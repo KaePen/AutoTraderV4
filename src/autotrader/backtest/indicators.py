@@ -1,0 +1,314 @@
+"""インジケータ計算モジュール
+
+マルチタイムフレームのインジケータ計算を担当。
+"""
+
+from __future__ import annotations
+
+from pathlib import Path
+from typing import Any
+
+import pandas as pd
+
+
+class IndicatorCalculator:
+    """マルチタイムフレームインジケータ計算
+
+    全時間足のインジケータを一括計算するクラス。
+    """
+
+    def __init__(
+        self,
+        sma_short: int = 20,
+        sma_long: int = 50,
+        rsi_period: int = 14,
+        atr_period: int = 14,
+        adx_period: int = 14,
+        stoch_k: int = 14,
+        stoch_d: int = 3,
+        swing_lookback: int = 7,
+        min_swing_distance: int = 10,
+        max_swing_distance: int = 40,
+    ):
+        """初期化
+
+        Args:
+            sma_short: 短期SMA期間
+            sma_long: 長期SMA期間
+            rsi_period: RSI期間
+            atr_period: ATR期間
+            adx_period: ADX期間
+            stoch_k: ストキャスティクスK期間
+            stoch_d: ストキャスティクスD期間
+            swing_lookback: スイング検出ルックバック
+            min_swing_distance: 最小スイング距離
+            max_swing_distance: 最大スイング距離
+        """
+        self._sma_short = sma_short
+        self._sma_long = sma_long
+        self._rsi_period = rsi_period
+        self._atr_period = atr_period
+        self._adx_period = adx_period
+        self._stoch_k = stoch_k
+        self._stoch_d = stoch_d
+        self._swing_lookback = swing_lookback
+        self._min_swing_distance = min_swing_distance
+        self._max_swing_distance = max_swing_distance
+
+    def calculate_all_timeframes(
+        self,
+        data_dict: dict[str, pd.DataFrame],
+    ) -> dict[str, pd.DataFrame]:
+        """全時間足のインジケータを計算
+
+        Args:
+            data_dict: 時間足別データフレーム
+
+        Returns:
+            dict[str, pd.DataFrame]: インジケータ付きデータフレーム
+        """
+        result = {}
+        for tf, df in data_dict.items():
+            result[tf] = self.calculate_single(df.copy())
+        return result
+
+    def calculate_single(self, df: pd.DataFrame) -> pd.DataFrame:
+        """単一時間足のインジケータを計算
+
+        Args:
+            df: OHLCVデータ
+
+        Returns:
+            pd.DataFrame: インジケータ付きデータ
+        """
+        import pandas_ta as ta
+
+        from autotrader.calculator.features.divergence_features import (
+            DivergenceDetector,
+        )
+
+        # SMA
+        df["sma_20"] = ta.sma(df["close"], length=self._sma_short)
+        df["sma_50"] = ta.sma(df["close"], length=self._sma_long)
+
+        # RSI
+        df["rsi_14"] = ta.rsi(df["close"], length=self._rsi_period)
+
+        # MACD
+        macd = ta.macd(df["close"])
+        if macd is not None:
+            cols = macd.columns.tolist()
+            macd_cols = [
+                c for c in cols
+                if "MACD_" in c and "MACDs" not in c and "MACDh" not in c
+            ]
+            signal_cols = [c for c in cols if "MACDs" in c]
+            hist_cols = [c for c in cols if "MACDh" in c]
+            if macd_cols and signal_cols and hist_cols:
+                df["macd"] = macd[macd_cols[0]]
+                df["macd_signal"] = macd[signal_cols[0]]
+                df["macd_histogram"] = macd[hist_cols[0]]
+                df["macd_hist_slope"] = df["macd_histogram"].diff()
+
+        # Stochastic
+        stoch = ta.stoch(
+            df["high"],
+            df["low"],
+            df["close"],
+            k=self._stoch_k,
+            d=self._stoch_d,
+        )
+        if stoch is not None:
+            k_cols = [c for c in stoch.columns if "STOCHk" in c]
+            if k_cols:
+                df["stoch_k"] = stoch[k_cols[0]]
+
+        # ATR
+        df["atr_14"] = ta.atr(
+            df["high"],
+            df["low"],
+            df["close"],
+            length=self._atr_period,
+        )
+
+        # ADX
+        adx = ta.adx(
+            df["high"],
+            df["low"],
+            df["close"],
+            length=self._adx_period,
+        )
+        if adx is not None:
+            adx_cols = [c for c in adx.columns if c.startswith("ADX")]
+            if adx_cols:
+                df["adx"] = adx[adx_cols[0]]
+
+        # ダイバージェンス
+        detector = DivergenceDetector(
+            swing_lookback=self._swing_lookback,
+            min_swing_distance=self._min_swing_distance,
+            max_swing_distance=self._max_swing_distance,
+        )
+        div_df = detector.calculate_divergence_signal(
+            df["close"],
+            df["rsi_14"],
+        )
+        df["is_bullish_div"] = div_df["is_bullish_div"]
+        df["is_bearish_div"] = div_df["is_bearish_div"]
+
+        return df
+
+    def calculate_basic(self, df: pd.DataFrame) -> pd.DataFrame:
+        """基本インジケータのみ計算（高速版）
+
+        ダイバージェンスを除いた基本インジケータのみを計算。
+
+        Args:
+            df: OHLCVデータ
+
+        Returns:
+            pd.DataFrame: インジケータ付きデータ
+        """
+        import pandas_ta as ta
+
+        # SMA
+        df["sma_20"] = ta.sma(df["close"], length=self._sma_short)
+        df["sma_50"] = ta.sma(df["close"], length=self._sma_long)
+
+        # RSI
+        df["rsi_14"] = ta.rsi(df["close"], length=self._rsi_period)
+
+        # MACD
+        macd = ta.macd(df["close"])
+        if macd is not None:
+            cols = macd.columns.tolist()
+            macd_cols = [
+                c for c in cols
+                if "MACD_" in c and "MACDs" not in c and "MACDh" not in c
+            ]
+            signal_cols = [c for c in cols if "MACDs" in c]
+            hist_cols = [c for c in cols if "MACDh" in c]
+            if macd_cols and signal_cols and hist_cols:
+                df["macd"] = macd[macd_cols[0]]
+                df["macd_signal"] = macd[signal_cols[0]]
+                df["macd_histogram"] = macd[hist_cols[0]]
+
+        # ATR
+        df["atr_14"] = ta.atr(
+            df["high"],
+            df["low"],
+            df["close"],
+            length=self._atr_period,
+        )
+
+        # ADX
+        adx = ta.adx(
+            df["high"],
+            df["low"],
+            df["close"],
+            length=self._adx_period,
+        )
+        if adx is not None:
+            adx_cols = [c for c in adx.columns if c.startswith("ADX")]
+            if adx_cols:
+                df["adx"] = adx[adx_cols[0]]
+
+        return df
+
+
+class MultiTimeframeDataLoader:
+    """マルチタイムフレームデータローダー
+
+    複数時間足のデータをロードし、インジケータを計算。
+    """
+
+    def __init__(
+        self,
+        data_dir: str | Path,
+        symbol: str = "USDJPY",
+        indicator_calculator: IndicatorCalculator | None = None,
+    ):
+        """初期化
+
+        Args:
+            data_dir: データディレクトリ
+            symbol: 通貨ペア
+            indicator_calculator: インジケータ計算機（Noneでデフォルト使用）
+        """
+        from autotrader.backtest.data_loader import DataLoader
+
+        self._data_dir = Path(data_dir)
+        self._symbol = symbol
+        self._loader = DataLoader(data_dir)
+        self._calculator = indicator_calculator or IndicatorCalculator()
+
+    def load_timeframes(
+        self,
+        timeframes: list[str],
+        calculate_indicators: bool = True,
+    ) -> dict[str, pd.DataFrame]:
+        """指定時間足のデータをロード
+
+        Args:
+            timeframes: ロードする時間足リスト
+            calculate_indicators: インジケータを計算するか
+
+        Returns:
+            dict[str, pd.DataFrame]: 時間足別データフレーム
+        """
+        data = {}
+
+        for tf in timeframes:
+            df = self._load_single_timeframe(tf)
+            if df is not None:
+                if calculate_indicators:
+                    df = self._calculator.calculate_single(df)
+                data[tf] = df
+
+        return data
+
+    def load_all_standard(
+        self,
+        include_short: bool = False,
+        calculate_indicators: bool = True,
+    ) -> dict[str, pd.DataFrame]:
+        """標準時間足をすべてロード
+
+        Args:
+            include_short: M1/M5を含めるか
+            calculate_indicators: インジケータを計算するか
+
+        Returns:
+            dict[str, pd.DataFrame]: 時間足別データフレーム
+        """
+        if include_short:
+            timeframes = ["M1", "M5", "M15", "H1", "H4", "D1"]
+        else:
+            timeframes = ["M15", "H1", "H4", "D1"]
+
+        return self.load_timeframes(timeframes, calculate_indicators)
+
+    def _load_single_timeframe(self, tf: str) -> pd.DataFrame | None:
+        """単一時間足をロード
+
+        Args:
+            tf: 時間足
+
+        Returns:
+            pd.DataFrame | None: データフレーム（見つからない場合None）
+        """
+        # ワイルドカードでファイル検索
+        pattern = f"{self._symbol}_{tf}*.csv"
+        tf_files = list(self._data_dir.glob(pattern))
+
+        if tf_files:
+            # 最初に見つかったファイルを使用
+            tf_path = sorted(tf_files)[0]
+            return self._loader.load_csv(tf_path)
+
+        # 完全一致も試行（後方互換性）
+        tf_path = self._data_dir / f"{self._symbol}_{tf}.csv"
+        if tf_path.exists():
+            return self._loader.load_csv(tf_path)
+
+        return None

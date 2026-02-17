@@ -1,0 +1,15 @@
+"""計算機（Calculator）モジュール
+
+テクニカル指標・特徴量の算出を担当するモジュール。
+
+Modules:
+    technical: テクニカル指標計算
+    features: 特徴量計算
+    precompute: バッチ事前計算エンジン
+"""
+
+from __future__ import annotations
+
+from autotrader.calculator.precompute import PrecomputeEngine
+
+__all__ = ["PrecomputeEngine"]

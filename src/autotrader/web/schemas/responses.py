@@ -1,0 +1,389 @@
+"""レスポンススキーマ"""
+
+from __future__ import annotations
+
+from datetime import datetime
+from typing import Any, Generic, TypeVar
+
+from pydantic import BaseModel, Field
+
+from autotrader.core.enums import (
+    ConfidenceLevel,
+    ExitReason,
+    SignalType,
+    Timeframe,
+)
+
+T = TypeVar("T")
+
+
+class ApiResponse(BaseModel, Generic[T]):
+    """API共通レスポンス
+
+    Attributes:
+        success: 成功フラグ
+        data: レスポンスデータ
+        error: エラーメッセージ
+        timestamp: タイムスタンプ
+    """
+
+    success: bool = True
+    data: T | None = None
+    error: str | None = None
+    timestamp: datetime = Field(default_factory=datetime.now)
+
+
+class HealthResponse(BaseModel):
+    """ヘルスチェックレスポンス
+
+    Attributes:
+        status: ステータス
+        version: バージョン
+        uptime: 稼働時間（秒）
+    """
+
+    status: str = "ok"
+    version: str = "1.0.0"
+    uptime: float = 0.0
+
+
+class AccountInfoResponse(BaseModel):
+    """口座情報レスポンス
+
+    Attributes:
+        balance: 残高
+        equity: 有効証拠金
+        margin: 使用証拠金
+        free_margin: 余剰証拠金
+        margin_level: 証拠金維持率
+        profit: 含み損益
+    """
+
+    balance: float
+    equity: float
+    margin: float = 0.0
+    free_margin: float = 0.0
+    margin_level: float = 0.0
+    profit: float = 0.0
+
+
+class DashboardResponse(BaseModel):
+    """ダッシュボードレスポンス
+
+    Attributes:
+        account: 口座情報
+        daily_pnl: 本日の損益
+        daily_pnl_pct: 本日の損益率
+        active_signals: アクティブシグナル数
+        open_positions: オープンポジション数
+        today_trades: 本日のトレード数
+        win_rate: 勝率
+    """
+
+    account: AccountInfoResponse
+    daily_pnl: float = 0.0
+    daily_pnl_pct: float = 0.0
+    active_signals: int = 0
+    open_positions: int = 0
+    today_trades: int = 0
+    win_rate: float = 0.0
+
+
+class SignalResponse(BaseModel):
+    """シグナルレスポンス
+
+    Attributes:
+        signal_id: シグナルID
+        symbol: 通貨ペア
+        timeframe: 時間足
+        signal_type: シグナル種別
+        confidence: 確度
+        confidence_level: 確度レベル
+        stop_loss: 損切価格
+        take_profit: 利確価格
+        reasoning: 判断理由
+        created_at: 生成時刻
+        indicators_snapshot: 指標スナップショット
+    """
+
+    signal_id: str
+    symbol: str
+    timeframe: Timeframe
+    signal_type: SignalType
+    confidence: float
+    confidence_level: ConfidenceLevel
+    stop_loss: float | None = None
+    take_profit: float | None = None
+    reasoning: str = ""
+    created_at: datetime
+    indicators_snapshot: dict[str, Any] = Field(default_factory=dict)
+
+
+class PositionResponse(BaseModel):
+    """ポジションレスポンス
+
+    Attributes:
+        position_id: ポジションID
+        ticket: チケットID
+        symbol: 通貨ペア
+        signal_type: 方向
+        volume: ロット数
+        entry_price: エントリー価格
+        current_price: 現在価格
+        stop_loss: 損切価格
+        take_profit: 利確価格
+        opened_at: オープン時刻
+        unrealized_pnl: 未実現損益
+        unrealized_pnl_pips: 未実現損益（pips）
+    """
+
+    position_id: str
+    ticket: int = 0
+    symbol: str
+    signal_type: SignalType
+    volume: float
+    entry_price: float
+    current_price: float = 0.0
+    stop_loss: float | None = None
+    take_profit: float | None = None
+    opened_at: datetime
+    unrealized_pnl: float = 0.0
+    unrealized_pnl_pips: float = 0.0
+
+
+class TradeResponse(BaseModel):
+    """トレードレスポンス
+
+    Attributes:
+        trade_id: トレードID
+        ticket: チケットID
+        symbol: 通貨ペア
+        signal_type: 方向
+        volume: ロット数
+        entry_price: エントリー価格
+        exit_price: 決済価格
+        stop_loss: 損切価格
+        take_profit: 利確価格
+        profit_loss: 損益
+        profit_loss_pips: 損益（pips）
+        exit_reason: 決済理由
+        opened_at: オープン時刻
+        closed_at: クローズ時刻
+    """
+
+    trade_id: str
+    ticket: int = 0
+    symbol: str
+    signal_type: SignalType
+    volume: float
+    entry_price: float
+    exit_price: float | None = None
+    stop_loss: float | None = None
+    take_profit: float | None = None
+    profit_loss: float | None = None
+    profit_loss_pips: float | None = None
+    exit_reason: ExitReason | None = None
+    opened_at: datetime
+    closed_at: datetime | None = None
+
+
+class TradeSummaryResponse(BaseModel):
+    """トレードサマリーレスポンス
+
+    Attributes:
+        total_trades: 総トレード数
+        winning_trades: 勝ちトレード数
+        losing_trades: 負けトレード数
+        win_rate: 勝率
+        total_profit: 総利益
+        total_loss: 総損失
+        net_profit: 純利益
+        profit_factor: プロフィットファクター
+        average_win: 平均勝ちトレード
+        average_loss: 平均負けトレード
+        max_drawdown: 最大ドローダウン
+    """
+
+    total_trades: int = 0
+    winning_trades: int = 0
+    losing_trades: int = 0
+    win_rate: float = 0.0
+    total_profit: float = 0.0
+    total_loss: float = 0.0
+    net_profit: float = 0.0
+    profit_factor: float = 0.0
+    average_win: float = 0.0
+    average_loss: float = 0.0
+    max_drawdown: float = 0.0
+
+
+class IndicatorResponse(BaseModel):
+    """指標レスポンス
+
+    Attributes:
+        symbol: 通貨ペア
+        timeframe: 時間足
+        timestamp: タイムスタンプ
+        rsi: RSI
+        macd: MACD
+        macd_signal: MACDシグナル
+        macd_hist: MACDヒストグラム
+        adx: ADX
+        plus_di: +DI
+        minus_di: -DI
+        bb_upper: ボリンジャーバンド上限
+        bb_middle: ボリンジャーバンド中央
+        bb_lower: ボリンジャーバンド下限
+        atr: ATR
+        ema_fast: 短期EMA
+        ema_slow: 長期EMA
+    """
+
+    symbol: str
+    timeframe: Timeframe
+    timestamp: datetime
+    rsi: float | None = None
+    macd: float | None = None
+    macd_signal: float | None = None
+    macd_hist: float | None = None
+    adx: float | None = None
+    plus_di: float | None = None
+    minus_di: float | None = None
+    bb_upper: float | None = None
+    bb_middle: float | None = None
+    bb_lower: float | None = None
+    atr: float | None = None
+    ema_fast: float | None = None
+    ema_slow: float | None = None
+
+
+class CandleResponse(BaseModel):
+    """ローソク足レスポンス
+
+    Attributes:
+        symbol: 通貨ペア
+        timeframe: 時間足
+        time: タイムスタンプ
+        open: 始値
+        high: 高値
+        low: 安値
+        close: 終値
+        volume: 出来高
+    """
+
+    symbol: str
+    timeframe: Timeframe
+    time: datetime
+    open: float
+    high: float
+    low: float
+    close: float
+    volume: float = 0.0
+
+
+class RiskConfigResponse(BaseModel):
+    """リスク設定レスポンス"""
+
+    max_daily_loss_pct: float
+    max_position_count: int
+    min_margin_ratio: float
+
+
+class NotificationConfigResponse(BaseModel):
+    """通知設定レスポンス"""
+
+    enabled: bool = True
+    min_confidence: float = 0.5
+    sound_enabled: bool = True
+
+
+# --- 新スキーマ（UnifiedBotConfig対応） ---
+class EntryFilterConfigResponse(BaseModel):
+    """エントリーフィルター設定レスポンス"""
+
+    range_day_bbw_threshold: float = 0.20
+    range_day_score_premium: float = 0.55
+    weak_hours_enabled: bool = True
+    weak_hours_score_premium: float = 0.5
+    tokyo_night_swing_enabled: bool = True
+    tokyo_night_swing_premium: float = 0.3
+
+
+class CapitalManagementConfigResponse(BaseModel):
+    """資金管理設定レスポンス"""
+
+    use_dynamic_lot: bool = True
+    base_risk_pct: float = 0.02
+    max_lot_per_trade: float = 2.0
+    max_total_exposure_lot: float = 5.0
+    equity_floor_pct: float = 0.30
+    slippage_buffer_pips: float = 2.0
+
+
+class PositionManagementConfigResponse(BaseModel):
+    """ポジション管理設定レスポンス"""
+
+    enable_position_manager: bool = True
+    stagnation_min_mfe_r: float = 0.15
+    range_day_early_be_r: float = 0.3
+    insurance_trigger_r: float = 1.0
+    partial_close_1r_ratio: float = 0.3
+    trailing_start_r: float = 2.0
+
+
+class TradingConfigResponse(BaseModel):
+    """トレーディング設定レスポンス（UnifiedBotConfig対応）"""
+
+    entry_filter: EntryFilterConfigResponse
+    capital_management: CapitalManagementConfigResponse
+    position_management: PositionManagementConfigResponse
+
+
+class SettingsResponse(BaseModel):
+    """設定レスポンス
+
+    Attributes:
+        trading: トレーディング設定（新）
+        risk: リスク設定
+        notification: 通知設定
+        strategy: 戦略設定（レガシー互換）
+    """
+
+    trading: TradingConfigResponse
+    risk: RiskConfigResponse
+    notification: NotificationConfigResponse
+
+
+# --- MT5/ライブトレーディング用スキーマ ---
+class MT5StatusResponse(BaseModel):
+    """MT5接続状態レスポンス
+
+    Attributes:
+        connected: MT5接続状態
+        transport: トランスポート種別
+        account: 口座情報（接続時）
+        symbol_info: シンボル情報（接続時）
+    """
+
+    connected: bool = False
+    transport: str = "bridge"
+    account: AccountInfoResponse | None = None
+    symbol_info: dict[str, Any] | None = None
+
+
+class TradingModeResponse(BaseModel):
+    """トレーディングモードレスポンス
+
+    Attributes:
+        mode: モード（"backtest"|"live"|"demo"）
+        label: 表示ラベル
+        connected: 接続状態
+        auto_trade: 自動取引ON/OFF
+        engine_running: エンジン実行中
+    """
+
+    mode: str = "backtest"
+    label: str = "Backtest Mode"
+    connected: bool = False
+    auto_trade: bool = False
+    engine_running: bool = False

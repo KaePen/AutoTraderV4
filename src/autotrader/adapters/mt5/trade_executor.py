@@ -1,0 +1,411 @@
+"""MT5トレード実行
+
+TradeExecutor ABCのMT5実装。
+"""
+
+from __future__ import annotations
+
+import logging
+
+from autotrader.adapters.mt5.connection import MT5ConnectionManager
+from autotrader.adapters.mt5.constants import (
+    ORDER_FILLING_FOK,
+    ORDER_TYPE_BUY,
+    ORDER_TYPE_SELL,
+    SUCCESS_RETCODES,
+    TRADE_ACTION_DEAL,
+    TRADE_ACTION_SLTP,
+)
+from autotrader.adapters.mt5.converters import (
+    mt5_position_to_entity,
+    signal_to_mt5_request,
+)
+from autotrader.adapters.mt5.exceptions import MT5ExecutionError
+from autotrader.core.entities import Position, Signal
+from autotrader.core.enums import SignalType
+from autotrader.core.interfaces.trade_executor import (
+    ExecutionResult,
+    TradeExecutor,
+)
+
+logger = logging.getLogger(__name__)
+
+
+class MT5TradeExecutor(TradeExecutor):
+    """MT5トレード実行
+
+    magic_numberフィルタでAutoTraderV4のポジションのみ操作。
+
+    Attributes:
+        _conn: MT5接続マネージャ
+        _magic: マジックナンバー
+        _deviation: 許容スリッページ
+        _symbol: デフォルトシンボル
+    """
+
+    def __init__(
+        self,
+        conn: MT5ConnectionManager,
+        magic: int,
+        deviation: int = 20,
+        symbol: str = "USDJPY",
+    ) -> None:
+        """初期化
+
+        Args:
+            conn: MT5接続マネージャ
+            magic: マジックナンバー
+            deviation: 許容スリッページ
+            symbol: デフォルトシンボル
+        """
+        self._conn = conn
+        self._magic = magic
+        self._deviation = deviation
+        self._symbol = symbol
+
+    def open_position(
+        self,
+        signal: Signal,
+        volume: float,
+    ) -> ExecutionResult:
+        """ポジションを開く
+
+        Args:
+            signal: シグナル
+            volume: ロット数
+
+        Returns:
+            ExecutionResult: 実行結果
+        """
+        import asyncio
+        return asyncio.get_event_loop().run_until_complete(
+            self.open_position_async(signal, volume)
+        )
+
+    async def open_position_async(
+        self,
+        signal: Signal,
+        volume: float,
+    ) -> ExecutionResult:
+        """ポジションを非同期で開く
+
+        Args:
+            signal: シグナル
+            volume: ロット数
+
+        Returns:
+            ExecutionResult: 実行結果
+        """
+        async with self._conn.session() as transport:
+            tick = await transport.symbol_info_tick(signal.symbol)
+            if not tick:
+                return ExecutionResult(
+                    success=False,
+                    message=f"ティック取得失敗: {signal.symbol}",
+                )
+
+            request = signal_to_mt5_request(
+                signal, volume, tick,
+                magic=self._magic,
+                deviation=self._deviation,
+            )
+
+            logger.info(
+                "注文送信: %s %s %.2f lots @ %.3f",
+                signal.signal_type.value,
+                signal.symbol,
+                volume,
+                request["price"],
+            )
+
+            result = await transport.order_send(request)
+
+        retcode = result.get("retcode", -1)
+        if retcode in SUCCESS_RETCODES:
+            ticket = int(result.get("order", 0))
+            logger.info(
+                "注文成功: ticket=%d retcode=%d",
+                ticket, retcode,
+            )
+            return ExecutionResult(
+                success=True,
+                ticket=ticket,
+                message=str(result.get("comment", "")),
+            )
+
+        msg = (
+            f"注文失敗: retcode={retcode} "
+            f"comment={result.get('comment', '')}"
+        )
+        logger.error(msg)
+        return ExecutionResult(success=False, message=msg)
+
+    def close_position(
+        self,
+        position: Position,
+        reason: str,
+    ) -> ExecutionResult:
+        """ポジションを閉じる
+
+        Args:
+            position: ポジション
+            reason: 決済理由
+
+        Returns:
+            ExecutionResult: 実行結果
+        """
+        import asyncio
+        return asyncio.get_event_loop().run_until_complete(
+            self.close_position_async(position, reason)
+        )
+
+    async def close_position_async(
+        self,
+        position: Position,
+        reason: str,
+    ) -> ExecutionResult:
+        """ポジションを非同期で閉じる
+
+        Args:
+            position: ポジション
+            reason: 決済理由
+
+        Returns:
+            ExecutionResult: 実行結果
+        """
+        return await self._close_volume(
+            position, position.volume, reason
+        )
+
+    def close_partial(
+        self,
+        position: Position,
+        volume: float,
+        reason: str,
+    ) -> ExecutionResult:
+        """ポジションを部分決済
+
+        Args:
+            position: ポジション
+            volume: 決済ロット数
+            reason: 決済理由
+
+        Returns:
+            ExecutionResult: 実行結果
+        """
+        import asyncio
+        return asyncio.get_event_loop().run_until_complete(
+            self.close_partial_async(position, volume, reason)
+        )
+
+    async def close_partial_async(
+        self,
+        position: Position,
+        volume: float,
+        reason: str,
+    ) -> ExecutionResult:
+        """ポジションを非同期で部分決済
+
+        Args:
+            position: ポジション
+            volume: 決済ロット数
+            reason: 決済理由
+
+        Returns:
+            ExecutionResult: 実行結果
+        """
+        return await self._close_volume(position, volume, reason)
+
+    async def _close_volume(
+        self,
+        position: Position,
+        volume: float,
+        reason: str,
+    ) -> ExecutionResult:
+        """指定ロット数を決済（共通ロジック）
+
+        Args:
+            position: ポジション
+            volume: 決済ロット数
+            reason: 決済理由
+
+        Returns:
+            ExecutionResult: 実行結果
+        """
+        # 反対方向の成行注文で決済
+        is_buy = position.signal_type == SignalType.BUY
+        close_type = ORDER_TYPE_SELL if is_buy else ORDER_TYPE_BUY
+
+        async with self._conn.session() as transport:
+            tick = await transport.symbol_info_tick(position.symbol)
+            if not tick:
+                return ExecutionResult(
+                    success=False,
+                    message=f"ティック取得失敗: {position.symbol}",
+                )
+
+            # 決済価格: BUYポジション→bid、SELLポジション→ask
+            price = (
+                float(tick.get("bid", 0)) if is_buy
+                else float(tick.get("ask", 0))
+            )
+
+            request = {
+                "action": TRADE_ACTION_DEAL,
+                "symbol": position.symbol,
+                "volume": round(volume, 2),
+                "type": close_type,
+                "position": position.ticket,
+                "price": price,
+                "deviation": self._deviation,
+                "magic": self._magic,
+                "comment": f"AT4_{reason[:16]}",
+                "type_time": 0,
+                "type_filling": ORDER_FILLING_FOK,
+            }
+
+            logger.info(
+                "決済送信: ticket=%d %.2f lots reason=%s",
+                position.ticket, volume, reason,
+            )
+
+            result = await transport.order_send(request)
+
+        retcode = result.get("retcode", -1)
+        if retcode in SUCCESS_RETCODES:
+            logger.info(
+                "決済成功: ticket=%d retcode=%d",
+                position.ticket, retcode,
+            )
+            return ExecutionResult(
+                success=True,
+                ticket=int(result.get("order", 0)),
+                message=reason,
+            )
+
+        msg = (
+            f"決済失敗: ticket={position.ticket} "
+            f"retcode={retcode} "
+            f"comment={result.get('comment', '')}"
+        )
+        logger.error(msg)
+        return ExecutionResult(success=False, message=msg)
+
+    def modify_position(
+        self,
+        position: Position,
+        stop_loss: float | None = None,
+        take_profit: float | None = None,
+    ) -> ExecutionResult:
+        """ポジションを修正
+
+        Args:
+            position: ポジション
+            stop_loss: 新しいSL
+            take_profit: 新しいTP
+
+        Returns:
+            ExecutionResult: 実行結果
+        """
+        import asyncio
+        return asyncio.get_event_loop().run_until_complete(
+            self.modify_position_async(
+                position, stop_loss, take_profit
+            )
+        )
+
+    async def modify_position_async(
+        self,
+        position: Position,
+        stop_loss: float | None = None,
+        take_profit: float | None = None,
+    ) -> ExecutionResult:
+        """ポジションを非同期で修正
+
+        Args:
+            position: ポジション
+            stop_loss: 新しいSL
+            take_profit: 新しいTP
+
+        Returns:
+            ExecutionResult: 実行結果
+        """
+        request = {
+            "action": TRADE_ACTION_SLTP,
+            "symbol": position.symbol,
+            "position": position.ticket,
+            "magic": self._magic,
+        }
+        if stop_loss is not None:
+            request["sl"] = stop_loss
+        else:
+            request["sl"] = position.stop_loss or 0.0
+
+        if take_profit is not None:
+            request["tp"] = take_profit
+        else:
+            request["tp"] = position.take_profit or 0.0
+
+        async with self._conn.session() as transport:
+            result = await transport.order_send(request)
+
+        retcode = result.get("retcode", -1)
+        if retcode in SUCCESS_RETCODES:
+            logger.info(
+                "SL/TP変更成功: ticket=%d SL=%.3f TP=%.3f",
+                position.ticket,
+                request.get("sl", 0),
+                request.get("tp", 0),
+            )
+            return ExecutionResult(
+                success=True,
+                ticket=position.ticket,
+                message="SL/TP変更成功",
+            )
+
+        msg = (
+            f"SL/TP変更失敗: ticket={position.ticket} "
+            f"retcode={retcode}"
+        )
+        logger.error(msg)
+        return ExecutionResult(success=False, message=msg)
+
+    def get_open_positions(
+        self, symbol: str | None = None
+    ) -> list[Position]:
+        """オープンポジションを取得
+
+        Args:
+            symbol: シンボル（Noneで全て）
+
+        Returns:
+            list[Position]: ポジションリスト
+        """
+        import asyncio
+        return asyncio.get_event_loop().run_until_complete(
+            self.get_open_positions_async(symbol)
+        )
+
+    async def get_open_positions_async(
+        self, symbol: str | None = None
+    ) -> list[Position]:
+        """オープンポジションを非同期で取得
+
+        magic_numberフィルタで自動トレーダのポジションのみ返却。
+
+        Args:
+            symbol: シンボル（Noneで全て）
+
+        Returns:
+            list[Position]: ポジションリスト
+        """
+        async with self._conn.session() as transport:
+            raw_positions = await transport.positions_get(symbol)
+
+        # magic_numberフィルタ
+        positions = []
+        for raw in raw_positions:
+            if int(raw.get("magic", 0)) == self._magic:
+                positions.append(mt5_position_to_entity(raw))
+
+        return positions

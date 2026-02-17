@@ -1,0 +1,37 @@
+{
+  "env": {
+    "DISABLE_NON_ESSENTIAL_MODEL_CALLS": "1",
+    "DISABLE_COST_WARNINGS": "0",
+    "BASH_DEFAULT_TIMEOUT_MS": "300000"
+  },
+  "permissions": {
+    "allow": [
+      "Bash(find:*)",
+      "Bash(rg:*)",
+      "Bash(grep:*)",
+      "Bash(ls:*)"
+    ],
+    "deny": [
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push:*)",
+      "Bash(git reset:*)",
+      "Bash(git rebase:*)",
+      "Bash(curl:*)",
+      "Bash(wget:*)",
+      "Read(./userdoc/**)",
+      "Read(./.env)",
+      "Read(./.env.*)",
+      "Read(./secrets/**)",
+      "Read(./.aws/**)",
+      "Read(./build/**)",
+      "Write(./docs/**)",
+      "Write(./documentation/**)",
+      "Write(README.md)",
+      "Edit(README.md)"
+    ],
+    "defaultMode": "acceptEdits"
+  },
+  "outputStyle": "Concise",
+  "plansDirectory": "./plans"
+}

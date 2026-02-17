@@ -1,0 +1,78 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# 仮想環境
+venv/
+env/
+ENV/
+.venv
+
+# テスト・カバレッジ
+.pytest_cache/
+.coverage
+htmlcov/
+*.cover
+.hypothesis/
+data/
+
+# mypy
+.mypy_cache/
+.dmyp.json
+
+# ログファイル
+logs/
+*.log
+
+# 一時ファイル
+tmp/
+*.tmp
+*_done.txt
+
+# バックテスト結果
+results/
+backtest_*.json
+
+# アーカイブ
+archives/
+
+# キャッシュ・データ
+cache/
+*.db
+*.sqlite
+*.sqlite3
+
+# 環境変数
+.env
+.env.local
+
+# OS固有
+.DS_Store
+Thumbs.db
+
+# エディタ
+*.swp
+*.swo
+*~
+.vscode/
+.idea/ 

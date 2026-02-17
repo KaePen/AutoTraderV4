@@ -1,0 +1,79 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "autotrader"
+version = "0.1.0"
+description = "FX自動トレードエージェント - MT5連携、LLM判断、マルチタイムフレーム分析"
+license = "MIT"
+requires-python = ">=3.12"
+authors = [
+    {name = "AutoTraderV4 Team"}
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Financial and Insurance Industry",
+    "License :: OSI Approved :: MIT License",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+]
+dependencies = [
+    "pydantic>=2.5.0",
+    "pydantic-settings>=2.1.0",
+    "pandas>=2.1.0",
+    "numpy>=1.26.0",
+    "polars>=0.20.0",
+    "pyarrow>=14.0.0",
+    "pandas-ta>=0.3.14b",
+    "ollama>=0.3.0",
+    "sqlalchemy>=2.0.0",
+    "asyncpg>=0.29.0",
+    "alembic>=1.13.0",
+    "psycopg2-binary>=2.9.0",
+    "fastapi>=0.108.0",
+    "uvicorn>=0.25.0",
+    "httpx>=0.25.0",
+    "pytz>=2024.1",
+    "loguru>=0.7.0",
+    "aiofiles>=23.0.0",
+    "websockets>=16.0",
+    "rich>=14.3.2",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4.0",
+    "pytest-asyncio>=0.23.0",
+    "pytest-cov>=4.1.0",
+    "pytest-mock>=3.12.0",
+    "mypy>=1.8.0",
+    "ruff>=0.1.0",
+]
+fast = [
+    "numba>=0.59.0",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/autotrader"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+asyncio_mode = "auto"
+addopts = "-v --cov=autotrader --cov-report=term-missing"
+
+[tool.ruff]
+line-length = 79
+target-version = "py312"
+select = ["E", "F", "I", "N", "W", "UP", "B", "C4", "SIM"]
+ignore = ["E501"]
+
+[tool.ruff.isort]
+known-first-party = ["autotrader"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+warn_return_any = true
+warn_unused_ignores = true

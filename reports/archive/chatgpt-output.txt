@@ -1,0 +1,142 @@
+1) 文書のバグ（即修正）
+1.1 の primary_tf が崩れている
+
+「当該 `` を決定…」になっていて読めません。
+ここは単純に primary_tf に直してください（Markdown崩れ）。
+
+2) “勝てる設計”にするための不足（最重要）
+
+あなたの最新データから、ボトルネックが明確に出ています。これを設計方針に落とし込むべきです。
+
+2.1 Exit（決済）を「設計の中心」に格上げする
+
+現ドキュメントの PositionManager は抽象度が高いですが、実際は Exitが成績を壊しています。特に SIGNAL_REVERSALが恒常的に大敗しているなら、ここは仕様として固定すべきです。
+
+追記案（PositionManagerの必須仕様）
+
+SIGNAL_REVERSAL は 原則禁止（もしくは “manage_tfで確定足2本連続反転” のときだけ許可）
+
+必須Exitセットを明記：
+
+Time Exit（戦略別）
+
+建値移動（1R到達）
+
+部分利確（1Rで50%など）
+
+トレーリング（Swing優先）
+
+“PositionManagerがある”ではなく、どのルールで勝つ/負けを抑えるかが肝です。ここを曖昧にすると勝率がまた落ちます。
+
+2.2 DAYを「特別枠」に格下げする設計が必要
+
+ドキュメント上は Scalp/ShortMid/Swing がフラットですが、実測では SWING優位・DAY弱めが出ています。
+なので StrategySelectorは「edge_score最大」だけだとDAYが出場しすぎる可能性がある。ここは ポリシーとして明文化してください。
+
+追記案（StrategySelectorの採択ポリシー）
+
+DAY は常時ペナルティ：edge_score_day *= 0.85 など
+
+regime == RANGE のとき DAY候補は 原則除外
+
+DAY 発動条件（AND条件）を明記：
+
+TREND_STRONG
+
+HTF整合（H1/H4）
+
+cost_factor良好（スプレッド狭い/時間帯良い）
+
+edge_score閾値以上
+
+2.3 NoTradeStrategy（取引しない）を追加したほうが勝ちやすい
+
+この文書は「どれで取引するか」が中心ですが、BOTが本当に強いのは 触らない判断です。
+時間帯別のワーストが出ているなら、なおさら。
+
+追記案
+
+StrategyPoolに NoTradeStrategy を追加
+
+StrategySelectorが「環境悪化時はNoTradeを選ぶ」規則を持つ
+
+例：spread拡大、閑散時間帯、イベント疑い、regime不明瞭 など
+
+3) コストモデルの明文化が足りない（実運用で崩れる典型）
+
+あなたの検証では「固定スプレッド」前提が残っていました。これが甘いと、特にスキャ寄り要素が崩れます。
+
+追記案（Backtest仕様／Data入力層）
+
+<SPREAD> を使う（推奨）
+もしくはセッション別の可変スプレッドモデルを採用する
+
+約定タイミング（close確定／next open）と滑り（slippage）を仕様に明記
+
+成果指標は「コスト込みPF」を必須にする
+
+4) “edge_score”の定義が曖昧（比較軸がブレる）
+
+edge_score式は書いてありますが、戦略間の比較可能性（正規化方法・レンジ）が文書にないので、ここは仕様として固定した方が良いです。
+
+追記案
+
+edge_scoreのレンジ（例：0〜0.3程度）を決める
+
+cost_factor は掛け算で強制（足し算禁止）
+
+htf_conflict_factor は戦略別の強度を明記（スイングは失格寄り、スキャは減点）
+
+5) レジーム検出（RegimeDetector）を“運用に使える形”に分割
+
+現状の TREND_STRONG / TREND_WEAK / RANGE / HIGH_VOL は良いのですが、運用では 「RANGE寄りTREND」混入が起きやすいです。
+改善案としては：
+
+追記案
+
+TREND は強弱だけでなく「トレンド持続性/ブレイク頻度」も加味して TREND_CLEAN と TREND_MESSY に分ける（名前は何でもOK）
+
+RANGE は「狭いレンジ」「広いレンジ（高ボラレンジ）」を分ける
+→ これで「触らない」判定が安定する
+
+6) 受入条件（DoD）が“勝てる条件”になっていない
+
+現状のDoDは「動くこと」に寄っています。勝つためには “悪いパーツが混入していない” をDoDに入れるべきです。
+
+DoD追記案
+
+SIGNAL_REVERSAL が損益でマイナスなら、ルールを無効化して再評価する（例外なく）
+
+RANGE×DAY の取引数が一定以下（原則0に近く）
+
+時間帯ワースト（例：JST早朝）で取引が抑制されている
+
+戦略別PFで SWING が主導している（全体を食っていないか）
+
+OOS（2016–2019 / 2024–2025）でPFが一定以上を維持
+
+7) ログ仕様が足りない（改善ループが回らない）
+
+輻輳型は「なぜ採択されたか」が命です。現ドキュメントにもログ拡張はありますが、最低限これを仕様化すると強いです。
+
+追記案（ログ必須項目）
+
+候補Top2の edge_score と落選理由（risk_flags / hard_stop）
+
+chosen_strategy_id と regime
+
+exit_reason（TP/SL/TimeExit/BE/Trail/…）
+
+spread・時間帯（JST）・volatility_level
+
+まとめ：このドキュメントを“勝てる設計書”にする修正TOP5
+
+Exit仕様の具体化（特にSIGNAL_REVERSALの扱いを明記）
+
+DAYの格下げポリシー（RANGEで除外・発動条件AND）
+
+NoTradeStrategy追加（時間帯・スプレッドで触らない）
+
+コストモデル（<SPREAD>/slippage）の仕様化
+
+edge_score正規化＋Selectorヒステリシスを仕様化
