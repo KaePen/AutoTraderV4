@@ -885,6 +885,28 @@ const DashboardApp = {
       </div>`;
   },
 
+  /** インジケーター時間足タブを描画 */
+  renderIndicatorTabs() {
+    const container = document.getElementById('indicator-tf-tabs');
+    if (!container) return;
+    const tfs = ['M5', 'M15', 'H1', 'H4'];
+    container.innerHTML = tfs.map((tf) => `
+      <button data-tf="${tf}"
+        class="px-2 py-0.5 text-xs rounded ${tf === this.indicatorTf
+          ? 'bg-blue-600 text-white'
+          : 'bg-gray-700 text-gray-400 hover:bg-gray-600'}">
+        ${tf}
+      </button>`).join('');
+    container.querySelectorAll('button[data-tf]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        this.indicatorTf = btn.dataset.tf;
+        localStorage.setItem('indicator_tf', this.indicatorTf);
+        this.renderIndicatorTabs();
+        this.fetchIndicators();
+      });
+    });
+  },
+
   /** 指標描画（グループ化 + ゾーン強化版） */
   renderIndicators() {
     const grid = document.getElementById('indicator-grid');
