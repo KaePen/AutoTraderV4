@@ -251,7 +251,7 @@ const ChartManager = {
       const cls = active
         ? 'bg-blue-600 text-white'
         : 'bg-gray-700 text-gray-300 hover:bg-gray-600';
-      return `<button data-tf="${tf}" class="px-2 py-1 text-xs rounded transition-colors ${cls}">${tf}</button>`;
+      return `<button data-tf="${tf}" class="w-9 py-1 text-xs text-center rounded transition-colors ${cls}">${tf}</button>`;
     }).join('');
 
     container.querySelectorAll('button[data-tf]').forEach((btn) => {
