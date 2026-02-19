@@ -882,7 +882,7 @@ const DashboardApp = {
       </div>`;
   },
 
-  /** 指標描画 */
+  /** 指標描画（グループ化 + ゾーン強化版） */
   renderIndicators() {
     const grid = document.getElementById('indicator-grid');
     if (!grid) return;
@@ -894,73 +894,275 @@ const DashboardApp = {
 
     const ind = this.indicators;
     grid.innerHTML = `
-      ${this.gaugeIndicator('RSI', ind.rsi, 0, 100, [{from:0,to:30,c:'green'},{from:30,to:70,c:'neutral'},{from:70,to:100,c:'red'}])}
-      ${this.gaugeIndicator('ADX', ind.adx, 0, 60, [{from:0,to:20,c:'red'},{from:20,to:40,c:'neutral'},{from:40,to:60,c:'green'}])}
-      ${this.valueIndicator('MACD', ind.macd, 'Signal', ind.macd_signal, ind.macd !== null && ind.macd > 0 ? 'green' : 'red')}
-      ${this.valueIndicator('MACD Hist', ind.macd_hist, null, null, ind.macd_hist !== null && ind.macd_hist > 0 ? 'green' : 'red')}
-      ${this.dualIndicator('+DI / -DI', ind.plus_di, ind.minus_di, '+DI', '-DI', 'green', 'red')}
-      ${this.bollingerIndicator(ind.bb_upper, ind.bb_middle, ind.bb_lower)}
-      ${this.valueIndicator('ATR', ind.atr, null, null, 'neutral', (v) => v.toFixed(4))}
-      ${this.dualIndicator('EMA', ind.ema_fast, ind.ema_slow, 'Fast', 'Slow',
-        ind.ema_fast !== null && ind.ema_slow !== null && ind.ema_fast > ind.ema_slow ? 'green' : 'red', 'neutral')}
+      <div class="col-span-2 md:col-span-4">
+        <div class="flex items-center gap-2 mb-2">
+          <span class="text-[9px] font-bold text-blue-400 uppercase tracking-widest">▶ Trend</span>
+          <div class="flex-1 h-px bg-blue-900/50"></div>
+        </div>
+        <div class="grid grid-cols-3 gap-2">
+          ${this.adxIndicator(ind.adx)}
+          ${this.emaIndicator(ind.ema_fast, ind.ema_slow)}
+          ${this.diIndicator(ind.plus_di, ind.minus_di)}
+        </div>
+      </div>
+      <div class="col-span-2 md:col-span-4">
+        <div class="flex items-center gap-2 mb-2">
+          <span class="text-[9px] font-bold text-yellow-400 uppercase tracking-widest">▶ Momentum</span>
+          <div class="flex-1 h-px bg-yellow-900/50"></div>
+        </div>
+        <div class="grid grid-cols-2 gap-2">
+          ${this.rsiIndicator(ind.rsi)}
+          ${this.macdIndicator(ind.macd, ind.macd_signal, ind.macd_hist)}
+        </div>
+      </div>
+      <div class="col-span-2 md:col-span-4">
+        <div class="flex items-center gap-2 mb-2">
+          <span class="text-[9px] font-bold text-purple-400 uppercase tracking-widest">▶ Volatility</span>
+          <div class="flex-1 h-px bg-purple-900/50"></div>
+        </div>
+        <div class="grid grid-cols-2 gap-2">
+          ${this.atrIndicator(ind.atr)}
+          ${this.bollingerIndicatorEnhanced(ind.bb_upper, ind.bb_middle, ind.bb_lower)}
+        </div>
+      </div>
     `;
   },
 
-  gaugeIndicator(label, value, min, max, zones) {
-    const pct = value !== null ? Math.max(0, Math.min(100, ((value - min) / (max - min)) * 100)) : 0;
-    const zone = value !== null ? zones.find((z) => value >= z.from && value < z.to) : null;
-    const zc = zone ? zone.c : 'neutral';
-    const colors = { green: 'text-green-400', red: 'text-red-400', neutral: 'text-gray-300' };
-    const barColors = { green: 'bg-green-500', red: 'bg-red-500', neutral: 'bg-gray-500' };
+  /** RSI ゾーンゲージ（30/50/70 マーカー付き） */
+  rsiIndicator(value) {
+    const pct = value !== null ? Math.max(0, Math.min(100, value)) : 0;
+    const isOverbought = value !== null && value > 70;
+    const isOversold = value !== null && value < 30;
+    const valueColor = isOverbought ? 'text-red-400' : isOversold ? 'text-green-400' : 'text-gray-200';
+    const stateLabel = isOverbought ? 'OVERBOUGHT' : isOversold ? 'OVERSOLD' : 'NEUTRAL';
+    const stateCls = isOverbought
+      ? 'text-red-400 bg-red-900/20 border-red-800/40'
+      : isOversold
+        ? 'text-green-400 bg-green-900/20 border-green-800/40'
+        : 'text-gray-500 bg-gray-800/40 border-gray-700/40';
+    const needleColor = isOverbought ? 'bg-red-400 shadow-red-400/50' : isOversold ? 'bg-green-400 shadow-green-400/50' : 'bg-blue-400 shadow-blue-400/50';
     return `
-      <div class="bg-gray-800/50 rounded-lg p-2.5">
+      <div class="bg-gray-800/60 rounded-lg p-2.5 border border-gray-700/30">
+        <div class="flex items-center justify-between mb-1.5">
+          <span class="text-[10px] font-bold text-gray-400 uppercase tracking-wider">RSI<span class="text-gray-600 font-normal ml-0.5">(14)</span></span>
+          <div class="flex items-center gap-1.5">
+            <span class="text-[9px] px-1 py-0.5 rounded border ${stateCls}">${stateLabel}</span>
+            <span class="text-sm font-bold tabular-nums ${valueColor}">${value !== null ? value.toFixed(1) : '-'}</span>
+          </div>
+        </div>
+        <div class="relative w-full h-3 rounded-full overflow-hidden mb-0.5">
+          <div class="absolute inset-0 flex">
+            <div class="h-full bg-green-900/50" style="width:30%"></div>
+            <div class="h-full bg-gray-700/30" style="width:40%"></div>
+            <div class="h-full bg-red-900/50" style="width:30%"></div>
+          </div>
+          <div class="absolute top-0 left-0 h-full w-px bg-green-700/50" style="left:30%"></div>
+          <div class="absolute top-0 h-full w-px bg-gray-600/40" style="left:50%"></div>
+          <div class="absolute top-0 h-full w-px bg-red-700/50" style="left:70%"></div>
+          <div class="absolute top-0.5 bottom-0.5 w-1.5 rounded-full shadow-lg ${needleColor} transition-all duration-500"
+               style="left:calc(${pct}% - 3px)"></div>
+        </div>
+        <div class="flex justify-between text-[8px] tabular-nums mt-0.5">
+          <span class="text-gray-600">0</span>
+          <span class="text-green-600/80">30</span>
+          <span class="text-gray-600">50</span>
+          <span class="text-red-600/80">70</span>
+          <span class="text-gray-600">100</span>
+        </div>
+      </div>`;
+  },
+
+  /** ADX セグメントメーター（Weak/Moderate/Strong） */
+  adxIndicator(value) {
+    const strength = value === null ? 'NO DATA'
+      : value < 20 ? 'WEAK'
+      : value < 40 ? 'MODERATE'
+      : 'STRONG';
+    const strengthColor = value === null ? 'text-gray-600'
+      : value < 20 ? 'text-red-400'
+      : value < 40 ? 'text-yellow-400'
+      : 'text-green-400';
+    const segments = 5;
+    const filledSegments = value !== null ? Math.min(segments, Math.floor(value / 12)) : 0;
+    const segColors = [
+      'bg-red-500/70', 'bg-orange-500/70',
+      'bg-yellow-500/70', 'bg-yellow-400/70', 'bg-green-500/70',
+    ];
+    const segmentsHtml = Array.from({ length: segments }, (_, i) => {
+      const filled = i < filledSegments;
+      return `<div class="flex-1 h-full rounded-sm ${filled ? segColors[i] : 'bg-gray-700/50'} transition-all duration-300"></div>`;
+    }).join('<div class="w-px h-full bg-gray-900 flex-shrink-0"></div>');
+    return `
+      <div class="bg-gray-800/60 rounded-lg p-2.5 border border-gray-700/30">
+        <div class="flex items-center justify-between mb-1.5">
+          <span class="text-[10px] font-bold text-gray-400 uppercase tracking-wider">ADX</span>
+          <div class="flex items-center gap-1.5">
+            <span class="text-[9px] font-bold ${strengthColor}">${strength}</span>
+            <span class="text-sm font-bold tabular-nums ${strengthColor}">${value !== null ? value.toFixed(1) : '-'}</span>
+          </div>
+        </div>
+        <div class="flex gap-0.5 h-2 mb-0.5">${segmentsHtml}</div>
+        <div class="flex justify-between text-[8px]">
+          <span class="text-red-600/70">Weak</span>
+          <span class="text-yellow-600/70">Moderate</span>
+          <span class="text-green-600/70">Strong</span>
+        </div>
+      </div>`;
+  },
+
+  /** EMA クロス状態バッジ + Gap表示 */
+  emaIndicator(fast, slow) {
+    const isCross = fast !== null && slow !== null;
+    const isGolden = isCross && fast > slow;
+    const crossLabel = !isCross ? '--' : isGolden ? 'GOLDEN ✦' : 'DEAD ✦';
+    const crossColor = !isCross ? 'text-gray-600'
+      : isGolden ? 'text-yellow-400' : 'text-blue-400';
+    const crossBg = !isCross ? 'bg-gray-800/40 border-gray-700'
+      : isGolden ? 'bg-yellow-900/20 border-yellow-700/40'
+      : 'bg-blue-900/20 border-blue-700/40';
+    const diff = isCross ? fast - slow : null;
+    const diffPct = (isCross && slow && slow !== 0) ? ((diff / slow) * 100) : null;
+    const fastColor = isGolden ? 'text-yellow-400' : isCross ? 'text-blue-300' : 'text-gray-400';
+    return `
+      <div class="bg-gray-800/60 rounded-lg p-2.5 border border-gray-700/30">
+        <div class="flex items-center justify-between mb-1.5">
+          <span class="text-[10px] font-bold text-gray-400 uppercase tracking-wider">EMA Cross</span>
+          <span class="text-[9px] px-1.5 py-0.5 rounded border font-bold ${crossColor} ${crossBg}">${crossLabel}</span>
+        </div>
+        <div class="space-y-0.5">
+          <div class="flex items-center justify-between">
+            <span class="text-[9px] text-gray-500">Fast</span>
+            <span class="text-xs tabular-nums font-medium ${fastColor}">${fast !== null ? fast.toFixed(3) : '-'}</span>
+          </div>
+          <div class="flex items-center justify-between">
+            <span class="text-[9px] text-gray-500">Slow</span>
+            <span class="text-xs tabular-nums text-gray-400">${slow !== null ? slow.toFixed(3) : '-'}</span>
+          </div>
+          ${diffPct !== null ? `
+          <div class="flex items-center justify-between pt-0.5 border-t border-gray-700/30 mt-0.5">
+            <span class="text-[9px] text-gray-600">Gap</span>
+            <span class="text-[9px] tabular-nums ${isGolden ? 'text-yellow-400/80' : 'text-blue-400/80'}">${isGolden ? '+' : ''}${diffPct.toFixed(3)}%</span>
+          </div>` : ''}
+        </div>
+      </div>`;
+  },
+
+  /** +DI / -DI 綱引きバー */
+  diIndicator(plusDi, minusDi) {
+    const hasData = plusDi !== null && minusDi !== null;
+    const total = hasData ? (plusDi + minusDi) : 0;
+    const plusPct = hasData && total > 0 ? (plusDi / total * 100) : 50;
+    const minusPct = hasData && total > 0 ? (minusDi / total * 100) : 50;
+    const isBullish = hasData && plusDi > minusDi;
+    const trendLabel = !hasData ? '--' : isBullish ? '▲ BULL' : '▼ BEAR';
+    const trendColor = !hasData ? 'text-gray-600' : isBullish ? 'text-green-400' : 'text-red-400';
+    return `
+      <div class="bg-gray-800/60 rounded-lg p-2.5 border border-gray-700/30">
+        <div class="flex items-center justify-between mb-1.5">
+          <span class="text-[10px] font-bold text-gray-400 uppercase tracking-wider">DI Lines</span>
+          <span class="text-[9px] font-bold ${trendColor}">${trendLabel}</span>
+        </div>
+        <div class="w-full h-2 rounded-full overflow-hidden flex mb-1">
+          <div class="bg-green-500/70 h-full transition-all duration-300" style="width:${plusPct}%"></div>
+          <div class="bg-red-500/70 h-full transition-all duration-300" style="width:${minusPct}%"></div>
+        </div>
+        <div class="flex items-center justify-between text-[9px]">
+          <span class="text-green-400 font-bold tabular-nums">+DI ${plusDi !== null ? plusDi.toFixed(1) : '-'}</span>
+          <span class="text-red-400 font-bold tabular-nums">-DI ${minusDi !== null ? minusDi.toFixed(1) : '-'}</span>
+        </div>
+      </div>`;
+  },
+
+  /** MACD + Signal + ヒストグラムバー */
+  macdIndicator(macd, signal, hist) {
+    const isBullish = macd !== null && macd > 0;
+    const isCrossOver = macd !== null && signal !== null && macd > signal;
+    const macdColor = isBullish ? 'text-green-400' : 'text-red-400';
+    const crossColor = isCrossOver ? 'text-green-400' : 'text-red-400';
+    const crossLabel = isCrossOver ? '▲ ABOVE SIG' : '▼ BELOW SIG';
+    const histPositive = hist !== null && hist > 0;
+    const histColor = histPositive ? 'text-green-400' : 'text-red-400';
+    const histBarColor = histPositive ? 'bg-green-500/70' : 'bg-red-500/70';
+    const maxAbs = Math.max(Math.abs(macd || 0), Math.abs(signal || 0), 0.000001);
+    const histRelPct = hist !== null ? Math.min(50, (Math.abs(hist) / maxAbs) * 50) : 0;
+    return `
+      <div class="bg-gray-800/60 rounded-lg p-2.5 border border-gray-700/30">
+        <div class="flex items-center justify-between mb-1.5">
+          <span class="text-[10px] font-bold text-gray-400 uppercase tracking-wider">MACD</span>
+          <span class="text-[9px] font-bold ${crossColor} ${isCrossOver ? 'bg-green-900/20' : 'bg-red-900/20'} px-1 py-0.5 rounded">${crossLabel}</span>
+        </div>
+        <div class="space-y-0.5 mb-1.5">
+          <div class="flex items-center justify-between">
+            <span class="text-[9px] text-gray-500">MACD</span>
+            <span class="text-xs tabular-nums font-bold ${macdColor}">${macd !== null ? macd.toFixed(5) : '-'}</span>
+          </div>
+          <div class="flex items-center justify-between">
+            <span class="text-[9px] text-gray-500">Signal</span>
+            <span class="text-xs tabular-nums text-gray-300">${signal !== null ? signal.toFixed(5) : '-'}</span>
+          </div>
+        </div>
+        <div>
+          <div class="flex items-center justify-between mb-0.5">
+            <span class="text-[9px] text-gray-600">Histogram</span>
+            <span class="text-[9px] tabular-nums font-bold ${histColor}">${hist !== null ? (hist >= 0 ? '+' : '') + hist.toFixed(5) : '-'}</span>
+          </div>
+          <div class="w-full h-2 bg-gray-700/50 rounded-full overflow-hidden relative">
+            <div class="absolute top-0 left-1/2 w-px h-full bg-gray-500/60"></div>
+            ${hist !== null ? (hist >= 0
+              ? `<div class="absolute top-0 left-1/2 h-full ${histBarColor} rounded-r-full transition-all duration-300" style="width:${histRelPct}%"></div>`
+              : `<div class="absolute top-0 right-1/2 h-full ${histBarColor} rounded-l-full transition-all duration-300" style="width:${histRelPct}%"></div>`
+            ) : ''}
+          </div>
+        </div>
+      </div>`;
+  },
+
+  /** ATR 表示 */
+  atrIndicator(value) {
+    return `
+      <div class="bg-gray-800/60 rounded-lg p-2.5 border border-gray-700/30">
         <div class="flex items-center justify-between mb-1">
-          <span class="text-[10px] text-gray-500 uppercase">${label}</span>
-          <span class="text-sm font-bold tabular-nums ${colors[zc]}">${value !== null ? value.toFixed(1) : '-'}</span>
+          <span class="text-[10px] font-bold text-gray-400 uppercase tracking-wider">ATR<span class="text-gray-600 font-normal ml-0.5">(14)</span></span>
+          <span class="text-sm font-bold tabular-nums text-purple-400">${value !== null ? value.toFixed(5) : '-'}</span>
         </div>
-        <div class="w-full h-1 bg-gray-700 rounded-full overflow-hidden">
-          <div class="h-full rounded-full transition-all duration-300 ${barColors[zc]}" style="width:${pct}%"></div>
-        </div>
+        <p class="text-[9px] text-gray-600 mt-1">Average True Range</p>
+        <p class="text-[9px] text-gray-600">市場の平均変動幅</p>
       </div>`;
   },
 
-  valueIndicator(label, value, subLabel, subValue, color, fmt) {
-    fmt = fmt || ((v) => v.toFixed(4));
-    const colors = { green: 'text-green-400', red: 'text-red-400', neutral: 'text-gray-300' };
-    const subHtml = subLabel ? `<p class="text-[10px] text-gray-500 tabular-nums">${subLabel}: ${subValue !== null && subValue !== undefined ? fmt(subValue) : '-'}</p>` : '';
-    return `
-      <div class="bg-gray-800/50 rounded-lg p-2.5">
-        <span class="text-[10px] text-gray-500 uppercase">${label}</span>
-        <p class="text-sm font-bold tabular-nums ${colors[color]}">${value !== null ? fmt(value) : '-'}</p>
-        ${subHtml}
-      </div>`;
-  },
-
-  dualIndicator(label, v1, v2, l1, l2, c1, c2) {
-    const colors = { green: 'text-green-400', red: 'text-red-400', neutral: 'text-gray-300' };
-    return `
-      <div class="bg-gray-800/50 rounded-lg p-2.5">
-        <span class="text-[10px] text-gray-500 uppercase">${label}</span>
-        <div class="flex items-baseline gap-2 mt-0.5">
-          <span class="text-xs font-bold tabular-nums ${colors[c1]}">${l1} ${v1 !== null ? v1.toFixed(1) : '-'}</span>
-          <span class="text-xs tabular-nums ${colors[c2]}">${l2} ${v2 !== null ? v2.toFixed(1) : '-'}</span>
-        </div>
-      </div>`;
-  },
-
-  bollingerIndicator(upper, middle, lower) {
+  /** ボリンジャーバンド（バンド幅状態 + ビジュアル） */
+  bollingerIndicatorEnhanced(upper, middle, lower) {
     const bbw = upper !== null && lower !== null && middle !== null && middle !== 0
-      ? ((upper - lower) / middle * 100).toFixed(3) : null;
+      ? ((upper - lower) / middle * 100) : null;
+    const isSqueeze = bbw !== null && bbw < 0.5;
+    const isExpand = bbw !== null && bbw > 2.0;
+    const bwState = bbw === null ? '--' : isSqueeze ? 'SQUEEZE' : isExpand ? 'EXPAND' : 'NORMAL';
+    const bwColor = bbw === null ? 'text-gray-600'
+      : isSqueeze ? 'text-yellow-400'
+      : isExpand ? 'text-purple-400'
+      : 'text-gray-400';
+    const bwBg = isSqueeze ? 'bg-yellow-900/20 border-yellow-700/40'
+      : isExpand ? 'bg-purple-900/20 border-purple-700/40'
+      : 'bg-gray-800/40 border-gray-700/40';
     return `
-      <div class="bg-gray-800/50 rounded-lg p-2.5">
-        <div class="flex items-center justify-between">
-          <span class="text-[10px] text-gray-500 uppercase">BB</span>
-          ${bbw ? `<span class="text-[10px] text-gray-500">BBW: ${bbw}%</span>` : ''}
+      <div class="bg-gray-800/60 rounded-lg p-2.5 border border-gray-700/30">
+        <div class="flex items-center justify-between mb-1.5">
+          <span class="text-[10px] font-bold text-gray-400 uppercase tracking-wider">Bollinger</span>
+          <div class="flex items-center gap-1.5">
+            <span class="text-[9px] px-1 py-0.5 rounded border font-bold ${bwColor} ${bwBg}">${bwState}</span>
+            ${bbw !== null ? `<span class="text-[9px] text-gray-600 tabular-nums">${bbw.toFixed(3)}%</span>` : ''}
+          </div>
         </div>
-        <div class="text-xs tabular-nums mt-0.5 space-y-0">
-          <div class="flex justify-between"><span class="text-gray-500">U</span><span class="text-gray-400">${upper !== null ? upper.toFixed(3) : '-'}</span></div>
-          <div class="flex justify-between"><span class="text-gray-500">M</span><span class="text-gray-300 font-medium">${middle !== null ? middle.toFixed(3) : '-'}</span></div>
-          <div class="flex justify-between"><span class="text-gray-500">L</span><span class="text-gray-400">${lower !== null ? lower.toFixed(3) : '-'}</span></div>
+        <div class="relative w-full h-5 bg-gray-700/20 rounded overflow-hidden mb-1.5">
+          <div class="absolute inset-x-0 top-0 h-1 ${isExpand ? 'bg-purple-500/25' : 'bg-red-500/15'}"></div>
+          <div class="absolute inset-x-0 bottom-0 h-1 ${isExpand ? 'bg-purple-500/25' : 'bg-green-500/15'}"></div>
+          <div class="absolute inset-x-0 top-1/2 h-px -translate-y-1/2 bg-gray-500/40"></div>
+          <div class="absolute inset-x-3 top-1 bottom-1 rounded ${isSqueeze ? 'bg-yellow-500/10 border border-yellow-500/20' : isExpand ? 'bg-purple-500/10 border border-purple-500/20' : 'bg-blue-500/8 border border-blue-500/15'}"></div>
+        </div>
+        <div class="grid grid-cols-3 gap-1 text-[9px] tabular-nums">
+          <div><span class="text-red-400/60">U</span> <span class="text-gray-400">${upper !== null ? upper.toFixed(3) : '-'}</span></div>
+          <div class="text-center"><span class="text-gray-500">M</span> <span class="text-gray-300 font-medium">${middle !== null ? middle.toFixed(3) : '-'}</span></div>
+          <div class="text-right"><span class="text-green-400/60">L</span> <span class="text-gray-400">${lower !== null ? lower.toFixed(3) : '-'}</span></div>
         </div>
       </div>`;
   },
@@ -971,18 +1173,40 @@ const DashboardApp = {
     const tableEl = document.getElementById('trade-history-table');
     if (!chipsEl || !tableEl) return;
 
-    // サマリーチップ
+    // サマリーカード
     if (this.tradeSummary) {
       const s = this.tradeSummary;
       const wrColor = s.win_rate >= 50 ? 'text-green-400' : 'text-red-400';
       const pfColor = s.profit_factor >= 1 ? 'text-green-400' : 'text-red-400';
       const netColor = s.net_profit >= 0 ? 'text-green-400' : 'text-red-400';
+      const netBg = s.net_profit >= 0
+        ? 'bg-green-900/10 border-green-800/30'
+        : 'bg-red-900/10 border-red-800/30';
       chipsEl.innerHTML = `
-        <span class="text-gray-500">WR: <span class="${wrColor}">${s.win_rate.toFixed(1)}%</span></span>
-        <span class="text-gray-500">PF: <span class="${pfColor}">${s.profit_factor.toFixed(2)}</span></span>
-        <span class="text-gray-500">Net: <span class="${netColor}">${this.fmtCurrency(s.net_profit)}</span></span>
-        <span class="text-gray-500">${s.total_trades} trades (${s.winning_trades}W/${s.losing_trades}L)</span>
+        <div class="bg-gray-800/60 border border-gray-700/40 rounded-lg p-2 text-center">
+          <p class="text-[9px] text-gray-500 uppercase tracking-wider mb-0.5">Win Rate</p>
+          <p class="text-base font-bold tabular-nums ${wrColor}">${s.win_rate.toFixed(1)}%</p>
+        </div>
+        <div class="bg-gray-800/60 border border-gray-700/40 rounded-lg p-2 text-center">
+          <p class="text-[9px] text-gray-500 uppercase tracking-wider mb-0.5">Profit Factor</p>
+          <p class="text-base font-bold tabular-nums ${pfColor}">${s.profit_factor.toFixed(2)}</p>
+        </div>
+        <div class="${netBg} border rounded-lg p-2 text-center">
+          <p class="text-[9px] text-gray-500 uppercase tracking-wider mb-0.5">Net P&amp;L</p>
+          <p class="text-base font-bold tabular-nums ${netColor}">${this.fmtCurrency(s.net_profit)}</p>
+        </div>
+        <div class="bg-gray-800/60 border border-gray-700/40 rounded-lg p-2 text-center">
+          <p class="text-[9px] text-gray-500 uppercase tracking-wider mb-0.5">Trades</p>
+          <p class="text-base font-bold tabular-nums text-gray-200">${s.total_trades}</p>
+          <p class="text-[9px] tabular-nums mt-0.5">
+            <span class="text-green-400">${s.winning_trades}W</span>
+            <span class="text-gray-600 mx-0.5">/</span>
+            <span class="text-red-400">${s.losing_trades}L</span>
+          </p>
+        </div>
       `;
+    } else {
+      chipsEl.innerHTML = '';
     }
 
     // テーブル
@@ -1016,14 +1240,17 @@ const DashboardApp = {
       const pipsHtml = t.profit_loss_pips !== null
         ? `<span class="text-gray-500 ml-1">(${t.profit_loss_pips.toFixed(1)}p)</span>` : '';
 
-      return `<tr>
-        <td class="text-xs text-gray-400 whitespace-nowrap tabular-nums">${this.fmtDateTime(t.closed_at || t.opened_at)}</td>
+      const rowBg = isProfit ? 'rgba(20,83,45,0.07)' : 'rgba(127,29,29,0.07)';
+      const borderClr = isProfit ? 'rgba(34,197,94,0.45)' : 'rgba(239,68,68,0.45)';
+      const pnlCellBg = isProfit ? 'rgba(20,83,45,0.18)' : 'rgba(127,29,29,0.18)';
+      return `<tr style="background:${rowBg}">
+        <td style="box-shadow:inset 3px 0 0 ${borderClr}" class="text-xs text-gray-400 whitespace-nowrap tabular-nums">${this.fmtDateTime(t.closed_at || t.opened_at)}</td>
         <td><span class="text-xs font-bold ${dirColor}">${t.signal_type}</span></td>
-        <td class="text-xs text-gray-400 tabular-nums">${t.volume.toFixed(2)}</td>
-        <td class="text-xs tabular-nums">${t.entry_price.toFixed(3)}</td>
-        <td class="text-xs tabular-nums">${t.exit_price !== null ? t.exit_price.toFixed(3) : '-'}</td>
+        <td class="text-xs text-gray-500 tabular-nums">${t.volume.toFixed(2)}</td>
+        <td class="text-xs text-gray-400 tabular-nums">${t.entry_price.toFixed(3)}</td>
+        <td class="text-xs text-gray-400 tabular-nums">${t.exit_price !== null ? t.exit_price.toFixed(3) : '-'}</td>
         <td>${reasonHtml}</td>
-        <td class="text-right text-xs font-medium tabular-nums ${pnlColor}">${isProfit ? '+' : ''}${this.fmtCurrency(pnl)}${pipsHtml}</td>
+        <td style="background:${pnlCellBg}" class="text-right text-xs font-bold tabular-nums ${pnlColor}">${isProfit ? '+' : ''}${this.fmtCurrency(pnl)}${pipsHtml}</td>
       </tr>`;
     }).join('');
 

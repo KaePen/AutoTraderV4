@@ -177,15 +177,15 @@
 
   <!-- トレード履歴（全幅） -->
   <div class="card" id="trade-history-panel">
-    <div class="flex items-center justify-between mb-3">
+    <div class="flex items-center justify-between mb-2">
       <button id="trade-history-toggle" class="flex items-center gap-2 text-sm font-semibold text-gray-300 uppercase tracking-wider hover:text-white transition-colors">
         <svg id="trade-history-chevron" class="w-4 h-4 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
         </svg>
         Trade History
       </button>
-      <div id="trade-summary-chips" class="flex items-center gap-4 text-xs tabular-nums"></div>
     </div>
+    <div id="trade-summary-chips" class="grid grid-cols-4 gap-2 mb-3"></div>
     <div id="trade-history-table" class="overflow-x-auto max-h-80"></div>
   </div>
 </div>
