@@ -8,6 +8,7 @@ const DashboardApp = {
   tradeSummary: null,
   currentSignals: [],
   indicators: null,
+  indicatorTf: localStorage.getItem('indicator_tf') || 'M15',
   isLoading: true,
   tradeHistoryExpanded: true,
   pollInterval: null,
@@ -56,6 +57,9 @@ const DashboardApp = {
 
     // チャート初期化
     ChartManager.init('chart-container', this.symbol);
+
+    // 指標タブ描画
+    this.renderIndicatorTabs();
 
     // データ取得
     this.fetchAll();
@@ -709,8 +713,7 @@ const DashboardApp = {
 
   /** 指標取得 */
   async fetchIndicators() {
-    const tf = ChartManager.timeframe || 'M15';
-    document.getElementById('indicator-timeframe').textContent = tf;
+    const tf = this.indicatorTf;
     try {
       this.indicators = await getIndicators(this.symbol, tf);
     } catch (e) {
