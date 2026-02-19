@@ -521,7 +521,7 @@ class TestTickEntryConfig:
     def test_デフォルト値(self) -> None:
         """デフォルト値が正しい"""
         config = TickEntryConfig()
-        assert config.enabled is False
+        assert config.enabled is True
         assert config.poll_interval_sec == 0.1
         assert config.max_monitoring_sec == 30.0
         assert config.execute_on_timeout is True

@@ -6,7 +6,6 @@ const NotificationManager = {
   hasPermission: false,
   enabled: true,
   soundEnabled: true,
-  minConfidence: 0.5,
   wsClient: null,
 
   /** 初期化 */
@@ -47,20 +46,7 @@ const NotificationManager = {
 
   /** メッセージ処理 */
   handleMessage(message) {
-    if (message.type === 'signal_update' && this.enabled) {
-      const signal = message.data;
-      if (signal.confidence >= this.minConfidence) {
-        this.addNotification({
-          id: 'signal-' + signal.signal_id,
-          title: signal.signal_type + ' Signal - ' + signal.symbol,
-          message: 'Confidence: ' + (signal.confidence * 100).toFixed(1) + '% (' + signal.confidence_level + ')',
-          type: 'signal',
-          confidenceLevel: signal.confidence_level,
-          timestamp: new Date(),
-          read: false,
-        });
-      }
-    } else if (message.type === 'alert') {
+    if (message.type === 'alert') {
       const alertData = message.data;
       this.addNotification({
         id: 'alert-' + Date.now(),
@@ -131,22 +117,13 @@ const NotificationManager = {
     }
 
     const typeColors = {
-      signal: 'border-blue-500',
       alert: 'border-yellow-500',
       info: 'border-gray-500',
-    };
-    const confColors = {
-      HIGH: 'text-green-400',
-      MEDIUM: 'text-yellow-400',
-      LOW: 'text-red-400',
     };
 
     this.listEl.innerHTML = '<ul>' + this.notifications.map((n) => {
       const borderColor = typeColors[n.type] || 'border-gray-500';
       const unreadBg = !n.read ? 'bg-gray-700/30' : '';
-      const confHtml = n.confidenceLevel
-        ? `<span class="text-xs ${confColors[n.confidenceLevel] || ''}">${n.confidenceLevel}</span>`
-        : '';
 
       return `<li class="p-3 border-l-2 hover:bg-gray-700/50 cursor-pointer transition-colors ${borderColor} ${unreadBg}"
                   data-id="${n.id}">
@@ -154,7 +131,6 @@ const NotificationManager = {
           <div class="flex-1 min-w-0">
             <p class="text-sm font-medium truncate">${this.escapeHtml(n.title)}</p>
             <p class="text-xs text-gray-400 mt-0.5">${this.escapeHtml(n.message)}</p>
-            ${confHtml}
           </div>
           <span class="text-xs text-gray-500 whitespace-nowrap">${this.formatTime(n.timestamp)}</span>
         </div>

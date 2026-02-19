@@ -28,6 +28,9 @@ from autotrader.decision.unified.position_manager import (
 from autotrader.decision.unified.position_sizer import PositionSizer
 from autotrader.decision.unified.trade_bot import UnifiedTradeBot
 from autotrader.live.config import LiveTradingConfig
+from autotrader.decision.unified.signal_consolidator import (
+    ConsolidatedSignal,
+)
 from autotrader.live.tick_entry_optimizer import TickEntryOptimizer
 
 logger = logging.getLogger(__name__)
@@ -78,6 +81,9 @@ class LiveTradingEngine:
 
         # 最新データキャッシュ
         self._last_signal: Signal | None = None
+        self._last_analysis: ConsolidatedSignal | None = None
+        self._last_tick_time: datetime | None = None
+        self._signal_history: list[Signal] = []
         self._enable_auto_trade = config.enable_auto_trade
 
         # ティックエントリー最適化
@@ -86,6 +92,11 @@ class LiveTradingEngine:
             data_provider=self._data_provider,
             symbol=config.symbol,
         )
+
+        # キャッシュ済みポジション（UI表示用）
+        self._cached_positions: list[dict] = []
+        # シンボル別デモモード状態（UI表示用）
+        self._symbol_demo_mode: dict[str, bool] = {}
 
     @property
     def connected(self) -> bool:
@@ -112,6 +123,87 @@ class LiveTradingEngine:
         """自動取引ON/OFF設定"""
         self._enable_auto_trade = value
         logger.info("自動取引: %s", "ON" if value else "OFF")
+
+    @property
+    def last_analysis(self) -> ConsolidatedSignal | None:
+        """直近のtick分析結果"""
+        return self._last_analysis
+
+    @property
+    def last_tick_time(self) -> datetime | None:
+        """直近のtick処理時刻"""
+        return self._last_tick_time
+
+    @property
+    def demo_mode_enabled(self) -> bool:
+        """デモモード状態"""
+        return getattr(
+            self._bot.config, "demo_mode", False
+        )
+
+    @property
+    def symbol_auto_trade_states(self) -> dict[str, bool]:
+        """シンボル別自動取引状態"""
+        return {self._config.symbol: self._enable_auto_trade}
+
+    @property
+    def symbol_demo_mode_states(self) -> dict[str, bool]:
+        """シンボル別デモモード状態"""
+        if self._symbol_demo_mode:
+            return dict(self._symbol_demo_mode)
+        return {self._config.symbol: self.demo_mode_enabled}
+
+    @property
+    def trade_history(self) -> list[dict]:
+        """クローズ済みトレード履歴（未実装：DBフォールバック用）"""
+        return []
+
+    @property
+    def cached_positions(self) -> list[dict]:
+        """キャッシュ済みオープンポジション（UI表示用）"""
+        return self._cached_positions
+
+    def set_symbol_auto_trade(
+        self, symbol: str, enable: bool
+    ) -> None:
+        """シンボルごとの自動取引ON/OFF設定
+
+        Args:
+            symbol: 通貨ペアシンボル
+            enable: 自動取引を有効にするか
+        """
+        self._enable_auto_trade = enable
+        logger.info(
+            "シンボル自動取引: %s %s",
+            symbol,
+            "ON" if enable else "OFF",
+        )
+
+    def set_symbol_demo_mode(
+        self, symbol: str, enable: bool
+    ) -> None:
+        """シンボルごとのデモモードON/OFF設定
+
+        Args:
+            symbol: 通貨ペアシンボル
+            enable: デモモードを有効にするか
+        """
+        self._symbol_demo_mode[symbol] = enable
+        logger.info(
+            "シンボルデモモード: %s %s",
+            symbol,
+            "ON" if enable else "OFF",
+        )
+
+    def reset_data_update_timer(self) -> None:
+        """データ更新タイマーをリセット（次回tick即時実行）"""
+        self._last_tick_time = None
+        logger.debug("データ更新タイマーリセット")
+
+    @property
+    def signal_history(self) -> list[Signal]:
+        """シグナル履歴"""
+        return self._signal_history
 
     async def start(self) -> None:
         """エンジン開始"""
@@ -206,8 +298,21 @@ class LiveTradingEngine:
         # 3. シグナル生成
         current_time = pd.Timestamp.now(tz="UTC")
         signal = self._bot.generate_signal(current_time)
+
+        # 全tickの分析結果を保存（HOLD含む）
+        self._last_analysis = signal
+        self._last_tick_time = datetime.now(timezone.utc)
+
         if signal and signal.direction != SignalType.HOLD:
             self._last_signal = signal
+            self._signal_history.append(
+                self._consolidated_to_signal(signal)
+            )
+            # 履歴上限
+            if len(self._signal_history) > 200:
+                self._signal_history = (
+                    self._signal_history[-200:]
+                )
             logger.info(
                 "シグナル生成: %s conf=%.2f",
                 signal.direction.value,
@@ -237,6 +342,33 @@ class LiveTradingEngine:
 
         # 5. 既存ポジション管理
         await self._manage_positions()
+
+    def _consolidated_to_signal(
+        self, cs: ConsolidatedSignal,
+    ) -> Signal:
+        """ConsolidatedSignalをSignalエンティティに変換
+
+        Args:
+            cs: 統合シグナル
+
+        Returns:
+            Signal: シグナルエンティティ
+        """
+        return Signal(
+            signal_id=str(uuid.uuid4()),
+            symbol=self._config.symbol,
+            timeframe=cs.primary_tf,
+            signal_type=cs.direction,
+            confidence=cs.confidence,
+            stop_loss=cs.sl_pips,
+            take_profit=cs.tp_pips,
+            reasoning=cs.rationale,
+            created_at=datetime.now(timezone.utc),
+            indicators_snapshot={},
+            regime=cs.regime,
+            mode=cs.mode,
+            consensus_score=cs.consensus_score,
+        )
 
     async def _load_historical_data(self) -> None:
         """起動時に過去データをTradeBotに供給"""

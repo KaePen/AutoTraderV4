@@ -1,89 +1,132 @@
-# MT5自動再接続 & データリトライ修正計画
+# ライブアナリティクス常時表示の修正計画
 
-## 問題
+## Context
 
-デモモードボタンを押さないとライブアナリティクスが表示されない。
+WebUIのライブアナリティクスパネルがデモモード/自動トレード有効化時しか更新されない。
+原因は `signals.py` ルーターが `engine.last_analysis` 等のプロパティを参照しているが、`engine.py` にこれらのプロパティが存在しないため、APIが常に「分析待機中（データなし）」を返しているため。
 
-### 根本原因
+## 根本原因
 
-1. **`_tick()`に再接続ロジックがない**: `start()`でMT5接続に失敗すると`_conn.connected=False`のまま永久にスキップされる
-2. **データ更新間隔が60秒**: 接続成功後も`_data_update_interval_sec=60.0`でスロットリングされ、初回データ取得が遅延する
-3. **market_data空時のリトライなし**: `_bot._market_data`が空のままだと`generate_signal()`が呼ばれず、ダミーの`scores={}`シグナルが返され続ける
-4. **デモモードボタンが副作用的に修正**: `toggle_symbol_demo_mode()`が`reset_data_update_timer()`を呼ぶため、結果的にデータ更新がトリガーされて表示が開始される
+`src/autotrader/web/routers/signals.py` が以下のプロパティを参照:
+- `engine.last_analysis` → **存在しない**
+- `engine.last_tick_time` → **存在しない**
+- `engine.demo_mode_enabled` → **存在しない**
+- `engine.signal_history` → **存在しない**
+
+`engine.py` の `_tick()` メソッドでは `generate_signal()` の結果を非HOLDの場合のみ `_last_signal` に保存しており、全tick結果の保存（`last_analysis`）をしていない。
+
+## 修正ファイル
+
+`src/autotrader/live/engine.py` のみ
 
 ## 修正内容
 
-### Change 1: `__init__()`に再接続追跡フィールド追加
+### Change 1: `__init__` に不足プロパティを追加
 
-**ファイル**: `src/autotrader/live/engine.py`
+`_last_signal` 定義の付近（L80）に以下を追加:
 
-`__init__()`の既存フィールド付近に以下を追加:
 ```python
-self._last_reconnect_attempt: datetime | None = None
-self._reconnect_interval_sec: float = 10.0
+self._last_analysis: ConsolidatedSignal | None = None
+self._last_tick_time: datetime | None = None
+self._signal_history: list[Signal] = []
 ```
 
-### Change 2: `_tick()`に自動再接続ブロック追加
+import追加:
+```python
+from autotrader.decision.unified.signal_consolidator import ConsolidatedSignal
+```
 
-**ファイル**: `src/autotrader/live/engine.py`
+### Change 2: プロパティアクセサを追加
 
-現在の`else: logger.debug("MT5未接続: 市場データ更新スキップ")`を以下に置換:
+`enable_auto_trade` プロパティ（L105-113）の後に追加:
 
 ```python
-else:
-    need_reconnect = (
-        self._last_reconnect_attempt is None
-        or (now - self._last_reconnect_attempt)
-        .total_seconds()
-        >= self._reconnect_interval_sec
+@property
+def last_analysis(self) -> ConsolidatedSignal | None:
+    """直近のtick分析結果"""
+    return self._last_analysis
+
+@property
+def last_tick_time(self) -> datetime | None:
+    """直近のtick処理時刻"""
+    return self._last_tick_time
+
+@property
+def demo_mode_enabled(self) -> bool:
+    """デモモード状態"""
+    return getattr(self._bot.config, "demo_mode", False)
+
+@property
+def signal_history(self) -> list[Signal]:
+    """シグナル履歴"""
+    return self._signal_history
+```
+
+### Change 3: `_tick()` で毎tick分析結果を保存
+
+`_tick()` L207-210 を修正。`generate_signal()` の結果を **HOLDを含む全tick** で `_last_analysis` に保存:
+
+```python
+# 3. シグナル生成
+current_time = pd.Timestamp.now(tz="UTC")
+signal = self._bot.generate_signal(current_time)
+
+# 全tickの分析結果を保存（HOLD含む）
+self._last_analysis = signal
+self._last_tick_time = datetime.now(timezone.utc)
+
+if signal and signal.direction != SignalType.HOLD:
+    self._last_signal = signal
+    self._signal_history.append(
+        self._consolidated_to_signal(signal)
     )
-    if need_reconnect:
-        self._last_reconnect_attempt = now
-        logger.info("MT5再接続試行中...")
-        try:
-            await self._conn.connect()
-            logger.info("MT5再接続成功")
-            await self._load_historical_data()
-            self._account_info = (
-                await self._data_provider
-                .get_account_info()
-            )
-            self._last_data_update = now
-        except Exception as e:
-            logger.debug(
-                "MT5再接続失敗: %s", e,
-            )
-    else:
-        logger.debug(
-            "MT5未接続: 再接続待機中",
-        )
+    # 履歴上限
+    if len(self._signal_history) > 200:
+        self._signal_history = self._signal_history[-200:]
+    ...（既存のログ・エントリー判定はそのまま）
 ```
 
-### Change 3: market_data空時に即時リトライ
+### Change 4: `_consolidated_to_signal()` ヘルパー追加
 
-**ファイル**: `src/autotrader/live/engine.py`
+`signal_history`（`/signals/current`, `/signals/history` で使用）に保存するため、`ConsolidatedSignal` → `Signal` エンティティ変換メソッドを追加。
 
-market_data空ブロック内、`self._last_tick_time = now`の前に追加:
+※ `Signal` は `signal_type: SignalType` を要求。`SignalResponse` は `confidence_level: ConfidenceLevel` を要求するが `Signal` エンティティにはそのフィールドが無い。`_signal_to_response()` が `signal.confidence_level` を参照するため、ダックタイピングでカバーするか、非HOLDシグナルを `Signal` として構築する際に工夫が必要。
+
+最小限の実装:
 
 ```python
-if self._conn.connected:
-    self._last_data_update = None
+def _consolidated_to_signal(
+    self, cs: ConsolidatedSignal,
+) -> Signal:
+    """ConsolidatedSignalをSignalエンティティに変換"""
+    return Signal(
+        signal_id=str(uuid.uuid4()),
+        symbol=self._config.symbol,
+        timeframe=cs.primary_tf,
+        signal_type=cs.direction,
+        confidence=cs.confidence,
+        stop_loss=cs.sl_pips,
+        take_profit=cs.tp_pips,
+        reasoning=cs.rationale,
+        created_at=datetime.now(timezone.utc),
+        indicators_snapshot={},
+        regime=cs.regime,
+        mode=cs.mode,
+        consensus_score=cs.consensus_score,
+    )
 ```
 
-これにより次のtickで即座にデータ再取得が試みられる。
+`SignalResponse` の `confidence_level` 問題は `/signals/current` を使う際に発生するが、主要目標は `/signals/analysis` エンドポイント（`last_analysis` ベース）なので、今回は `signal_history` を最低限動作させる範囲に留める。`confidence_level` は `Signal` に属性を追加せず、`_signal_to_response()` 側で `getattr` フォールバック対応する。
 
-### Change 4: テスト追加
+## 変更しないもの
 
-**ファイル**: `tests/unit/live/test_engine.py`
+- `signals.py` ルーター（既にプロパティを正しく参照している）
+- `dashboard.js`（`mode === 'live'` チェックのみで正しい）
+- `handlers.py`（WebSocket層）
+- `trade_bot.py`（シグナル生成ロジック）
 
-4つの新テスト:
-1. `test_未接続時に自動再接続を試行` - connected=Falseのtickで`connect()`が呼ばれる
-2. `test_再接続スロットリング` - 10秒未満の再tick時には`connect()`が呼ばれない
-3. `test_再接続成功後にデータ取得` - 再接続成功時に`_load_historical_data()`が呼ばれる
-4. `test_market_data空時にデータ更新タイマーリセット` - connected=True+market_data空で`_last_data_update=None`になる
+## 検証
 
-## 影響範囲
-
-- `src/autotrader/live/engine.py` のみ変更
-- `tests/unit/live/test_engine.py` にテスト追加
-- 既存の動作に対して後方互換: 接続成功時の動作は変わらない
+1. `pytest tests/unit/live/` で既存テストがパスすること
+2. WebUI起動 → デモモード/自動トレードOFFでもLive Analyticsパネルが表示・更新されること
+3. `GET /api/v1/signals/analysis` が `consensus_score`, `tf_scores` 等を含むレスポンスを返すこと

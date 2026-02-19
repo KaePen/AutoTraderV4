@@ -31,7 +31,7 @@ class TickEntryConfig:
         conflict_policy: 新シグナル衝突時ポリシー
     """
 
-    enabled: bool = False
+    enabled: bool = True
     enabled_modes: tuple[str, ...] = ("SCALPING",)
     poll_interval_sec: float = 0.1
     max_monitoring_sec: float = 30.0

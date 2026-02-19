@@ -1051,6 +1051,7 @@ class TestRangeDayBeFix:
             range_day_early_be_r=1.0,
             range_day_fast_be_enabled=False,
             range_day_insurance_enabled=False,
+            range_day_half_r_partial_enabled=False,
         )
         self.manager = PositionManager(self.config)
         self.entry_time = datetime(2024, 1, 1, 10, 0, 0)
@@ -1178,6 +1179,7 @@ class TestRangeDayBeFix:
         legacy_config = PositionManagerConfig(
             range_day_be_disabled=False,
             range_day_insurance_enabled=False,
+            range_day_half_r_partial_enabled=False,
         )
         manager = PositionManager(legacy_config)
         manager.register_position(
@@ -1254,6 +1256,7 @@ class TestFastBeAndStagnation:
             range_day_fast_be_enabled=True,
             range_day_fast_be_minutes=90.0,
             range_day_insurance_enabled=False,
+            range_day_half_r_partial_enabled=False,
         )
         manager = PositionManager(config)
         self._register(manager, self.range_day_plan)
@@ -1274,6 +1277,7 @@ class TestFastBeAndStagnation:
             range_day_fast_be_enabled=True,
             range_day_fast_be_minutes=90.0,
             range_day_insurance_enabled=False,
+            range_day_half_r_partial_enabled=False,
         )
         manager = PositionManager(config)
         self._register(manager, self.range_day_plan)
@@ -1720,6 +1724,7 @@ class TestRangeDayInsurance:
             range_day_insurance_sl_offset_r=-0.1,
             insurance_trigger_r=0.7,
             insurance_min_holding_minutes=0.0,
+            range_day_half_r_partial_enabled=False,
         )
         manager = PositionManager(config)
         self._register(manager, self.range_day_plan)
@@ -1794,6 +1799,7 @@ class TestRangeDayInsurance:
             range_day_insurance_sl_offset_r=-0.1,
             insurance_trigger_r=0.5,
             insurance_min_holding_minutes=15.0,
+            range_day_half_r_partial_enabled=False,
         )
         manager = PositionManager(config)
         self._register(manager, self.range_day_plan)
@@ -1864,6 +1870,7 @@ class TestRangeDayInsurance:
             insurance_trigger_r=0.5,
             insurance_block_high_mfe_r=0.8,
             insurance_min_holding_minutes=0.0,
+            range_day_half_r_partial_enabled=False,
         )
         manager = PositionManager(config)
         self._register(manager, self.range_day_plan)
@@ -1954,8 +1961,8 @@ class TestRangeDayHalfRPartial:
             150.25, abs=0.001,
         )
 
-    def test_half_r_disabled_by_default(self) -> None:
-        """デフォルトOFF時、0.5Rで発火しない"""
+    def test_half_r_disabled_explicitly(self) -> None:
+        """明示OFF時、0.5Rで発火しない"""
         config = PositionManagerConfig(
             range_day_half_r_partial_enabled=False,
             range_day_insurance_enabled=False,

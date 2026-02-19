@@ -129,7 +129,7 @@ class TestEngineTickConfigIntegration:
         """デフォルトLiveTradingConfigにtick_entry_config"""
         config = LiveTradingConfig()
         assert hasattr(config, "tick_entry_config")
-        assert config.tick_entry_config.enabled is False
+        assert config.tick_entry_config.enabled is True
 
     def test_カスタムTickEntryConfig(self) -> None:
         """カスタムTickEntryConfigが正しく設定"""
