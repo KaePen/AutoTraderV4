@@ -455,6 +455,17 @@ def parse_args() -> argparse.Namespace:
         default=2.0,
         help="SLスリッページバッファpips（デフォルト: 2.0）",
     )
+    parser.add_argument(
+        "--keep-tp-after-partial",
+        action="store_true",
+        help="1R部分利確後もTPを維持（デフォルト: 無効=TP無効化）",
+    )
+    parser.add_argument(
+        "--consensus-threshold",
+        type=float,
+        default=5.5,
+        help="コンセンサス閾値（デフォルト: 5.5）",
+    )
     # RANGE×DAY 0.5R部分利確（デフォルトON）
     parser.add_argument(
         "--no-range-day-half-r-partial",
@@ -823,6 +834,7 @@ def run_single_backtest(args: argparse.Namespace):
         equity_caution_pct=args.equity_caution,
         slippage_buffer_pips=args.slippage_buffer,
         tp_sl_ratio=args.tp_sl_ratio,
+        consensus_day_trade_threshold=args.consensus_threshold,
     )
 
     # PositionManagerConfig構築
@@ -863,6 +875,7 @@ def run_single_backtest(args: argparse.Namespace):
         range_day_half_r_partial_enabled=(
             not args.no_range_day_half_r_partial
         ),
+        disable_tp_after_partial=not args.keep_tp_after_partial,
     )
 
     result = runner.run_unified(
