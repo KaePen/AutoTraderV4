@@ -10,11 +10,22 @@
 
 from __future__ import annotations
 
+import io
 import json
 import os
 import subprocess
+import sys
 import time
 from pathlib import Path
+
+# Windowsコンソールの文字化け対策
+if sys.platform == "win32":
+    sys.stdout = io.TextIOWrapper(
+        sys.stdout.buffer, encoding="utf-8", errors="replace"
+    )
+    sys.stderr = io.TextIOWrapper(
+        sys.stderr.buffer, encoding="utf-8", errors="replace"
+    )
 
 # 設定
 REPO = "KaePen/AutoTraderV4"
@@ -56,11 +67,12 @@ def save_processed(processed: set[int]) -> None:
 
 def get_open_prs() -> list[dict]:
     """GitHub APIでオープンなPR一覧を取得する。"""
+    cmd = (
+        f"gh pr list --repo {REPO} --state open --base main"
+        " --json number,title,headRefName"
+    )
     result = subprocess.run(
-        ["gh", "pr", "list", "--repo", REPO,
-         "--state", "open", "--base", "main",
-         "--json", "number,title,headRefName"],
-        capture_output=True, text=True
+        cmd, capture_output=True, text=True, shell=True
     )
     if result.returncode != 0:
         print(f"[ERROR] gh pr list failed: {result.stderr}")
@@ -82,9 +94,9 @@ def run_review_agent(pr: dict) -> None:
     print(f"[INFO] PR #{pr['number']} のレビューを開始: {pr['title']}")
 
     subprocess.run(
-        ["claude", "-p", prompt,
-         "--allowedTools", "Bash,Read,Edit,Write,Glob,Grep"],
+        f'claude -p "{prompt}" --allowedTools "Bash,Read,Edit,Write,Glob,Grep"',
         cwd=str(PROJECT_DIR),
+        shell=True,
     )
 
 
