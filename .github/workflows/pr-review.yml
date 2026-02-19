@@ -1,0 +1,67 @@
+name: Auto PR Review & Merge
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches: [main]
+
+jobs:
+  review-and-merge:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Claude Code CLI
+        run: pip install claude-code
+
+      - name: Install project dependencies
+        run: pip install -e ".[dev]" 2>/dev/null || pip install -e . 2>/dev/null || true
+
+      - name: Configure git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Run PR Review Agent
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.number }}
+          PR_BRANCH: ${{ github.head_ref }}
+          PR_BASE: ${{ github.base_ref }}
+          PR_TITLE: ${{ github.event.pull_request.title }}
+        run: |
+          claude -p "
+          あなたはPRのコードレビューとmainへのマージを担当するエージェントです。
+
+          対象PR:
+          - PR番号: #${PR_NUMBER}
+          - ブランチ: ${PR_BRANCH} → ${PR_BASE}
+          - タイトル: ${PR_TITLE}
+
+          以下の手順で対応してください:
+          1. git diff origin/${PR_BASE}...origin/${PR_BRANCH} で変更内容を確認
+          2. テストを実行して全て通ることを確認
+          3. コードレビュー（バグ・セキュリティ・スタイル）
+          4. 問題なければ main にマージ（git merge --no-ff）
+          5. git push origin main でリモートに反映
+          6. gh pr close ${PR_NUMBER} でPRをクローズ
+
+          問題がある場合は gh pr review ${PR_NUMBER} --request-changes --body で
+          指摘コメントを残してください。
+          " \
+          --allowedTools "Bash,Read,Glob,Grep" \
+          --dangerously-skip-permissions
