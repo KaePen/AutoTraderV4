@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import io
+import json
 import os
 import subprocess
 import sys
@@ -113,7 +114,6 @@ REVIEW_PROMPT = """
 """
 
 
-
 def get_open_prs() -> list[dict]:
     """GitHub APIでオープンなPR一覧を取得する。"""
     result = subprocess.run(
@@ -135,7 +135,7 @@ def get_open_prs() -> list[dict]:
 
 
 def run_review_agent(pr: dict) -> None:
-    """PR対応のClaude Codeエージェントを起動してログを保存する。
+    """PR対応のClaude Codeエージェントを起動する。
 
     Args:
         pr: PR情報辞書（number, title, headRefName）

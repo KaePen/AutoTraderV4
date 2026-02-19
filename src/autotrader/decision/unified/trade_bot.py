@@ -481,9 +481,29 @@ class UnifiedTradeBot:
             )
 
         # SoftGuardチェック（デモモードでも情報取得: 出力データに使用）
+        # ATR比率を計算してボラティリティ状態をSoftGuardに渡す
+        _primary_atr_row = self._get_current_row(
+            plan.primary_tf, current_time,
+        )
+        _atr_ratio = 1.0
+        if _primary_atr_row is not None:
+            _atr = _primary_atr_row.get("atr_14")
+            _atr_ma = _primary_atr_row.get("atr_ma_20")
+            if (
+                _atr is not None and _atr_ma is not None
+                and not pd.isna(_atr) and not pd.isna(_atr_ma)
+                and _atr_ma > 0
+            ):
+                _atr_ratio = float(_atr) / float(_atr_ma)
         sg_context = {
-            "spread_pips": 1.5,
+            "spread_pips": self._get_spread_pips(current_time),
             "current_time": current_time.to_pydatetime(),
+            "atr_ratio": _atr_ratio,
+            "recent_losses": self.state.consecutive_losses,
+            "trend_strength": regime_result.trend_strength,
+            "mtf_alignment": (
+                "aligned" if htf_alignment >= 0.3 else "mixed"
+            ),
         }
         sg_result = self.soft_guard.check(sg_context, is_entry=True)
 

@@ -521,15 +521,21 @@ class IndicatorSeriesResponse(BaseModel):
     Attributes:
         ema12: EMA(12)時系列
         ema26: EMA(26)時系列
+        ema50: EMA(50)時系列
+        ema200: EMA(200)時系列
         bb_upper: BB上限時系列
         bb_middle: BB中央時系列
         bb_lower: BB下限時系列
         rsi: RSI時系列
+        vwap: VWAP時系列
     """
 
     ema12: list[IndicatorPoint] = Field(default_factory=list)
     ema26: list[IndicatorPoint] = Field(default_factory=list)
+    ema50: list[IndicatorPoint] = Field(default_factory=list)
+    ema200: list[IndicatorPoint] = Field(default_factory=list)
     bb_upper: list[IndicatorPoint] = Field(default_factory=list)
     bb_middle: list[IndicatorPoint] = Field(default_factory=list)
     bb_lower: list[IndicatorPoint] = Field(default_factory=list)
     rsi: list[IndicatorPoint] = Field(default_factory=list)
+    vwap: list[IndicatorPoint] = Field(default_factory=list)
