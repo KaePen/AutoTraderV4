@@ -132,19 +132,30 @@ class MT5TradeExecutor(TradeExecutor):
                     message=f"ティック取得失敗: {signal.symbol}",
                 )
 
+            # シンボルのpoint値取得（SL/TP pips→価格変換用）
+            sym_info = await transport.symbol_info(signal.symbol)
+            point = (
+                float(sym_info.get("point", 0.0))
+                if sym_info else None
+            )
+
             request = signal_to_mt5_request(
                 signal, volume, tick,
                 magic=self._magic,
                 deviation=self._deviation,
                 filling_type=filling,
+                point=point,
             )
 
             logger.info(
-                "注文送信: %s %s %.2f lots @ %.3f filling=%d",
+                "注文送信: %s %s %.2f lots @ %.3f "
+                "sl=%.3f tp=%.3f filling=%d",
                 signal.signal_type.value,
                 signal.symbol,
                 volume,
                 request["price"],
+                request.get("sl", 0.0),
+                request.get("tp", 0.0),
                 filling,
             )
 
