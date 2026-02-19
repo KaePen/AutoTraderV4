@@ -153,6 +153,7 @@ def signal_to_mt5_request(
     magic: int = DEFAULT_MAGIC_NUMBER,
     deviation: int = DEFAULT_DEVIATION,
     filling_type: int = ORDER_FILLING_FOK,
+    point: float | None = None,
 ) -> dict:
     """シグナルをMT5注文リクエストに変換
 
@@ -163,6 +164,8 @@ def signal_to_mt5_request(
         magic: マジックナンバー
         deviation: 許容スリッページ
         filling_type: 充填タイプ
+        point: シンボルのpoint値（SL/TP pips→価格変換用）
+               1pip = point * 10（MT5標準）
 
     Returns:
         dict: MT5注文リクエスト辞書
@@ -187,8 +190,25 @@ def signal_to_mt5_request(
     }
 
     if signal.stop_loss is not None:
-        request["sl"] = signal.stop_loss
+        if point is not None and point > 0:
+            # pipsから実際の価格レベルに変換（1pip = point * 10）
+            sl_distance = signal.stop_loss * point * 10
+            sl_price = (
+                price - sl_distance if is_buy else price + sl_distance
+            )
+            request["sl"] = round(sl_price, 5)
+        else:
+            request["sl"] = signal.stop_loss
+
     if signal.take_profit is not None:
-        request["tp"] = signal.take_profit
+        if point is not None and point > 0:
+            # pipsから実際の価格レベルに変換（1pip = point * 10）
+            tp_distance = signal.take_profit * point * 10
+            tp_price = (
+                price + tp_distance if is_buy else price - tp_distance
+            )
+            request["tp"] = round(tp_price, 5)
+        else:
+            request["tp"] = signal.take_profit
 
     return request

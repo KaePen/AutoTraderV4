@@ -244,3 +244,62 @@ class TestSignalToMt5Request:
 
         assert "sl" not in result
         assert "tp" not in result
+
+    def test_BUY_pips変換(self) -> None:
+        """BUYでpoint指定時にpipsから価格レベルに変換される"""
+        # USDJPY: point=0.001, 1pip=0.01
+        signal = Signal(
+            signal_id="test-004",
+            symbol="USDJPY",
+            signal_type=SignalType.BUY,
+            confidence=0.8,
+            stop_loss=15.0,
+            take_profit=45.0,
+        )
+        tick = {"ask": 155.500, "bid": 155.490}
+        result = signal_to_mt5_request(
+            signal, 1.0, tick, point=0.001,
+        )
+
+        price = 155.500
+        expected_sl = round(price - 15.0 * 0.001 * 10, 5)
+        expected_tp = round(price + 45.0 * 0.001 * 10, 5)
+        assert result["sl"] == pytest.approx(expected_sl, abs=1e-4)
+        assert result["tp"] == pytest.approx(expected_tp, abs=1e-4)
+
+    def test_SELL_pips変換(self) -> None:
+        """SELLでpoint指定時にSLはbid+distance、TPはbid-distance"""
+        signal = Signal(
+            signal_id="test-005",
+            symbol="USDJPY",
+            signal_type=SignalType.SELL,
+            confidence=0.8,
+            stop_loss=20.0,
+            take_profit=40.0,
+        )
+        tick = {"ask": 155.510, "bid": 155.500}
+        result = signal_to_mt5_request(
+            signal, 1.0, tick, point=0.001,
+        )
+
+        price = 155.500
+        expected_sl = round(price + 20.0 * 0.001 * 10, 5)
+        expected_tp = round(price - 40.0 * 0.001 * 10, 5)
+        assert result["sl"] == pytest.approx(expected_sl, abs=1e-4)
+        assert result["tp"] == pytest.approx(expected_tp, abs=1e-4)
+
+    def test_point_なし_SL_TP_そのまま渡す(self) -> None:
+        """point未指定時はSL/TPをそのまま渡す"""
+        signal = Signal(
+            signal_id="test-006",
+            symbol="USDJPY",
+            signal_type=SignalType.BUY,
+            confidence=0.8,
+            stop_loss=149.5,
+            take_profit=151.5,
+        )
+        tick = {"ask": 150.5, "bid": 150.490}
+        result = signal_to_mt5_request(signal, 1.0, tick)
+
+        assert result["sl"] == 149.5
+        assert result["tp"] == 151.5
