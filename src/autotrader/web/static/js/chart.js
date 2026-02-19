@@ -21,15 +21,21 @@ const ChartManager = {
   _indicatorSeries: {
     ema12: null,
     ema26: null,
+    ema50: null,
+    ema200: null,
     bbUpper: null,
     bbMiddle: null,
     bbLower: null,
+    vwap: null,
   },
   // 指標表示ON/OFF状態
   _indVisible: {
     ema: true,
     bb: true,
     rsi: true,
+    ema50: false,
+    ema200: false,
+    vwap: false,
   },
 
   /** 初期化 */
@@ -106,6 +112,26 @@ const ChartManager = {
       crosshairMarkerVisible: false,
     });
 
+    // EMA(50)
+    this._indicatorSeries.ema50 = this.chart.addLineSeries({
+      color: '#22d3ee',
+      lineWidth: 1.5,
+      priceLineVisible: false,
+      lastValueVisible: false,
+      crosshairMarkerVisible: false,
+      visible: false,
+    });
+
+    // EMA(200)
+    this._indicatorSeries.ema200 = this.chart.addLineSeries({
+      color: '#e2e8f0',
+      lineWidth: 2,
+      priceLineVisible: false,
+      lastValueVisible: false,
+      crosshairMarkerVisible: false,
+      visible: false,
+    });
+
     // BB Upper
     this._indicatorSeries.bbUpper = this.chart.addLineSeries({
       color: '#a78bfa',
@@ -134,6 +160,17 @@ const ChartManager = {
       priceLineVisible: false,
       lastValueVisible: false,
       crosshairMarkerVisible: false,
+    });
+
+    // VWAP
+    this._indicatorSeries.vwap = this.chart.addLineSeries({
+      color: '#4ade80',
+      lineWidth: 1.5,
+      lineStyle: 0,
+      priceLineVisible: false,
+      lastValueVisible: false,
+      crosshairMarkerVisible: false,
+      visible: false,
     });
 
     // Volume（チャート下部30%に背景として表示）
@@ -303,7 +340,10 @@ const ChartManager = {
 
     const toggles = [
       { key: 'ema', label: 'EMA', color: '#60a5fa' },
+      { key: 'ema50', label: 'E50', color: '#22d3ee' },
+      { key: 'ema200', label: 'E200', color: '#e2e8f0' },
       { key: 'bb', label: 'BB', color: '#a78bfa' },
+      { key: 'vwap', label: 'VWAP', color: '#4ade80' },
       { key: 'rsi', label: 'RSI', color: '#facc15' },
     ];
 
@@ -333,12 +373,21 @@ const ChartManager = {
     const showEma = this._indVisible.ema;
     const showBb = this._indVisible.bb;
     const showRsi = this._indVisible.rsi;
+    const showEma50 = this._indVisible.ema50;
+    const showEma200 = this._indVisible.ema200;
+    const showVwap = this._indVisible.vwap;
 
     if (this._indicatorSeries.ema12) {
       this._indicatorSeries.ema12.applyOptions({ visible: showEma });
     }
     if (this._indicatorSeries.ema26) {
       this._indicatorSeries.ema26.applyOptions({ visible: showEma });
+    }
+    if (this._indicatorSeries.ema50) {
+      this._indicatorSeries.ema50.applyOptions({ visible: showEma50 });
+    }
+    if (this._indicatorSeries.ema200) {
+      this._indicatorSeries.ema200.applyOptions({ visible: showEma200 });
     }
     if (this._indicatorSeries.bbUpper) {
       this._indicatorSeries.bbUpper.applyOptions({ visible: showBb });
@@ -348,6 +397,9 @@ const ChartManager = {
     }
     if (this._indicatorSeries.bbLower) {
       this._indicatorSeries.bbLower.applyOptions({ visible: showBb });
+    }
+    if (this._indicatorSeries.vwap) {
+      this._indicatorSeries.vwap.applyOptions({ visible: showVwap });
     }
 
     // RSIサブチャートの表示/非表示
@@ -538,6 +590,15 @@ const ChartManager = {
     }
     if (this._indicatorSeries.ema26) {
       this._indicatorSeries.ema26.setData(toPoints(data.ema26));
+    }
+    if (this._indicatorSeries.ema50) {
+      this._indicatorSeries.ema50.setData(toPoints(data.ema50));
+    }
+    if (this._indicatorSeries.ema200) {
+      this._indicatorSeries.ema200.setData(toPoints(data.ema200));
+    }
+    if (this._indicatorSeries.vwap) {
+      this._indicatorSeries.vwap.setData(toPoints(data.vwap));
     }
     if (this._indicatorSeries.bbUpper) {
       this._indicatorSeries.bbUpper.setData(toPoints(data.bb_upper));

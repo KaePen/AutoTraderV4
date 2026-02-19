@@ -275,9 +275,12 @@ async def get_indicator_series(
     close = df["close"]
     high = df["high"]
     low = df["low"]
+    volume = df["volume"] if "volume" in df.columns else None
 
     ema12 = _series(ta.ema(close, length=12))
     ema26 = _series(ta.ema(close, length=26))
+    ema50 = _series(ta.ema(close, length=50))
+    ema200 = _series(ta.ema(close, length=200))
 
     bb_df = ta.bbands(close, length=20, std=2.0)
     bb_upper, bb_middle, bb_lower = [], [], []
@@ -289,13 +292,25 @@ async def get_indicator_series(
 
     rsi = _series(ta.rsi(close, length=14))
 
+    # VWAP: (high+low+close)/3 * volume の累積 / volume累積
+    vwap: list[IndicatorPoint] = []
+    if volume is not None and not volume.empty:
+        typical = (high + low + close) / 3
+        cum_tpv = (typical * volume).cumsum()
+        cum_vol = volume.cumsum()
+        vwap_s = cum_tpv / cum_vol.replace(0, pd.NA)
+        vwap = _series(vwap_s)
+
     return ApiResponse(
         data=IndicatorSeriesResponse(
             ema12=ema12,
             ema26=ema26,
+            ema50=ema50,
+            ema200=ema200,
             bb_upper=bb_upper,
             bb_middle=bb_middle,
             bb_lower=bb_lower,
             rsi=rsi,
+            vwap=vwap,
         )
     )
