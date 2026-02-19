@@ -26,7 +26,10 @@ from autotrader.decision.unified.position_manager import (
     PositionManager,
     PositionManagerConfig,
 )
-from autotrader.decision.unified.position_sizer import PositionSizer
+from autotrader.decision.unified.position_sizer import (
+    PositionSizer,
+    PositionSizerConfig,
+)
 from autotrader.decision.unified.trade_bot import UnifiedTradeBot
 from autotrader.live.config import LiveTradingConfig
 from autotrader.decision.unified.signal_consolidator import (
@@ -70,7 +73,9 @@ class LiveTradingEngine:
         )
         self._bot = UnifiedTradeBot(config.bot_config)
         self._pm = PositionManager()
-        self._sizer = PositionSizer(config.bot_config)
+        self._sizer = PositionSizer(
+            self._build_sizer_config(config.bot_config)
+        )
         self._running = False
         self._task: asyncio.Task | None = None  # type: ignore[type-arg]
         self._account_info: AccountInfo | None = None
@@ -211,7 +216,9 @@ class LiveTradingEngine:
             new_config: 新しいUnifiedBotConfig
         """
         self._bot.config = new_config
-        self._sizer = PositionSizer(new_config)
+        self._sizer = PositionSizer(
+            self._build_sizer_config(new_config)
+        )
         logger.info("BotConfig更新完了 demo_mode=%s", new_config.demo_mode)
 
     def update_pm_config(self, new_config: PositionManagerConfig) -> None:
@@ -224,6 +231,31 @@ class LiveTradingEngine:
         """
         self._pm.config = new_config
         logger.info("PositionManagerConfig更新完了")
+
+    @staticmethod
+    def _build_sizer_config(
+        bot_config: UnifiedBotConfig,
+    ) -> PositionSizerConfig:
+        """UnifiedBotConfigからPositionSizerConfigを生成
+
+        UnifiedBotConfigはPositionSizerConfigと別型のため
+        必要なフィールドを抽出して変換する。
+
+        Args:
+            bot_config: Bot設定
+
+        Returns:
+            PositionSizerConfig: サイザー設定
+        """
+        return PositionSizerConfig(
+            base_risk_pct=bot_config.base_risk_pct,
+            max_risk_pct_absolute=bot_config.max_risk_pct_absolute,
+            max_lot_per_trade=bot_config.max_lot_per_trade,
+            max_total_exposure_lot=bot_config.max_total_exposure_lot,
+            equity_floor_pct=bot_config.equity_floor_pct,
+            equity_caution_pct=bot_config.equity_caution_pct,
+            slippage_buffer_pips=bot_config.slippage_buffer_pips,
+        )
 
     @property
     def signal_history(self) -> list[Signal]:
