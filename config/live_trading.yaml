@@ -1,0 +1,48 @@
+# ライブトレード用設定（本番環境）
+# バックテストはCLI引数で別管理
+
+bot_config:
+  range_day_bbw_threshold: 0.20
+  range_day_score_premium: 0.55
+  weak_hours_enabled: true
+  weak_hours_score_premium: 0.5
+  tokyo_night_swing_enabled: true
+  tokyo_night_swing_premium: 0.3
+  use_dynamic_lot: true
+  base_risk_pct: 0.02
+  max_lot_per_trade: 2.0
+  max_total_exposure_lot: 5.0
+  equity_floor_pct: 0.30
+  slippage_buffer_pips: 2.0
+
+pm_config:
+  # 基本
+  partial_close_1r_ratio: 0.3
+  partial_close_2r_ratio: 0.3
+  breakeven_at_1r: true
+  trailing_start_r: 2.0
+  trailing_atr_multiplier: 2.0
+  spread_pips: 1.5
+  slippage_pips: 0.5
+  # BE制御
+  range_day_be_disabled: true
+  range_day_early_be_r: 0.3
+  range_day_fast_be_enabled: true
+  range_day_fast_be_minutes: 90.0
+  # Stagnation
+  stagnation_exit_minutes: 120.0
+  stagnation_min_mfe_r: 0.15
+  swing_stagnation_exit_minutes: 120.0
+  swing_stagnation_min_mfe_r: 0.15
+  swing_trend_stagnation_enabled: true
+  swing_trend_stagnation_exit_minutes: 90.0
+  swing_trend_stagnation_min_mfe_r: 0.15
+  # 保険
+  range_day_insurance_enabled: true
+  insurance_trigger_r: 1.0
+  insurance_block_high_mfe_r: 0.8
+  insurance_min_holding_minutes: 15.0
+  # 0.5R部分利確
+  range_day_half_r_partial_enabled: true
+  range_day_half_r_partial_ratio: 0.20
+  range_day_half_r_trigger: 0.5

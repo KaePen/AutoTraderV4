@@ -152,6 +152,17 @@ class UnifiedBotConfig:
     # 東京深夜SWINGフィルター（JST 02-06 = UTC 17-21）
     tokyo_night_swing_enabled: bool = True
     tokyo_night_swing_premium: float = 0.3
+    # デモモード（フィルター緩和: HTF/セッション/パターン制限をスキップ）
+    demo_mode: bool = False
+    # コンセンサス閾値（DAY_TRADE）デモ時は低くして取引頻度を上げる
+    consensus_day_trade_threshold: float = 5.5
+    # デモモード時の最大同時ポジション数（本番は1固定）
+    demo_max_positions: int = 3
+    # デモモード時のクールダウン時間（分）: 0=無効
+    demo_cooldown_minutes: int = 0
+    # デモモード時のコンセンサス閾値（積極的トレード用）
+    demo_consensus_scalping_threshold: float = 1.5
+    demo_consensus_swing_threshold: float = 2.5
 
     def get_evaluator_config(self, timeframe: str) -> EvaluatorConfig:
         """時間足別評価器設定を取得

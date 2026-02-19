@@ -21,18 +21,6 @@ class EventType(str, Enum):
     ACCOUNT_UPDATE = "account_update"
     ALERT = "alert"
     HEARTBEAT = "heartbeat"
-    
-    # バックテストイベント
-    BACKTEST_START = "backtest_start"
-    BACKTEST_END = "backtest_end"
-    BACKTEST_PROGRESS = "backtest_progress"
-    BACKTEST_YEAR_START = "backtest_year_start"
-    BACKTEST_YEAR_END = "backtest_year_end"
-    BACKTEST_MONTH_END = "backtest_month_end"
-    BACKTEST_TRADE_OPEN = "backtest_trade_open"
-    BACKTEST_TRADE_CLOSE = "backtest_trade_close"
-    BACKTEST_SIGNAL = "backtest_signal"
-    BACKTEST_METRICS = "backtest_metrics"
 
 
 class ConnectionManager:

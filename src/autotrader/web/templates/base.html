@@ -1,0 +1,184 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}AutoTrader V4{% endblock %}</title>
+  <!-- TailwindCSS CDN -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            primary: {
+              400: '#60a5fa',
+              500: '#3b82f6',
+              600: '#2563eb',
+              700: '#1d4ed8',
+            }
+          }
+        }
+      }
+    }
+  </script>
+  <!-- lightweight-charts CDN -->
+  <script src="https://unpkg.com/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
+  <!-- カスタムCSS -->
+  <link rel="stylesheet" href="/static/css/styles.css">
+  {% block head %}{% endblock %}
+</head>
+<body class="bg-gray-900 text-gray-100 font-sans antialiased">
+  <div class="min-h-screen">
+    <!-- ヘッダー -->
+    <header class="fixed top-0 left-0 right-0 z-50 bg-gray-800/95 backdrop-blur-sm border-b border-gray-700 h-14">
+      <div class="flex items-center justify-between h-full px-4">
+        <div class="flex items-center gap-4">
+          <div class="flex items-center gap-2">
+            <svg class="w-6 h-6 text-blue-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <path d="M3 17l6-6 4 4 8-8" />
+              <path d="M17 7h4v4" />
+            </svg>
+            <h1 class="text-lg font-bold bg-gradient-to-r from-blue-400 to-cyan-400 bg-clip-text text-transparent">
+              AutoTrader V4
+            </h1>
+          </div>
+          <div id="header-pair-strip" class="hidden lg:flex items-center gap-1.5 ml-4"></div>
+        </div>
+        <div class="flex items-center gap-3">
+          <!-- 時計 -->
+          <div id="header-clock" class="hidden md:flex items-center gap-1.5 text-xs tabular-nums text-gray-400">
+            <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <circle cx="12" cy="12" r="10" stroke-width="2"/>
+              <path stroke-linecap="round" stroke-width="2" d="M12 6v6l4 2"/>
+            </svg>
+            <span id="clock-local"></span>
+            <span class="text-gray-600">|</span>
+            <span id="clock-utc" class="text-gray-500"></span>
+          </div>
+          <!-- シンボルセレクター -->
+          <select id="symbol-selector" class="bg-gray-700 border border-gray-600 text-sm rounded-lg px-2 py-1.5 text-gray-200 focus:outline-none focus:ring-1 focus:ring-blue-500">
+            <option value="USDJPY">USDJPY</option>
+            <option value="EURUSD">EURUSD</option>
+            <option value="GBPUSD">GBPUSD</option>
+            <option value="AUDUSD">AUDUSD</option>
+            <option value="EURJPY">EURJPY</option>
+          </select>
+          <!-- ナビゲーション -->
+          <div class="flex gap-1">
+            <a href="/" id="nav-dashboard"
+               class="px-3 py-1.5 rounded-lg text-sm font-medium transition-colors bg-blue-600 text-white">
+              Dashboard
+            </a>
+          </div>
+          <!-- 通知ベル -->
+          <div id="notification-bell-container" class="relative">
+            <button id="notification-bell-btn" class="relative p-2 rounded-lg hover:bg-gray-700 transition-colors" aria-label="Notifications">
+              <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                      d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
+              </svg>
+              <span id="notification-badge" class="hidden absolute -top-1 -right-1 w-5 h-5 bg-red-500 rounded-full text-xs flex items-center justify-center font-medium">0</span>
+            </button>
+            <!-- 通知ドロップダウン -->
+            <div id="notification-dropdown" class="hidden absolute right-0 top-full mt-2 w-80 bg-gray-800 border border-gray-700 rounded-lg shadow-xl z-50">
+              <div class="flex items-center justify-between p-3 border-b border-gray-700">
+                <h3 class="font-medium">通知</h3>
+                <button id="notification-clear-btn" class="text-xs text-gray-400 hover:text-gray-200">すべてクリア</button>
+              </div>
+              <div id="notification-list" class="max-h-80 overflow-y-auto">
+                <p class="p-4 text-sm text-gray-400 text-center">通知はありません</p>
+              </div>
+            </div>
+          </div>
+          <!-- 口座名 -->
+          <span id="header-account-name"
+                class="hidden text-xs tabular-nums px-2 py-1 rounded bg-gray-700/60 text-gray-300 border border-gray-600/50 cursor-pointer hover:bg-gray-600/60 transition-colors"
+                title="設定で口座名を変更できます"
+                onclick="SettingsManager.openToTab('connection')">
+          </span>
+          <!-- 設定ボタン -->
+          <button id="settings-btn" class="p-2 rounded-lg hover:bg-gray-700 transition-colors" aria-label="Settings">
+            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                    d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                    d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
+            </svg>
+          </button>
+        </div>
+      </div>
+    </header>
+
+    <!-- メインコンテンツ -->
+    <main class="pt-14 min-h-screen">
+      <div class="p-4 max-w-[1600px] mx-auto">
+        {% block content %}{% endblock %}
+      </div>
+    </main>
+  </div>
+
+  <!-- 設定モーダル -->
+  <div id="settings-modal-overlay" class="hidden fixed inset-0 bg-black/50 z-40"></div>
+  <div id="settings-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4">
+    <div class="bg-gray-800 border border-gray-700 rounded-lg shadow-xl w-full max-w-lg" onclick="event.stopPropagation()">
+      <div class="flex items-center justify-between p-4 border-b border-gray-700">
+        <h2 class="text-lg font-semibold">設定</h2>
+        <button id="settings-close-btn" class="p-1 rounded hover:bg-gray-700 transition-colors" aria-label="Close">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+      </div>
+      <div class="flex border-b border-gray-700" id="settings-tabs">
+        <button data-tab="entry" class="flex-1 px-4 py-2 text-sm font-medium text-blue-400 border-b-2 border-blue-400">エントリー</button>
+        <button data-tab="capital" class="flex-1 px-4 py-2 text-sm font-medium text-gray-400 hover:text-gray-200">資金管理</button>
+        <button data-tab="position" class="flex-1 px-4 py-2 text-sm font-medium text-gray-400 hover:text-gray-200">PM</button>
+        <button data-tab="notification" class="flex-1 px-4 py-2 text-sm font-medium text-gray-400 hover:text-gray-200">通知</button>
+        <button data-tab="connection" class="flex-1 px-4 py-2 text-sm font-medium text-gray-400 hover:text-gray-200">接続</button>
+      </div>
+      <div id="settings-content" class="p-4">
+        <div class="flex items-center justify-center h-40">
+          <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
+        </div>
+      </div>
+      <div class="flex items-center justify-between gap-2 p-4 border-t border-gray-700">
+        <button id="settings-mt5-btn"
+                class="px-4 py-2 rounded text-sm font-semibold transition-all bg-blue-600 hover:bg-blue-700 text-white">
+          MT5 接続
+        </button>
+        <div class="flex gap-2">
+          <button id="settings-cancel-btn" class="px-4 py-2 rounded bg-gray-600 hover:bg-gray-500 transition-colors">閉じる</button>
+          <button id="settings-save-btn" class="hidden px-4 py-2 rounded bg-blue-600 hover:bg-blue-700 disabled:opacity-50 transition-colors">保存</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 共通JS -->
+  <script src="/static/js/api.js?v=2"></script>
+  <script src="/static/js/websocket.js?v=2"></script>
+  <script src="/static/js/notifications.js?v=2"></script>
+  <script src="/static/js/settings.js?v=2"></script>
+  <script>
+    (function() {
+      function pad(n) { return n < 10 ? '0' + n : String(n); }
+      function updateClock() {
+        var now = new Date();
+        var localEl = document.getElementById('clock-local');
+        var utcEl = document.getElementById('clock-utc');
+        if (localEl) {
+          localEl.textContent = pad(now.getHours()) + ':' + pad(now.getMinutes()) + ':' + pad(now.getSeconds());
+        }
+        if (utcEl) {
+          utcEl.textContent = 'UTC ' + pad(now.getUTCHours()) + ':' + pad(now.getUTCMinutes());
+        }
+      }
+      updateClock();
+      setInterval(updateClock, 1000);
+    })();
+  </script>
+  {% block scripts %}{% endblock %}
+</body>
+</html>

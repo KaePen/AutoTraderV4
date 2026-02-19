@@ -10,7 +10,6 @@ from autotrader.web.routers import (
     indicators,
     candles,
     settings,
-    backtest,
 )
 
 __all__ = [
@@ -21,5 +20,4 @@ __all__ = [
     "indicators",
     "candles",
     "settings",
-    "backtest",
 ]

@@ -17,9 +17,22 @@
 from __future__ import annotations
 
 import argparse
+import io
 import logging
+import os
 import sys
 from pathlib import Path
+
+# Windows cp932エンコーディング問題の回避
+# RichがLegacy Windows Terminalで非ASCII文字を出力できない
+if sys.platform == "win32":
+    sys.stdout = io.TextIOWrapper(
+        sys.stdout.buffer, encoding="utf-8", errors="replace",
+    )
+    sys.stderr = io.TextIOWrapper(
+        sys.stderr.buffer, encoding="utf-8", errors="replace",
+    )
+    os.environ.setdefault("PYTHONIOENCODING", "utf-8")
 
 # プロジェクトルートをパスに追加
 try:
@@ -352,6 +365,24 @@ def parse_args() -> argparse.Namespace:
         default=0.15,
         help="SWING Stagnation MFE閾値（デフォルト: 0.15）",
     )
+    # SWING×TREND専用Stagnation設定
+    parser.add_argument(
+        "--no-swing-trend-stag",
+        action="store_true",
+        help="SWING×TREND stagnation厳格化を無効化",
+    )
+    parser.add_argument(
+        "--swing-trend-stag-minutes",
+        type=float,
+        default=90.0,
+        help="SWING×TREND Stagnation時間（デフォルト: 90分）",
+    )
+    parser.add_argument(
+        "--swing-trend-stag-mfe",
+        type=float,
+        default=0.15,
+        help="SWING×TREND Stagnation MFE閾値（デフォルト: 0.15）",
+    )
     # RANGE×DAY 入口フィルター
     parser.add_argument(
         "--range-day-bbw",
@@ -406,11 +437,11 @@ def parse_args() -> argparse.Namespace:
         default=2.0,
         help="SLスリッページバッファpips（デフォルト: 2.0）",
     )
-    # RANGE×DAY 0.5R部分利確
+    # RANGE×DAY 0.5R部分利確（デフォルトON）
     parser.add_argument(
-        "--range-day-half-r-partial",
+        "--no-range-day-half-r-partial",
         action="store_true",
-        help="RANGE×DAY 0.5R部分利確を有効化",
+        help="RANGE×DAY 0.5R部分利確を無効化",
     )
     # spread/slippage上書き
     parser.add_argument(
@@ -474,7 +505,7 @@ def print_header(args: argparse.Namespace) -> None:
         table.add_row("判断頻度", base_tf)
         table.add_row("評価時間足", "M5, M15, H1, H4, D1")
         table.add_row("期間", args.years)
-        table.add_row("初期残高", f"¥{args.initial_balance:,.0f}")
+        table.add_row("初期残高", f"JPY{args.initial_balance:,.0f}")
         table.add_row("ボリューム", str(args.volume))
         if args.parallel:
             table.add_row("並列TF", "[green]有効[/green]")
@@ -498,7 +529,7 @@ def print_header(args: argparse.Namespace) -> None:
         print(f"トレード判断頻度: {base_tf}")
         print(f"評価時間足: M5, M15, H1, H4, D1（マルチタイムフレーム）")
         print(f"期間: {args.years}")
-        print(f"初期残高: ¥{args.initial_balance:,.0f}")
+        print(f"初期残高: JPY{args.initial_balance:,.0f}")
         print(f"ボリューム: {args.volume}")
         print("=" * 80)
 
@@ -541,7 +572,7 @@ def print_results(result) -> None:
         profit_color = "green" if result.net_profit > 0 else "red"
         table.add_row(
             "純利益",
-            f"[{profit_color}]¥{result.net_profit:+,.0f}[/{profit_color}]"
+            f"[{profit_color}]JPY{result.net_profit:+,.0f}[/{profit_color}]"
         )
 
         # ドローダウン
@@ -578,7 +609,7 @@ def print_results(result) -> None:
         nlr = result.non_loss_rate
         print(f"非敗率: {nlr:.1f}%")
         print(f"プロフィットファクター: {result.profit_factor:.2f}")
-        print(f"純利益: ¥{result.net_profit:+,.0f}")
+        print(f"純利益: JPY{result.net_profit:+,.0f}")
         print(f"最大ドローダウン: {result.max_drawdown:.2f}%")
         print(f"シャープレシオ: {result.sharpe_ratio:.2f}")
         print(f"年間平均収益率: {result.annual_return:.1f}%")
@@ -606,7 +637,7 @@ def print_yearly_results(yearly_results: list) -> None:
             f"{r['win_rate']:>7.1f}% "
             f"{nlr:>7.1f}% "
             f"{r['profit_factor']:>7.2f} "
-            f"¥{r['net_profit']:>+12,.0f} "
+            f"JPY{r['net_profit']:>+12,.0f} "
             f"{r['max_drawdown']:>7.2f}%"
         )
 
@@ -799,8 +830,17 @@ def run_single_backtest(args: argparse.Namespace):
         insurance_min_holding_minutes=args.insurance_min_hold,
         swing_stagnation_exit_minutes=args.swing_stag_minutes,
         swing_stagnation_min_mfe_r=args.swing_stag_mfe,
+        swing_trend_stagnation_enabled=(
+            not args.no_swing_trend_stag
+        ),
+        swing_trend_stagnation_exit_minutes=(
+            args.swing_trend_stag_minutes
+        ),
+        swing_trend_stagnation_min_mfe_r=(
+            args.swing_trend_stag_mfe
+        ),
         range_day_half_r_partial_enabled=(
-            args.range_day_half_r_partial
+            not args.no_range_day_half_r_partial
         ),
     )
 
@@ -1137,7 +1177,7 @@ def run_quick(args: argparse.Namespace):
     print(f"\n=== 結果 ===")
     print(f"トレード数: {len(trades)}")
     print(f"勝率: {wins / len(trades) * 100:.1f}%")
-    print(f"損益: ¥{total_pnl:,.0f}")
+    print(f"損益: JPY{total_pnl:,.0f}")
     print(f"PF: {pf:.2f}")
 
 

@@ -25,7 +25,7 @@ from autotrader.web.schemas import (
 class TradingMode:
     """トレーディングモード"""
 
-    mode: str  # "backtest" | "live" | "demo"
+    mode: str  # "live" | "demo" | "offline"
     label: str
     connected: bool
 
@@ -99,75 +99,6 @@ class TradingStateService(ABC):
         Returns:
             TradeSummaryResponse: サマリー
         """
-
-
-class BacktestTradingState(TradingStateService):
-    """バックテストモードの状態サービス
-
-    DBに保存されたバックテスト結果から
-    ダッシュボード情報を構築する。
-
-    Attributes:
-        _db: DBセッション
-    """
-
-    def __init__(self, db: Session) -> None:
-        """初期化
-
-        Args:
-            db: DBセッション
-        """
-        self._db = db
-
-    def get_mode(self) -> TradingMode:
-        """バックテストモード返却"""
-        return TradingMode(
-            mode="backtest",
-            label="Backtest Mode",
-            connected=True,
-        )
-
-    def get_dashboard(self) -> DashboardResponse:
-        """DB上のバックテスト結果からダッシュボード構築"""
-        from autotrader.web.services.market_service import (
-            MarketService,
-        )
-
-        service = MarketService(self._db)
-        return service.get_dashboard()
-
-    def get_positions(
-        self, symbol: str | None = None
-    ) -> list[PositionResponse]:
-        """バックテストモードではポジションなし"""
-        return []
-
-    def get_trades(
-        self,
-        symbol: str | None = None,
-        limit: int = 50,
-        offset: int = 0,
-    ) -> list[TradeResponse]:
-        """DB上のトレード履歴"""
-        from autotrader.web.services.market_service import (
-            MarketService,
-        )
-
-        service = MarketService(self._db)
-        return service.get_trades(symbol, limit, offset)
-
-    def get_trade_summary(
-        self,
-        symbol: str | None = None,
-        days: int = 30,
-    ) -> TradeSummaryResponse:
-        """DB上のトレードサマリー"""
-        from autotrader.web.services.market_service import (
-            MarketService,
-        )
-
-        service = MarketService(self._db)
-        return service.get_trade_summary(symbol, days)
 
 
 class LiveTradingState(TradingStateService):

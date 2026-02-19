@@ -44,6 +44,11 @@ def mt5_account_to_entity(data: dict) -> AccountInfo:
         free_margin=float(data.get("margin_free", 0)),
         margin_level=float(data.get("margin_level", 0)),
         profit=float(data.get("profit", 0)),
+        login=int(data.get("login", 0)),
+        server=str(data.get("server", "")),
+        name=str(data.get("name", "")),
+        currency=str(data.get("currency", "JPY")),
+        leverage=int(data.get("leverage", 0)),
     )
 
 

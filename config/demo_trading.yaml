@@ -1,0 +1,70 @@
+# デモトレード用設定（積極的トレード版）
+# 本番設定: config/live_trading.yaml
+# バックテスト: CLI引数で別管理
+#
+# デモモードの特徴:
+#   - HTFトレンドフィルターをスキップ（方向性要件なし）
+#   - SoftGuardセッションブロックをスキップ
+#   - RANGE+DAYフィルターをスキップ
+#   - コンセンサス閾値を大幅低下（5.5→1.5）で積極的取引
+#   - クールダウン0分（連続エントリー可能）
+#   - チェック間隔1秒（リアルタイム検知）
+
+bot_config:
+  # デモモード有効（フィルター緩和）
+  demo_mode: true
+  # コンセンサス閾値を極限まで下げて取引頻度を最大化（本番: 5.5）
+  consensus_day_trade_threshold: 1.5
+  # デモ時のクールダウン0分（連続エントリー可能）
+  demo_cooldown_minutes: 0
+  # デモ時のスキャルピング/スイング閾値も下げる
+  demo_consensus_scalping_threshold: 1.0
+  demo_consensus_swing_threshold: 2.0
+  # デモ時の最大同時ポジション数（本番は1固定）
+  demo_max_positions: 3
+  # エントリーフィルター（緩和）
+  range_day_bbw_threshold: 0.10
+  range_day_score_premium: 0.0
+  weak_hours_enabled: false
+  weak_hours_score_premium: 0.0
+  tokyo_night_swing_enabled: false
+  tokyo_night_swing_premium: 0.0
+  # 資金管理（デモは小ロット）
+  use_dynamic_lot: true
+  base_risk_pct: 0.01
+  max_lot_per_trade: 0.5
+  max_total_exposure_lot: 2.0
+  equity_floor_pct: 0.10
+  slippage_buffer_pips: 1.0
+
+pm_config:
+  # 部分利確（本番と同じ設定）
+  partial_close_1r_ratio: 0.3
+  partial_close_2r_ratio: 0.3
+  breakeven_at_1r: true
+  trailing_start_r: 2.0
+  trailing_atr_multiplier: 2.0
+  spread_pips: 1.5
+  slippage_pips: 0.5
+  # BE制御
+  range_day_be_disabled: true
+  range_day_early_be_r: 0.3
+  range_day_fast_be_enabled: true
+  range_day_fast_be_minutes: 90.0
+  # Stagnation
+  stagnation_exit_minutes: 120.0
+  stagnation_min_mfe_r: 0.15
+  swing_stagnation_exit_minutes: 120.0
+  swing_stagnation_min_mfe_r: 0.15
+  swing_trend_stagnation_enabled: true
+  swing_trend_stagnation_exit_minutes: 90.0
+  swing_trend_stagnation_min_mfe_r: 0.15
+  # 保険
+  range_day_insurance_enabled: true
+  insurance_trigger_r: 1.0
+  insurance_block_high_mfe_r: 0.8
+  insurance_min_holding_minutes: 15.0
+  # 0.5R部分利確
+  range_day_half_r_partial_enabled: true
+  range_day_half_r_partial_ratio: 0.20
+  range_day_half_r_trigger: 0.5

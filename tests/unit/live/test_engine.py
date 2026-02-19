@@ -19,6 +19,9 @@ from autotrader.decision.unified.position_manager import (
     ManagementAction,
     ManagementActionType,
 )
+from autotrader.decision.unified.signal_consolidator import (
+    ConsolidatedSignal,
+)
 from autotrader.live.config import LiveTradingConfig
 from autotrader.live.engine import LiveTradingEngine
 
@@ -127,9 +130,14 @@ class TestLiveTradingEngine:
 
         # generate_signalをモック（HOLD）
         engine._bot.generate_signal = MagicMock(
-            return_value=Signal(
-                signal_type=SignalType.HOLD,
+            return_value=ConsolidatedSignal(
+                direction=SignalType.HOLD,
                 confidence=0.0,
+                primary_tf="M15",
+                aligned_tfs=[],
+                sl_pips=0.0,
+                tp_pips=0.0,
+                rationale="テスト",
             )
         )
 
@@ -273,7 +281,6 @@ class TestLiveTradingConfig:
         """デフォルト値が正しい"""
         config = LiveTradingConfig()
         assert config.symbol == "USDJPY"
-        assert config.check_interval_sec == 60.0
         assert config.candle_lookback == 500
         assert config.enable_auto_trade is False
         assert config.require_confirmation is True

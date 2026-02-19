@@ -7,7 +7,6 @@ from __future__ import annotations
 
 from autotrader.adapters.mt5.config import MT5Config
 from autotrader.adapters.mt5.connection import (
-    BridgeTransport,
     DirectTransport,
     MT5ConnectionManager,
     MT5Transport,
@@ -20,7 +19,6 @@ from autotrader.adapters.mt5.converters import (
     signal_to_mt5_request,
 )
 from autotrader.adapters.mt5.exceptions import (
-    MT5BridgeError,
     MT5ConnectionError,
     MT5DataError,
     MT5Error,
@@ -31,7 +29,6 @@ __all__ = [
     "MT5Config",
     "MT5Transport",
     "DirectTransport",
-    "BridgeTransport",
     "MT5ConnectionManager",
     "mt5_account_to_entity",
     "mt5_symbol_to_entity",
@@ -42,5 +39,4 @@ __all__ = [
     "MT5ConnectionError",
     "MT5ExecutionError",
     "MT5DataError",
-    "MT5BridgeError",
 ]

@@ -11,12 +11,10 @@ import pytest
 
 from autotrader.adapters.mt5.config import MT5Config
 from autotrader.adapters.mt5.connection import (
-    BridgeTransport,
     MT5ConnectionManager,
     MT5Transport,
 )
 from autotrader.adapters.mt5.exceptions import (
-    MT5BridgeError,
     MT5ConnectionError,
 )
 
@@ -59,10 +57,14 @@ class MockTransport(MT5Transport):
         return {"name": symbol, "point": 0.001, "digits": 3}
 
     async def symbol_info_tick(self, symbol: str) -> dict:
-        return {"ask": 150.123, "bid": 150.120, "last": 150.121}
+        return {
+            "ask": 150.123, "bid": 150.120,
+            "last": 150.121,
+        }
 
     async def copy_rates_from_pos(
-        self, symbol: str, timeframe: int, start_pos: int, count: int
+        self, symbol: str, timeframe: int,
+        start_pos: int, count: int,
     ) -> list[dict]:
         return [
             {
@@ -95,6 +97,15 @@ class MockTransport(MT5Transport):
     ) -> list[dict]:
         return []
 
+    async def copy_ticks_from(
+        self,
+        symbol: str,
+        date_from: int,
+        count: int,
+        flags: int = 0,
+    ) -> list[dict]:
+        return []
+
 
 class TestMT5ConnectionManager:
     """MT5ConnectionManager テスト"""
@@ -102,7 +113,7 @@ class TestMT5ConnectionManager:
     @pytest.mark.asyncio
     async def test_正常接続(self) -> None:
         """正常にMT5に接続できる"""
-        config = MT5Config(transport="direct")
+        config = MT5Config()
         manager = MT5ConnectionManager(config)
         # トランスポートをモックに差替え
         mock_transport = MockTransport()
@@ -117,7 +128,6 @@ class TestMT5ConnectionManager:
     async def test_接続失敗リトライ(self) -> None:
         """接続失敗時にリトライする"""
         config = MT5Config(
-            transport="direct",
             retry_count=2,
             retry_delay_sec=0.01,
         )
@@ -133,7 +143,7 @@ class TestMT5ConnectionManager:
     @pytest.mark.asyncio
     async def test_切断(self) -> None:
         """切断が正しく動作する"""
-        config = MT5Config(transport="direct")
+        config = MT5Config()
         manager = MT5ConnectionManager(config)
         mock_transport = MockTransport()
         manager._transport = mock_transport
@@ -147,7 +157,7 @@ class TestMT5ConnectionManager:
     @pytest.mark.asyncio
     async def test_ヘルスチェック_正常(self) -> None:
         """ヘルスチェックが正常に動作する"""
-        config = MT5Config(transport="direct")
+        config = MT5Config()
         manager = MT5ConnectionManager(config)
         mock_transport = MockTransport()
         manager._transport = mock_transport
@@ -160,7 +170,7 @@ class TestMT5ConnectionManager:
     @pytest.mark.asyncio
     async def test_ヘルスチェック_未接続(self) -> None:
         """未接続時のヘルスチェックはFalse"""
-        config = MT5Config(transport="direct")
+        config = MT5Config()
         manager = MT5ConnectionManager(config)
 
         result = await manager.health_check()
@@ -168,9 +178,11 @@ class TestMT5ConnectionManager:
         assert result is False
 
     @pytest.mark.asyncio
-    async def test_セッションコンテキストマネージャ(self) -> None:
+    async def test_セッションコンテキストマネージャ(
+        self,
+    ) -> None:
         """sessionコンテキストマネージャが動作する"""
-        config = MT5Config(transport="direct")
+        config = MT5Config()
         manager = MT5ConnectionManager(config)
         mock_transport = MockTransport()
         manager._transport = mock_transport
@@ -185,7 +197,6 @@ class TestMT5ConnectionManager:
     async def test_ensure_connected_再接続(self) -> None:
         """ensure_connectedで未接続時に再接続"""
         config = MT5Config(
-            transport="direct",
             health_check_interval_sec=0,
         )
         manager = MT5ConnectionManager(config)
@@ -198,37 +209,13 @@ class TestMT5ConnectionManager:
         assert manager.connected is True
 
 
-class TestBridgeTransport:
-    """BridgeTransport テスト"""
-
-    def test_初期化(self) -> None:
-        """BridgeTransportが正しく初期化される"""
-        transport = BridgeTransport(
-            host="192.168.1.1", port=9999, timeout=5.0
-        )
-        assert transport._host == "192.168.1.1"
-        assert transport._port == 9999
-        assert transport._timeout == 5.0
-
-    @pytest.mark.asyncio
-    async def test_接続失敗(self) -> None:
-        """存在しないホストへの接続はMT5BridgeErrorを送出"""
-        transport = BridgeTransport(
-            host="127.0.0.1", port=1, timeout=0.1
-        )
-        with pytest.raises(MT5BridgeError):
-            await transport.initialize()
-
-
 class TestMT5ConfigDefaults:
     """MT5Config デフォルト値テスト"""
 
     def test_デフォルト値(self) -> None:
         """デフォルト値が正しく設定される"""
         config = MT5Config()
-        assert config.transport == "bridge"
-        assert config.bridge_host == "localhost"
-        assert config.bridge_port == 18812
+        assert config.transport == "direct"
         assert config.magic_number == 20240001
         assert config.retry_count == 3
 

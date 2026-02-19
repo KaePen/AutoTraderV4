@@ -49,10 +49,3 @@ class MT5DataError(MT5Error):
 
     ローソク足/ティック/シンボル情報の取得失敗時に送出。
     """
-
-
-class MT5BridgeError(MT5Error):
-    """MT5ブリッジ通信エラー
-
-    WSL→Windowsブリッジの通信失敗時に送出。
-    """

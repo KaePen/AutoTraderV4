@@ -1,7 +1,6 @@
 """MT5定数定義
 
-MetaTrader5パッケージ不要でブリッジ経由動作可能にするため
-全定数をハードコードする。
+テスト容易性のため全定数をハードコードする。
 """
 
 from __future__ import annotations

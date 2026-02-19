@@ -11,6 +11,7 @@ from autotrader.web.schemas.responses import (
     TradeResponse,
     TradeSummaryResponse,
     IndicatorResponse,
+    IndicatorSeriesResponse,
     CandleResponse,
     SettingsResponse,
     TradingConfigResponse,
@@ -19,9 +20,14 @@ from autotrader.web.schemas.responses import (
     PositionManagementConfigResponse,
     MT5StatusResponse,
     TradingModeResponse,
+    AnalysisResponse,
+    AccountPresetResponse,
+    AccountPresetsResponse,
 )
 from autotrader.web.schemas.requests import (
     SettingsUpdateRequest,
+    SwitchAccountRequest,
+    AccountPresetRequest,
     TradingConfigUpdate,
 )
 
@@ -34,9 +40,11 @@ __all__ = [
     "TradeResponse",
     "TradeSummaryResponse",
     "IndicatorResponse",
+    "IndicatorSeriesResponse",
     "CandleResponse",
     "SettingsResponse",
     "SettingsUpdateRequest",
+    "SwitchAccountRequest",
     "TradingConfigResponse",
     "TradingConfigUpdate",
     "EntryFilterConfigResponse",
@@ -44,4 +52,8 @@ __all__ = [
     "PositionManagementConfigResponse",
     "MT5StatusResponse",
     "TradingModeResponse",
+    "AnalysisResponse",
+    "AccountPresetResponse",
+    "AccountPresetsResponse",
+    "AccountPresetRequest",
 ]

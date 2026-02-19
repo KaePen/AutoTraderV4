@@ -28,6 +28,7 @@ from autotrader.decision.unified.position_manager import (
 from autotrader.decision.unified.position_sizer import PositionSizer
 from autotrader.decision.unified.trade_bot import UnifiedTradeBot
 from autotrader.live.config import LiveTradingConfig
+from autotrader.live.tick_entry_optimizer import TickEntryOptimizer
 
 logger = logging.getLogger(__name__)
 
@@ -78,6 +79,13 @@ class LiveTradingEngine:
         # 最新データキャッシュ
         self._last_signal: Signal | None = None
         self._enable_auto_trade = config.enable_auto_trade
+
+        # ティックエントリー最適化
+        self._tick_optimizer = TickEntryOptimizer(
+            config=config.tick_entry_config,
+            data_provider=self._data_provider,
+            symbol=config.symbol,
+        )
 
     @property
     def connected(self) -> bool:
@@ -140,6 +148,13 @@ class LiveTradingEngine:
     async def stop(self) -> None:
         """エンジン停止"""
         self._running = False
+
+        # ティック監視中ならキャンセル
+        if self._tick_optimizer.is_active:
+            self._tick_optimizer.cancel_monitoring(
+                "エンジン停止"
+            )
+
         if self._task:
             self._task.cancel()
             try:
@@ -155,14 +170,25 @@ class LiveTradingEngine:
         """メインループ
 
         check_interval_sec間隔で_tickを実行。
+        ティック監視中は高速ポーリング（100ms）。
         """
         while self._running:
             try:
                 await self._tick()
             except Exception as e:
-                logger.error("ティック処理エラー: %s", e, exc_info=True)
+                logger.error(
+                    "ティック処理エラー: %s", e, exc_info=True
+                )
 
-            await asyncio.sleep(self._config.check_interval_sec)
+            if self._tick_optimizer.is_active:
+                await asyncio.sleep(
+                    self._config.tick_entry_config
+                    .poll_interval_sec
+                )
+            else:
+                await asyncio.sleep(
+                    self._config.check_interval_sec
+                )
 
     async def _tick(self) -> None:
         """1ティック分の処理
@@ -180,18 +206,34 @@ class LiveTradingEngine:
         # 3. シグナル生成
         current_time = pd.Timestamp.now(tz="UTC")
         signal = self._bot.generate_signal(current_time)
-        if signal and signal.signal_type != SignalType.HOLD:
+        if signal and signal.direction != SignalType.HOLD:
             self._last_signal = signal
             logger.info(
-                "シグナル生成: %s %s conf=%.2f",
-                signal.signal_type.value,
-                signal.symbol,
+                "シグナル生成: %s conf=%.2f",
+                signal.direction.value,
                 signal.confidence,
             )
 
             # 4. エントリー判定
             if self._enable_auto_trade:
-                await self._execute_entry(signal)
+                if self._should_use_tick_optimizer():
+                    self._tick_optimizer.start_monitoring(
+                        signal
+                    )
+                else:
+                    await self._execute_entry(signal)
+
+        # 4.5 ティック監視ポーリング
+        if self._tick_optimizer.is_active:
+            result = await self._tick_optimizer.poll_tick()
+            if result is not None:
+                if result.should_execute:
+                    pending = (
+                        self._tick_optimizer.pending_signal
+                    )
+                    if pending is not None:
+                        await self._execute_entry(pending)
+                self._tick_optimizer.reset()
 
         # 5. 既存ポジション管理
         await self._manage_positions()
@@ -244,6 +286,37 @@ class LiveTradingEngine:
             )
             if not df.empty:
                 self._bot.set_market_data({tf_str: df})
+
+    def _should_use_tick_optimizer(self) -> bool:
+        """ティック最適化を使用すべきか判定
+
+        Returns:
+            bool: ティック最適化を使用すべきか
+        """
+        cfg = self._config.tick_entry_config
+        if not cfg.enabled:
+            return False
+
+        # デモモードでは無効
+        if getattr(self._bot, "demo_mode", False):
+            return False
+
+        # 現在のモード判定
+        current_mode = getattr(
+            self._bot, "current_mode", ""
+        )
+        if isinstance(current_mode, str):
+            mode_name = current_mode.upper()
+        else:
+            mode_name = str(current_mode).upper()
+
+        if cfg.enabled_modes and mode_name:
+            return mode_name in (
+                m.upper() for m in cfg.enabled_modes
+            )
+
+        # モード不明の場合はenabledに従う
+        return True
 
     async def _execute_entry(self, signal: Signal) -> None:
         """エントリー実行
@@ -404,7 +477,7 @@ class LiveTradingEngine:
         # 現在のシグナル方向（反転チェック用）
         current_signal_type = None
         if self._last_signal:
-            current_signal_type = self._last_signal.signal_type
+            current_signal_type = self._last_signal.direction
 
         for position in positions:
             pos_id = str(position.ticket)

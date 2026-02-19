@@ -1,17 +1,9 @@
-
 ■バックテスト
-uv run python scripts/run_backtest.py --years 2015-2025 --verbose
+.venv/Scripts/python.exe scripts/run_backtest.py --years 2010-2025 --verbose
 
 ■WebUI起動
-1. バックエンド（FastAPI）
-cd /home/yamas/projects/AutoTraderV4
-.venv/bin/uvicorn autotrader.web.main:app --reload --host 0.0.0.0 --port 8000
+.venv\Scripts\python -m uvicorn autotrader.web.main:app --host 0.0.0.0 --port 8000
+.venv\Scripts\python -m autotrader.web
 
-2. フロントエンド（Vite dev server）
-cd /home/yamas/projects/AutoTraderV4/src/autotrader/web/frontend
-npm install   # 初回のみ
-npm run dev
-
-■MT5接続
-python mt5_bridge_server.py
-mt5-live
+■Supabaseパスワード
+cUr5rHyklWdpdbOb

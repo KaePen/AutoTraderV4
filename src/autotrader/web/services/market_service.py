@@ -36,14 +36,20 @@ class MarketService:
         self._db = db
         self._candle_service = CandleService()
 
-    def get_dashboard(self) -> DashboardResponse:
+    def get_dashboard(
+        self,
+        account_override: AccountInfoResponse | None = None,
+    ) -> DashboardResponse:
         """ダッシュボード情報を取得
+
+        Args:
+            account_override: MT5リアル口座情報（優先使用）
 
         Returns:
             DashboardResponse: ダッシュボード情報
         """
-        # 口座情報（ライブモード未接続時はデフォルト値）
-        account = AccountInfoResponse(
+        # MT5接続時はリアルデータ、未接続時はデフォルト値
+        account = account_override or AccountInfoResponse(
             balance=1_000_000.0,
             equity=1_000_000.0,
         )

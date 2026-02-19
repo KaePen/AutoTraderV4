@@ -220,6 +220,46 @@ class MT5DataProvider(DataProvider):
         async with self._conn.session() as transport:
             return await transport.symbol_info_tick(symbol)
 
+    async def get_tick_fast(self, symbol: str) -> dict:
+        """高速ティック取得（高頻度ポーリング用）
+
+        セッションチェックを省略し、トランスポートを
+        直接使用する。TickEntryOptimizer等の高頻度
+        呼び出しに最適化。
+
+        Args:
+            symbol: シンボル
+
+        Returns:
+            dict: ティック情報（ask, bid等）
+        """
+        transport = self._conn.transport
+        if transport is None:
+            return {}
+        return await transport.symbol_info_tick(symbol)
+
+    async def get_recent_ticks(
+        self,
+        symbol: str,
+        count: int = 20,
+    ) -> list[dict]:
+        """直近Nティック一括取得
+
+        Args:
+            symbol: シンボル
+            count: 取得件数
+
+        Returns:
+            list[dict]: ティックデータのリスト
+        """
+        import time as _time
+        # 直近のティックを取得するため、現在時刻から取得
+        date_from = int(_time.time()) - 60
+        async with self._conn.session() as transport:
+            return await transport.copy_ticks_from(
+                symbol, date_from, count, 0
+            )
+
     async def get_account_info(self) -> AccountInfo:
         """口座情報取得
 

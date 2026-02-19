@@ -1,33 +1,25 @@
 """MT5接続管理
 
-Transport ABC + DirectTransport + BridgeTransport + ConnectionManager
+Transport ABC + DirectTransport + ConnectionManager
 """
 
 from __future__ import annotations
 
 import asyncio
-import json
 import logging
-import struct
 import time
 from abc import ABC, abstractmethod
 from contextlib import asynccontextmanager
 from typing import Any, AsyncGenerator
 
 from autotrader.adapters.mt5.config import MT5Config
-from autotrader.adapters.mt5.exceptions import (
-    MT5BridgeError,
-    MT5ConnectionError,
-)
+from autotrader.adapters.mt5.exceptions import MT5ConnectionError
 
 logger = logging.getLogger(__name__)
 
 
 class MT5Transport(ABC):
-    """MT5トランスポート抽象クラス
-
-    DirectTransport / BridgeTransport の共通インターフェース。
-    """
+    """MT5トランスポート抽象クラス"""
 
     @abstractmethod
     async def initialize(self) -> bool:
@@ -40,7 +32,7 @@ class MT5Transport(ABC):
 
     @abstractmethod
     async def login(
-        self, login: int, password: str, server: str
+        self, login: int, password: str = "", server: str = ""
     ) -> bool:
         """MT5ログイン
 
@@ -171,6 +163,27 @@ class MT5Transport(ABC):
         """
         ...
 
+    @abstractmethod
+    async def copy_ticks_from(
+        self,
+        symbol: str,
+        date_from: int,
+        count: int,
+        flags: int = 0,
+    ) -> list[dict]:
+        """ティック履歴取得
+
+        Args:
+            symbol: シンボル名
+            date_from: 開始日時（UNIXエポック秒）
+            count: 取得件数
+            flags: COPY_TICKS_ALL(0)/INFO(1)/TRADE(2)
+
+        Returns:
+            list[dict]: ティックデータ
+        """
+        ...
+
 
 class DirectTransport(MT5Transport):
     """MetaTrader5パッケージ直接呼出トランスポート
@@ -195,14 +208,15 @@ class DirectTransport(MT5Transport):
         except ImportError as e:
             raise MT5ConnectionError(
                 "MetaTrader5パッケージが見つかりません。"
-                "Windows環境でpip install MetaTrader5を実行してください。"
+                "Windows環境でpip install MetaTrader5を"
+                "実行してください。"
             ) from e
 
         kwargs: dict[str, Any] = {}
         if self._terminal_path:
             kwargs["path"] = self._terminal_path
 
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(
             None, lambda: self._mt5.initialize(**kwargs)
         )
@@ -214,10 +228,10 @@ class DirectTransport(MT5Transport):
         return True
 
     async def login(
-        self, login: int, password: str, server: str
+        self, login: int, password: str = "", server: str = ""
     ) -> bool:
-        """MT5ログイン"""
-        loop = asyncio.get_event_loop()
+        """MT5ログイン（passwordは省略可: MT5ターミナルの保存済み認証を使用）"""
+        loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(
             None,
             lambda: self._mt5.login(
@@ -234,12 +248,14 @@ class DirectTransport(MT5Transport):
     async def shutdown(self) -> None:
         """MT5シャットダウン"""
         if self._mt5:
-            loop = asyncio.get_event_loop()
-            await loop.run_in_executor(None, self._mt5.shutdown)
+            loop = asyncio.get_running_loop()
+            await loop.run_in_executor(
+                None, self._mt5.shutdown
+            )
 
     async def account_info(self) -> dict:
         """口座情報取得"""
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         info = await loop.run_in_executor(
             None, self._mt5.account_info
         )
@@ -249,7 +265,7 @@ class DirectTransport(MT5Transport):
 
     async def symbol_info(self, symbol: str) -> dict:
         """シンボル情報取得"""
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         info = await loop.run_in_executor(
             None, lambda: self._mt5.symbol_info(symbol)
         )
@@ -259,7 +275,7 @@ class DirectTransport(MT5Transport):
 
     async def symbol_info_tick(self, symbol: str) -> dict:
         """ティック情報取得"""
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         tick = await loop.run_in_executor(
             None, lambda: self._mt5.symbol_info_tick(symbol)
         )
@@ -268,10 +284,11 @@ class DirectTransport(MT5Transport):
         return tick._asdict()
 
     async def copy_rates_from_pos(
-        self, symbol: str, timeframe: int, start_pos: int, count: int
+        self, symbol: str, timeframe: int,
+        start_pos: int, count: int,
     ) -> list[dict]:
         """直近N本のローソク足取得"""
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         rates = await loop.run_in_executor(
             None,
             lambda: self._mt5.copy_rates_from_pos(
@@ -291,10 +308,14 @@ class DirectTransport(MT5Transport):
     ) -> list[dict]:
         """期間指定ローソク足取得"""
         from datetime import datetime, timezone
-        dt_from = datetime.fromtimestamp(date_from, tz=timezone.utc)
-        dt_to = datetime.fromtimestamp(date_to, tz=timezone.utc)
+        dt_from = datetime.fromtimestamp(
+            date_from, tz=timezone.utc
+        )
+        dt_to = datetime.fromtimestamp(
+            date_to, tz=timezone.utc
+        )
 
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         rates = await loop.run_in_executor(
             None,
             lambda: self._mt5.copy_rates_range(
@@ -307,23 +328,28 @@ class DirectTransport(MT5Transport):
 
     async def order_send(self, request: dict) -> dict:
         """注文送信"""
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         result = await loop.run_in_executor(
             None, lambda: self._mt5.order_send(request)
         )
         if result is None:
-            return {"retcode": -1, "comment": "order_send returned None"}
+            return {
+                "retcode": -1,
+                "comment": "order_send returned None",
+            }
         return result._asdict()
 
     async def positions_get(
         self, symbol: str | None = None
     ) -> list[dict]:
         """オープンポジション取得"""
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         if symbol:
             positions = await loop.run_in_executor(
                 None,
-                lambda: self._mt5.positions_get(symbol=symbol),
+                lambda: self._mt5.positions_get(
+                    symbol=symbol
+                ),
             )
         else:
             positions = await loop.run_in_executor(
@@ -338,238 +364,49 @@ class DirectTransport(MT5Transport):
     ) -> list[dict]:
         """約定履歴取得"""
         from datetime import datetime, timezone
-        dt_from = datetime.fromtimestamp(date_from, tz=timezone.utc)
-        dt_to = datetime.fromtimestamp(date_to, tz=timezone.utc)
+        dt_from = datetime.fromtimestamp(
+            date_from, tz=timezone.utc
+        )
+        dt_to = datetime.fromtimestamp(
+            date_to, tz=timezone.utc
+        )
 
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         deals = await loop.run_in_executor(
             None,
-            lambda: self._mt5.history_deals_get(dt_from, dt_to),
+            lambda: self._mt5.history_deals_get(
+                dt_from, dt_to
+            ),
         )
         if deals is None:
             return []
         return [d._asdict() for d in deals]
 
-
-class BridgeTransport(MT5Transport):
-    """WSL→WindowsブリッジTransport
-
-    JSON-RPC over TCPソケットでWindows側のブリッジサーバと通信。
-    メッセージフレーミング: 4バイト長さプレフィックス + JSON本文
-    """
-
-    def __init__(
-        self, host: str = "localhost", port: int = 18812,
-        timeout: float = 10.0,
-    ) -> None:
-        """初期化
-
-        Args:
-            host: ブリッジホスト
-            port: ブリッジポート
-            timeout: タイムアウト秒
-        """
-        self._host = host
-        self._port = port
-        self._timeout = timeout
-        self._reader: asyncio.StreamReader | None = None
-        self._writer: asyncio.StreamWriter | None = None
-        self._request_id = 0
-
-    async def _connect(self) -> None:
-        """TCP接続確立"""
-        try:
-            self._reader, self._writer = await asyncio.wait_for(
-                asyncio.open_connection(self._host, self._port),
-                timeout=self._timeout,
-            )
-        except (OSError, asyncio.TimeoutError) as e:
-            raise MT5BridgeError(
-                f"ブリッジ接続失敗 {self._host}:{self._port}: {e}"
-            ) from e
-
-    async def _disconnect(self) -> None:
-        """TCP切断"""
-        if self._writer:
-            try:
-                self._writer.close()
-                await self._writer.wait_closed()
-            except Exception:
-                pass
-            self._writer = None
-            self._reader = None
-
-    async def _send_request(
-        self, method: str, params: dict | None = None
-    ) -> Any:
-        """JSON-RPCリクエスト送信
-
-        Args:
-            method: メソッド名
-            params: パラメータ
-
-        Returns:
-            Any: レスポンスのresultフィールド
-
-        Raises:
-            MT5BridgeError: 通信エラー
-        """
-        if not self._writer or self._writer.is_closing():
-            await self._connect()
-
-        self._request_id += 1
-        request = {
-            "jsonrpc": "2.0",
-            "method": method,
-            "params": params or {},
-            "id": self._request_id,
-        }
-
-        data = json.dumps(request).encode("utf-8")
-        # 長さプレフィックス（4バイト、ビッグエンディアン）
-        header = struct.pack(">I", len(data))
-
-        try:
-            self._writer.write(header + data)
-            await asyncio.wait_for(
-                self._writer.drain(), timeout=self._timeout
-            )
-
-            # レスポンス読み取り
-            resp_header = await asyncio.wait_for(
-                self._reader.readexactly(4),  # type: ignore[union-attr]
-                timeout=self._timeout,
-            )
-            resp_len = struct.unpack(">I", resp_header)[0]
-            resp_data = await asyncio.wait_for(
-                self._reader.readexactly(resp_len),  # type: ignore[union-attr]
-                timeout=self._timeout,
-            )
-
-            response = json.loads(resp_data.decode("utf-8"))
-
-            if "error" in response:
-                err = response["error"]
-                raise MT5BridgeError(
-                    f"RPC error [{err.get('code', -1)}]: "
-                    f"{err.get('message', 'unknown')}"
-                )
-
-            return response.get("result")
-
-        except (
-            OSError,
-            asyncio.TimeoutError,
-            asyncio.IncompleteReadError,
-        ) as e:
-            await self._disconnect()
-            raise MT5BridgeError(
-                f"ブリッジ通信エラー: {e}"
-            ) from e
-
-    async def initialize(self) -> bool:
-        """ブリッジ経由でMT5初期化"""
-        await self._connect()
-        result = await self._send_request("initialize")
-        return bool(result)
-
-    async def login(
-        self, login: int, password: str, server: str
-    ) -> bool:
-        """ブリッジ経由でMT5ログイン"""
-        result = await self._send_request(
-            "login",
-            {"login": login, "password": password, "server": server},
-        )
-        return bool(result)
-
-    async def shutdown(self) -> None:
-        """ブリッジ経由でMT5シャットダウン"""
-        try:
-            await self._send_request("shutdown")
-        except MT5BridgeError:
-            pass
-        await self._disconnect()
-
-    async def account_info(self) -> dict:
-        """口座情報取得"""
-        result = await self._send_request("account_info")
-        return result or {}
-
-    async def symbol_info(self, symbol: str) -> dict:
-        """シンボル情報取得"""
-        result = await self._send_request(
-            "symbol_info", {"symbol": symbol}
-        )
-        return result or {}
-
-    async def symbol_info_tick(self, symbol: str) -> dict:
-        """ティック情報取得"""
-        result = await self._send_request(
-            "symbol_info_tick", {"symbol": symbol}
-        )
-        return result or {}
-
-    async def copy_rates_from_pos(
-        self, symbol: str, timeframe: int, start_pos: int, count: int
-    ) -> list[dict]:
-        """直近N本のローソク足取得"""
-        result = await self._send_request(
-            "copy_rates_from_pos",
-            {
-                "symbol": symbol,
-                "timeframe": timeframe,
-                "start_pos": start_pos,
-                "count": count,
-            },
-        )
-        return result or []
-
-    async def copy_rates_range(
+    async def copy_ticks_from(
         self,
         symbol: str,
-        timeframe: int,
         date_from: int,
-        date_to: int,
+        count: int,
+        flags: int = 0,
     ) -> list[dict]:
-        """期間指定ローソク足取得"""
-        result = await self._send_request(
-            "copy_rates_range",
-            {
-                "symbol": symbol,
-                "timeframe": timeframe,
-                "date_from": date_from,
-                "date_to": date_to,
-            },
+        """ティック履歴取得"""
+        from datetime import datetime, timezone
+        dt_from = datetime.fromtimestamp(
+            date_from, tz=timezone.utc
         )
-        return result or []
 
-    async def order_send(self, request: dict) -> dict:
-        """注文送信"""
-        result = await self._send_request(
-            "order_send", {"request": request}
+        loop = asyncio.get_running_loop()
+        ticks = await loop.run_in_executor(
+            None,
+            lambda: self._mt5.copy_ticks_from(
+                symbol, dt_from, count, flags
+            ),
         )
-        return result or {}
-
-    async def positions_get(
-        self, symbol: str | None = None
-    ) -> list[dict]:
-        """オープンポジション取得"""
-        params: dict[str, Any] = {}
-        if symbol:
-            params["symbol"] = symbol
-        result = await self._send_request("positions_get", params)
-        return result or []
-
-    async def history_deals_get(
-        self, date_from: int, date_to: int
-    ) -> list[dict]:
-        """約定履歴取得"""
-        result = await self._send_request(
-            "history_deals_get",
-            {"date_from": date_from, "date_to": date_to},
-        )
-        return result or []
+        if ticks is None:
+            return []
+        return [
+            dict(zip(ticks.dtype.names, t)) for t in ticks
+        ]
 
 
 class MT5ConnectionManager:
@@ -599,15 +436,9 @@ class MT5ConnectionManager:
         """トランスポートを生成
 
         Returns:
-            MT5Transport: トランスポートインスタンス
+            MT5Transport: DirectTransportインスタンス
         """
-        if self._config.transport == "direct":
-            return DirectTransport(self._config.terminal_path)
-        return BridgeTransport(
-            host=self._config.bridge_host,
-            port=self._config.bridge_port,
-            timeout=self._config.timeout_sec,
-        )
+        return DirectTransport(self._config.terminal_path)
 
     @property
     def transport(self) -> MT5Transport:
@@ -630,13 +461,14 @@ class MT5ConnectionManager:
         """
         last_error: Exception | None = None
 
-        for attempt in range(1, self._config.retry_count + 1):
+        for attempt in range(
+            1, self._config.retry_count + 1
+        ):
             try:
                 logger.info(
-                    "MT5接続試行 %d/%d (%s)",
+                    "MT5接続試行 %d/%d (direct)",
                     attempt,
                     self._config.retry_count,
-                    self._config.transport,
                 )
                 await self._transport.initialize()
 
@@ -652,10 +484,11 @@ class MT5ConnectionManager:
                 logger.info("MT5接続成功")
                 return True
 
-            except (MT5ConnectionError, MT5BridgeError) as e:
+            except MT5ConnectionError as e:
                 last_error = e
                 logger.warning(
-                    "MT5接続失敗 (試行%d): %s", attempt, e
+                    "MT5接続失敗 (試行%d): %s",
+                    attempt, e,
                 )
                 if attempt < self._config.retry_count:
                     await asyncio.sleep(
@@ -664,8 +497,8 @@ class MT5ConnectionManager:
 
         self._connected = False
         raise MT5ConnectionError(
-            f"MT5接続失敗（{self._config.retry_count}回試行）: "
-            f"{last_error}"
+            f"MT5接続失敗（{self._config.retry_count}回試行）"
+            f": {last_error}"
         )
 
     async def disconnect(self) -> None:
@@ -703,7 +536,9 @@ class MT5ConnectionManager:
         """
         now = time.time()
         interval = self._config.health_check_interval_sec
-        need_check = (now - self._last_health_check) > interval
+        need_check = (
+            (now - self._last_health_check) > interval
+        )
 
         if self._connected and not need_check:
             return
@@ -716,7 +551,9 @@ class MT5ConnectionManager:
         await self.connect()
 
     @asynccontextmanager
-    async def session(self) -> AsyncGenerator[MT5Transport, None]:
+    async def session(
+        self,
+    ) -> AsyncGenerator[MT5Transport, None]:
         """接続セッションコンテキストマネージャ
 
         Yields:

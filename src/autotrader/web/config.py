@@ -17,6 +17,10 @@ class WebSettings(BaseSettings):
         debug: デバッグモード
         cors_origins: CORSオリジン
         ws_heartbeat_interval: WebSocketハートビート間隔（秒）
+        admin_password: 管理者パスワード（AUTOTRADER_WEB_ADMIN_PASSWORD）
+        jwt_secret_key: JWT署名キー（AUTOTRADER_WEB_JWT_SECRET_KEY）
+        jwt_algorithm: JWTアルゴリズム
+        jwt_expire_minutes: トークン有効期限（分）
     """
 
     model_config = SettingsConfigDict(
@@ -30,7 +34,7 @@ class WebSettings(BaseSettings):
     port: int = 8000
     debug: bool = False
     cors_origins: list[str] = Field(
-        default_factory=lambda: ["http://localhost:5173", "http://localhost:3000"]
+        default_factory=lambda: ["http://localhost:3000"]
     )
     ws_heartbeat_interval: int = 30
 

@@ -227,6 +227,11 @@ class AccountInfo(BaseModel):
         free_margin: 余剰証拠金
         margin_level: 証拠金維持率
         profit: 含み損益
+        login: ログインID
+        server: サーバー名
+        name: 口座名義
+        currency: 口座通貨
+        leverage: レバレッジ
     """
 
     model_config = ConfigDict(frozen=True)
@@ -237,6 +242,11 @@ class AccountInfo(BaseModel):
     free_margin: float = 0.0
     margin_level: float = 0.0
     profit: float = 0.0
+    login: int = 0
+    server: str = ""
+    name: str = ""
+    currency: str = "JPY"
+    leverage: int = 0
 
 
 class SymbolInfo(BaseModel):

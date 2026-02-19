@@ -10,6 +10,8 @@ import logging
 from autotrader.adapters.mt5.connection import MT5ConnectionManager
 from autotrader.adapters.mt5.constants import (
     ORDER_FILLING_FOK,
+    ORDER_FILLING_IOC,
+    ORDER_FILLING_RETURN,
     ORDER_TYPE_BUY,
     ORDER_TYPE_SELL,
     SUCCESS_RETCODES,
@@ -82,6 +84,31 @@ class MT5TradeExecutor(TradeExecutor):
             self.open_position_async(signal, volume)
         )
 
+    async def _get_filling_mode(
+        self, symbol: str,
+    ) -> int:
+        """シンボルの対応フィリングモードを取得
+
+        symbol_info.filling_modeビットマスクから判定:
+        - bit0(1): FOK対応
+        - bit1(2): IOC対応
+        - どちらもなし: RETURN
+
+        Args:
+            symbol: シンボル名
+
+        Returns:
+            int: フィリングモード定数
+        """
+        async with self._conn.session() as transport:
+            info = await transport.symbol_info(symbol)
+        filling_mode = int(info.get("filling_mode", 0))
+        if filling_mode & 1:
+            return ORDER_FILLING_FOK
+        if filling_mode & 2:
+            return ORDER_FILLING_IOC
+        return ORDER_FILLING_RETURN
+
     async def open_position_async(
         self,
         signal: Signal,
@@ -96,6 +123,7 @@ class MT5TradeExecutor(TradeExecutor):
         Returns:
             ExecutionResult: 実行結果
         """
+        filling = await self._get_filling_mode(signal.symbol)
         async with self._conn.session() as transport:
             tick = await transport.symbol_info_tick(signal.symbol)
             if not tick:
@@ -108,14 +136,16 @@ class MT5TradeExecutor(TradeExecutor):
                 signal, volume, tick,
                 magic=self._magic,
                 deviation=self._deviation,
+                filling_type=filling,
             )
 
             logger.info(
-                "注文送信: %s %s %.2f lots @ %.3f",
+                "注文送信: %s %s %.2f lots @ %.3f filling=%d",
                 signal.signal_type.value,
                 signal.symbol,
                 volume,
                 request["price"],
+                filling,
             )
 
             result = await transport.order_send(request)
@@ -235,6 +265,7 @@ class MT5TradeExecutor(TradeExecutor):
         # 反対方向の成行注文で決済
         is_buy = position.signal_type == SignalType.BUY
         close_type = ORDER_TYPE_SELL if is_buy else ORDER_TYPE_BUY
+        filling = await self._get_filling_mode(position.symbol)
 
         async with self._conn.session() as transport:
             tick = await transport.symbol_info_tick(position.symbol)
@@ -261,7 +292,7 @@ class MT5TradeExecutor(TradeExecutor):
                 "magic": self._magic,
                 "comment": f"AT4_{reason[:16]}",
                 "type_time": 0,
-                "type_filling": ORDER_FILLING_FOK,
+                "type_filling": filling,
             }
 
             logger.info(

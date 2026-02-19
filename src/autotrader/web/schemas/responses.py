@@ -47,6 +47,32 @@ class HealthResponse(BaseModel):
     uptime: float = 0.0
 
 
+class AccountPresetResponse(BaseModel):
+    """口座プリセットレスポンス
+
+    Attributes:
+        login: MT5ログインID
+        server: サーバー名
+        name: 表示名
+    """
+
+    login: int
+    server: str
+    name: str = ""
+
+
+class AccountPresetsResponse(BaseModel):
+    """口座プリセット一覧レスポンス
+
+    Attributes:
+        accounts: 口座プリセットリスト
+    """
+
+    accounts: list[AccountPresetResponse] = Field(
+        default_factory=list
+    )
+
+
 class AccountInfoResponse(BaseModel):
     """口座情報レスポンス
 
@@ -57,6 +83,11 @@ class AccountInfoResponse(BaseModel):
         free_margin: 余剰証拠金
         margin_level: 証拠金維持率
         profit: 含み損益
+        login: ログインID
+        server: サーバー名
+        name: 口座名義
+        currency: 口座通貨
+        leverage: レバレッジ
     """
 
     balance: float
@@ -65,6 +96,11 @@ class AccountInfoResponse(BaseModel):
     free_margin: float = 0.0
     margin_level: float = 0.0
     profit: float = 0.0
+    login: int = 0
+    server: str = ""
+    name: str = ""
+    currency: str = "JPY"
+    leverage: int = 0
 
 
 class DashboardResponse(BaseModel):
@@ -321,14 +357,42 @@ class CapitalManagementConfigResponse(BaseModel):
 
 
 class PositionManagementConfigResponse(BaseModel):
-    """ポジション管理設定レスポンス"""
+    """ポジション管理設定レスポンス（全PMフィールド）"""
 
     enable_position_manager: bool = True
-    stagnation_min_mfe_r: float = 0.15
-    range_day_early_be_r: float = 0.3
-    insurance_trigger_r: float = 1.0
+    # 部分利確
     partial_close_1r_ratio: float = 0.3
+    partial_close_2r_ratio: float = 0.3
+    breakeven_at_1r: bool = True
+    # トレーリング
     trailing_start_r: float = 2.0
+    trailing_atr_multiplier: float = 2.0
+    # コスト
+    spread_pips: float = 1.5
+    slippage_pips: float = 0.5
+    # Stagnation
+    stagnation_exit_minutes: float = 120.0
+    stagnation_min_mfe_r: float = 0.15
+    # BE制御
+    range_day_be_disabled: bool = True
+    range_day_early_be_r: float = 0.3
+    range_day_fast_be_enabled: bool = True
+    range_day_fast_be_minutes: float = 90.0
+    # 保険
+    range_day_insurance_enabled: bool = True
+    insurance_trigger_r: float = 1.0
+    insurance_block_high_mfe_r: float = 0.8
+    insurance_min_holding_minutes: float = 15.0
+    # 0.5R部分利確
+    range_day_half_r_partial_enabled: bool = True
+    range_day_half_r_partial_ratio: float = 0.20
+    range_day_half_r_trigger: float = 0.5
+    # SWING stagnation
+    swing_stagnation_exit_minutes: float = 120.0
+    swing_stagnation_min_mfe_r: float = 0.15
+    swing_trend_stagnation_enabled: bool = True
+    swing_trend_stagnation_exit_minutes: float = 90.0
+    swing_trend_stagnation_min_mfe_r: float = 0.15
 
 
 class TradingConfigResponse(BaseModel):
@@ -366,9 +430,56 @@ class MT5StatusResponse(BaseModel):
     """
 
     connected: bool = False
-    transport: str = "bridge"
+    transport: str = "direct"
     account: AccountInfoResponse | None = None
     symbol_info: dict[str, Any] | None = None
+
+
+class AnalysisResponse(BaseModel):
+    """分析状態レスポンス（直近tick結果）
+
+    Attributes:
+        direction: シグナル方向（"HOLD"|"BUY"|"SELL"）
+        confidence: 確度
+        consensus_score: コンセンサススコア
+        entry_threshold: エントリー閾値
+        regime: 市場レジーム
+        mode: トレードモード
+        rationale: 判断理由
+        htf_alignment: 上位足整合度
+        penalty_total: ペナルティ合計
+        penalty_breakdown: ペナルティ内訳
+        trend_strength: トレンド強度
+        aligned_tfs: 方向一致時間足
+        tf_scores: 時間足別スコア
+        tf_breakdowns: 時間足別スコア内訳
+        last_tick_time: 最終tick時刻（ISO形式）
+        demo_mode: デモモード状態
+    """
+
+    direction: str = "HOLD"
+    confidence: float = 0.0
+    consensus_score: float | None = None
+    entry_threshold: float = 0.0
+    regime: str | None = None
+    mode: str | None = None
+    rationale: str = "データなし"
+    htf_alignment: float = 0.0
+    penalty_total: float = 0.0
+    penalty_breakdown: dict[str, float] = Field(
+        default_factory=dict
+    )
+    trend_strength: float = 0.0
+    aligned_tfs: list[str] = Field(default_factory=list)
+    tf_scores: dict[str, float] = Field(default_factory=dict)
+    tf_breakdowns: dict[str, dict[str, float]] = Field(
+        default_factory=dict
+    )
+    last_tick_time: str | None = None
+    demo_mode: bool = False
+    engine_running: bool = False
+    auto_trade_enabled: bool = False
+    mt5_connected: bool = False
 
 
 class TradingModeResponse(BaseModel):
@@ -387,3 +498,38 @@ class TradingModeResponse(BaseModel):
     connected: bool = False
     auto_trade: bool = False
     engine_running: bool = False
+    demo_mode: bool = False
+    symbol_auto_trade: dict[str, bool] = Field(default_factory=dict)
+    symbol_demo_mode: dict[str, bool] = Field(default_factory=dict)
+
+
+class IndicatorPoint(BaseModel):
+    """時系列指標の1点
+
+    Attributes:
+        time: UNIX秒タイムスタンプ
+        value: 指標値
+    """
+
+    time: float
+    value: float
+
+
+class IndicatorSeriesResponse(BaseModel):
+    """チャートオーバーレイ用指標時系列レスポンス
+
+    Attributes:
+        ema12: EMA(12)時系列
+        ema26: EMA(26)時系列
+        bb_upper: BB上限時系列
+        bb_middle: BB中央時系列
+        bb_lower: BB下限時系列
+        rsi: RSI時系列
+    """
+
+    ema12: list[IndicatorPoint] = Field(default_factory=list)
+    ema26: list[IndicatorPoint] = Field(default_factory=list)
+    bb_upper: list[IndicatorPoint] = Field(default_factory=list)
+    bb_middle: list[IndicatorPoint] = Field(default_factory=list)
+    bb_lower: list[IndicatorPoint] = Field(default_factory=list)
+    rsi: list[IndicatorPoint] = Field(default_factory=list)

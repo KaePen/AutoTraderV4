@@ -19,10 +19,8 @@ class MT5Config:
         login: MT5ログインID
         password: パスワード
         server: サーバー名
-        terminal_path: MT5ターミナルパス（Windows側）
-        transport: トランスポート種別（"direct"|"bridge"）
-        bridge_host: ブリッジホスト（WSL→Windows接続用）
-        bridge_port: ブリッジポート
+        terminal_path: MT5ターミナルパス
+        transport: トランスポート種別（"direct"）
         timeout_sec: タイムアウト（秒）
         magic_number: マジックナンバー（AutoTraderV4識別用）
         deviation: 許容スリッページ（ポイント）
@@ -36,9 +34,7 @@ class MT5Config:
     password: str = ""
     server: str = ""
     terminal_path: str = ""
-    transport: str = "bridge"
-    bridge_host: str = "localhost"
-    bridge_port: int = 18812
+    transport: str = "direct"
     timeout_sec: float = 10.0
     magic_number: int = DEFAULT_MAGIC_NUMBER
     deviation: int = DEFAULT_DEVIATION

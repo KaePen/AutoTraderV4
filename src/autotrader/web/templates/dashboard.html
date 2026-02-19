@@ -1,0 +1,197 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="space-y-4">
+  <!-- トレーディングコントロール -->
+  <div id="trading-control" class="card border border-gray-700">
+    <div class="flex items-center justify-between flex-wrap gap-3">
+      <!-- 左: ステータス表示 -->
+      <div class="flex items-center gap-4">
+        <div class="flex items-center gap-2">
+          <span id="tc-mode-badge" class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-gray-700 text-gray-400">
+            ---
+          </span>
+<span id="tc-mt5-badge" class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-gray-700 text-gray-400">
+            <span id="tc-mt5-dot" class="w-1.5 h-1.5 rounded-full bg-gray-500"></span>
+            MT5 未接続
+          </span>
+        </div>
+      </div>
+      <!-- 右: ボタン群 -->
+      <div class="flex items-center gap-2">
+        <button id="tc-demo-mode-btn"
+                class="px-4 py-1.5 rounded-lg text-sm font-semibold transition-all bg-gray-700 text-gray-500 cursor-not-allowed"
+                disabled>
+          デモモード
+        </button>
+        <button id="tc-auto-trade-btn"
+                class="px-4 py-1.5 rounded-lg text-sm font-semibold transition-all bg-gray-700 text-gray-500 cursor-not-allowed"
+                disabled>
+          自動トレード開始
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- メトリクスストリップ -->
+  <div id="metrics-strip" class="grid grid-cols-2 md:grid-cols-5 gap-3">
+    <!-- スケルトン -->
+    <div class="card skeleton-card animate-pulse"><div class="h-3 skeleton w-16 mb-2"></div><div class="h-6 skeleton w-24"></div></div>
+    <div class="card skeleton-card animate-pulse"><div class="h-3 skeleton w-16 mb-2"></div><div class="h-6 skeleton w-24"></div></div>
+    <div class="card skeleton-card animate-pulse"><div class="h-3 skeleton w-16 mb-2"></div><div class="h-6 skeleton w-24"></div></div>
+    <div class="card skeleton-card animate-pulse"><div class="h-3 skeleton w-16 mb-2"></div><div class="h-6 skeleton w-24"></div></div>
+    <div class="card skeleton-card animate-pulse"><div class="h-3 skeleton w-16 mb-2"></div><div class="h-6 skeleton w-24"></div></div>
+  </div>
+
+  <!-- 分析パネル -->
+  <div id="analysis-panel" class="card border border-gray-700 hidden">
+    <!-- エンジン/接続状態バナー -->
+    <p id="ap-engine-status" class="text-xs text-gray-500 mb-2"></p>
+    <div class="flex items-center justify-between mb-3">
+      <div class="flex items-center gap-3">
+        <h3 class="text-xs font-semibold text-gray-400 uppercase tracking-wider">Live Analysis</h3>
+        <span id="ap-direction-badge" class="inline-flex items-center px-2 py-0.5 rounded text-xs font-bold bg-gray-700 text-gray-400">--</span>
+        <span id="ap-regime" class="text-xs text-gray-500">--</span>
+        <span id="ap-mode" class="text-xs text-gray-600">--</span>
+      </div>
+      <span id="ap-tick-time" class="text-xs text-gray-600 tabular-nums">--</span>
+    </div>
+    <!-- スコアバー -->
+    <div class="mb-3">
+      <div class="flex items-center justify-between text-xs mb-1">
+        <span class="text-gray-500">Consensus Score</span>
+        <span id="ap-score-text" class="tabular-nums text-gray-300 font-medium">-- / --</span>
+      </div>
+      <div class="w-full h-2 bg-gray-700 rounded-full overflow-hidden relative">
+        <div id="ap-score-bar" class="h-full rounded-full transition-all duration-500 bg-blue-500" style="width:0%"></div>
+        <div id="ap-threshold-marker" class="absolute top-0 w-0.5 h-full bg-yellow-400/80" style="left:50%"></div>
+      </div>
+    </div>
+    <!-- サブ指標 -->
+    <div class="grid grid-cols-3 gap-2 mb-3 text-xs">
+      <div class="bg-gray-800/50 rounded p-2">
+        <p class="text-gray-500 mb-0.5">HTF整合</p>
+        <p id="ap-htf" class="font-bold tabular-nums text-gray-300">--</p>
+      </div>
+      <div class="bg-gray-800/50 rounded p-2">
+        <p class="text-gray-500 mb-0.5">トレンド強度</p>
+        <p id="ap-trend" class="font-bold tabular-nums text-gray-300">--</p>
+      </div>
+      <div class="bg-gray-800/50 rounded p-2">
+        <p class="text-gray-500 mb-0.5">ペナルティ</p>
+        <p id="ap-penalty" class="font-bold tabular-nums text-gray-300">--</p>
+      </div>
+    </div>
+    <!-- 時間足スコア -->
+    <div id="ap-tf-scores" class="flex gap-2 mb-3 flex-wrap"></div>
+    <!-- 判断理由 -->
+    <p id="ap-rationale" class="text-xs text-gray-400 bg-gray-800/50 rounded px-3 py-2 line-clamp-2"></p>
+  </div>
+
+  <!-- メインコンテンツ -->
+  <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+    <!-- 左カラム - チャート & 指標 -->
+    <div class="lg:col-span-2 space-y-4">
+      <!-- チャート -->
+      <div class="card">
+        <div class="flex items-center justify-between mb-4">
+          <h2 id="chart-title" class="text-lg font-semibold text-gray-100">USDJPY チャート</h2>
+          <div class="flex items-center gap-2 flex-wrap">
+            <!-- 指標切り替え -->
+            <div class="flex items-center gap-1">
+              <span class="text-[10px] text-gray-500 uppercase tracking-wider mr-1">Ind</span>
+              <div id="chart-indicator-toggles" class="flex gap-1"></div>
+            </div>
+            <div class="w-px h-4 bg-gray-700"></div>
+            <!-- 自動更新セレクター -->
+            <div class="flex items-center gap-1">
+              <span class="text-[10px] text-gray-500 uppercase tracking-wider mr-1">Auto</span>
+              <div id="chart-refresh-selector" class="flex gap-1"></div>
+            </div>
+            <div class="w-px h-4 bg-gray-700"></div>
+            <!-- 時間足ボタン -->
+            <div id="chart-timeframe-buttons" class="flex gap-1"></div>
+          </div>
+        </div>
+        <!-- OHLC情報バー（クロスヘア連動） -->
+        <div id="chart-ohlc-bar" class="flex items-center gap-3 px-1 pb-1 text-xs tabular-nums invisible">
+          <span class="text-gray-500">O:<span id="chart-ohlc-o" class="text-gray-300 ml-0.5">-</span></span>
+          <span class="text-gray-500">H:<span id="chart-ohlc-h" class="text-green-400 ml-0.5">-</span></span>
+          <span class="text-gray-500">L:<span id="chart-ohlc-l" class="text-red-400 ml-0.5">-</span></span>
+          <span class="text-gray-500">C:<span id="chart-ohlc-c" class="ml-0.5">-</span></span>
+          <span id="chart-ohlc-chg" class="font-medium">-</span>
+          <span class="text-gray-600">|</span>
+          <span class="text-gray-500">Vol:<span id="chart-ohlc-vol" class="text-gray-400 ml-0.5">-</span></span>
+        </div>
+        <div id="chart-container" class="h-80 w-full relative">
+          <div id="chart-loader" class="absolute inset-0 flex items-center justify-center bg-gray-800/50 z-10">
+            <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
+          </div>
+        </div>
+        <!-- RSIサブチャート -->
+        <div id="rsi-panel" class="mt-1 border-t border-gray-700/50">
+          <div class="flex items-center gap-2 px-1 py-0.5">
+            <span class="text-[10px] text-yellow-400 font-semibold uppercase tracking-wider">RSI(14)</span>
+            <span class="text-[10px] text-gray-600">70 / 30</span>
+          </div>
+          <div id="rsi-container" class="h-20 w-full"></div>
+        </div>
+      </div>
+
+      <!-- 指標パネル -->
+      <div class="card" id="indicator-panel">
+        <h2 class="text-sm font-semibold text-gray-300 uppercase tracking-wider mb-3">
+          Indicators (<span id="indicator-timeframe">M15</span>)
+        </h2>
+        <div id="indicator-grid" class="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <!-- 動的に描画 -->
+        </div>
+      </div>
+    </div>
+
+    <!-- 右カラム - シグナル & ポジション -->
+    <div class="space-y-4">
+      <!-- シグナルパネル -->
+      <div class="card" id="signal-panel">
+        <div class="flex items-center justify-between mb-3">
+          <h2 class="text-sm font-semibold text-gray-300 uppercase tracking-wider">Signals</h2>
+          <span id="signal-count" class="text-xs text-gray-500">0 件</span>
+        </div>
+        <div id="signal-list">
+          <div class="flex items-center justify-center h-20 text-gray-500 text-sm">シグナル待機中...</div>
+        </div>
+      </div>
+
+      <!-- ポジションテーブル -->
+      <div class="card" id="position-panel">
+        <div class="flex items-center justify-between mb-3">
+          <h2 class="text-sm font-semibold text-gray-300 uppercase tracking-wider">Positions</h2>
+          <span id="position-count" class="text-xs text-gray-500">no open</span>
+        </div>
+        <div id="position-list">
+          <div class="flex items-center justify-center h-16 text-gray-500 text-sm">ポジションなし</div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- トレード履歴（全幅） -->
+  <div class="card" id="trade-history-panel">
+    <div class="flex items-center justify-between mb-3">
+      <button id="trade-history-toggle" class="flex items-center gap-2 text-sm font-semibold text-gray-300 uppercase tracking-wider hover:text-white transition-colors">
+        <svg id="trade-history-chevron" class="w-4 h-4 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+        </svg>
+        Trade History
+      </button>
+      <div id="trade-summary-chips" class="flex items-center gap-4 text-xs tabular-nums"></div>
+    </div>
+    <div id="trade-history-table" class="overflow-x-auto max-h-80"></div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/js/chart.js?v=3"></script>
+<script src="/static/js/dashboard.js?v=7"></script>
+{% endblock %}

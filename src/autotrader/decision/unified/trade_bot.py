@@ -16,13 +16,18 @@ from typing import TYPE_CHECKING
 
 import pandas as pd
 
-from autotrader.constraint.soft_guard import SoftGuard, SoftGuardConfig
+from autotrader.constraint.soft_guard import (
+    SoftGuard,
+    SoftGuardConfig,
+    SoftGuardResult,
+)
 from autotrader.core.enums import MarketRegime, SignalType, TradingStrategyMode
 from autotrader.core.interfaces.position_sizing import SizingContext
 
 from .config import RiskConfig, UnifiedBotConfig
 from .mode_aware_consensus import (
     ConsensusConfig,
+    ConsensusResult,
     ModeAwareScoreConsensus,
     TimeframeSignal as ConsensusTimeframeSignal,
 )
@@ -192,8 +197,16 @@ class UnifiedTradeBot:
             for tf in self.timeframes
         }
 
-        # リスク管理器
-        self.risk_manager = RiskManager(self.config.risk)
+        # リスク管理器（デモモード時はクールダウンを無効化）
+        if self.config.demo_mode:
+            import dataclasses as _dc
+            risk_config = _dc.replace(
+                self.config.risk,
+                cooldown_minutes=self.config.demo_cooldown_minutes,
+            )
+        else:
+            risk_config = self.config.risk
+        self.risk_manager = RiskManager(risk_config)
 
         # 新アーキテクチャコンポーネント
         self._init_new_components()
@@ -223,10 +236,29 @@ class UnifiedTradeBot:
         # タイムフレームルーター
         self.tf_router = TimeframeRouter()
 
-        # コンセンサス統合器
-        self.consensus = ModeAwareScoreConsensus(
-            ConsensusConfig(day_trade_threshold=5.5)
-        )
+        # コンセンサス統合器（デモモード時は全閾値を大幅に下げる）
+        if self.config.demo_mode:
+            self.consensus = ModeAwareScoreConsensus(
+                ConsensusConfig(
+                    scalping_threshold=(
+                        self.config.demo_consensus_scalping_threshold
+                    ),
+                    day_trade_threshold=(
+                        self.config.consensus_day_trade_threshold
+                    ),
+                    swing_threshold=(
+                        self.config.demo_consensus_swing_threshold
+                    ),
+                )
+            )
+        else:
+            self.consensus = ModeAwareScoreConsensus(
+                ConsensusConfig(
+                    day_trade_threshold=(
+                        self.config.consensus_day_trade_threshold
+                    ),
+                )
+            )
 
         # ポジションサイザー（資金管理パラメータを設定から注入）
         self.position_sizer = PositionSizer(PositionSizerConfig(
@@ -408,6 +440,11 @@ class UnifiedTradeBot:
         consensus = self.consensus.consolidate(consensus_signals, plan)
 
         if consensus.direction == SignalType.HOLD:
+            # デモモード: HOLDでもランダムシグナルを強制生成
+            if self.config.demo_mode:
+                return self._generate_demo_signal(
+                    plan, tf_signals, current_time,
+                )
             if self._flow_analyzer:
                 from autotrader.backtest.trade_flow_analyzer import (
                     SignalStepRecord,
@@ -435,178 +472,208 @@ class UnifiedTradeBot:
                     final_direction="HOLD",
                     hold_reason=consensus.reasoning,
                 ))
-            return self._hold_signal(consensus.reasoning)
-
-        # 上位足トレンドフィルター（必須条件）
-        if not self._check_htf_trend_alignment(current_time, consensus.direction):
-            if self._flow_analyzer:
-                from autotrader.backtest.trade_flow_analyzer import (
-                    SignalStepRecord,
-                )
-                self._flow_analyzer.collect(SignalStepRecord(
-                    timestamp=str(current_time),
-                    regime=regime_result.regime.value,
-                    volatility=regime_result.volatility_level,
-                    mode=plan.mode.value,
-                    primary_tf=plan.primary_tf,
-                    risk_passed=True,
-                    consensus_direction=consensus.direction.value,
-                    consensus_score=consensus.score,
-                    consensus_threshold=consensus.threshold,
-                    consensus_passed=True,
-                    htf_passed=False,
-                    htf_direction=consensus.direction.value,
-                    final_direction="HOLD",
-                    hold_reason=f"HTFトレンド不一致({consensus.direction.value})",
-                ))
-            return self._hold_signal(
-                f"HTFトレンド不一致({consensus.direction.value})"
+            return self._hold_with_analysis(
+                consensus.reasoning,
+                plan, tf_signals, consensus,
+                regime_result, htf_alignment,
             )
 
-        # SoftGuardチェック
+        # SoftGuardチェック（デモモードでも情報取得: 出力データに使用）
         sg_context = {
             "spread_pips": 1.5,
             "current_time": current_time.to_pydatetime(),
         }
         sg_result = self.soft_guard.check(sg_context, is_entry=True)
 
-        # SoftGuardペナルティによるブロック（常時有効）
-        if sg_result.total_penalty >= 0.8:
-            return self._hold_signal(
-                f"SoftGuardブロック: penalty="
-                f"{sg_result.total_penalty:.2f}"
-            )
-
         # セッションフィルター
         hour_utc = current_time.hour if hasattr(
             current_time, 'hour'
         ) else current_time.to_pydatetime().hour
 
-        # LONDONオフ時間ブロック（hour=7はLONDON境界）
-        if hour_utc == 7 and sg_result.total_penalty > 0:
-            return self._hold_signal(
-                f"LONDONオフ時間ブロック: hour={hour_utc}, "
-                f"penalty={sg_result.total_penalty:.2f}"
+        # デモモードでなければフィルターを適用
+        # demo_mode=True時: HTF/SoftGuard/セッション/パターン制限をスキップ
+
+        def _filt_hold(reason: str) -> ConsolidatedSignal:
+            """フィルターHOLD用ローカルヘルパー"""
+            return self._hold_with_analysis(
+                reason, plan, tf_signals, consensus,
+                regime_result, htf_alignment, sg_result,
             )
 
-        # TOKYOオフ時間フィルター（閾値6.6）
-        if (
-            4 <= hour_utc <= 6
-            and sg_result.total_penalty > 0
-            and consensus.score < 6.6
-        ):
-            return self._hold_signal(
-                f"TOKYOオフ時間フィルター: hour={hour_utc}, "
-                f"score={consensus.score:.1f}<6.6"
-            )
-
-        # RANGE + DAY(ShortMid相当) 制限
-        if (
-            regime_result.regime == MarketRegime.RANGE
-            and plan.mode == TradingStrategyMode.DAY_TRADE
-            and regime_result.trend_strength < 0.3
-        ):
-            return self._hold_signal(
-                f"RANGE+DAY制限: trend_strength="
-                f"{regime_result.trend_strength:.2f}"
-            )
-
-        # RANGE+DAY ペナルティ+低ボラ制限
-        if (
-            regime_result.regime == MarketRegime.RANGE
-            and plan.mode == TradingStrategyMode.DAY_TRADE
-            and sg_result.total_penalty > 0
-        ):
-            _primary_row = self._get_current_row(
-                plan.primary_tf, current_time,
-            )
-            if _primary_row is not None:
-                _bb_w = _primary_row.get("bb_width")
-                if (
-                    _bb_w is not None
-                    and not pd.isna(_bb_w)
-                    and float(_bb_w) < self.config.range_day_bbw_threshold
-                ):
-                    return self._hold_signal(
-                        f"RANGE+DAY低ボラ制限: "
-                        f"penalty="
-                        f"{sg_result.total_penalty:.2f}"
-                        f", bb_width="
-                        f"{float(_bb_w):.4f}"
-                        f"<{self.config.range_day_bbw_threshold}"
+        if not self.config.demo_mode:
+            # 上位足トレンドフィルター（必須条件）
+            if not self._check_htf_trend_alignment(
+                current_time, consensus.direction,
+            ):
+                if self._flow_analyzer:
+                    from autotrader.backtest.trade_flow_analyzer import (
+                        SignalStepRecord,
                     )
-
-        # Weak Hours RANGEフィルター（JST 18-21 = UTC 9-12）
-        if (
-            self.config.weak_hours_enabled
-            and 9 <= hour_utc <= 12
-            and regime_result.regime == MarketRegime.RANGE
-            and consensus.score < consensus.threshold
-                + self.config.weak_hours_score_premium
-        ):
-            return self._hold_signal(
-                f"WeakHours RANGE: hour={hour_utc}, "
-                f"score={consensus.score:.1f}"
-                f"<{consensus.threshold + self.config.weak_hours_score_premium:.1f}"
-            )
-
-        # 東京深夜SWINGフィルター（JST 02-06 = UTC 17-21）
-        # 東京深夜は流動性低下でトレンド追従が困難
-        if (
-            self.config.tokyo_night_swing_enabled
-            and 17 <= hour_utc <= 21
-            and regime_result.regime == MarketRegime.TREND
-            and plan.mode == TradingStrategyMode.SWING
-            and consensus.score < consensus.threshold
-                + self.config.tokyo_night_swing_premium
-        ):
-            return self._hold_signal(
-                f"東京深夜SWING: hour={hour_utc}, "
-                f"score={consensus.score:.1f}"
-                f"<{consensus.threshold + self.config.tokyo_night_swing_premium:.1f}"
-            )
-
-        # RANGE+DAYスコアプレミアム（低スコア帯を除外）
-        _score_premium = self.config.range_day_score_premium
-        if (
-            _score_premium > 0
-            and regime_result.regime == MarketRegime.RANGE
-            and plan.mode == TradingStrategyMode.DAY_TRADE
-            and consensus.score < consensus.threshold + _score_premium
-        ):
-            return self._hold_signal(
-                f"RANGE+DAYスコアプレミアム: "
-                f"score={consensus.score:.1f}"
-                f"<{consensus.threshold + _score_premium:.1f}"
-            )
-
-        # TOKYO低ペナルティ帯: 閾値+0.2
-        if (
-            4 <= hour_utc <= 6
-            and 0 < sg_result.total_penalty <= 0.2
-            and consensus.score < consensus.threshold + 0.2
-        ):
-            return self._hold_signal(
-                f"TOKYO低penalty閾値: penalty="
-                f"{sg_result.total_penalty:.2f}, "
-                f"score={consensus.score:.1f}"
-                f"<{consensus.threshold + 0.2:.1f}"
-            )
-
-        # MACDスロープ逆方向フィルター
-        _primary_sig = tf_signals.get(plan.primary_tf)
-        if (
-            _primary_sig
-            and _primary_sig.score_breakdown
-        ):
-            _macd_slope = (
-                _primary_sig.score_breakdown.macd_slope
-            )
-            if _macd_slope <= -2.0:
-                return self._hold_signal(
-                    f"MACDスロープ逆方向: "
-                    f"{_macd_slope:.1f}"
+                    self._flow_analyzer.collect(SignalStepRecord(
+                        timestamp=str(current_time),
+                        regime=regime_result.regime.value,
+                        volatility=regime_result.volatility_level,
+                        mode=plan.mode.value,
+                        primary_tf=plan.primary_tf,
+                        risk_passed=True,
+                        consensus_direction=consensus.direction.value,
+                        consensus_score=consensus.score,
+                        consensus_threshold=consensus.threshold,
+                        consensus_passed=True,
+                        htf_passed=False,
+                        htf_direction=consensus.direction.value,
+                        final_direction="HOLD",
+                        hold_reason=(
+                            f"HTFトレンド不一致"
+                            f"({consensus.direction.value})"
+                        ),
+                    ))
+                return _filt_hold(
+                    f"HTFトレンド不一致({consensus.direction.value})"
                 )
+
+            # SoftGuardペナルティによるブロック（常時有効）
+            if sg_result.total_penalty >= 0.8:
+                return _filt_hold(
+                    f"SoftGuardブロック: penalty="
+                    f"{sg_result.total_penalty:.2f}"
+                )
+
+            # LONDONオフ時間ブロック（hour=7はLONDON境界）
+            if hour_utc == 7 and sg_result.total_penalty > 0:
+                return _filt_hold(
+                    f"LONDONオフ時間ブロック: hour={hour_utc}, "
+                    f"penalty={sg_result.total_penalty:.2f}"
+                )
+
+            # TOKYOオフ時間フィルター（閾値6.6）
+            if (
+                4 <= hour_utc <= 6
+                and sg_result.total_penalty > 0
+                and consensus.score < 6.6
+            ):
+                return _filt_hold(
+                    f"TOKYOオフ時間フィルター: hour={hour_utc}, "
+                    f"score={consensus.score:.1f}<6.6"
+                )
+
+            # RANGE + DAY(ShortMid相当) 制限
+            if (
+                regime_result.regime == MarketRegime.RANGE
+                and plan.mode == TradingStrategyMode.DAY_TRADE
+                and regime_result.trend_strength < 0.3
+            ):
+                return _filt_hold(
+                    f"RANGE+DAY制限: trend_strength="
+                    f"{regime_result.trend_strength:.2f}"
+                )
+
+            # RANGE+DAY ペナルティ+低ボラ制限
+            if (
+                regime_result.regime == MarketRegime.RANGE
+                and plan.mode == TradingStrategyMode.DAY_TRADE
+                and sg_result.total_penalty > 0
+            ):
+                _primary_row = self._get_current_row(
+                    plan.primary_tf, current_time,
+                )
+                if _primary_row is not None:
+                    _bb_w = _primary_row.get("bb_width")
+                    if (
+                        _bb_w is not None
+                        and not pd.isna(_bb_w)
+                        and float(_bb_w)
+                        < self.config.range_day_bbw_threshold
+                    ):
+                        return _filt_hold(
+                            f"RANGE+DAY低ボラ制限: "
+                            f"penalty="
+                            f"{sg_result.total_penalty:.2f}"
+                            f", bb_width="
+                            f"{float(_bb_w):.4f}"
+                            f"<{self.config.range_day_bbw_threshold}"
+                        )
+
+            # Weak Hours RANGEフィルター（JST 18-21 = UTC 9-12）
+            if (
+                self.config.weak_hours_enabled
+                and 9 <= hour_utc <= 12
+                and regime_result.regime == MarketRegime.RANGE
+                and consensus.score < consensus.threshold
+                    + self.config.weak_hours_score_premium
+            ):
+                _wh_threshold = (
+                    consensus.threshold
+                    + self.config.weak_hours_score_premium
+                )
+                return _filt_hold(
+                    f"WeakHours RANGE: hour={hour_utc}, "
+                    f"score={consensus.score:.1f}"
+                    f"<{_wh_threshold:.1f}"
+                )
+
+            # 東京深夜SWINGフィルター（JST 02-06 = UTC 17-21）
+            # 東京深夜は流動性低下でトレンド追従が困難
+            if (
+                self.config.tokyo_night_swing_enabled
+                and 17 <= hour_utc <= 21
+                and regime_result.regime == MarketRegime.TREND
+                and plan.mode == TradingStrategyMode.SWING
+                and consensus.score < consensus.threshold
+                    + self.config.tokyo_night_swing_premium
+            ):
+                _tn_threshold = (
+                    consensus.threshold
+                    + self.config.tokyo_night_swing_premium
+                )
+                return _filt_hold(
+                    f"東京深夜SWING: hour={hour_utc}, "
+                    f"score={consensus.score:.1f}"
+                    f"<{_tn_threshold:.1f}"
+                )
+
+            # RANGE+DAYスコアプレミアム（低スコア帯を除外）
+            _score_premium = self.config.range_day_score_premium
+            if (
+                _score_premium > 0
+                and regime_result.regime == MarketRegime.RANGE
+                and plan.mode == TradingStrategyMode.DAY_TRADE
+                and consensus.score
+                < consensus.threshold + _score_premium
+            ):
+                return _filt_hold(
+                    f"RANGE+DAYスコアプレミアム: "
+                    f"score={consensus.score:.1f}"
+                    f"<{consensus.threshold + _score_premium:.1f}"
+                )
+
+            # TOKYO低ペナルティ帯: 閾値+0.2
+            if (
+                4 <= hour_utc <= 6
+                and 0 < sg_result.total_penalty <= 0.2
+                and consensus.score < consensus.threshold + 0.2
+            ):
+                return _filt_hold(
+                    f"TOKYO低penalty閾値: penalty="
+                    f"{sg_result.total_penalty:.2f}, "
+                    f"score={consensus.score:.1f}"
+                    f"<{consensus.threshold + 0.2:.1f}"
+                )
+
+            # MACDスロープ逆方向フィルター
+            _primary_sig = tf_signals.get(plan.primary_tf)
+            if (
+                _primary_sig
+                and _primary_sig.score_breakdown
+            ):
+                _macd_slope = (
+                    _primary_sig.score_breakdown.macd_slope
+                )
+                if _macd_slope <= -2.0:
+                    return _filt_hold(
+                        f"MACDスロープ逆方向: "
+                        f"{_macd_slope:.1f}"
+                    )
 
         # SL/TP計算（primary_tf由来）
         primary_signal = tf_signals.get(plan.primary_tf)
@@ -630,7 +697,7 @@ class UnifiedTradeBot:
                     final_direction="HOLD",
                     hold_reason="primary_tfデータなし",
                 ))
-            return self._hold_signal("primary_tfデータなし")
+            return _filt_hold("primary_tfデータなし")
 
         sl_pips = primary_signal.sl_pips
         tp_sl_ratio = plan.get_recommended_tp_sl_ratio()
@@ -658,7 +725,7 @@ class UnifiedTradeBot:
             )
             sizing_result = self.position_sizer.calculate(sizing_context)
             if sizing_result.blocked:
-                return self._hold_signal(
+                return _filt_hold(
                     f"資金管理: {sizing_result.reasoning}"
                 )
             lot = sizing_result.lot
@@ -877,6 +944,135 @@ class UnifiedTradeBot:
             tp_pips=0.0,
             rationale=reason,
             scores={},
+        )
+
+    def _hold_with_analysis(
+        self,
+        reason: str,
+        plan: TradingPlan,
+        tf_signals: dict[str, TimeframeSignal],
+        consensus: ConsensusResult,
+        regime_result: RegimeResult,
+        htf_alignment: float,
+        sg_result: SoftGuardResult | None = None,
+    ) -> ConsolidatedSignal:
+        """分析データ付きHOLDシグナル
+
+        TF評価・コンセンサス計算後にHOLDを返す場合、
+        UI表示用の分析データを保持する。
+
+        Args:
+            reason: HOLD理由
+            plan: トレーディングプラン
+            tf_signals: 時間足別シグナル
+            consensus: コンセンサス結果
+            regime_result: レジーム判定結果
+            htf_alignment: HTF整合スコア
+            sg_result: SoftGuard結果
+
+        Returns:
+            ConsolidatedSignal: 分析データ付きHOLDシグナル
+        """
+        tf_breakdowns: dict[str, dict[str, float]] = {}
+        for tf_name, sig in tf_signals.items():
+            if sig.score_breakdown is not None:
+                tf_breakdowns[tf_name] = (
+                    sig.score_breakdown.to_dict()
+                )
+
+        return ConsolidatedSignal(
+            direction=SignalType.HOLD,
+            confidence=0.0,
+            primary_tf=plan.primary_tf,
+            aligned_tfs=consensus.aligned_tfs,
+            sl_pips=0.0,
+            tp_pips=0.0,
+            rationale=reason,
+            scores={
+                tf: sig.confidence
+                for tf, sig in tf_signals.items()
+            },
+            regime=regime_result.regime.value,
+            mode=plan.mode.value,
+            consensus_score=consensus.score,
+            tf_score_breakdowns=tf_breakdowns,
+            entry_threshold=consensus.threshold,
+            htf_alignment=htf_alignment,
+            penalty_total=(
+                sg_result.total_penalty
+                if sg_result else 0.0
+            ),
+            penalty_breakdown=(
+                {
+                    r.value: v
+                    for r, v in sg_result.penalties.items()
+                }
+                if sg_result else {}
+            ),
+            trend_strength=regime_result.trend_strength,
+        )
+
+    def _generate_demo_signal(
+        self,
+        plan: TradingPlan,
+        tf_signals: dict[str, TimeframeSignal],
+        current_time: pd.Timestamp,
+    ) -> ConsolidatedSignal:
+        """デモモード用ランダムシグナル生成
+
+        evaluatorがHOLDを返した場合でも、UIテスト用に
+        ランダムな方向でシグナルを生成する。
+
+        Args:
+            plan: トレーディングプラン
+            tf_signals: 時間足別シグナル
+            current_time: 現在時刻
+
+        Returns:
+            ConsolidatedSignal: デモ用シグナル
+        """
+        import random
+
+        direction = random.choice(
+            [SignalType.BUY, SignalType.SELL]
+        )
+        confidence = random.uniform(0.6, 0.95)
+        score = random.uniform(2.0, 5.0)
+
+        # SL/TPはprimary_tfシグナルから取得、なければデフォルト
+        primary_sig = tf_signals.get(plan.primary_tf)
+        if primary_sig and primary_sig.sl_pips > 0:
+            sl_pips = primary_sig.sl_pips
+        else:
+            sl_pips = 15.0
+        tp_sl_ratio = plan.get_recommended_tp_sl_ratio()
+        tp_pips = sl_pips * tp_sl_ratio
+
+        rationale = (
+            f"DEMO {direction.value}: "
+            f"score={score:.2f}, "
+            f"mode={plan.mode.value}, "
+            f"lot=0.01"
+        )
+
+        return ConsolidatedSignal(
+            direction=direction,
+            confidence=confidence,
+            primary_tf=plan.primary_tf,
+            aligned_tfs=list(tf_signals.keys()),
+            sl_pips=sl_pips,
+            tp_pips=tp_pips,
+            rationale=rationale,
+            scores={
+                tf: confidence
+                for tf in tf_signals
+            },
+            regime=self._last_regime,
+            mode=plan.mode.value,
+            consensus_score=score,
+            strategy_id=f"DEMO_{plan.mode.value}",
+            entry_threshold=1.50,
+            lot=0.01,
         )
 
     def _get_current_row(

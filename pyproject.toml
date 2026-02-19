@@ -28,7 +28,7 @@ dependencies = [
     "pandas-ta>=0.3.14b",
     "ollama>=0.3.0",
     "sqlalchemy>=2.0.0",
-    "asyncpg>=0.29.0",
+    "PyJWT>=2.8.0",
     "alembic>=1.13.0",
     "psycopg2-binary>=2.9.0",
     "fastapi>=0.108.0",
@@ -39,6 +39,8 @@ dependencies = [
     "aiofiles>=23.0.0",
     "websockets>=16.0",
     "rich>=14.3.2",
+    "jinja2>=3.1.0",
+    "pyyaml>=6.0",
 ]
 
 [project.optional-dependencies]
@@ -49,6 +51,9 @@ dev = [
     "pytest-mock>=3.12.0",
     "mypy>=1.8.0",
     "ruff>=0.1.0",
+]
+mt5 = [
+    "MetaTrader5>=5.0.45",
 ]
 fast = [
     "numba>=0.59.0",
@@ -61,7 +66,7 @@ packages = ["src/autotrader"]
 testpaths = ["tests"]
 pythonpath = ["src"]
 asyncio_mode = "auto"
-addopts = "-v --cov=autotrader --cov-report=term-missing"
+addopts = "-v --cov=src/autotrader --cov-report=term-missing"
 
 [tool.ruff]
 line-length = 79

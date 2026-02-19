@@ -1,0 +1,7 @@
+accounts:
+- login: 75466079
+  server: XMTrading-MT5 3
+  name: デモ口座
+- login: 70609162
+  server: XMTrading-MT5 3
+  name: リアル口座
