@@ -263,9 +263,11 @@ class UnifiedTradeBot:
         # ポジションサイザー（資金管理パラメータを設定から注入）
         self.position_sizer = PositionSizer(PositionSizerConfig(
             base_risk_pct=self.config.base_risk_pct,
+            max_risk_pct_absolute=self.config.max_risk_pct_absolute,
             max_lot_per_trade=self.config.max_lot_per_trade,
             max_total_exposure_lot=self.config.max_total_exposure_lot,
             equity_floor_pct=self.config.equity_floor_pct,
+            equity_caution_pct=self.config.equity_caution_pct,
             slippage_buffer_pips=self.config.slippage_buffer_pips,
         ))
 
@@ -700,7 +702,10 @@ class UnifiedTradeBot:
             return _filt_hold("primary_tfデータなし")
 
         sl_pips = primary_signal.sl_pips
-        tp_sl_ratio = plan.get_recommended_tp_sl_ratio()
+        tp_sl_ratio = (
+            plan.get_recommended_tp_sl_ratio()
+            * self.config.tp_sl_ratio
+        )
         tp_pips = sl_pips * tp_sl_ratio
 
         # ポジションサイジング
@@ -1045,7 +1050,10 @@ class UnifiedTradeBot:
             sl_pips = primary_sig.sl_pips
         else:
             sl_pips = 15.0
-        tp_sl_ratio = plan.get_recommended_tp_sl_ratio()
+        tp_sl_ratio = (
+            plan.get_recommended_tp_sl_ratio()
+            * self.config.tp_sl_ratio
+        )
         tp_pips = sl_pips * tp_sl_ratio
 
         rationale = (

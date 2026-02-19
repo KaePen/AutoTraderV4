@@ -146,7 +146,9 @@ class UnifiedBotConfig:
     max_lot_per_trade: float = 2.0
     max_total_exposure_lot: float = 5.0
     base_risk_pct: float = 0.02
+    max_risk_pct_absolute: float = 0.03
     equity_floor_pct: float = 0.30
+    equity_caution_pct: float = 0.50
     # SLスリッページバッファ（pips）
     slippage_buffer_pips: float = 2.0
     # 東京深夜SWINGフィルター（JST 02-06 = UTC 17-21）
