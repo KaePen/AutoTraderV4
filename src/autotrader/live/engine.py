@@ -24,6 +24,7 @@ from autotrader.decision.unified.config import UnifiedBotConfig
 from autotrader.decision.unified.position_manager import (
     ManagementActionType,
     PositionManager,
+    PositionManagerConfig,
 )
 from autotrader.decision.unified.position_sizer import PositionSizer
 from autotrader.decision.unified.trade_bot import UnifiedTradeBot
@@ -199,6 +200,30 @@ class LiveTradingEngine:
         """データ更新タイマーをリセット（次回tick即時実行）"""
         self._last_tick_time = None
         logger.debug("データ更新タイマーリセット")
+
+    def update_bot_config(self, new_config: UnifiedBotConfig) -> None:
+        """Botの設定を動的に更新する
+
+        デモ/ライブモード切り替え時やWebUI設定変更時に呼ばれる。
+        TradeBot.config と PositionSizer を新設定で再構築する。
+
+        Args:
+            new_config: 新しいUnifiedBotConfig
+        """
+        self._bot.config = new_config
+        self._sizer = PositionSizer(new_config)
+        logger.info("BotConfig更新完了 demo_mode=%s", new_config.demo_mode)
+
+    def update_pm_config(self, new_config: PositionManagerConfig) -> None:
+        """PositionManagerの設定を動的に更新する
+
+        WebUI設定変更時にポジション管理パラメータを即時反映する。
+
+        Args:
+            new_config: 新しいPositionManagerConfig
+        """
+        self._pm.config = new_config
+        logger.info("PositionManagerConfig更新完了")
 
     @property
     def signal_history(self) -> list[Signal]:
