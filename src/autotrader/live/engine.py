@@ -406,7 +406,9 @@ class LiveTradingEngine:
     async def _update_market_data(self) -> None:
         """最新ローソク足データを取得してTradeBotに設定"""
         symbol = self._config.symbol
-        # 各時間足の最新30本を取得（指標計算に十分な量）
+        # 全TFのデータを一括収集してから設定
+        # （個別set_market_dataは辞書を上書きするため）
+        all_data: dict[str, pd.DataFrame] = {}
         for tf_str in self._bot.timeframes:
             try:
                 tf = Timeframe(tf_str)
@@ -417,7 +419,10 @@ class LiveTradingEngine:
                 symbol, tf, 30
             )
             if not df.empty:
-                self._bot.set_market_data({tf_str: df})
+                all_data[tf_str] = df
+
+        if all_data:
+            self._bot.set_market_data(all_data)
 
     def _should_use_tick_optimizer(self) -> bool:
         """ティック最適化を使用すべきか判定
