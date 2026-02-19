@@ -889,14 +889,13 @@ const DashboardApp = {
   renderIndicatorTabs() {
     const container = document.getElementById('indicator-tf-tabs');
     if (!container) return;
-    const tfs = ['M5', 'M15', 'H1', 'H4'];
-    container.innerHTML = tfs.map((tf) => `
-      <button data-tf="${tf}"
-        class="px-2 py-0.5 text-xs rounded ${tf === this.indicatorTf
-          ? 'bg-blue-600 text-white'
-          : 'bg-gray-700 text-gray-400 hover:bg-gray-600'}">
-        ${tf}
-      </button>`).join('');
+    const tfs = ['M1', 'M5', 'M15', 'M30', 'H1', 'H4', 'D1'];
+    container.innerHTML = tfs.map((tf) => {
+      const cls = tf === this.indicatorTf
+        ? 'bg-blue-600 text-white'
+        : 'bg-gray-700 text-gray-400 hover:bg-gray-600';
+      return `<button data-tf="${tf}" class="w-9 py-0.5 text-xs text-center rounded transition-colors ${cls}">${tf}</button>`;
+    }).join('');
     container.querySelectorAll('button[data-tf]').forEach((btn) => {
       btn.addEventListener('click', () => {
         this.indicatorTf = btn.dataset.tf;
