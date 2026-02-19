@@ -106,7 +106,12 @@ class TestEngineTickOptimizer:
     ) -> None:
         """デモモードでは無効"""
         engine = LiveTradingEngine(tick_enabled_config)
-        engine._bot.demo_mode = True  # type: ignore[attr-defined]
+        # bot.configはfrozen dataclassのためdemo_mode=Trueの新configで置換
+        import dataclasses
+        demo_config = dataclasses.replace(
+            engine._bot.config, demo_mode=True
+        )
+        engine._bot.config = demo_config
 
         result = engine._should_use_tick_optimizer()
         assert result is False
