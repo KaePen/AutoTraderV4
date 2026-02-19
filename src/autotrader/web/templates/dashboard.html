@@ -140,9 +140,10 @@
 
       <!-- 指標パネル -->
       <div class="card" id="indicator-panel">
-        <h2 class="text-sm font-semibold text-gray-300 uppercase tracking-wider mb-3">
-          Indicators (<span id="indicator-timeframe">M15</span>)
-        </h2>
+        <div class="flex items-center justify-between mb-3">
+          <h2 class="text-sm font-semibold text-gray-300 uppercase tracking-wider">Indicators</h2>
+          <div id="indicator-tf-tabs" class="flex gap-1"></div>
+        </div>
         <div id="indicator-grid" class="grid grid-cols-2 md:grid-cols-4 gap-3">
           <!-- 動的に描画 -->
         </div>

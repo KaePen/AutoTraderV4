@@ -330,9 +330,8 @@ class LiveTradingEngine:
 
         if signal and signal.direction != SignalType.HOLD:
             self._last_signal = signal
-            self._signal_history.append(
-                self._consolidated_to_signal(signal)
-            )
+            converted = self._consolidated_to_signal(signal)
+            self._signal_history.append(converted)
             # 履歴上限
             if len(self._signal_history) > 200:
                 self._signal_history = (
@@ -343,6 +342,32 @@ class LiveTradingEngine:
                 signal.direction.value,
                 signal.confidence,
             )
+
+            # WebSocketシグナルブロードキャスト
+            try:
+                from autotrader.web.websocket.handlers import (
+                    broadcast_signal_update,
+                )
+                asyncio.create_task(
+                    broadcast_signal_update({
+                        "signal_id": converted.signal_id,
+                        "symbol": converted.symbol,
+                        "timeframe": converted.timeframe,
+                        "signal_type": converted.signal_type.value,
+                        "confidence": converted.confidence,
+                        "confidence_level": (
+                            converted.confidence_level.value
+                        ),
+                        "stop_loss": converted.stop_loss,
+                        "take_profit": converted.take_profit,
+                        "reasoning": converted.reasoning,
+                        "created_at": (
+                            converted.created_at.isoformat()
+                        ),
+                    })
+                )
+            except Exception:
+                pass  # ブロードキャスト失敗は無視
 
             # 4. エントリー判定
             if self._enable_auto_trade:
@@ -397,7 +422,11 @@ class LiveTradingEngine:
         )
 
     async def _load_historical_data(self) -> None:
-        """起動時に過去データをTradeBotに供給"""
+        """起動時に過去データをTradeBotに供給
+
+        全TFのデータを一括収集してから設定。
+        （個別set_market_dataは辞書を上書きするため）
+        """
         symbol = self._config.symbol
         lookback = self._config.candle_lookback
         timeframes = self._bot.timeframes
@@ -407,6 +436,7 @@ class LiveTradingEngine:
             symbol, lookback, len(timeframes),
         )
 
+        all_data: dict[str, pd.DataFrame] = {}
         for tf_str in timeframes:
             try:
                 tf = Timeframe(tf_str)
@@ -423,10 +453,16 @@ class LiveTradingEngine:
                 )
                 continue
 
-            self._bot.set_market_data({tf_str: df})
+            all_data[tf_str] = df
             logger.info(
                 "データ読込完了: %s %s %d本",
                 symbol, tf_str, len(df),
+            )
+
+        if all_data:
+            self._bot.set_market_data(all_data)
+            logger.info(
+                "全TFデータ設定完了: %d時間足", len(all_data)
             )
 
     async def _update_market_data(self) -> None:
@@ -461,7 +497,7 @@ class LiveTradingEngine:
             return False
 
         # デモモードでは無効
-        if getattr(self._bot, "demo_mode", False):
+        if getattr(self._bot.config, "demo_mode", False):
             return False
 
         # 現在のモード判定
@@ -571,6 +607,18 @@ class LiveTradingEngine:
                 )
             # TradeBotに通知
             self._bot.on_trade_executed(signal)
+            # WebSocketポジション更新ブロードキャスト
+            try:
+                from autotrader.web.websocket.handlers import (
+                    broadcast_position_update,
+                )
+                asyncio.create_task(
+                    broadcast_position_update(
+                        {"symbol": self._config.symbol}
+                    )
+                )
+            except Exception:
+                pass
         else:
             logger.error("エントリー失敗: %s", result.message)
 

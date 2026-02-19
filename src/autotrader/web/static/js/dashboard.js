@@ -8,6 +8,7 @@ const DashboardApp = {
   tradeSummary: null,
   currentSignals: [],
   indicators: null,
+  indicatorTf: localStorage.getItem('indicator_tf') || 'M15',
   isLoading: true,
   tradeHistoryExpanded: true,
   pollInterval: null,
@@ -56,6 +57,9 @@ const DashboardApp = {
 
     // チャート初期化
     ChartManager.init('chart-container', this.symbol);
+
+    // 指標タブ描画
+    this.renderIndicatorTabs();
 
     // データ取得
     this.fetchAll();
@@ -709,8 +713,7 @@ const DashboardApp = {
 
   /** 指標取得 */
   async fetchIndicators() {
-    const tf = ChartManager.timeframe || 'M15';
-    document.getElementById('indicator-timeframe').textContent = tf;
+    const tf = this.indicatorTf;
     try {
       this.indicators = await getIndicators(this.symbol, tf);
     } catch (e) {
@@ -880,6 +883,28 @@ const DashboardApp = {
         ${progressHtml}
         <div class="text-[10px] text-gray-600">${this.fmtHoldTime(p.opened_at)}</div>
       </div>`;
+  },
+
+  /** インジケーター時間足タブを描画 */
+  renderIndicatorTabs() {
+    const container = document.getElementById('indicator-tf-tabs');
+    if (!container) return;
+    const tfs = ['M5', 'M15', 'H1', 'H4'];
+    container.innerHTML = tfs.map((tf) => `
+      <button data-tf="${tf}"
+        class="px-2 py-0.5 text-xs rounded ${tf === this.indicatorTf
+          ? 'bg-blue-600 text-white'
+          : 'bg-gray-700 text-gray-400 hover:bg-gray-600'}">
+        ${tf}
+      </button>`).join('');
+    container.querySelectorAll('button[data-tf]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        this.indicatorTf = btn.dataset.tf;
+        localStorage.setItem('indicator_tf', this.indicatorTf);
+        this.renderIndicatorTabs();
+        this.fetchIndicators();
+      });
+    });
   },
 
   /** 指標描画（グループ化 + ゾーン強化版） */

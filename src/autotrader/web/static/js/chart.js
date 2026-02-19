@@ -38,6 +38,12 @@ const ChartManager = {
     if (!this.containerEl) return;
     this.symbol = symbol || 'USDJPY';
 
+    // localStorageから設定を復元
+    const savedTf = localStorage.getItem('chart_timeframe');
+    if (savedTf) this.timeframe = savedTf;
+    const savedMs = localStorage.getItem('chart_refresh_ms');
+    if (savedMs !== null) this._refreshMs = parseInt(savedMs, 10);
+
     this.createChart();
     this.fetchCandles();
     this.renderTimeframeButtons();
@@ -251,6 +257,7 @@ const ChartManager = {
     container.querySelectorAll('button[data-tf]').forEach((btn) => {
       btn.addEventListener('click', () => {
         this.timeframe = btn.dataset.tf;
+        localStorage.setItem('chart_timeframe', this.timeframe);
         this.renderTimeframeButtons();
         this.fetchCandles();
         this._scheduleRefresh();
@@ -282,6 +289,7 @@ const ChartManager = {
     container.querySelectorAll('button[data-ms]').forEach((btn) => {
       btn.addEventListener('click', () => {
         this._refreshMs = parseInt(btn.dataset.ms, 10);
+        localStorage.setItem('chart_refresh_ms', this._refreshMs);
         this.renderRefreshSelector();
         this._scheduleRefresh();
       });

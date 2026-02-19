@@ -288,6 +288,23 @@ async def toggle_symbol_auto_trade(
         "ON" if enable else "OFF",
     )
 
+    # エンジン未起動時は自動起動
+    if enable and not engine.running:
+        try:
+            await engine.start()
+            logger.info(
+                "エンジン自動起動（自動取引ON時）"
+            )
+        except Exception as e:
+            logger.error("エンジン起動失敗: %s", e)
+            return ApiResponse(
+                success=False,
+                error=f"エンジン起動失敗: {e}",
+                data=TradingModeResponse(),
+            )
+    elif engine.running:
+        engine.reset_data_update_timer()
+
     return await get_trading_mode(request)
 
 
