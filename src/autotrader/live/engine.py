@@ -346,12 +346,13 @@ class LiveTradingEngine:
 
             # 4. エントリー判定
             if self._enable_auto_trade:
+                entry_signal = self._consolidated_to_signal(signal)
                 if self._should_use_tick_optimizer():
                     self._tick_optimizer.start_monitoring(
-                        signal
+                        entry_signal
                     )
                 else:
-                    await self._execute_entry(signal)
+                    await self._execute_entry(entry_signal)
 
         # 4.5 ティック監視ポーリング
         if self._tick_optimizer.is_active:
