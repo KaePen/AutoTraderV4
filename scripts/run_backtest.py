@@ -426,10 +426,28 @@ def parse_args() -> argparse.Namespace:
         help="基本リスク率（デフォルト: 0.02=2%%）",
     )
     parser.add_argument(
+        "--max-risk-pct-abs",
+        type=float,
+        default=0.03,
+        help="絶対最大リスク率（デフォルト: 0.03=3%%）",
+    )
+    parser.add_argument(
         "--equity-floor",
         type=float,
         default=0.30,
         help="取引停止の資金下限率（デフォルト: 0.30=30%%）",
+    )
+    parser.add_argument(
+        "--equity-caution",
+        type=float,
+        default=0.50,
+        help="ロット減額開始の資金注意率（デフォルト: 0.50=50%%）",
+    )
+    parser.add_argument(
+        "--tp-sl-ratio",
+        type=float,
+        default=1.0,
+        help="TP/SL比率乗数（デフォルト: 1.0=プラン推奨値）",
     )
     parser.add_argument(
         "--slippage-buffer",
@@ -800,8 +818,11 @@ def run_single_backtest(args: argparse.Namespace):
         max_lot_per_trade=args.max_lot_per_trade,
         max_total_exposure_lot=args.max_total_exposure,
         base_risk_pct=args.risk_pct,
+        max_risk_pct_absolute=args.max_risk_pct_abs,
         equity_floor_pct=args.equity_floor,
+        equity_caution_pct=args.equity_caution,
         slippage_buffer_pips=args.slippage_buffer,
+        tp_sl_ratio=args.tp_sl_ratio,
     )
 
     # PositionManagerConfig構築
