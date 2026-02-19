@@ -5,9 +5,6 @@
 
 環境変数:
     PROJECT_DIR: プロジェクトディレクトリ（省略時はスクリプトの親ディレクトリ）
-
-ログ出力先:
-    logs/pr_reviews/pr_{番号}_{タイムスタンプ}.log
 """
 
 from __future__ import annotations
@@ -96,7 +93,6 @@ CLAUDE_CMD = _find_claude_executable()
 # 設定
 REPO = "KaePen/AutoTraderV4"
 POLL_INTERVAL_SEC = 30
-PROCESSED_FILE = Path(__file__).parent / ".pr_watcher_processed.json"
 PROJECT_DIR = Path(
     os.environ.get("PROJECT_DIR", Path(__file__).parent.parent)
 )
@@ -116,23 +112,6 @@ REVIEW_PROMPT = """
 
 問題がある場合は処理を中断して理由を説明してください。
 """
-
-
-
-def load_processed() -> set[int]:
-    """処理済みPR番号を読み込む。"""
-    if PROCESSED_FILE.exists():
-        data = json.loads(PROCESSED_FILE.read_text(encoding="utf-8"))
-        return set(data.get("processed", []))
-    return set()
-
-
-def save_processed(processed: set[int]) -> None:
-    """処理済みPR番号を保存する。"""
-    PROCESSED_FILE.write_text(
-        json.dumps({"processed": list(processed)}),
-        encoding="utf-8",
-    )
 
 
 def get_open_prs() -> list[dict]:
@@ -156,7 +135,7 @@ def get_open_prs() -> list[dict]:
 
 
 def run_review_agent(pr: dict) -> None:
-    """PR対応のClaude Codeエージェントを起動してログを保存する。
+    """PR対応のClaude Codeエージェントを起動する。
 
     Args:
         pr: PR情報辞書（number, title, headRefName）
@@ -207,7 +186,8 @@ def main() -> None:
     print(f"[INFO] gh: {GH_CMD}", flush=True)
     print("[INFO] 停止するには Ctrl+C を押してください", flush=True)
 
-    processed = load_processed()
+    # セッション中のみ処理済みを記憶（再起動時はリセット）
+    processed: set[int] = set()
 
     try:
         while True:
@@ -216,15 +196,13 @@ def main() -> None:
 
             if not new_prs:
                 print(
-                    f"[INFO] 未処理PRなし (処理済み: {sorted(processed)})"
-                    f" - {POLL_INTERVAL_SEC}秒後に再確認",
+                    f"[INFO] 未処理PRなし - {POLL_INTERVAL_SEC}秒後に再確認",
                     flush=True,
                 )
             else:
                 for pr in new_prs:
                     run_review_agent(pr)
                     processed.add(pr["number"])
-                    save_processed(processed)
 
             time.sleep(POLL_INTERVAL_SEC)
     except KeyboardInterrupt:
