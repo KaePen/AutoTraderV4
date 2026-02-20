@@ -17,6 +17,7 @@ from autotrader.decision.unified.mode_monitor import (
     DAY_TRADE_CONFIG,
     SCALPING_CONFIG,
     SWING_CONFIG,
+    UNIVERSAL_CONFIG,
     ModeConfig,
     ModeMonitor,
     ModeSignal,
@@ -99,6 +100,7 @@ class MultiModeController:
         TradingStrategyMode.SCALPING: SCALPING_CONFIG,
         TradingStrategyMode.DAY_TRADE: DAY_TRADE_CONFIG,
         TradingStrategyMode.SWING: SWING_CONFIG,
+        TradingStrategyMode.UNIVERSAL: UNIVERSAL_CONFIG,
     }
 
     def __init__(

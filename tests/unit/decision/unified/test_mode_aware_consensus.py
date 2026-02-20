@@ -210,6 +210,52 @@ class TestModeAwareScoreConsensus:
         assert threshold == 6.0  # 高品質シグナル閾値
 
 
+class TestUniversalModeConsensus:
+    """UNIVERSALモードのコンセンサステスト"""
+
+    def setup_method(self) -> None:
+        """テストセットアップ"""
+        self.consensus = ModeAwareScoreConsensus()
+        self.universal_plan = TradingPlan(
+            mode=TradingStrategyMode.UNIVERSAL,
+            primary_tf="M15",
+            entry_tf="M5",
+            confirm_tfs=["M1", "H1", "H4", "H8", "D1"],
+            manage_tf="M15",
+            max_holding_bars=32,
+            tp_sl_ratio_range=(1.1, 1.4),
+        )
+
+    def test_universal_threshold_is_4_5(self) -> None:
+        """UNIVERSALモードの閾値は4.5"""
+        threshold = self.consensus.get_threshold_for_mode(
+            TradingStrategyMode.UNIVERSAL
+        )
+        assert threshold == 4.5
+
+    def test_universal_consolidate_uses_threshold_4_5(self) -> None:
+        """UNIVERSALモードのconsolidateでthreshold=4.5が使われる"""
+        signals = {
+            "M5": TimeframeSignal(
+                direction=SignalType.BUY,
+                strength=0.5,
+                sl_pips=10.0,
+                tp_pips=20.0,
+            ),
+        }
+        result = self.consensus.consolidate(signals, self.universal_plan)
+        assert result.threshold == 4.5
+
+    def test_universal_mode_custom_threshold(self) -> None:
+        """UNIVERSALモードのカスタム閾値"""
+        config = ConsensusConfig(universal_threshold=3.0)
+        consensus = ModeAwareScoreConsensus(config)
+        threshold = consensus.get_threshold_for_mode(
+            TradingStrategyMode.UNIVERSAL
+        )
+        assert threshold == 3.0
+
+
 class TestConsensusConfig:
     """ConsensusConfigのテスト"""
 

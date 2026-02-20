@@ -127,6 +127,47 @@ class TestTradingPlan:
         assert ratio == 2.0  # (1.5 + 2.5) / 2
 
 
+class TestUniversalModeSelector:
+    """UNIVERSALモードのTradingModeSelectorテスト"""
+
+    def test_universal_mode_always_returns_universal_plan(self) -> None:
+        """use_universal_mode=TrueのときUNIVERSALプランを返す"""
+        selector = TradingModeSelector(use_universal_mode=True)
+
+        # どのレジームでもUNIVERSAL
+        for regime in [
+            MarketRegime.HIGH_VOL,
+            MarketRegime.TREND,
+            MarketRegime.RANGE,
+            MarketRegime.LOW_VOL,
+        ]:
+            plan = selector.select(
+                regime=regime,
+                volatility_level=1.0,
+                htf_alignment=0.5,
+            )
+            assert plan.mode == TradingStrategyMode.UNIVERSAL
+
+    def test_universal_plan_includes_all_tfs(self) -> None:
+        """UNIVERSALプランは全TFをconfirm_tfsに含む"""
+        selector = TradingModeSelector(use_universal_mode=True)
+        plan = selector.select(
+            regime=MarketRegime.RANGE,
+            volatility_level=1.0,
+        )
+        assert plan.mode == TradingStrategyMode.UNIVERSAL
+        assert len(plan.confirm_tfs) > 3
+
+    def test_universal_selection_reason(self) -> None:
+        """UNIVERSALモードの選択理由が設定される"""
+        selector = TradingModeSelector(use_universal_mode=True)
+        plan = selector.select(
+            regime=MarketRegime.TREND,
+            volatility_level=1.0,
+        )
+        assert "UNIVERSAL" in plan.selection_reason
+
+
 class TestModeSelectorConfig:
     """ModeSelectorConfigのテスト"""
 

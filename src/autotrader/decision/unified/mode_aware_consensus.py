@@ -44,6 +44,7 @@ class ConsensusResult:
         reasoning: 判断理由
         buy_score: BUY方向の加重スコア（多面分析用）
         sell_score: SELL方向の加重スコア（多面分析用）
+        dynamic_entry_tf: 動的選択されたエントリーTF（UNIVERSALモード用）
     """
 
     direction: SignalType
@@ -53,6 +54,7 @@ class ConsensusResult:
     reasoning: str
     buy_score: float = 0.0
     sell_score: float = 0.0
+    dynamic_entry_tf: str | None = None
 
 
 @dataclass(frozen=True)
@@ -77,6 +79,7 @@ class ConsensusConfig:
     scalping_threshold: float = 3.5
     day_trade_threshold: float = 4.5
     swing_threshold: float = 6.0
+    universal_threshold: float = 4.5
     enable_counter_signal: bool = True
 
 
@@ -128,6 +131,13 @@ class ModeAwareScoreConsensus:
             TimeframeRole.MANAGE: 1.5,
             TimeframeRole.OTHER: 0.3,
         },
+        TradingStrategyMode.UNIVERSAL: {
+            TimeframeRole.PRIMARY: 3.0,
+            TimeframeRole.ENTRY: 2.5,
+            TimeframeRole.CONFIRM: 2.0,
+            TimeframeRole.MANAGE: 1.5,
+            TimeframeRole.OTHER: 1.0,
+        },
     }
 
     def __init__(self, config: ConsensusConfig | None = None) -> None:
@@ -151,6 +161,7 @@ class ModeAwareScoreConsensus:
             TradingStrategyMode.SCALPING: self.config.scalping_threshold,
             TradingStrategyMode.DAY_TRADE: self.config.day_trade_threshold,
             TradingStrategyMode.SWING: self.config.swing_threshold,
+            TradingStrategyMode.UNIVERSAL: self.config.universal_threshold,
         }
 
     def consolidate(
@@ -415,21 +426,28 @@ class ModeAwareScoreConsensus:
         Returns:
             ConsensusResult: コンセンサス結果
         """
-        # entry_tf足確定時のみ判断
-        if completed_tf != plan.entry_tf:
-            return ConsensusResult(
-                direction=SignalType.HOLD,
-                score=0.0,
-                threshold=self.get_threshold_for_mode(plan.mode),
-                aligned_tfs=[],
-                reasoning=f"entry_tf({plan.entry_tf})未確定",
-            )
+        # UNIVERSALモードでは全TF確定でエントリー判断
+        # それ以外はentry_tf足確定時のみ判断
+        if plan.mode != TradingStrategyMode.UNIVERSAL:
+            if completed_tf != plan.entry_tf:
+                return ConsensusResult(
+                    direction=SignalType.HOLD,
+                    score=0.0,
+                    threshold=self.get_threshold_for_mode(plan.mode),
+                    aligned_tfs=[],
+                    reasoning=f"entry_tf({plan.entry_tf})未確定",
+                )
 
         # 通常のコンセンサス処理
         result = self.consolidate(tf_signals, plan)
 
         # entry_tfの方向と整合性チェック
-        entry_signal = tf_signals.get(plan.entry_tf)
+        # UNIVERSALモードではdynamic_entry_tfが設定されていればそれを使う
+        if plan.mode == TradingStrategyMode.UNIVERSAL:
+            entry_tf_key = plan.dynamic_entry_tf or plan.entry_tf
+            entry_signal = tf_signals.get(entry_tf_key)
+        else:
+            entry_signal = tf_signals.get(plan.entry_tf)
         if entry_signal is None:
             return ConsensusResult(
                 direction=SignalType.HOLD,

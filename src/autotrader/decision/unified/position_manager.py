@@ -197,6 +197,7 @@ class PositionManagerConfig:
     be_enabled_modes: tuple[TradingStrategyMode, ...] = (
         TradingStrategyMode.SWING,
         TradingStrategyMode.DAY_TRADE,
+        TradingStrategyMode.UNIVERSAL,
     )
     early_breakeven_r: float = 0.5
     early_breakeven_enabled: bool = True
@@ -254,9 +255,10 @@ class PositionManager:
 
     # モード別最大保有時間（分）
     MODE_MAX_HOLDING_MINUTES: dict[TradingStrategyMode, int] = {
-        TradingStrategyMode.SCALPING: 90,      # 90分
-        TradingStrategyMode.DAY_TRADE: 480,    # 8時間
-        TradingStrategyMode.SWING: 2880,       # 2日
+        TradingStrategyMode.SCALPING: 90,       # 90分
+        TradingStrategyMode.DAY_TRADE: 480,     # 8時間
+        TradingStrategyMode.SWING: 2880,        # 2日
+        TradingStrategyMode.UNIVERSAL: 480,     # デフォルト（動的に上書き）
     }
 
     def __init__(self, config: PositionManagerConfig | None = None) -> None:
@@ -585,9 +587,22 @@ class PositionManager:
         current_price: float,
     ) -> ManagementAction | None:
         """時間決済チェック"""
-        max_minutes = self.MODE_MAX_HOLDING_MINUTES.get(
-            position.plan.mode, 480
-        )
+        # UNIVERSALモードは dynamic_entry_tf に基づいて保有時間を動的計算
+        if position.plan.mode == TradingStrategyMode.UNIVERSAL:
+            from autotrader.decision.unified.dynamic_tf_selector import (
+                DynamicTFSelector,
+            )
+            entry_tf = (
+                getattr(position.plan, "dynamic_entry_tf", None)
+                or position.plan.entry_tf
+            )
+            max_minutes = DynamicTFSelector.HOLDING_MINUTES_BY_ENTRY_TF.get(
+                entry_tf, 480
+            )
+        else:
+            max_minutes = self.MODE_MAX_HOLDING_MINUTES.get(
+                position.plan.mode, 480
+            )
         elapsed = (current_time - position.entry_time).total_seconds() / 60
 
         if elapsed >= max_minutes:

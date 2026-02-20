@@ -755,7 +755,7 @@ class TradeSimulator:
             from autotrader.decision.unified.mode_selector import (
                 TradingPlan,
             )
-            mode = TradingStrategyMode.DAY_TRADE
+            mode = TradingStrategyMode.UNIVERSAL
             if signal.mode:
                 try:
                     mode = TradingStrategyMode(signal.mode)
