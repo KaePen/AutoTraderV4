@@ -414,7 +414,7 @@ const DashboardApp = {
         </div>`;
       }).join('');
 
-      tfEl.innerHTML = `<div class="w-full">${summaryHtml}</div>` + `<div class="grid grid-cols-8 gap-1.5 mt-2">${cardsHtml}${penaltyCardHtml}</div>`;
+      tfEl.innerHTML = `<div class="w-full">${summaryHtml}</div>` + `<div class="grid grid-cols-4 gap-1.5 mt-2">${cardsHtml}${penaltyCardHtml}</div>`;
     }
 
   },
