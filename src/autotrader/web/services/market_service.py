@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from sqlalchemy.orm import Session
 
@@ -74,7 +74,7 @@ class MarketService:
         )
 
         # 本日のトレード集計
-        today = datetime.now().replace(
+        today = datetime.now(timezone.utc).replace(
             hour=0, minute=0, second=0, microsecond=0
         )
         today_trades = (
@@ -204,7 +204,7 @@ class MarketService:
         Returns:
             TradeSummaryResponse: トレードサマリー
         """
-        since = datetime.now() - timedelta(days=days)
+        since = datetime.now(timezone.utc) - timedelta(days=days)
         query = self._db.query(TradeRecord).filter(
             TradeRecord.is_open.is_(False),
             TradeRecord.closed_at >= since,
@@ -266,7 +266,7 @@ class MarketService:
         return IndicatorResponse(
             symbol=symbol,
             timeframe=timeframe,
-            timestamp=datetime.now(),
+            timestamp=datetime.now(timezone.utc),
         )
 
     def get_candles(

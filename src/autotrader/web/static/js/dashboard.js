@@ -1487,10 +1487,10 @@ const DashboardApp = {
     return new Intl.NumberFormat('ja-JP', { style: 'currency', currency: currency, maximumFractionDigits: digits }).format(v);
   },
   fmtTime(dateStr) {
-    return new Date(dateStr).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit' });
+    return new Date(dateStr).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Tokyo' });
   },
   fmtDateTime(dateStr) {
-    return new Date(dateStr).toLocaleDateString('ja-JP', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+    return new Date(dateStr).toLocaleDateString('ja-JP', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Tokyo' });
   },
   fmtHoldTime(openedAt) {
     const diffMs = Date.now() - new Date(openedAt).getTime();

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Generic, TypeVar
 
 from pydantic import BaseModel, Field
@@ -30,7 +30,9 @@ class ApiResponse(BaseModel, Generic[T]):
     success: bool = True
     data: T | None = None
     error: str | None = None
-    timestamp: datetime = Field(default_factory=datetime.now)
+    timestamp: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc)
+    )
 
 
 class HealthResponse(BaseModel):
