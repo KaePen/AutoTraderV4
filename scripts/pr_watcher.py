@@ -296,6 +296,15 @@ def auto_merge_pr(pr: dict) -> None:
             flush=True,
         )
 
+    # 5. ローカルブランチ削除（存在しなければスキップ）
+    # -D: worktree経由でマージしたためgitの「マージ済み」判定外→強制削除
+    r = _git(["branch", "-D", branch])
+    if r.returncode != 0 and "not found" not in r.stderr:
+        print(
+            f"[WARN] PR #{num} ローカルブランチ削除失敗: {r.stderr}",
+            flush=True,
+        )
+
     print(f"[INFO] PR #{num} マージ完了: {title}", flush=True)
 
 
