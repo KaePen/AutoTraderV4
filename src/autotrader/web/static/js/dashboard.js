@@ -507,36 +507,38 @@ const DashboardApp = {
     // モードバッジ（デモ/リアル × AUTO ON/OFF の4パターン）
     if (!isConnected) {
       modeBadge.textContent = 'STANDBY';
-      modeBadge.className = 'inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-gray-700 text-gray-400';
+      modeBadge.className = 'hidden md:inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-gray-700 text-gray-400';
     } else if (isDemoOn && isAutoOn) {
       modeBadge.textContent = 'デモオート';
-      modeBadge.className = 'inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold bg-orange-900/40 text-orange-400 border border-orange-700/50';
+      modeBadge.className = 'hidden md:inline-flex items-center px-2 py-1 rounded-full text-xs font-bold bg-orange-900/40 text-orange-400 border border-orange-700/50';
     } else if (isDemoOn) {
       modeBadge.textContent = 'デモ';
-      modeBadge.className = 'inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold bg-orange-900/40 text-orange-400 border border-orange-700/50';
+      modeBadge.className = 'hidden md:inline-flex items-center px-2 py-1 rounded-full text-xs font-bold bg-orange-900/40 text-orange-400 border border-orange-700/50';
     } else if (isAutoOn) {
       modeBadge.textContent = 'リアルオート';
-      modeBadge.className = 'inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold bg-green-900/60 text-green-300 border border-green-600/60';
+      modeBadge.className = 'hidden md:inline-flex items-center px-2 py-1 rounded-full text-xs font-bold bg-green-900/60 text-green-300 border border-green-600/60';
     } else {
       modeBadge.textContent = 'リアル';
-      modeBadge.className = 'inline-flex items-center px-2.5 py-1 rounded-full text-xs font-bold bg-blue-900/40 text-blue-400 border border-blue-700/50';
+      modeBadge.className = 'hidden md:inline-flex items-center px-2 py-1 rounded-full text-xs font-bold bg-blue-900/40 text-blue-400 border border-blue-700/50';
     }
 
     // MT5接続バッジ
     if (isConnected) {
-      mt5Badge.className = 'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-green-900/30 text-green-400 border border-green-800/50';
+      mt5Badge.className = 'hidden md:inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-xs font-medium bg-green-900/30 text-green-400 border border-green-800/50';
       mt5Badge.innerHTML = '<span class="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse"></span>MT5 接続中';
     } else if (isLive) {
-      mt5Badge.className = 'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-yellow-900/30 text-yellow-400 border border-yellow-800/50';
+      mt5Badge.className = 'hidden md:inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-xs font-medium bg-yellow-900/30 text-yellow-400 border border-yellow-800/50';
       mt5Badge.innerHTML = '<span class="w-1.5 h-1.5 rounded-full bg-yellow-500"></span>MT5 未接続';
     } else {
-      mt5Badge.className = 'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-gray-700 text-gray-400';
+      mt5Badge.className = 'hidden md:inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-xs font-medium bg-gray-700 text-gray-400';
       mt5Badge.innerHTML = '<span class="w-1.5 h-1.5 rounded-full bg-gray-500"></span>MT5 未接続';
     }
 
-    // 設定モーダル内MT5ボタン
+    // 設定モーダル内MT5ボタン（通常サイズ）
     const btnBase = 'px-4 py-2 rounded text-sm font-semibold transition-all';
-    const btnDisabled = btnBase + ' bg-gray-700 text-gray-500 cursor-not-allowed';
+    // ヘッダーボタン（コンパクト、md以上のみ表示）
+    const hdrBtnBase = 'hidden md:inline-flex px-3 py-1 rounded-lg text-xs font-semibold transition-all';
+    const btnDisabled = hdrBtnBase + ' bg-gray-700 text-gray-500 cursor-not-allowed';
     if (mt5Btn) {
       if (this.tcBusy) {
         mt5Btn.disabled = true;
@@ -557,20 +559,20 @@ const DashboardApp = {
     if (autoBtn) {
       if (this.tcBusy) {
         autoBtn.disabled = true;
-        autoBtn.textContent = '処理中...';
+        autoBtn.textContent = '...';
         autoBtn.className = btnDisabled;
       } else if (!isConnected) {
         autoBtn.disabled = true;
-        autoBtn.textContent = '自動トレード開始';
+        autoBtn.textContent = 'AUTO';
         autoBtn.className = btnDisabled;
       } else if (isAutoOn) {
         autoBtn.disabled = false;
-        autoBtn.textContent = this.symbol + ' 自動トレード停止';
-        autoBtn.className = btnBase + ' bg-red-600 hover:bg-red-700 text-white shadow-lg shadow-red-600/20 active:scale-[0.98]';
+        autoBtn.textContent = 'AUTO';
+        autoBtn.className = hdrBtnBase + ' bg-red-600 hover:bg-red-700 text-white shadow-lg shadow-red-600/20 active:scale-[0.98]';
       } else {
         autoBtn.disabled = false;
-        autoBtn.textContent = this.symbol + ' 自動トレード開始';
-        autoBtn.className = btnBase + ' bg-green-600 hover:bg-green-700 text-white shadow-lg shadow-green-600/20 active:scale-[0.98]';
+        autoBtn.textContent = 'AUTO';
+        autoBtn.className = hdrBtnBase + ' bg-green-600 hover:bg-green-700 text-white shadow-lg shadow-green-600/20 active:scale-[0.98]';
       }
     }
 
@@ -579,20 +581,20 @@ const DashboardApp = {
     if (demoBtn) {
       if (this.tcBusy) {
         demoBtn.disabled = true;
-        demoBtn.textContent = '処理中...';
+        demoBtn.textContent = '...';
         demoBtn.className = btnDisabled;
       } else if (!isLive) {
         demoBtn.disabled = true;
-        demoBtn.textContent = 'デモモード';
+        demoBtn.textContent = 'DEMO';
         demoBtn.className = btnDisabled;
       } else if (isDemoOn) {
         demoBtn.disabled = false;
-        demoBtn.textContent = this.symbol + ' デモ: ON';
-        demoBtn.className = btnBase + ' bg-orange-500/20 text-orange-400 border border-orange-600/50 hover:bg-orange-500/30 active:scale-[0.98]';
+        demoBtn.textContent = 'DEMO';
+        demoBtn.className = hdrBtnBase + ' bg-orange-500/20 text-orange-400 border border-orange-600/50 hover:bg-orange-500/30 active:scale-[0.98]';
       } else {
         demoBtn.disabled = false;
-        demoBtn.textContent = this.symbol + ' デモ: OFF';
-        demoBtn.className = btnBase + ' bg-gray-700 text-gray-300 hover:bg-gray-600 active:scale-[0.98]';
+        demoBtn.textContent = 'DEMO';
+        demoBtn.className = hdrBtnBase + ' bg-gray-700 text-gray-300 hover:bg-gray-600 active:scale-[0.98]';
       }
     }
 

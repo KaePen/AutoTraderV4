@@ -47,6 +47,19 @@
           <div id="header-pair-strip" class="hidden lg:flex items-center gap-1.5 ml-4"></div>
         </div>
         <div class="flex items-center gap-3">
+          <!-- MT5ステータス + モードバッジ -->
+          <span id="tc-mt5-badge" class="hidden md:inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-xs font-medium bg-gray-700 text-gray-400">
+            <span class="w-1.5 h-1.5 rounded-full bg-gray-500"></span>MT5
+          </span>
+          <span id="tc-mode-badge" class="hidden md:inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-gray-700 text-gray-400">---</span>
+          <!-- デモ・自動売買ボタン -->
+          <button id="tc-demo-mode-btn"
+                  class="hidden md:inline-flex px-3 py-1 rounded-lg text-xs font-semibold transition-all bg-gray-700 text-gray-500 cursor-not-allowed"
+                  disabled>DEMO</button>
+          <button id="tc-auto-trade-btn"
+                  class="hidden md:inline-flex px-3 py-1 rounded-lg text-xs font-semibold transition-all bg-gray-700 text-gray-500 cursor-not-allowed"
+                  disabled>AUTO</button>
+          <div class="hidden md:block w-px h-4 bg-gray-700"></div>
           <!-- 時計 -->
           <div id="header-clock" class="hidden md:flex items-center gap-1.5 text-xs tabular-nums text-gray-400">
             <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -65,13 +78,6 @@
             <option value="AUDUSD">AUDUSD</option>
             <option value="EURJPY">EURJPY</option>
           </select>
-          <!-- ナビゲーション -->
-          <div class="flex gap-1">
-            <a href="/" id="nav-dashboard"
-               class="px-3 py-1.5 rounded-lg text-sm font-medium transition-colors bg-blue-600 text-white">
-              Dashboard
-            </a>
-          </div>
           <!-- 通知ベル -->
           <div id="notification-bell-container" class="relative">
             <button id="notification-bell-btn" class="relative p-2 rounded-lg hover:bg-gray-700 transition-colors" aria-label="Notifications">
