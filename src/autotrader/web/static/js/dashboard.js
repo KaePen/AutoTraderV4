@@ -313,23 +313,26 @@ const DashboardApp = {
       };
       // 全ペナルティ項目を固定順で表示（値0も含む）
       const penaltyItems = Object.keys(penaltyLabel).map(k => [k, pb[k] || 0]);
-      const penaltyHtml = `<div class="mb-2 border border-red-900/30 rounded px-2 py-1.5 bg-red-950/10">
+      const penaltyHtml = `<div class="mb-2">
           <div class="flex items-center justify-between text-[10px] mb-1">
             <span class="text-gray-500">Penalties</span>
-            <span class="text-red-400 font-bold tabular-nums">-${(a.penalty_total || 0).toFixed(2)} total</span>
+            <span class="${(a.penalty_total || 0) > 0 ? 'text-red-400' : 'text-gray-500'} font-bold tabular-nums">-${(a.penalty_total || 0).toFixed(2)} total</span>
           </div>
-          <div class="space-y-0.5">
+          <div class="flex gap-1.5 flex-wrap">
             ${penaltyItems.map(([k, v]) => {
               const lbl = penaltyLabel[k];
               const w = Math.min(100, Math.round(v / 0.25 * 100));
               const valText = v > 0 ? `-${v.toFixed(2)}` : '0';
               const valColor = v > 0 ? 'text-red-400' : 'text-gray-600';
-              return `<div class="flex items-center gap-1">
-                <span class="text-[8px] text-gray-500 w-7 text-right flex-shrink-0">${lbl}</span>
-                <div class="flex-1 h-1 bg-gray-700/40 rounded-full overflow-hidden">
-                  <div class="bg-red-500/60 h-full rounded-full" style="width:${w}%"></div>
+              const borderCls = v > 0 ? 'border-red-700/50 bg-red-900/20' : 'border-gray-700 bg-gray-800/60';
+              return `<div class="rounded border ${borderCls} px-2 py-1.5 flex-1 min-w-[55px]">
+                <div class="flex items-center justify-between mb-0.5">
+                  <span class="text-[9px] text-gray-400 uppercase font-bold">${lbl}</span>
+                  <span class="text-[9px] font-bold tabular-nums ${valColor}">${valText}</span>
                 </div>
-                <span class="text-[9px] tabular-nums ${valColor} w-8 text-right flex-shrink-0">${valText}</span>
+                <div class="w-full bg-gray-700/50 rounded-full h-1">
+                  <div class="bg-red-500/60 h-1 rounded-full" style="width:${w}%"></div>
+                </div>
               </div>`;
             }).join('')}
           </div>
