@@ -178,7 +178,7 @@ const DashboardApp = {
       const dirStyles = {
         BUY: 'bg-green-900/40 text-green-400 border border-green-700/50',
         SELL: 'bg-red-900/40 text-red-400 border border-red-700/50',
-        HOLD: 'bg-gray-700 text-gray-400',
+        HOLD: 'bg-red-900/30 text-red-400 border border-red-800/40',
       };
       dirBadge.textContent = a.direction || '--';
       dirBadge.className = 'inline-flex items-center px-2 py-0.5 rounded text-xs font-bold ' + (dirStyles[a.direction] || dirStyles.HOLD);
@@ -882,9 +882,9 @@ const DashboardApp = {
   },
 
   signalCard(s) {
-    const borderColors = { BUY: 'border-l-green-500', SELL: 'border-l-red-500', HOLD: 'border-l-gray-600' };
-    const bgColors = { BUY: 'bg-green-950/30', SELL: 'bg-red-950/30', HOLD: 'bg-gray-800/50' };
-    const dirColors = { BUY: 'text-green-400', SELL: 'text-red-400', HOLD: 'text-gray-500' };
+    const borderColors = { BUY: 'border-l-green-500', SELL: 'border-l-red-500', HOLD: 'border-l-red-700' };
+    const bgColors = { BUY: 'bg-green-950/30', SELL: 'bg-red-950/30', HOLD: 'bg-red-950/20' };
+    const dirColors = { BUY: 'text-green-400', SELL: 'text-red-400', HOLD: 'text-red-400' };
     const confColors = { HIGH: 'bg-green-900/40 text-green-400 border-green-700/50', MEDIUM: 'bg-yellow-900/40 text-yellow-400 border-yellow-700/50', LOW: 'bg-red-900/40 text-red-400 border-red-700/50' };
     const barColor = s.confidence >= 0.7 ? 'bg-green-500' : s.confidence >= 0.4 ? 'bg-yellow-500' : 'bg-red-500';
 
