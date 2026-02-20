@@ -572,7 +572,7 @@ const DashboardApp = {
       mt5Badge.className = 'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-yellow-900/30 text-yellow-400 border border-yellow-800/50';
       mt5Badge.innerHTML = '<span class="w-1.5 h-1.5 rounded-full bg-yellow-500"></span>MT5';
     } else {
-      mt5Badge.className = 'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-gray-700/80 text-gray-400';
+      mt5Badge.className = 'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-gray-700/80 text-gray-400 border border-gray-700/50';
       mt5Badge.innerHTML = '<span class="w-1.5 h-1.5 rounded-full bg-gray-500"></span>MT5';
     }
 
@@ -652,26 +652,23 @@ const DashboardApp = {
           ? symbolDemoStates[pair] : false;
         const isReal = isConnected && pairAutoOn && !pairDemoOn;
         const isDemo = isConnected && pairAutoOn && pairDemoOn;
+        // ドットとチップ色をMT5バッジと統一（w-1.5 h-1.5 rounded-full）
         const dot = isReal
-          ? '<span class="w-1 h-1 rounded-full bg-green-400 animate-pulse flex-shrink-0"></span>'
+          ? '<span class="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse flex-shrink-0"></span>'
           : isDemo
-            ? '<span class="w-1 h-1 rounded-full bg-orange-400 animate-pulse flex-shrink-0"></span>'
-            : '<span class="w-1 h-1 rounded-full bg-gray-600 flex-shrink-0"></span>';
-        const label = isReal ? 'リアル' : isDemo ? 'デモ' : 'スタンバイ';
+            ? '<span class="w-1.5 h-1.5 rounded-full bg-orange-400 animate-pulse flex-shrink-0"></span>'
+            : '<span class="w-1.5 h-1.5 rounded-full bg-gray-500 flex-shrink-0"></span>';
         const chipCls = isReal
-          ? 'border-green-800/50 bg-green-900/20 hover:bg-green-900/35 cursor-pointer'
+          ? 'border-green-800/50 bg-green-900/20 text-gray-300 hover:bg-green-900/35 cursor-pointer'
           : isDemo
-            ? 'border-orange-800/50 bg-orange-900/20 hover:bg-orange-900/35 cursor-pointer'
-            : 'border-gray-700/50 bg-gray-800/60 cursor-default';
-        const labelCls = isReal ? 'text-green-400' : isDemo ? 'text-orange-400' : 'text-gray-500';
+            ? 'border-orange-800/50 bg-orange-900/20 text-gray-300 hover:bg-orange-900/35 cursor-pointer'
+            : 'border-gray-700/50 bg-gray-700/80 text-gray-400 cursor-default';
         const clickAttr = isConnected
           ? `onclick="DashboardApp.handleSymbolAutoTradeToggle('${pair}')"`
           : '';
-        return `<div ${clickAttr} class="flex items-center gap-1 px-1.5 py-0.5 rounded border ${chipCls} transition-colors select-none">
-          <span class="text-[10px] font-semibold text-gray-300 tabular-nums">${pair}</span>
-          ${dot}
-          <span class="text-[9px] ${labelCls}">${label}</span>
-        </div>`;
+        return `<span ${clickAttr} class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border ${chipCls} transition-colors select-none text-xs font-medium tabular-nums">
+          ${dot}${pair}
+        </span>`;
       }).join('');
     }
 
