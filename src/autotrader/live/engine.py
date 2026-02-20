@@ -436,6 +436,110 @@ class LiveTradingEngine:
         # 5. 既存ポジション管理
         await self._manage_positions()
 
+        # 6. tick完了: 全UIデータをWebSocketで一括配信
+        asyncio.create_task(self._broadcast_tick_update())
+
+    async def _broadcast_tick_update(self) -> None:
+        """tick完了後に全UIデータをダッシュボードへ一括配信
+
+        analysis / account / positions / radar を1ペイロードで送信。
+        フロントエンドはこのイベントを受信してUIを全更新する。
+        """
+        try:
+            from autotrader.web.websocket.handlers import (
+                broadcast_tick_update,
+            )
+            payload = self._build_tick_payload()
+            await broadcast_tick_update(payload)
+        except Exception:
+            pass  # ブロードキャスト失敗は無視
+
+    def _build_tick_payload(self) -> dict:
+        """tick_updateペイロードを構築
+
+        Returns:
+            dict: analysis / account / positions / radar / mode
+        """
+        # --- analysis ---
+        cs = self._last_analysis
+        tick_time = self._last_tick_time
+        if cs is not None:
+            analysis = {
+                "direction": cs.direction.value,
+                "confidence": cs.confidence,
+                "consensus_score": cs.consensus_score,
+                "entry_threshold": cs.entry_threshold,
+                "regime": cs.regime,
+                "mode": cs.mode,
+                "rationale": cs.rationale,
+                "htf_alignment": cs.htf_alignment,
+                "penalty_total": cs.penalty_total,
+                "trend_strength": cs.trend_strength,
+                "aligned_tfs": list(cs.aligned_tfs),
+                "tf_scores": dict(cs.scores),
+                "last_tick_time": (
+                    tick_time.isoformat() if tick_time else None
+                ),
+                "demo_mode": self._demo_mode_enabled,
+                "engine_running": self._running,
+                "auto_trade_enabled": self._enable_auto_trade,
+                "mt5_connected": self.connected,
+            }
+        else:
+            analysis = {
+                "engine_running": self._running,
+                "mt5_connected": self.connected,
+                "auto_trade_enabled": self._enable_auto_trade,
+                "demo_mode": self._demo_mode_enabled,
+            }
+
+        # --- account (metrics用) ---
+        acc = self._account_info
+        account = {
+            "balance": acc.balance if acc else 0.0,
+            "equity": acc.equity if acc else 0.0,
+            "margin": acc.margin if acc else 0.0,
+            "free_margin": acc.free_margin if acc else 0.0,
+            "profit": acc.profit if acc else 0.0,
+        }
+
+        # --- radar (シグナル履歴からHOLD除外・信頼度降順) ---
+        grouped: dict[str, list] = {}
+        for s in self._signal_history:
+            if s.signal_type.value != "HOLD":
+                grouped.setdefault(s.symbol, []).append(s)
+        radar = {
+            sym: sorted(
+                sigs, key=lambda x: x.confidence, reverse=True
+            )
+            for sym, sigs in grouped.items()
+        }
+        radar_serialized = {
+            sym: [
+                {
+                    "signal_id": s.signal_id,
+                    "signal_type": s.signal_type.value,
+                    "timeframe": s.timeframe.value
+                    if hasattr(s.timeframe, "value")
+                    else str(s.timeframe),
+                    "confidence": s.confidence,
+                    "confidence_level": s.confidence_level.value
+                    if hasattr(s.confidence_level, "value")
+                    else str(s.confidence_level),
+                    "reasoning": s.reasoning,
+                }
+                for s in sigs
+            ]
+            for sym, sigs in radar.items()
+        }
+
+        return {
+            "analysis": analysis,
+            "account": account,
+            "positions": self._cached_positions,
+            "radar": radar_serialized,
+        }
+
     def _consolidated_to_signal(
         self, cs: ConsolidatedSignal,
     ) -> Signal:

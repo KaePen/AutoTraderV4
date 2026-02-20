@@ -16,6 +16,8 @@ const DashboardApp = {
   pollInterval: null,
   indicatorInterval: null,
   signalWs: null,
+  // WebSocket駆動フラグ（接続中はpollingを停止）
+  wsActive: false,
   // トレーディングコントロール状態
   tradingMode: null,
   tcBusy: false,
@@ -71,19 +73,21 @@ const DashboardApp = {
     this.fetchTradingMode();
     this.fetchAnalysis();
 
-    // ポーリング
+    // チャート・インジケータのみ定期更新（データ量大のためWS対象外）
     this.pollInterval = setInterval(() => this.fetchAll(), 30000);
     this.indicatorInterval = setInterval(() => this.fetchIndicators(), 30000);
-    // トレーディング状態ポーリング（5秒）
-    setInterval(() => this.fetchTradingMode(), 5000);
-    // 分析ポーリング（1秒 = エンジンtickと同期）
-    setInterval(() => this.fetchAnalysis(), 1000);
-    // ポジション・トレードポーリング（2秒 = MT5更新と同期）
-    setInterval(() => this.fetchPositionsAndTrades(), 2000);
-    // シグナルレーダーポーリング（10秒）
-    setInterval(() => this.fetchSignalRadar(), 10000);
 
-    // シグナルWebSocket
+    // フォールバックpolling（WS切断中のみ動作）
+    this._fallbackInterval = setInterval(() => {
+      if (!this.wsActive) {
+        this.fetchAnalysis();
+        this.fetchPositionsAndTrades();
+        this.fetchSignalRadar();
+        this.fetchTradingMode();
+      }
+    }, 3000);
+
+    // シグナルWebSocket（チャートマーカー更新）
     this.signalWs = createWebSocketClient('/ws/signals');
     this.signalWs.on('signal_update', (msg) => {
       const signal = msg.data;
@@ -100,12 +104,63 @@ const DashboardApp = {
     });
     this.signalWs.connect();
 
-    // ダッシュボードWebSocket（ポジション・トレード即時更新）
+    // ダッシュボードWebSocket（tick_update で全UI一括更新）
     this.dashWs = createWebSocketClient('/ws/dashboard');
+    this.dashWs.on('tick_update', (msg) => {
+      this.wsActive = true;
+      this._applyTickUpdate(msg.data);
+    });
     this.dashWs.on('position_update', () => {
-      this.fetchPositionsAndTrades();
+      // tick_update未対応の旧バックエンド向けフォールバック
+      if (!this.wsActive) this.fetchPositionsAndTrades();
+    });
+    this.dashWs.onStateChange((state) => {
+      if (state === 'disconnected' || state === 'error') {
+        this.wsActive = false;
+      }
     });
     this.dashWs.connect();
+  },
+
+  // ── tick_update 一括適用 ──
+
+  /**
+   * tick_updateペイロードを受信してUI全更新
+   * analysis / account / positions / radar をまとめて適用する。
+   *
+   * @param {Object} data - tick_updateペイロード
+   */
+  _applyTickUpdate(data) {
+    // 分析パネル
+    if (data.analysis) {
+      this.lastAnalysis = data.analysis;
+      this.renderAnalysisPanel();
+      this.renderTradingControl();
+    }
+
+    // メトリクス（口座情報）
+    if (data.account && this.dashboard) {
+      this.dashboard = {
+        ...this.dashboard,
+        account: {
+          ...this.dashboard.account,
+          ...data.account,
+        },
+      };
+      this.renderMetrics();
+    }
+
+    // ポジション
+    if (data.positions !== undefined) {
+      this.positions = data.positions;
+      this.renderPositions();
+    }
+
+    // シグナルレーダー
+    if (data.radar) {
+      this.radarData = data.radar;
+      this.renderSignalRadar();
+    }
   },
 
   // ── 分析パネル ──
