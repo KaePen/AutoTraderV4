@@ -637,8 +637,8 @@ class LiveTradingEngine:
                 await self._register_new_position(
                     result.ticket, signal_with_lot, lot
                 )
-            # TradeBotに通知
-            self._bot.on_trade_executed(signal)
+            # TradeBotに通知（取引時刻を渡す）
+            self._bot.on_trade_executed(signal.created_at)
             # WebSocketポジション更新ブロードキャスト
             try:
                 from autotrader.web.websocket.handlers import (
