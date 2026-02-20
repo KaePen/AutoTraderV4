@@ -34,21 +34,28 @@
     <!-- ヘッダー -->
     <header class="fixed top-0 left-0 right-0 z-50 bg-gray-800/95 backdrop-blur-sm border-b border-gray-700 h-14">
       <div class="flex items-center justify-between h-full px-4">
-        <div class="flex items-center gap-4">
-          <div class="flex items-center gap-2">
+        <div class="flex items-center gap-2.5">
+          <!-- ロゴ -->
+          <div class="flex items-center gap-2 flex-shrink-0">
             <svg class="w-6 h-6 text-blue-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
               <path d="M3 17l6-6 4 4 8-8" />
               <path d="M17 7h4v4" />
             </svg>
-            <h1 class="text-lg font-bold bg-gradient-to-r from-blue-400 to-cyan-400 bg-clip-text text-transparent">
+            <h1 class="text-lg font-bold bg-gradient-to-r from-blue-400 to-cyan-400 bg-clip-text text-transparent whitespace-nowrap">
               AutoTrader V4
             </h1>
-            <!-- MT5接続ステータス（グローバル表示） -->
-            <span id="tc-mt5-badge" class="hidden inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-xs font-medium bg-gray-700 text-gray-400">
+          </div>
+          <!-- 区切り -->
+          <div class="w-px h-4 bg-gray-700 flex-shrink-0"></div>
+          <!-- ステータスチップ群（MT5 + 各通貨ペア） -->
+          <div class="flex items-center gap-1.5">
+            <!-- MT5接続ステータス -->
+            <span id="tc-mt5-badge" class="hidden inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-gray-700/80 text-gray-400 border border-gray-700/50">
               <span class="w-1.5 h-1.5 rounded-full bg-gray-500"></span>MT5
             </span>
+            <!-- 通貨ペアステータスチップ（lg:以上） -->
+            <div id="header-pair-strip" class="hidden lg:flex items-center gap-1.5"></div>
           </div>
-          <div id="header-pair-strip" class="hidden lg:flex items-center gap-1.5 ml-4"></div>
         </div>
         <div class="flex items-center gap-2">
           <!-- デモ・自動売買ボタン（四角型・高さ統一） -->
