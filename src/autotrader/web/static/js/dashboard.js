@@ -268,7 +268,7 @@ const DashboardApp = {
     // 時間足スコア（コンセンサス詳細表示）
     const tfEl = document.getElementById('ap-tf-scores');
     if (tfEl && a.tf_scores) {
-      const tfOrder = ['M1', 'M5', 'M15', 'M30', 'H1', 'H4', 'D1'];
+      const tfOrder = ['M1', 'M5', 'M15', 'M30', 'H1', 'H4', 'H8', 'D1'];
       const tfs = Object.entries(a.tf_scores).sort((x, y) => {
         return tfOrder.indexOf(x[0]) - tfOrder.indexOf(y[0]);
       });
@@ -414,7 +414,7 @@ const DashboardApp = {
         </div>`;
       }).join('');
 
-      tfEl.innerHTML = `<div class="w-full">${summaryHtml}</div>` + `<div class="grid grid-cols-8 gap-1.5 mt-2">${cardsHtml}${penaltyCardHtml}</div>`;
+      tfEl.innerHTML = `<div class="w-full">${summaryHtml}</div>` + `<div class="grid grid-cols-9 gap-1.5 mt-2">${cardsHtml}${penaltyCardHtml}</div>`;
     }
 
   },
