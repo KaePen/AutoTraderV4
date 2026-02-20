@@ -43,14 +43,15 @@
             <h1 class="text-lg font-bold bg-gradient-to-r from-blue-400 to-cyan-400 bg-clip-text text-transparent">
               AutoTrader V4
             </h1>
+            <!-- MT5接続ステータス（グローバル表示） -->
+            <span id="tc-mt5-badge" class="hidden inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-xs font-medium bg-gray-700 text-gray-400">
+              <span class="w-1.5 h-1.5 rounded-full bg-gray-500"></span>MT5
+            </span>
           </div>
           <div id="header-pair-strip" class="hidden lg:flex items-center gap-1.5 ml-4"></div>
         </div>
         <div class="flex items-center gap-3">
-          <!-- MT5ステータス + モードバッジ -->
-          <span id="tc-mt5-badge" class="hidden md:inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-xs font-medium bg-gray-700 text-gray-400">
-            <span class="w-1.5 h-1.5 rounded-full bg-gray-500"></span>MT5
-          </span>
+          <!-- モードバッジ -->
           <span id="tc-mode-badge" class="hidden md:inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-gray-700 text-gray-400">---</span>
           <!-- デモ・自動売買ボタン -->
           <button id="tc-demo-mode-btn"
