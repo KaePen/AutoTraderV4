@@ -12,7 +12,7 @@ import dataclasses
 import logging
 import time as _time
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pandas as pd
 
@@ -41,6 +41,9 @@ from autotrader.live.tick_entry_optimizer import TickEntryOptimizer
 from autotrader.backtest.indicators import IndicatorCalculator
 
 logger = logging.getLogger(__name__)
+
+# 日本標準時（UTC+9）
+JST = timezone(timedelta(hours=9))
 
 
 class LiveTradingEngine:
@@ -1132,7 +1135,7 @@ class LiveTradingEngine:
                     signal_type=signal.signal_type.value,
                     volume=lot,
                     entry_price=entry_price,
-                    opened_at=datetime.now(timezone.utc),
+                    opened_at=datetime.now(JST),
                     stop_loss=sl_price,
                     take_profit=tp_price,
                     ticket=ticket,
@@ -1228,7 +1231,7 @@ class LiveTradingEngine:
                     else pos.entry_price - current_price
                 )
                 pnl_pips = price_diff / pip_size
-            closed_at = datetime.now(timezone.utc)
+            closed_at = datetime.now(JST)
             db_url = get_settings().database_url
             with get_session(db_url) as db:
                 repo = TradeRepository(db)
