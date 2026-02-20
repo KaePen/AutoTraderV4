@@ -111,6 +111,8 @@ class LiveTradingEngine:
         self._closed_trades: list[dict] = []
         # MT5 tick高速ポーリング用（最終tickのms単位時刻）
         self._last_mt5_tick_ms: int = 0
+        # 直近tick価格キャッシュ（_tick_price_update→_update_market_dataで共用）
+        self._last_tick_data: dict | None = None
         # フル処理（ローソク足+指標+シグナル）最終実行時刻
         self._last_full_tick_time: float = 0.0
 
@@ -429,6 +431,9 @@ class LiveTradingEngine:
         self._last_mt5_tick_ms = tick_ms
         bid = float(tick.get("bid", 0.0))
         ask = float(tick.get("ask", 0.0))
+
+        # 1秒サイクルのフル処理で使うためキャッシュ
+        self._last_tick_data = tick
 
         try:
             from autotrader.web.websocket.handlers import (
@@ -784,28 +789,26 @@ class LiveTradingEngine:
             if not df.empty:
                 all_data[tf_str] = df
 
-        # リアルタイム評価: 現在tick価格で最後のバーを更新
-        # これにより時間足確定を待たずシグナルが毎秒変化する
-        try:
-            tick = await self._data_provider.get_tick_fast(symbol)
-            if tick:
-                bid = float(tick.get("bid", 0.0))
-                ask = float(tick.get("ask", 0.0))
-                mid = (bid + ask) / 2.0
-                if mid > 0:
-                    for tf_str, df in all_data.items():
-                        if df.empty:
-                            continue
-                        df = df.copy()
-                        idx = df.index[-1]
-                        df.at[idx, "close"] = mid
-                        if mid > float(df.at[idx, "high"]):
-                            df.at[idx, "high"] = mid
-                        if mid < float(df.at[idx, "low"]):
-                            df.at[idx, "low"] = mid
-                        all_data[tf_str] = df
-        except Exception:
-            pass  # tick取得失敗時は確定済みデータのみ使用
+        # リアルタイム評価: キャッシュ済みtick価格で最後のバーを更新
+        # _tick_price_update()が0.1秒毎にキャッシュするため追加API不要。
+        # インジケータ・アナリティクスは同じ1秒サイクルで同期して更新される。
+        tick = self._last_tick_data
+        if tick:
+            bid = float(tick.get("bid", 0.0))
+            ask = float(tick.get("ask", 0.0))
+            mid = (bid + ask) / 2.0
+            if mid > 0:
+                for tf_str, df in all_data.items():
+                    if df.empty:
+                        continue
+                    df = df.copy()
+                    idx = df.index[-1]
+                    df.at[idx, "close"] = mid
+                    if mid > float(df.at[idx, "high"]):
+                        df.at[idx, "high"] = mid
+                    if mid < float(df.at[idx, "low"]):
+                        df.at[idx, "low"] = mid
+                    all_data[tf_str] = df
 
         if all_data:
             all_data = self._calc_indicators(all_data)
