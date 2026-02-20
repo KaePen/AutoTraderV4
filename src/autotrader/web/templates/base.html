@@ -96,6 +96,16 @@
             <option value="AUDUSD">AUDUSD</option>
             <option value="EURJPY">EURJPY</option>
           </select>
+          <!-- 口座名 -->
+          <span id="header-account-name"
+                class="hidden text-xs tabular-nums px-2 py-1 rounded bg-gray-700/60 text-gray-300 border border-gray-600/50 cursor-pointer hover:bg-gray-600/60 transition-colors"
+                title="設定で口座名を変更できます"
+                onclick="SettingsManager.openToTab('connection')">
+          </span>
+          <!-- MT5接続ステータス -->
+          <span id="tc-mt5-badge" class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-gray-700/80 text-gray-400 border border-gray-700/50">
+            <span class="w-1.5 h-1.5 rounded-full bg-gray-500"></span>MT5
+          </span>
           <!-- 通知ベル -->
           <div id="notification-bell-container" class="relative">
             <button id="notification-bell-btn" class="relative p-2 rounded-lg hover:bg-gray-700 transition-colors" aria-label="Notifications">
@@ -116,16 +126,6 @@
               </div>
             </div>
           </div>
-          <!-- 口座名 -->
-          <span id="header-account-name"
-                class="hidden text-xs tabular-nums px-2 py-1 rounded bg-gray-700/60 text-gray-300 border border-gray-600/50 cursor-pointer hover:bg-gray-600/60 transition-colors"
-                title="設定で口座名を変更できます"
-                onclick="SettingsManager.openToTab('connection')">
-          </span>
-          <!-- MT5接続ステータス -->
-          <span id="tc-mt5-badge" class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-gray-700/80 text-gray-400 border border-gray-700/50">
-            <span class="w-1.5 h-1.5 rounded-full bg-gray-500"></span>MT5
-          </span>
           <!-- 設定ボタン -->
           <button id="settings-btn" class="p-2 rounded-lg hover:bg-gray-700 transition-colors" aria-label="Settings">
             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
