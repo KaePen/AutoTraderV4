@@ -15,6 +15,7 @@ import os
 import subprocess
 import sys
 import time
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 # Windowsコンソールの文字化け対策 + バッファリング無効化
@@ -93,6 +94,7 @@ CLAUDE_CMD = _find_claude_executable()
 # 設定
 REPO = "KaePen/AutoTraderV4"
 POLL_INTERVAL_SEC = 30
+MAX_PARALLEL_REVIEWS = 3  # 同時処理するPR数の上限
 PROJECT_DIR = Path(
     os.environ.get("PROJECT_DIR", Path(__file__).parent.parent)
 )
@@ -110,14 +112,14 @@ REVIEW_PROMPT = """
 
 以下の手順で対応してください:
 1. git fetch origin {pr_branch} でリモートブランチを取得
-2. git worktree add /tmp/pr_{pr_number}_review origin/{pr_branch} で一時ディレクトリを作成
+2. git worktree add {project_dir}/tmp/pr_{pr_number}_review origin/{pr_branch} で一時ディレクトリを作成
 3. git diff origin/main...origin/{pr_branch} で変更内容を確認
-4. /tmp/pr_{pr_number}_review で .venv/Scripts/python -m pytest tests/ -q を実行
+4. {project_dir}/tmp/pr_{pr_number}_review で .venv/Scripts/python -m pytest tests/ -q を実行
 5. コードレビュー（バグ・セキュリティ・スタイル）
 6. 問題なければ git merge --no-ff origin/{pr_branch} を {project_dir} で実行（checkout不要）
 7. git push origin main
 8. git push origin --delete {pr_branch} でリモートブランチを削除
-9. git worktree remove /tmp/pr_{pr_number}_review --force で後片付け
+9. git worktree remove {project_dir}/tmp/pr_{pr_number}_review --force で後片付け
 
 問題がある場合は worktree を削除してから処理を中断し理由を説明してください。
 """
@@ -189,34 +191,48 @@ def run_review_agent(pr: dict) -> None:
 
 
 def main() -> None:
-    """メインループ - 定期的にPRを確認してエージェントを起動する。"""
+    """メインループ - 定期的にPRを確認してエージェントを並行起動する。"""
     print(f"[INFO] PRウォッチャー起動 (間隔: {POLL_INTERVAL_SEC}秒)", flush=True)
     print(f"[INFO] 対象リポジトリ: {REPO}", flush=True)
+    print(f"[INFO] 最大並行処理数: {MAX_PARALLEL_REVIEWS}", flush=True)
     print(f"[INFO] claude: {CLAUDE_CMD}", flush=True)
     print(f"[INFO] gh: {GH_CMD}", flush=True)
     print("[INFO] 停止するには Ctrl+C を押してください", flush=True)
 
     # セッション中のみ処理済みを記憶（再起動時はリセット）
+    # submitした時点で登録するため、完了前でも重複起動しない
     processed: set[int] = set()
 
-    try:
-        while True:
-            prs = get_open_prs()
-            new_prs = [pr for pr in prs if pr["number"] not in processed]
+    with ThreadPoolExecutor(max_workers=MAX_PARALLEL_REVIEWS) as executor:
+        try:
+            while True:
+                prs = get_open_prs()
+                new_prs = [
+                    pr for pr in prs if pr["number"] not in processed
+                ]
 
-            if not new_prs:
-                print(
-                    f"[INFO] 未処理PRなし - {POLL_INTERVAL_SEC}秒後に再確認",
-                    flush=True,
-                )
-            else:
-                for pr in new_prs:
-                    run_review_agent(pr)
-                    processed.add(pr["number"])
+                if not new_prs:
+                    print(
+                        f"[INFO] 未処理PRなし - {POLL_INTERVAL_SEC}秒後に再確認",
+                        flush=True,
+                    )
+                else:
+                    for pr in new_prs:
+                        # キュー登録と同時にprocessed追加（重複防止）
+                        processed.add(pr["number"])
+                        executor.submit(run_review_agent, pr)
+                        print(
+                            f"[INFO] PR #{pr['number']} をキューに追加: "
+                            f"{pr['title']}",
+                            flush=True,
+                        )
 
-            time.sleep(POLL_INTERVAL_SEC)
-    except KeyboardInterrupt:
-        print("\n[INFO] PRウォッチャーを停止しました", flush=True)
+                time.sleep(POLL_INTERVAL_SEC)
+        except KeyboardInterrupt:
+            print(
+                "\n[INFO] PRウォッチャーを停止中 (実行中のエージェントは完了を待機)...",
+                flush=True,
+            )
 
 
 if __name__ == "__main__":
