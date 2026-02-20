@@ -1209,15 +1209,31 @@ class LiveTradingEngine:
         positions = await self._executor.get_open_positions_async(
             self._config.symbol
         )
-        if not positions:
-            self._cached_positions = []
-            return
+        current_tickets = {pos.ticket for pos in positions}
 
         # _open_tradesが未復元の場合、DBから復元（起動タイミング対応）
-        if not self._open_trades:
+        if not self._open_trades and positions:
             self._restore_open_trades_from_db(
                 [pos.ticket for pos in positions]
             )
+
+        # 外部決済（手動/SL/TP）の検出:
+        # _open_tradesにあるが現在MT5に存在しないticket
+        if self._open_trades:
+            externally_closed = (
+                set(self._open_trades.keys()) - current_tickets
+            )
+            for ticket in externally_closed:
+                logger.info(
+                    "外部決済検出（手動/SL/TP）: ticket=%d", ticket
+                )
+                self._write_close_to_db(
+                    ticket, 0.0, "external_close"
+                )
+
+        if not positions:
+            self._cached_positions = []
+            return
 
         # ATR取得（ポジション管理で使用）
         # USDJPY換算で約20pips相当を最小値とする
