@@ -27,21 +27,14 @@ const DashboardApp = {
 
   /** 初期化 */
   init() {
-    // シンボルセレクター
-    const selector = document.getElementById('symbol-selector');
-    if (selector) {
-      selector.addEventListener('change', (e) => {
-        this.symbol = e.target.value;
-        const headerSymbol = document.getElementById('header-symbol');
-        if (headerSymbol) headerSymbol.textContent = this.symbol;
-        document.getElementById('chart-title').textContent = this.symbol + ' チャート';
-        ChartManager.setSymbol(this.symbol);
-        this.renderTradingControl();
-        this.fetchAll();
-        this.fetchIndicators();
-        this.fetchSignals();
-      });
-    }
+    // カスタムシンボルドロップダウン初期化（クリック外で閉じる）
+    document.addEventListener('click', (e) => {
+      const wrapper = document.getElementById('symbol-dropdown-wrapper');
+      const list = document.getElementById('symbol-dropdown-list');
+      if (wrapper && list && !wrapper.contains(e.target)) {
+        list.classList.add('hidden');
+      }
+    });
 
     // トレード履歴トグル
     const toggle = document.getElementById('trade-history-toggle');
@@ -459,6 +452,7 @@ const DashboardApp = {
     const settingsMt5Btn = document.getElementById('settings-mt5-btn');
     const autoBtn = document.getElementById('tc-auto-trade-btn');
     const demoBtn = document.getElementById('tc-demo-mode-btn');
+    const trigger = document.getElementById('symbol-dropdown-trigger');
 
     if (settingsMt5Btn) {
       settingsMt5Btn.addEventListener('click', () => this.handleMT5Toggle());
@@ -468,6 +462,13 @@ const DashboardApp = {
     }
     if (demoBtn) {
       demoBtn.addEventListener('click', () => this.handleDemoModeToggle());
+    }
+    if (trigger) {
+      trigger.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const list = document.getElementById('symbol-dropdown-list');
+        if (list) list.classList.toggle('hidden');
+      });
     }
   },
 
@@ -568,12 +569,10 @@ const DashboardApp = {
 
   /** トレーディングコントロール描画 */
   renderTradingControl() {
-    const modeBadge = document.getElementById('tc-mode-badge');
     const mt5Badge = document.getElementById('tc-mt5-badge');
-    const mt5Dot = document.getElementById('tc-mt5-dot');
     const mt5Btn = document.getElementById('settings-mt5-btn');
     const autoBtn = document.getElementById('tc-auto-trade-btn');
-    if (!modeBadge) return;
+    if (!mt5Badge) return;
 
     const m = this.tradingMode;
     const isLive = m && m.mode === 'live';
@@ -586,40 +585,22 @@ const DashboardApp = {
     const isDemoOn = Object.prototype.hasOwnProperty.call(symbolDemoStates, this.symbol)
       ? symbolDemoStates[this.symbol] : false;
 
-    // モードバッジ（デモ/リアル × AUTO ON/OFF の4パターン）
-    if (!isConnected) {
-      modeBadge.textContent = 'STANDBY';
-      modeBadge.className = 'hidden md:inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-gray-700 text-gray-400';
-    } else if (isDemoOn && isAutoOn) {
-      modeBadge.textContent = 'デモオート';
-      modeBadge.className = 'hidden md:inline-flex items-center px-2 py-1 rounded-full text-xs font-bold bg-orange-900/40 text-orange-400 border border-orange-700/50';
-    } else if (isDemoOn) {
-      modeBadge.textContent = 'デモ';
-      modeBadge.className = 'hidden md:inline-flex items-center px-2 py-1 rounded-full text-xs font-bold bg-orange-900/40 text-orange-400 border border-orange-700/50';
-    } else if (isAutoOn) {
-      modeBadge.textContent = 'リアルオート';
-      modeBadge.className = 'hidden md:inline-flex items-center px-2 py-1 rounded-full text-xs font-bold bg-green-900/60 text-green-300 border border-green-600/60';
-    } else {
-      modeBadge.textContent = 'リアル';
-      modeBadge.className = 'hidden md:inline-flex items-center px-2 py-1 rounded-full text-xs font-bold bg-blue-900/40 text-blue-400 border border-blue-700/50';
-    }
-
-    // MT5接続バッジ
+    // MT5接続バッジ（楕円型・ロゴ横）
     if (isConnected) {
-      mt5Badge.className = 'hidden md:inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-xs font-medium bg-green-900/30 text-green-400 border border-green-800/50';
-      mt5Badge.innerHTML = '<span class="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse"></span>MT5 接続中';
+      mt5Badge.className = 'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-green-900/30 text-green-400 border border-green-800/50';
+      mt5Badge.innerHTML = '<span class="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse"></span>MT5';
     } else if (isLive) {
-      mt5Badge.className = 'hidden md:inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-xs font-medium bg-yellow-900/30 text-yellow-400 border border-yellow-800/50';
-      mt5Badge.innerHTML = '<span class="w-1.5 h-1.5 rounded-full bg-yellow-500"></span>MT5 未接続';
+      mt5Badge.className = 'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-yellow-900/30 text-yellow-400 border border-yellow-800/50';
+      mt5Badge.innerHTML = '<span class="w-1.5 h-1.5 rounded-full bg-yellow-500"></span>MT5';
     } else {
-      mt5Badge.className = 'hidden md:inline-flex items-center gap-1.5 px-2 py-1 rounded-full text-xs font-medium bg-gray-700 text-gray-400';
-      mt5Badge.innerHTML = '<span class="w-1.5 h-1.5 rounded-full bg-gray-500"></span>MT5 未接続';
+      mt5Badge.className = 'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-gray-700/80 text-gray-400';
+      mt5Badge.innerHTML = '<span class="w-1.5 h-1.5 rounded-full bg-gray-500"></span>MT5';
     }
 
     // 設定モーダル内MT5ボタン（通常サイズ）
     const btnBase = 'px-4 py-2 rounded text-sm font-semibold transition-all';
-    // ヘッダーボタン（コンパクト、md以上のみ表示）
-    const hdrBtnBase = 'hidden md:inline-flex px-3 py-1 rounded-lg text-xs font-semibold transition-all';
+    // ヘッダーボタン（四角型・コンパクト・md以上のみ表示）
+    const hdrBtnBase = 'hidden md:inline-flex items-center px-3 py-1 rounded text-xs font-semibold transition-all';
     const btnDisabled = hdrBtnBase + ' bg-gray-700 text-gray-500 cursor-not-allowed';
     if (mt5Btn) {
       if (this.tcBusy) {
@@ -680,9 +661,6 @@ const DashboardApp = {
       }
     }
 
-    // ヘッダー口座名表示
-    this.updateHeaderAccountName();
-
     // ヘッダー通貨ペアステータスチップ更新
     // スタンバイ / デモ / リアル の3状態で表示
     const pairStrip = document.getElementById('header-pair-strip');
@@ -717,6 +695,81 @@ const DashboardApp = {
         </div>`;
       }).join('');
     }
+
+    // カスタムシンボルドロップダウン更新
+    this.renderSymbolDropdown();
+
+    // ヘッダー口座名表示
+    this.updateHeaderAccountName();
+  },
+
+  /** カスタムシンボルドロップダウン描画 */
+  renderSymbolDropdown() {
+    const pairs = ['USDJPY', 'EURUSD', 'GBPUSD', 'AUDUSD', 'EURJPY'];
+    const m = this.tradingMode;
+    const isConnected = m && m.connected;
+    const symbolAutoStates = (m && m.symbol_auto_trade) || {};
+    const symbolDemoStates = (m && m.symbol_demo_mode) || {};
+
+    /** 各ペアのモード情報を返す */
+    const getPairMode = (pair) => {
+      const autoOn = Object.prototype.hasOwnProperty.call(symbolAutoStates, pair)
+        ? symbolAutoStates[pair] : false;
+      const demoOn = Object.prototype.hasOwnProperty.call(symbolDemoStates, pair)
+        ? symbolDemoStates[pair] : false;
+      if (!isConnected) return { label: '未接続', dotCls: 'bg-gray-600', textCls: 'text-gray-500', pulse: false };
+      if (autoOn && !demoOn) return { label: 'リアル', dotCls: 'bg-green-500', textCls: 'text-green-400', pulse: true };
+      if (autoOn && demoOn) return { label: 'デモ', dotCls: 'bg-orange-400', textCls: 'text-orange-400', pulse: true };
+      return { label: '待機', dotCls: 'bg-gray-500', textCls: 'text-gray-500', pulse: false };
+    };
+
+    // トリガーボタンを現在シンボルのモードで更新
+    const curMode = getPairMode(this.symbol);
+    const trigDot = document.getElementById('symbol-trigger-dot');
+    const trigLabel = document.getElementById('symbol-trigger-label');
+    const trigMode = document.getElementById('symbol-trigger-mode');
+    if (trigDot) trigDot.className = `w-1.5 h-1.5 rounded-full flex-shrink-0 ${curMode.dotCls}${curMode.pulse ? ' animate-pulse' : ''}`;
+    if (trigLabel) trigLabel.textContent = this.symbol;
+    if (trigMode) {
+      trigMode.textContent = curMode.label;
+      trigMode.className = `font-normal ml-0.5 ${curMode.textCls}`;
+    }
+
+    // ドロップダウンリストを生成
+    const list = document.getElementById('symbol-dropdown-list');
+    if (!list) return;
+    list.innerHTML = pairs.map((pair) => {
+      const mode = getPairMode(pair);
+      const isSelected = pair === this.symbol;
+      const selectedCls = isSelected ? 'bg-gray-700/60' : '';
+      const pulseAttr = mode.pulse ? ' animate-pulse' : '';
+      return `<div onclick="DashboardApp.selectSymbol('${pair}')"
+               class="flex items-center gap-2.5 px-3 py-2 hover:bg-gray-700 cursor-pointer transition-colors select-none ${selectedCls}">
+        <span class="w-2 h-2 rounded-full flex-shrink-0 ${mode.dotCls}${pulseAttr}"></span>
+        <span class="font-semibold text-xs text-gray-200 flex-1 tabular-nums">${pair}</span>
+        <span class="text-xs ${mode.textCls}">${mode.label}</span>
+        ${isSelected ? '<svg class="w-3 h-3 text-blue-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>' : '<span class="w-3 h-3 flex-shrink-0"></span>'}
+      </div>`;
+    }).join('');
+  },
+
+  /** シンボル選択（カスタムドロップダウンから呼ぶ） */
+  selectSymbol(symbol) {
+    this.symbol = symbol;
+    // 非表示ネイティブselectも同期
+    const sel = document.getElementById('symbol-selector');
+    if (sel) sel.value = symbol;
+    // chart-titleも更新
+    const chartTitle = document.getElementById('chart-title');
+    if (chartTitle) chartTitle.textContent = symbol + ' チャート';
+    ChartManager.setSymbol(symbol);
+    // ドロップダウンを閉じる
+    const list = document.getElementById('symbol-dropdown-list');
+    if (list) list.classList.add('hidden');
+    this.renderTradingControl();
+    this.fetchAll();
+    this.fetchIndicators();
+    this.fetchSignals();
   },
 
   /** シンボルごとの自動トレードON/OFFトグル */
