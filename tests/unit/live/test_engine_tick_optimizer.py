@@ -121,7 +121,7 @@ class TestEngineTickOptimizer:
     ) -> None:
         """有効モード外では使用しない"""
         engine = LiveTradingEngine(tick_enabled_config)
-        engine._bot.current_mode = "SWING"  # type: ignore[attr-defined]
+        engine._bot._last_mode = "SWING"  # type: ignore[attr-defined]
 
         result = engine._should_use_tick_optimizer()
         assert result is False
