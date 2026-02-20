@@ -442,6 +442,18 @@ const ChartManager = {
     }
   },
 
+  /**
+   * DBのUTC日時文字列をチャート時刻（MT5 GMT+2基準のUNIX秒）に変換
+   * MT5ブローカーはGMT+2でローソク足を記録するため、
+   * チャートのバー時刻と一致させるには UTC+2h が必要
+   *
+   * @param {string} dateStr - ISO 8601 日時文字列（UTC）
+   * @returns {number} チャート時刻（整数 UNIX秒）
+   */
+  _toChartTime(dateStr) {
+    return Math.floor(new Date(dateStr).getTime() / 1000) + 2 * 3600;
+  },
+
   /** シンボルに応じた価格の小数点桁数 */
   _getPricePrecision() {
     return this.symbol && this.symbol.includes('JPY') ? 3 : 5;
@@ -607,7 +619,7 @@ const ChartManager = {
         if (s.timeframe !== this.timeframe) continue;
         if (s.signal_type === 'HOLD') continue;
         markers.push({
-          time: new Date(s.created_at).getTime() / 1000,
+          time: this._toChartTime(s.created_at),
           position: s.signal_type === 'BUY' ? 'belowBar' : 'aboveBar',
           color: s.signal_type === 'BUY' ? '#60a5fa' : '#f87171',
           shape: s.signal_type === 'BUY' ? 'arrowUp' : 'arrowDown',
@@ -622,7 +634,7 @@ const ChartManager = {
         if (t.symbol !== this.symbol) continue;
 
         const isBuy = t.signal_type === 'BUY';
-        const entryTime = new Date(t.opened_at).getTime() / 1000;
+        const entryTime = this._toChartTime(t.opened_at);
 
         // エントリーマーカー
         // 買い: ▲（arrowUp）緑 / 売り: ●（circle）赤
@@ -639,7 +651,7 @@ const ChartManager = {
         // エグジットマーカー（クローズ済みのみ）
         // 買い: ▼（arrowDown）損益色 / 売り: ■（square）損益色
         if (!t.is_open && t.closed_at && t.exit_price != null) {
-          const exitTime = new Date(t.closed_at).getTime() / 1000;
+          const exitTime = this._toChartTime(t.closed_at);
           const isProfit = (t.profit_loss || 0) >= 0;
           markers.push({
             time: exitTime,
@@ -684,7 +696,7 @@ const ChartManager = {
     for (const t of this._trades) {
       if (t.symbol !== this.symbol) continue;
 
-      const entryTime = new Date(t.opened_at).getTime() / 1000;
+      const entryTime = this._toChartTime(t.opened_at);
       if (entryTime <= 0) continue;
 
       let exitTime, exitPrice;
@@ -696,7 +708,7 @@ const ChartManager = {
         exitPrice = this._lastBarData.close;
       } else {
         if (!t.closed_at || t.exit_price == null) continue;
-        exitTime = new Date(t.closed_at).getTime() / 1000;
+        exitTime = this._toChartTime(t.closed_at);
         exitPrice = t.exit_price;
       }
 
