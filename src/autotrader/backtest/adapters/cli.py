@@ -44,6 +44,9 @@ class CLIAdapter:
         # マルチモードオプション
         use_multi_mode = getattr(args, "multi_mode", False)
 
+        # UNIVERSALモードオプション
+        use_universal_mode = getattr(args, "universal", False)
+
         return ExecutorConfig(
             start_year=start_year,
             end_year=end_year,
@@ -52,6 +55,7 @@ class CLIAdapter:
             symbol=args.symbol,
             data_dir=args.data_dir,
             use_short_timeframe=use_short_tf,
+            use_universal_mode=use_universal_mode,
             use_multi_mode=use_multi_mode,
             parallel_years=parallel_years,
             max_workers=max_workers,
@@ -128,6 +132,11 @@ class CLIAdapter:
             "--no-short-tf",
             action="store_true",
             help="短い時間足を使用しない（M15基準）",
+        )
+        parser.add_argument(
+            "--universal",
+            action="store_true",
+            help="UNIVERSALモードを有効化（M1〜D1全TFを動的評価）",
         )
         parser.add_argument(
             "--multi-mode",

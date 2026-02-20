@@ -131,8 +131,10 @@ class BacktestRunner:
         self.config = config or BacktestConfig()
         self._h1_df: pd.DataFrame | None = None
         self._h4_df: pd.DataFrame | None = None
+        self._h8_df: pd.DataFrame | None = None
         self._d1_df: pd.DataFrame | None = None
         self._m15_df: pd.DataFrame | None = None
+        self._m30_df: pd.DataFrame | None = None
         self._m1_df: pd.DataFrame | None = None
         self._m5_df: pd.DataFrame | None = None
         self._cancel_callback: Callable[[], bool] | None = None
@@ -694,9 +696,17 @@ class BacktestRunner:
         bot.state.equity = self.config.initial_balance
         bot.state.peak_equity = self.config.initial_balance
 
-        # 全時間足データをロード（M1/M5はenable_scalpingまたはuse_m1で有効化）
-        include_short_tf = use_m1 or enable_scalping
-        market_data = self._load_all_timeframes(include_m1=include_short_tf)
+        # UNIVERSALモードまたはbot_configにM1/M5が含まれる場合は自動でロード。
+        # enable_scalping/use_m1は後方互換性のため維持するが、
+        # UNIVERSALモードでは明示指定不要。
+        _short_tfs = {"M1", "M5"}
+        _needs_short_tf = (
+            use_m1
+            or enable_scalping
+            or getattr(bot_config, "use_universal_mode", False)
+            or bool(set(bot_config.timeframes) & _short_tfs)
+        )
+        market_data = self._load_all_timeframes(include_m1=_needs_short_tf)
         bot.set_market_data(market_data)
 
         # 並列マルチTFモードの場合
@@ -783,7 +793,8 @@ class BacktestRunner:
         """全時間足データをロード
 
         Args:
-            include_m1: M1/M5データを含める（メモリ使用量増加）
+            include_m1: M1/M5データを含める（メモリ使用量増加）。
+                UNIVERSALモードでは自動的にTrueになる。
 
         Returns:
             dict[str, pd.DataFrame]: 時間足別データフレーム
@@ -791,56 +802,58 @@ class BacktestRunner:
         loader = DataLoader(self.data_dir)
         data = {}
 
-        # タイムフレームリスト（M1/M5はオプション）
+        # M30・H8はDEFAULT_TIMEFRAMESに含まれるため常にロード。
+        # M1・M5はUNIVERSALモードやenable_scalping時のみロード。
         if include_m1:
-            timeframes_to_load = ["M1", "M5", "M15", "H1", "H4", "D1"]
+            timeframes_to_load = [
+                "M1", "M5", "M15", "M30", "H1", "H4", "H8", "D1"
+            ]
         else:
-            timeframes_to_load = ["M15", "H1", "H4", "D1"]
+            timeframes_to_load = ["M15", "M30", "H1", "H4", "H8", "D1"]
+
+        # インスタンス変数との対応マップ
+        _tf_attr_map = {
+            "M1": "_m1_df",
+            "M5": "_m5_df",
+            "M30": "_m30_df",
+            "H8": "_h8_df",
+        }
 
         for tf in timeframes_to_load:
             # ワイルドカードでファイル検索
-            pattern = f"USDJPY_{tf}*.csv"
+            pattern = f"USDJPY_{tf}_*.csv"
             tf_files = list(self.data_dir.glob(pattern))
-            
+
+            if not tf_files:
+                # ワイルドカードなしも試行（後方互換性）
+                tf_path = self.data_dir / f"USDJPY_{tf}.csv"
+                tf_files = [tf_path] if tf_path.exists() else []
+
             if tf_files:
-                # 最初に見つかったファイルを使用
                 tf_path = sorted(tf_files)[0]
                 df = loader.load_csv(tf_path)
                 if df is not None:
-                    # インジケータ計算
                     df = self._calculate_indicators(df)
                     data[tf] = df
                     # インスタンス変数にも保存
-                    if tf == "M1":
-                        self._m1_df = df
-                    elif tf == "M5":
-                        self._m5_df = df
-            else:
-                # 完全一致も試行（後方互換性）
-                tf_path = self.data_dir / f"USDJPY_{tf}.csv"
-                if tf_path.exists():
-                    df = loader.load_csv(tf_path)
-                    if df is not None:
-                        df = self._calculate_indicators(df)
-                        data[tf] = df
-                        if tf == "M1":
-                            self._m1_df = df
-                        elif tf == "M5":
-                            self._m5_df = df
+                    attr = _tf_attr_map.get(tf)
+                    if attr:
+                        setattr(self, attr, df)
 
-        # 既にロード済みのデータを使用
-        if self._h1_df is not None:
-            data["H1"] = self._h1_df
-        if self._h4_df is not None:
-            data["H4"] = self._h4_df
-        if self._d1_df is not None:
-            data["D1"] = self._d1_df
-        if self._m15_df is not None:
-            data["M15"] = self._m15_df
-        if self._m1_df is not None:
-            data["M1"] = self._m1_df
-        if self._m5_df is not None:
-            data["M5"] = self._m5_df
+        # 既にロード済みのデータをマージ（load_data()で先にロードした分）
+        for tf, attr in [
+            ("H1", "_h1_df"),
+            ("H4", "_h4_df"),
+            ("H8", "_h8_df"),
+            ("D1", "_d1_df"),
+            ("M15", "_m15_df"),
+            ("M30", "_m30_df"),
+            ("M1", "_m1_df"),
+            ("M5", "_m5_df"),
+        ]:
+            df = getattr(self, attr, None)
+            if df is not None and tf not in data:
+                data[tf] = df
 
         return data
 

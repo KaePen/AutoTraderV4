@@ -56,6 +56,7 @@ class ExecutorConfig:
     symbol: str = "USDJPY"
     data_dir: str = "data/csv"
     use_short_timeframe: bool = True
+    use_universal_mode: bool = False
     use_multi_mode: bool = False
     parallel_years: bool = True
     max_workers: int | None = None
@@ -218,6 +219,11 @@ class BacktestExecutor:
         """
         from autotrader.decision.unified import UnifiedBotConfig
 
+        if self._config.use_universal_mode:
+            # UNIVERSALモード: M1〜D1全TFを評価
+            return UnifiedBotConfig(
+                use_universal_mode=True,
+            )
         return UnifiedBotConfig(
             timeframes=["M15", "H1", "H4", "D1"],
         )
