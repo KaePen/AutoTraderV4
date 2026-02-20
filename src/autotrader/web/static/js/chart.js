@@ -14,9 +14,6 @@ const ChartManager = {
   isLoading: false,
   resizeObserver: null,
   rsiResizeObserver: null,
-  // 自動更新
-  _refreshTimer: null,
-  _refreshMs: 0, // 0=無効（price_updateで駆動するため）
   // 最新バーキャッシュ（price_update高速更新用）
   _lastBarData: null,
   // 指標シリーズ（オーバーレイ）
@@ -49,15 +46,10 @@ const ChartManager = {
     // localStorageから設定を復元
     const savedTf = localStorage.getItem('chart_timeframe');
     if (savedTf) this.timeframe = savedTf;
-    const savedMs = localStorage.getItem('chart_refresh_ms');
-    if (savedMs !== null) this._refreshMs = parseInt(savedMs, 10);
-
     this.createChart();
     this.fetchCandles();
     this.renderTimeframeButtons();
-    this.renderRefreshSelector();
     this.renderIndicatorToggles();
-    this._scheduleRefresh();
   },
 
   /** チャート作成 */
@@ -299,38 +291,6 @@ const ChartManager = {
         localStorage.setItem('chart_timeframe', this.timeframe);
         this.renderTimeframeButtons();
         this.fetchCandles();
-        this._scheduleRefresh();
-      });
-    });
-  },
-
-  /** 自動更新セレクター描画 */
-  renderRefreshSelector() {
-    const container = document.getElementById('chart-refresh-selector');
-    if (!container) return;
-
-    const options = [
-      { label: 'OFF', ms: 0 },
-      { label: '1s', ms: 1000 },
-      { label: '5s', ms: 5000 },
-      { label: '10s', ms: 10000 },
-      { label: '30s', ms: 30000 },
-    ];
-
-    container.innerHTML = options.map((o) => {
-      const active = o.ms === this._refreshMs;
-      const cls = active
-        ? 'bg-cyan-700 text-cyan-200'
-        : 'bg-gray-700 text-gray-400 hover:bg-gray-600 hover:text-gray-200';
-      return `<button data-ms="${o.ms}" class="px-2 py-1 text-xs rounded transition-colors ${cls}">${o.label}</button>`;
-    }).join('');
-
-    container.querySelectorAll('button[data-ms]').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        this._refreshMs = parseInt(btn.dataset.ms, 10);
-        localStorage.setItem('chart_refresh_ms', this._refreshMs);
-        this.renderRefreshSelector();
-        this._scheduleRefresh();
       });
     });
   },
@@ -467,58 +427,6 @@ const ChartManager = {
   /** シンボルに応じた価格の小数点桁数 */
   _getPricePrecision() {
     return this.symbol && this.symbol.includes('JPY') ? 3 : 5;
-  },
-
-  /** 自動更新スケジュール */
-  _scheduleRefresh() {
-    if (this._refreshTimer) {
-      clearInterval(this._refreshTimer);
-      this._refreshTimer = null;
-    }
-    if (this._refreshMs > 0) {
-      this._refreshTimer = setInterval(
-        () => this.fetchLatestCandle(),
-        this._refreshMs
-      );
-    }
-  },
-
-  /** 最新ローソク足だけ軽量更新（差分更新） */
-  async fetchLatestCandle() {
-    if (this.isLoading || !this.candleSeries) return;
-    try {
-      const data = await getCandles(this.symbol, this.timeframe, 2);
-      if (!data || data.length === 0) return;
-
-      const latest = data[data.length - 1];
-      const latestTime = Math.floor(
-        new Date(latest.time).getTime() / 1000
-      );
-
-      try {
-        const bar = {
-          time: latestTime,
-          open: latest.open,
-          high: latest.high,
-          low: latest.low,
-          close: latest.close,
-        };
-        this.candleSeries.update(bar);
-        // 最新バーをキャッシュ更新
-        this._lastBarData = { ...bar };
-        if (this.volumeSeries) {
-          this.volumeSeries.update({
-            time: latestTime,
-            value: latest.volume || 0,
-            color: latest.close >= latest.open ? '#22c55e28' : '#ef444428',
-          });
-        }
-      } catch (_updateErr) {
-        await this.fetchCandles();
-      }
-    } catch (e) {
-      // ネットワークエラー等は無視
-    }
   },
 
   /** ローソク足取得（全件） */
@@ -666,7 +574,6 @@ const ChartManager = {
   setSymbol(symbol) {
     this.symbol = symbol;
     this.fetchCandles();
-    this._scheduleRefresh();
   },
 
   /** ローディング表示 */
@@ -679,10 +586,6 @@ const ChartManager = {
 
   /** 破棄 */
   destroy() {
-    if (this._refreshTimer) {
-      clearInterval(this._refreshTimer);
-      this._refreshTimer = null;
-    }
     if (this.resizeObserver) {
       this.resizeObserver.disconnect();
     }
