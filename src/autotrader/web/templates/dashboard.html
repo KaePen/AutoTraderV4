@@ -43,10 +43,10 @@
     <div class="card skeleton-card animate-pulse"><div class="h-3 skeleton w-16 mb-2"></div><div class="h-6 skeleton w-24"></div></div>
   </div>
 
-  <!-- ライブアナリティクス + シグナル (横並び) -->
-  <div class="flex flex-col lg:flex-row gap-4">
-    <!-- 分析パネル (ライブ時のみ表示) -->
-    <div id="analysis-panel" class="card border border-gray-700 hidden lg:flex-1">
+  <!-- ライブアナリティクス + シグナル (横並び、チャートと同じ2/3:1/3比率) -->
+  <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+    <!-- 分析パネル (ライブ時のみ表示、チャートと同じ2/3幅) -->
+    <div id="analysis-panel" class="card border border-gray-700 hidden lg:col-span-2">
       <!-- エンジン/接続状態バナー -->
       <p id="ap-engine-status" class="text-xs text-gray-500 mb-2"></p>
       <div class="flex items-center justify-between mb-3">
@@ -90,8 +90,8 @@
       <p id="ap-rationale" class="text-xs text-gray-400 bg-gray-800/50 rounded px-3 py-2 line-clamp-2"></p>
     </div>
 
-    <!-- シグナルパネル -->
-    <div class="card lg:flex-1" id="signal-panel">
+    <!-- シグナルパネル (バックテスト時: 全幅、ライブ時: 1/3幅) -->
+    <div class="card lg:col-span-3" id="signal-panel">
       <div class="flex items-center justify-between mb-3">
         <h2 class="text-sm font-semibold text-gray-300 uppercase tracking-wider">Signals</h2>
         <span id="signal-count" class="text-xs text-gray-500">0 件</span>
@@ -162,7 +162,7 @@
           <h2 class="text-sm font-semibold text-gray-300 uppercase tracking-wider">Positions</h2>
           <span id="position-count" class="text-xs text-gray-500">no open</span>
         </div>
-        <div id="position-list">
+        <div id="position-list" class="max-h-44 overflow-y-auto">
           <div class="flex items-center justify-center h-16 text-gray-500 text-sm">ポジションなし</div>
         </div>
       </div>
