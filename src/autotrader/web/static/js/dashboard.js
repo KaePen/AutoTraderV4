@@ -75,6 +75,8 @@ const DashboardApp = {
     setInterval(() => this.fetchTradingMode(), 5000);
     // 分析ポーリング（1秒 = エンジンtickと同期）
     setInterval(() => this.fetchAnalysis(), 1000);
+    // ポジション・トレードポーリング（2秒 = MT5更新と同期）
+    setInterval(() => this.fetchPositionsAndTrades(), 2000);
 
     // シグナルWebSocket
     this.signalWs = createWebSocketClient('/ws/signals');
@@ -849,49 +851,59 @@ const DashboardApp = {
 
   positionCard(p) {
     const isProfit = p.unrealized_pnl >= 0;
-    const borderColor = p.signal_type === 'BUY' ? 'border-l-green-500' : 'border-l-red-500';
-    const dirColor = p.signal_type === 'BUY' ? 'text-green-400' : 'text-red-400';
+    const isBuy = p.signal_type === 'BUY';
+    const borderColor = isBuy ? 'border-l-green-500' : 'border-l-red-500';
+    const dirBg = isBuy ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400';
     const pnlColor = isProfit ? 'text-green-400' : 'text-red-400';
+    const pnlSign = isProfit ? '+' : '';
 
+    // SL/TPプログレスバー
     let progressHtml = '';
-    if (p.stop_loss !== null && p.take_profit !== null) {
+    if (p.stop_loss != null && p.take_profit != null) {
       const sl = p.stop_loss, tp = p.take_profit;
       const range = Math.abs(tp - sl);
       if (range > 0) {
-        const currentPct = Math.max(0, Math.min(100, ((p.current_price - Math.min(sl, tp)) / range) * 100));
-        const isBuy = p.signal_type === 'BUY';
-        const displayPct = isBuy ? currentPct : 100 - currentPct;
+        const rawPct = (p.current_price - Math.min(sl, tp)) / range * 100;
+        const clampedPct = Math.max(0, Math.min(100, rawPct));
+        const displayPct = isBuy ? clampedPct : 100 - clampedPct;
+        const slLabel = sl.toFixed(3);
+        const tpLabel = tp.toFixed(3);
         progressHtml = `
           <div class="mb-2">
             <div class="w-full h-1.5 bg-gray-700 rounded-full relative overflow-hidden">
-              <div class="absolute top-0 left-0 h-full bg-red-500/30 rounded-l-full" style="width:${isBuy ? 30 : 70}%"></div>
-              <div class="absolute top-0 right-0 h-full bg-green-500/30 rounded-r-full" style="width:${isBuy ? 30 : 30}%"></div>
-              <div class="absolute top-0 w-0.5 h-full ${pnlColor.replace('text-', 'bg-')}" style="left:${displayPct}%"></div>
+              <div class="absolute inset-y-0 left-0 bg-red-500/25 rounded-l-full" style="width:${isBuy ? 25 : 75}%"></div>
+              <div class="absolute inset-y-0 right-0 bg-green-500/25 rounded-r-full" style="width:${isBuy ? 25 : 25}%"></div>
+              <div class="absolute inset-y-0 w-px ${pnlColor.replace('text-', 'bg-')}" style="left:${displayPct}%"></div>
             </div>
             <div class="flex justify-between text-[10px] text-gray-600 mt-0.5">
-              <span>SL ${p.stop_loss.toFixed(3)}</span>
-              <span>TP ${p.take_profit.toFixed(3)}</span>
+              <span>SL ${slLabel}</span><span>TP ${tpLabel}</span>
             </div>
           </div>`;
       }
     }
 
     return `
-      <div class="border-l-2 ${borderColor} bg-gray-800/50 rounded-r-lg p-3">
-        <div class="flex items-center justify-between mb-2">
-          <div class="flex items-center gap-2">
-            <span class="text-sm font-bold ${dirColor}">${p.signal_type}</span>
-            <span class="text-xs text-gray-500">${p.symbol}</span>
-            <span class="text-xs text-gray-600">${p.volume.toFixed(2)} lot</span>
+      <div class="border-l-2 ${borderColor} bg-gray-800/60 rounded-r-lg px-3 py-2.5">
+        <!-- 上段: 方向 + PnL -->
+        <div class="flex items-center justify-between mb-1.5">
+          <div class="flex items-center gap-1.5">
+            <span class="text-[11px] font-bold px-1.5 py-0.5 rounded ${dirBg}">${p.signal_type}</span>
+            <span class="text-[11px] text-gray-400">${p.symbol}</span>
+            <span class="text-[10px] text-gray-600">${p.volume.toFixed(2)}lot</span>
           </div>
-          <span class="text-sm font-bold tabular-nums ${pnlColor}">${isProfit ? '+' : ''}${this.fmtCurrency(p.unrealized_pnl)}</span>
+          <div class="text-right">
+            <div class="text-base font-bold tabular-nums leading-none ${pnlColor}">${pnlSign}${this.fmtCurrency(p.unrealized_pnl)}</div>
+            <div class="text-[10px] tabular-nums ${pnlColor} opacity-80">${pnlSign}${p.unrealized_pnl_pips.toFixed(1)} pips</div>
+          </div>
         </div>
-        <div class="flex items-center gap-4 text-xs tabular-nums mb-2">
-          <span class="text-gray-400">Entry ${p.entry_price.toFixed(3)}</span>
-          <span class="text-gray-300 font-medium">Now ${p.current_price.toFixed(3)}</span>
-          <span class="${pnlColor}">${p.unrealized_pnl_pips >= 0 ? '+' : ''}${p.unrealized_pnl_pips.toFixed(1)} pips</span>
+        <!-- 中段: 価格 -->
+        <div class="flex items-center gap-3 text-[11px] tabular-nums mb-2">
+          <span class="text-gray-500">Entry <span class="text-gray-400">${p.entry_price.toFixed(3)}</span></span>
+          <span class="text-gray-600">→</span>
+          <span class="text-gray-300 font-semibold">${p.current_price.toFixed(3)}</span>
         </div>
         ${progressHtml}
+        <!-- 下段: 保有時間 -->
         <div class="text-[10px] text-gray-600">${this.fmtHoldTime(p.opened_at)}</div>
       </div>`;
   },
