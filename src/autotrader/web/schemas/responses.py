@@ -175,6 +175,7 @@ class PositionResponse(BaseModel):
 
     position_id: str
     ticket: int = 0
+    trade_id: str = ""
     symbol: str
     signal_type: SignalType
     volume: float
