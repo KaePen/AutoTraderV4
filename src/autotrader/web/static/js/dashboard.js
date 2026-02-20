@@ -95,7 +95,6 @@ const DashboardApp = {
           this.currentSignals.unshift(signal);
           if (this.currentSignals.length > 3) this.currentSignals.length = 3;
         }
-        this.renderSignals();
         ChartManager.setSignals(this.currentSignals);
       }
     });
@@ -857,55 +856,6 @@ const DashboardApp = {
         <p class="text-lg font-bold tabular-nums ${valueColors[variant]}">${value}</p>
         ${hint ? `<p class="text-[10px] text-gray-600 tabular-nums">${hint}</p>` : ''}
         ${sub ? `<p class="text-xs text-gray-500 mt-0.5 tabular-nums">${sub}</p>` : ''}
-      </div>`;
-  },
-
-  /** シグナル描画 */
-  renderSignals() {
-    const listEl = document.getElementById('signal-list');
-    const countEl = document.getElementById('signal-count');
-    if (!listEl) return;
-
-    // 最大3件に制限
-    const signals = this.currentSignals.slice(0, 3);
-    if (countEl) countEl.textContent = signals.length + ' 件';
-
-    if (signals.length === 0) {
-      listEl.innerHTML = '<div class="flex items-center justify-center h-12 text-gray-500 text-sm">シグナル待機中...</div>';
-      return;
-    }
-
-    let html = '<div class="space-y-1">';
-    signals.forEach((s) => { html += this.signalCard(s); });
-    html += '</div>';
-    listEl.innerHTML = html;
-  },
-
-  signalCard(s) {
-    const borderColors = { BUY: 'border-l-green-500', SELL: 'border-l-red-500', HOLD: 'border-l-gray-600' };
-    const bgColors = { BUY: 'bg-green-950/30', SELL: 'bg-red-950/30', HOLD: 'bg-gray-800/50' };
-    const dirColors = { BUY: 'text-green-400', SELL: 'text-red-400', HOLD: 'text-gray-500' };
-    const confColors = { HIGH: 'bg-green-900/40 text-green-400 border-green-700/50', MEDIUM: 'bg-yellow-900/40 text-yellow-400 border-yellow-700/50', LOW: 'bg-red-900/40 text-red-400 border-red-700/50' };
-    const barColor = s.confidence >= 0.7 ? 'bg-green-500' : s.confidence >= 0.4 ? 'bg-yellow-500' : 'bg-red-500';
-
-    const slTp = [
-      s.stop_loss !== null ? `<span class="text-red-400/70">SL ${s.stop_loss.toFixed(3)}</span>` : '',
-      s.take_profit !== null ? `<span class="text-green-400/70">TP ${s.take_profit.toFixed(3)}</span>` : '',
-    ].filter(Boolean).join(' ');
-
-    return `
-      <div class="border-l-2 ${borderColors[s.signal_type]} ${bgColors[s.signal_type]} rounded-r px-2 py-1.5">
-        <div class="flex items-center gap-2">
-          <span class="text-xs font-bold ${dirColors[s.signal_type]}">${s.signal_type}</span>
-          <span class="text-[10px] text-gray-500">${s.timeframe}</span>
-          <div class="flex-1 h-1 bg-gray-700 rounded-full overflow-hidden mx-1">
-            <div class="h-full rounded-full ${barColor}" style="width:${s.confidence * 100}%"></div>
-          </div>
-          <span class="inline-flex items-center px-1.5 py-0 rounded text-[10px] font-medium border ${confColors[s.confidence_level] || ''}">${(s.confidence * 100).toFixed(0)}%</span>
-          <span class="text-[10px] text-gray-600 tabular-nums">${this.fmtTime(s.created_at)}</span>
-        </div>
-        ${s.reasoning ? `<p class="text-[10px] text-gray-500 mt-0.5 truncate">${this.escapeHtml(s.reasoning)}</p>` : ''}
-        ${slTp ? `<div class="flex items-center gap-2 text-[10px] tabular-nums mt-0.5">${slTp}</div>` : ''}
       </div>`;
   },
 
