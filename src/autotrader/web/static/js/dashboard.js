@@ -306,35 +306,34 @@ const DashboardApp = {
 
       // ペナルティ内訳（バー可視化）
       const pb = a.penalty_breakdown || {};
-      const penaltyItems = Object.entries(pb)
-        .filter(([, v]) => v > 0)
-        .sort((x, y) => y[1] - x[1]);
       const penaltyLabel = {
         high_spread: 'SPR', off_hours: 'HRS',
         low_volatility: 'VOL↓', high_volatility: 'VOL↑',
         recent_loss: 'LOSS', mtf_conflict: 'MTF', weak_trend: 'TRD',
       };
-      const penaltyHtml = penaltyItems.length > 0
-        ? `<div class="mb-2 border border-red-900/30 rounded px-2 py-1.5 bg-red-950/10">
-            <div class="flex items-center justify-between text-[10px] mb-1">
-              <span class="text-gray-500">Penalties</span>
-              <span class="text-red-400 font-bold tabular-nums">-${(a.penalty_total || 0).toFixed(2)} total</span>
-            </div>
-            <div class="space-y-0.5">
-              ${penaltyItems.map(([k, v]) => {
-                const lbl = penaltyLabel[k] || k.slice(0, 4).toUpperCase();
-                const w = Math.min(100, Math.round(v / 0.25 * 100));
-                return `<div class="flex items-center gap-1">
-                  <span class="text-[8px] text-gray-500 w-7 text-right flex-shrink-0">${lbl}</span>
-                  <div class="flex-1 h-1 bg-gray-700/40 rounded-full overflow-hidden">
-                    <div class="bg-red-500/60 h-full rounded-full" style="width:${w}%"></div>
-                  </div>
-                  <span class="text-[9px] tabular-nums text-red-400 w-8 text-right flex-shrink-0">-${v.toFixed(2)}</span>
-                </div>`;
-              }).join('')}
-            </div>
-          </div>`
-        : '';
+      // 全ペナルティ項目を固定順で表示（値0も含む）
+      const penaltyItems = Object.keys(penaltyLabel).map(k => [k, pb[k] || 0]);
+      const penaltyHtml = `<div class="mb-2 border border-red-900/30 rounded px-2 py-1.5 bg-red-950/10">
+          <div class="flex items-center justify-between text-[10px] mb-1">
+            <span class="text-gray-500">Penalties</span>
+            <span class="text-red-400 font-bold tabular-nums">-${(a.penalty_total || 0).toFixed(2)} total</span>
+          </div>
+          <div class="space-y-0.5">
+            ${penaltyItems.map(([k, v]) => {
+              const lbl = penaltyLabel[k];
+              const w = Math.min(100, Math.round(v / 0.25 * 100));
+              const valText = v > 0 ? `-${v.toFixed(2)}` : '0';
+              const valColor = v > 0 ? 'text-red-400' : 'text-gray-600';
+              return `<div class="flex items-center gap-1">
+                <span class="text-[8px] text-gray-500 w-7 text-right flex-shrink-0">${lbl}</span>
+                <div class="flex-1 h-1 bg-gray-700/40 rounded-full overflow-hidden">
+                  <div class="bg-red-500/60 h-full rounded-full" style="width:${w}%"></div>
+                </div>
+                <span class="text-[9px] tabular-nums ${valColor} w-8 text-right flex-shrink-0">${valText}</span>
+              </div>`;
+            }).join('')}
+          </div>
+        </div>`;
 
       // 投票サマリーバー + ペナルティ
       const summaryHtml = `
