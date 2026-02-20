@@ -116,7 +116,8 @@ REVIEW_PROMPT = """
 5. コードレビュー（バグ・セキュリティ・スタイル）
 6. 問題なければ git merge --no-ff origin/{pr_branch} を {project_dir} で実行（checkout不要）
 7. git push origin main
-8. git worktree remove /tmp/pr_{pr_number}_review --force で後片付け
+8. git push origin --delete {pr_branch} でリモートブランチを削除
+9. git worktree remove /tmp/pr_{pr_number}_review --force で後片付け
 
 問題がある場合は worktree を削除してから処理を中断し理由を説明してください。
 """
