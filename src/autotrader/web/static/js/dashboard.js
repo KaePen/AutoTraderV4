@@ -832,14 +832,20 @@ const DashboardApp = {
     }
   },
 
-  /** 指標取得 */
+  /** 指標取得（全TF並列取得してキャッシュ） */
   async fetchIndicators() {
-    const tf = this.indicatorTf;
-    try {
-      this.indicators = await getIndicators(this.symbol, tf);
-    } catch (e) {
-      this.indicators = null;
+    const tfs = ['M1', 'M5', 'M15', 'M30', 'H1', 'H4', 'H8', 'D1'];
+    const results = await Promise.allSettled(
+      tfs.map((tf) =>
+        getIndicators(this.symbol, tf).then((data) => ({ tf, data }))
+      )
+    );
+    for (const r of results) {
+      if (r.status === 'fulfilled' && r.value.data) {
+        this.indicatorsAllTf[r.value.tf] = r.value.data;
+      }
     }
+    this.indicators = this.indicatorsAllTf[this.indicatorTf] || null;
     this.renderIndicators();
   },
 
@@ -1087,12 +1093,12 @@ const DashboardApp = {
       btn.addEventListener('click', () => {
         this.indicatorTf = btn.dataset.tf;
         localStorage.setItem('indicator_tf', this.indicatorTf);
-        // キャッシュ済みデータを即時表示（WS接続中はAPI不要）
+        // キャッシュ済みデータを即時表示
         this.indicators = this.indicatorsAllTf[this.indicatorTf] || null;
         this.renderIndicatorTabs();
         this.renderIndicators();
-        // WS未接続時はAPIフォールバック
-        if (!this.wsActive) this.fetchIndicators();
+        // キャッシュ未取得またはWS未接続時は全TF再取得
+        if (!this.indicators || !this.wsActive) this.fetchIndicators();
       });
     });
   },
