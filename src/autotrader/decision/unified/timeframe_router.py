@@ -99,7 +99,7 @@ def _tf_to_minutes(tf: str) -> int:
     """
     mapping = {
         "M1": 1, "M5": 5, "M15": 15, "M30": 30,
-        "H1": 60, "H4": 240, "D1": 1440, "W1": 10080,
+        "H1": 60, "H4": 240, "H8": 480, "D1": 1440, "W1": 10080,
     }
     return mapping.get(tf, 60)
 
@@ -111,7 +111,7 @@ class TimeframeRouter:
     """
 
     # 標準のTF階層
-    TF_HIERARCHY = ["M1", "M5", "M15", "M30", "H1", "H4", "D1", "W1"]
+    TF_HIERARCHY = ["M1", "M5", "M15", "M30", "H1", "H4", "H8", "D1", "W1"]
 
     def __init__(self) -> None:
         """初期化"""
