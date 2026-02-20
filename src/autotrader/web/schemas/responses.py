@@ -210,6 +210,7 @@ class TradeResponse(BaseModel):
 
     trade_id: str
     ticket: int = 0
+    is_open: bool = False
     symbol: str
     signal_type: SignalType
     volume: float

@@ -142,14 +142,12 @@ class MarketService:
         Returns:
             list[TradeResponse]: トレード履歴
         """
-        query = self._db.query(TradeRecord).filter(
-            TradeRecord.is_open.is_(False)
-        )
+        query = self._db.query(TradeRecord)
         if symbol:
             query = query.filter(TradeRecord.symbol == symbol)
 
         trades = (
-            query.order_by(TradeRecord.closed_at.desc())
+            query.order_by(TradeRecord.opened_at.desc())
             .offset(offset)
             .limit(limit)
             .all()
@@ -158,6 +156,7 @@ class MarketService:
         return [
             TradeResponse(
                 trade_id=t.trade_id,
+                is_open=t.is_open,
                 symbol=t.symbol,
                 signal_type=t.signal_type,
                 volume=t.volume,
