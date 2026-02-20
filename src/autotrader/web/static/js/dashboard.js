@@ -830,23 +830,19 @@ const DashboardApp = {
     const bgCls = isBuy ? 'bg-green-500/5' : 'bg-red-500/5';
     const barCls = isBuy ? 'bg-green-500' : 'bg-red-500';
     const confPct = Math.round((sig.confidence || 0) * 100);
-    const confLabel = sig.confidence_level || '';
 
     return `
-      <div class="flex-shrink-0 w-44 rounded-lg border ${borderCls} ${bgCls} px-2.5 py-2">
-        <div class="flex items-center gap-1.5 mb-1.5">
+      <div class="flex-shrink-0 w-36 rounded-lg border ${borderCls} ${bgCls} px-2 py-1.5">
+        <div class="flex items-center gap-1.5 mb-1">
           <span class="text-[10px] font-bold px-1.5 py-0.5 rounded ${dirBg}">${sig.signal_type}</span>
           <span class="text-xs font-bold text-gray-200">${symbol}</span>
-          <span class="text-[10px] text-gray-500">${sig.timeframe || ''}</span>
         </div>
-        <div class="flex items-center gap-1.5 mb-1">
+        <div class="flex items-center gap-1.5">
           <div class="flex-1 h-1 bg-gray-700 rounded-full overflow-hidden">
             <div class="h-full ${barCls} rounded-full transition-all" style="width:${confPct}%"></div>
           </div>
           <span class="text-[10px] text-gray-300 tabular-nums font-medium">${confPct}%</span>
         </div>
-        ${confLabel ? `<span class="text-[9px] text-gray-500 uppercase tracking-wider">${confLabel}</span>` : ''}
-        ${sig.reasoning ? `<p class="text-[10px] text-gray-500 truncate mt-0.5">${this.escapeHtml(sig.reasoning)}</p>` : ''}
       </div>`;
   },
 
