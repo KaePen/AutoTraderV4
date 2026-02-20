@@ -181,6 +181,8 @@ class UnifiedBotConfig:
     demo_consensus_scalping_threshold: float = 1.0
     demo_consensus_day_trade_threshold: float = 1.5
     demo_consensus_swing_threshold: float = 1.5
+    # UNIVERSALモード（動的TF選択）
+    use_universal_mode: bool = False
 
     def get_evaluator_config(self, timeframe: str) -> EvaluatorConfig:
         """時間足別評価器設定を取得

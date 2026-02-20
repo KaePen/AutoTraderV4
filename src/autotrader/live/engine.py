@@ -1040,14 +1040,14 @@ class LiveTradingEngine:
             ticket, entry_price, sl_price, tp_price,
         )
 
-        # signal.modeから実際のモードを解決（デフォルト: DAY_TRADE）
-        mode = TradingStrategyMode.DAY_TRADE
+        # signal.modeから実際のモードを解決（デフォルト: UNIVERSAL）
+        mode = TradingStrategyMode.UNIVERSAL
         if signal.mode:
             try:
                 mode = TradingStrategyMode(signal.mode.upper())
             except ValueError:
                 logger.warning(
-                    "不明なモード: %s、DAY_TRADEを使用",
+                    "不明なモード: %s、UNIVERSALを使用",
                     signal.mode,
                 )
 
@@ -1522,7 +1522,7 @@ class LiveTradingEngine:
                 from autotrader.core.enums import TradingStrategyMode
 
                 plan = TradingPlan(
-                    mode=TradingStrategyMode.DAY_TRADE,
+                    mode=TradingStrategyMode.UNIVERSAL,
                     primary_tf="M15",
                     entry_tf="M15",
                     confirm_tfs=["H1", "H4"],

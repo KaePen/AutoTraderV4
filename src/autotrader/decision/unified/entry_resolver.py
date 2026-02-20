@@ -47,6 +47,12 @@ MODE_ENTRY_CONFIGS: dict[TradingStrategyMode, EntryConfig] = {
         confirm_tfs=["D1"],
         min_score_threshold=5.0,
     ),
+    TradingStrategyMode.UNIVERSAL: EntryConfig(
+        primary_tf="M15",
+        entry_tf="M5",
+        confirm_tfs=["M1", "H1", "H4", "H8", "D1"],
+        min_score_threshold=4.0,
+    ),
 }
 
 
@@ -106,13 +112,17 @@ class EntryTimeframeResolver:
     ) -> bool:
         """エントリーチェックすべきかを判定
 
+        UNIVERSALモードは任意のTF確定時に常にTrueを返す。
+
         Args:
             mode: トレーディングモード
             completed_tf: 確定した時間足
 
         Returns:
-            bool: entry_tf足確定時はTrue
+            bool: entry_tf足確定時はTrue（UNIVERSALは常にTrue）
         """
+        if mode == TradingStrategyMode.UNIVERSAL:
+            return True
         config = self.get_entry_config(mode)
         return completed_tf == config.entry_tf
 
@@ -135,6 +145,43 @@ class EntryTimeframeResolver:
             EntryDecision: エントリー判定結果
         """
         config = self.get_entry_config(mode)
+
+        # UNIVERSALモードは任意TFでエントリーチェック可能
+        # entry_tf未確定チェックをスキップし、completed_tfをentry_tfとして扱う
+        if mode == TradingStrategyMode.UNIVERSAL:
+            entry_direction = tf_directions.get(completed_tf, "HOLD")
+            if entry_direction == "HOLD":
+                return EntryDecision(
+                    should_enter=False,
+                    entry_tf=completed_tf,
+                    direction="HOLD",
+                    score=0.0,
+                    reasoning=f"UNIVERSAL: {completed_tf}がHOLD",
+                )
+            entry_score = tf_scores.get(completed_tf, 0.0)
+            normalized_score = entry_score
+            if normalized_score < config.min_score_threshold:
+                return EntryDecision(
+                    should_enter=False,
+                    entry_tf=completed_tf,
+                    direction=entry_direction,
+                    score=normalized_score,
+                    reasoning=(
+                        f"UNIVERSAL スコア不足: "
+                        f"{normalized_score:.2f} < "
+                        f"{config.min_score_threshold}"
+                    ),
+                )
+            return EntryDecision(
+                should_enter=True,
+                entry_tf=completed_tf,
+                direction=entry_direction,
+                score=normalized_score,
+                reasoning=(
+                    f"UNIVERSALモード: tf={completed_tf}, "
+                    f"score={normalized_score:.2f}"
+                ),
+            )
 
         # entry_tf足確定時のみ判断
         if completed_tf != config.entry_tf:

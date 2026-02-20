@@ -150,6 +150,7 @@ class TradingStrategyMode(str, Enum):
     SCALPING = "SCALPING"      # 短期：M5-M15基準、保有90分以内
     DAY_TRADE = "DAY_TRADE"    # 中期：M15-H1基準、保有8時間以内
     SWING = "SWING"            # 長期：H4-D1基準、保有2日以内
+    UNIVERSAL = "UNIVERSAL"    # 動的：全TFを評価して最強TFを自動選択
 
 
 class TradingMode(str, Enum):

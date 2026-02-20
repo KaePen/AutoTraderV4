@@ -35,6 +35,7 @@ class TradingPlan:
     tp_sl_ratio_range: tuple[float, float]
     selection_reason: str = ""
     regime: str | None = None
+    dynamic_entry_tf: str | None = None
 
     @property
     def all_tfs(self) -> list[str]:
@@ -110,21 +111,35 @@ class TradingModeSelector:
             "max_holding_bars": 12,  # 2日
             "tp_sl_ratio_range": (1.2, 1.6),  # 勝率54%・PF1.01達成
         },
+        TradingStrategyMode.UNIVERSAL: {
+            "primary_tf": "M15",
+            "entry_tf": "M5",
+            "confirm_tfs": ["M1", "M5", "M15", "H1", "H4", "H8", "D1"],
+            "manage_tf": "M15",
+            "max_holding_bars": 32,  # デフォルト：8時間（動的変更可）
+            "tp_sl_ratio_range": (1.1, 1.4),  # デフォルト（動的変更可）
+        },
     }
 
-    def __init__(self, config: ModeSelectorConfig | None = None) -> None:
+    def __init__(
+        self,
+        config: ModeSelectorConfig | None = None,
+        use_universal_mode: bool = False,
+    ) -> None:
         """初期化
 
         Args:
             config: モード選択設定
+            use_universal_mode: UNIVERSALモードを使用するか
         """
         self.config = config or ModeSelectorConfig()
+        self.use_universal_mode = use_universal_mode
 
     def select(
         self,
         regime: MarketRegime,
         volatility_level: float,
-        htf_alignment: float,
+        htf_alignment: float = 0.0,
         hour_utc: int | None = None,
     ) -> TradingPlan:
         """トレーディングプランを選択
@@ -138,6 +153,19 @@ class TradingModeSelector:
         Returns:
             TradingPlan: 選択されたトレーディングプラン
         """
+        if self.use_universal_mode:
+            plan_params = self.MODE_PLANS[TradingStrategyMode.UNIVERSAL]
+            return TradingPlan(
+                mode=TradingStrategyMode.UNIVERSAL,
+                primary_tf=plan_params["primary_tf"],
+                entry_tf=plan_params["entry_tf"],
+                confirm_tfs=plan_params["confirm_tfs"],
+                manage_tf=plan_params["manage_tf"],
+                max_holding_bars=plan_params["max_holding_bars"],
+                tp_sl_ratio_range=plan_params["tp_sl_ratio_range"],
+                selection_reason="UNIVERSAL（動的TF選択）",
+            )
+
         mode, reason = self._select_mode(
             regime, volatility_level, htf_alignment, hour_utc
         )

@@ -81,6 +81,17 @@ SWING_CONFIG = ModeConfig(
     min_confidence=0.5,
 )
 
+UNIVERSAL_CONFIG = ModeConfig(
+    mode=TradingStrategyMode.UNIVERSAL,
+    primary_tf="M15",
+    entry_tf="M5",
+    confirm_tfs=["M1", "H1", "H4", "H8", "D1"],
+    max_hold_minutes=480,  # デフォルト8時間（動的変更可）
+    sl_range=(10.0, 100.0),
+    tp_range=(10.0, 400.0),
+    min_confidence=0.5,
+)
+
 
 @dataclass
 class ModeSignal:

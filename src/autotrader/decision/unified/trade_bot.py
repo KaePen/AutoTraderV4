@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from typing import TYPE_CHECKING
@@ -225,7 +226,13 @@ class UnifiedTradeBot:
         self.regime_detector = MarketRegimeDetector(RegimeDetectorConfig())
 
         # モード選択器
-        self.mode_selector = TradingModeSelector(ModeSelectorConfig())
+        use_universal = getattr(
+            self.config, "use_universal_mode", False
+        )
+        self.mode_selector = TradingModeSelector(
+            ModeSelectorConfig(),
+            use_universal_mode=use_universal,
+        )
 
         # タイムフレームルーター
         self.tf_router = TimeframeRouter()
@@ -268,9 +275,14 @@ class UnifiedTradeBot:
         # ソフトガード
         self.soft_guard = SoftGuard(SoftGuardConfig())
 
+        # 動的TF選択器（UNIVERSALモード用）
+        from autotrader.decision.unified.dynamic_tf_selector import (
+            DynamicTFSelector,
+        )
+        self._dynamic_tf_selector = DynamicTFSelector()
+
         # リスク管理器（デモモード時はクールダウンを排除）
-        import dataclasses as _dc
-        risk_config = _dc.replace(
+        risk_config = dataclasses.replace(
             self.config.risk,
             cooldown_minutes=(
                 0 if self.config.demo_mode
@@ -393,6 +405,10 @@ class UnifiedTradeBot:
             hour_utc=hour_utc,
         )
 
+        # UNIVERSALモード: 動的TF選択（tf_signals取得前のプレースホルダー）
+        # ※実際の動的TF選択はtf_signals取得後に行う（後述）
+        _universal_mode = plan.mode == TradingStrategyMode.UNIVERSAL
+
         # 分析用に最後のモード/レジームを保持
         self._last_mode = plan.mode.value
         self._last_regime = regime_result.regime.value
@@ -439,6 +455,18 @@ class UnifiedTradeBot:
                 row, candle, plan, current_time,
             )
             tf_signals[tf] = signal
+
+        # UNIVERSALモード: 全TFシグナル取得後に動的TF選択でplanを更新
+        if _universal_mode and tf_signals:
+            # コンセンサス方向を支配方向として渡す（先のコンセンサス前のため
+            # None で全TF評価）
+            _dynamic_result = self._dynamic_tf_selector.select(tf_signals)
+            plan = dataclasses.replace(
+                plan,
+                dynamic_entry_tf=_dynamic_result.selected_entry_tf,
+                max_holding_bars=_dynamic_result.max_holding_bars,
+                tp_sl_ratio_range=_dynamic_result.tp_sl_ratio_range,
+            )
 
         # コンセンサスはモード別TFセットのみ対象（役割重みを保持）
         for tf in tf_set.all_tfs:
@@ -608,9 +636,26 @@ class UnifiedTradeBot:
 
             # LOW_VOL + DAY_TRADE: スコア品質要件を高める
             # 低ボラティリティ環境はスプレッド影響が大きく不利
+            # UNIVERSALモードでDAY_TRADE相当(M15/H1)の場合も同様
+            _effective_mode_for_filter = plan.mode
+            if plan.mode == TradingStrategyMode.UNIVERSAL:
+                _dyn_tf = plan.dynamic_entry_tf or plan.entry_tf
+                if _dyn_tf in ("M1", "M5"):
+                    _effective_mode_for_filter = (
+                        TradingStrategyMode.SCALPING
+                    )
+                elif _dyn_tf in ("M15", "H1"):
+                    _effective_mode_for_filter = (
+                        TradingStrategyMode.DAY_TRADE
+                    )
+                elif _dyn_tf in ("H4", "H8", "D1"):
+                    _effective_mode_for_filter = (
+                        TradingStrategyMode.SWING
+                    )
             if (
                 regime_result.regime == MarketRegime.LOW_VOL
-                and plan.mode == TradingStrategyMode.DAY_TRADE
+                and _effective_mode_for_filter
+                == TradingStrategyMode.DAY_TRADE
                 and consensus.score < consensus.threshold + 1.5
             ):
                 return _filt_hold(
@@ -621,7 +666,8 @@ class UnifiedTradeBot:
             # RANGE + DAY(ShortMid相当) 制限
             if (
                 regime_result.regime == MarketRegime.RANGE
-                and plan.mode == TradingStrategyMode.DAY_TRADE
+                and _effective_mode_for_filter
+                == TradingStrategyMode.DAY_TRADE
                 and regime_result.trend_strength < 0.3
             ):
                 return _filt_hold(
@@ -632,7 +678,8 @@ class UnifiedTradeBot:
             # RANGE+DAY ペナルティ+低ボラ制限
             if (
                 regime_result.regime == MarketRegime.RANGE
-                and plan.mode == TradingStrategyMode.DAY_TRADE
+                and _effective_mode_for_filter
+                == TradingStrategyMode.DAY_TRADE
                 and sg_result.total_penalty > 0
             ):
                 _primary_row = self._get_current_row(
@@ -679,7 +726,8 @@ class UnifiedTradeBot:
                 self.config.tokyo_night_swing_enabled
                 and 17 <= hour_utc <= 21
                 and regime_result.regime == MarketRegime.TREND
-                and plan.mode == TradingStrategyMode.SWING
+                and _effective_mode_for_filter
+                == TradingStrategyMode.SWING
                 and consensus.score < consensus.threshold
                     + self.config.tokyo_night_swing_premium
             ):
@@ -700,7 +748,8 @@ class UnifiedTradeBot:
             # 閾値基準: 好調年H1 ATR=0.094-0.129, 不調年H1 ATR=0.045
             if (
                 regime_result.regime == MarketRegime.TREND
-                and plan.mode == TradingStrategyMode.SWING
+                and _effective_mode_for_filter
+                == TradingStrategyMode.SWING
                 and _entry_tf_atr_abs is not None
                 and _entry_tf_atr_abs
                 < self.config.swing_low_vol_atr_ratio
@@ -715,7 +764,8 @@ class UnifiedTradeBot:
             if (
                 _score_premium > 0
                 and regime_result.regime == MarketRegime.RANGE
-                and plan.mode == TradingStrategyMode.DAY_TRADE
+                and _effective_mode_for_filter
+                == TradingStrategyMode.DAY_TRADE
                 and consensus.score
                 < consensus.threshold + _score_premium
             ):
