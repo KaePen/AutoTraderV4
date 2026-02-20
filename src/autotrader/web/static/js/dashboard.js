@@ -978,19 +978,16 @@ const DashboardApp = {
     const borderColors = { profit: 'border-l-green-500/50', loss: 'border-l-red-500/50', neutral: 'border-l-gray-600' };
     const valueColors = { profit: 'text-green-400', loss: 'text-red-400', neutral: 'text-gray-100' };
 
-    // 通貨ペアごとにグループ化してBUY/SELLアイコンを生成
+    // 通貨ペアごとにグループ化して含み損益合計を集計
     const bySymbol = {};
     for (const p of positions) {
-      if (!bySymbol[p.symbol]) bySymbol[p.symbol] = { buy: 0, sell: 0 };
-      if (p.signal_type === 'BUY') bySymbol[p.symbol].buy++;
-      else bySymbol[p.symbol].sell++;
+      if (!bySymbol[p.symbol]) bySymbol[p.symbol] = { pnl: 0 };
+      bySymbol[p.symbol].pnl += (p.unrealized_pnl || 0);
     }
 
     const pills = Object.entries(bySymbol).map(([sym, cnt]) => {
-      const arrow = cnt.buy > 0 && cnt.sell > 0 ? '↑↓'
-        : cnt.buy > 0 ? '↑' : '↓';
-      const color = cnt.buy > 0 && cnt.sell > 0 ? 'text-yellow-400'
-        : cnt.buy > 0 ? 'text-green-400' : 'text-red-400';
+      const arrow = cnt.pnl > 0 ? '↑' : cnt.pnl < 0 ? '↓' : '→';
+      const color = cnt.pnl > 0 ? 'text-green-400' : cnt.pnl < 0 ? 'text-red-400' : 'text-gray-400';
       return `<span class="inline-flex items-center gap-0.5 ${color} text-[10px] font-medium">${sym}<span>${arrow}</span></span>`;
     }).join('<span class="text-gray-700 mx-0.5">·</span>');
 
