@@ -738,22 +738,27 @@ class LiveTradingEngine:
 
         PositionManager.evaluateで各ポジションを評価し、
         SL変更・部分決済・全決済をMT5で実行。
+        _cached_positionsをMT5の現在状態で更新する。
         """
         positions = await self._executor.get_open_positions_async(
             self._config.symbol
         )
         if not positions:
+            self._cached_positions = []
             return
 
         # ATR取得（ポジション管理で使用）
+        # USDJPY換算で約20pips相当を最小値とする
+        _min_atr = 0.20 if "JPY" in self._config.symbol.upper() else 0.0020
         try:
             latest = await self._data_provider.get_latest_candle_async(
                 self._config.symbol, Timeframe.M15
             )
             # ATRは簡易計算（最新の高値-安値）
-            atr = float(latest.get("high", 0)) - float(
-                latest.get("low", 0)
-            )
+            _h = float(latest.get("high", 0))
+            _l = float(latest.get("low", 0))
+            atr = _h - _l if (_h > 0 and _l > 0) else _min_atr
+            atr = max(atr, _min_atr)
         except Exception:
             atr = 0.3  # デフォルト（USDJPY: 約30pips）
 
@@ -762,27 +767,65 @@ class LiveTradingEngine:
         if self._last_signal:
             current_signal_type = self._last_signal.direction
 
+        # pip計算係数（通貨ペア別）
+        is_jpy = "JPY" in self._config.symbol.upper()
+        pip_factor = 0.01 if is_jpy else 0.0001
+        pip_value = 1000.0 if is_jpy else 10.0
+
+        cache_list: list[dict] = []
         for position in positions:
             pos_id = str(position.ticket)
 
-            # PM未登録ならスキップ
+            # ティック取得（キャッシュ＋管理評価で共用）
+            current_price = position.entry_price
+            try:
+                tick = await self._data_provider.get_tick(
+                    position.symbol
+                )
+                price_key = (
+                    "bid"
+                    if position.signal_type == SignalType.BUY
+                    else "ask"
+                )
+                fetched = float(tick.get(price_key, 0))
+                if fetched > 0:
+                    current_price = fetched
+            except Exception:
+                pass
+
+            # キャッシュエントリ構築（MT5全ポジションを対象）
+            pip_diff = (
+                (current_price - position.entry_price) / pip_factor
+            )
+            if position.signal_type == SignalType.SELL:
+                pip_diff = -pip_diff
+            cache_list.append({
+                "position_id": str(position.ticket),
+                "ticket": position.ticket,
+                "symbol": position.symbol,
+                "signal_type": position.signal_type.value,
+                "volume": position.volume,
+                "entry_price": position.entry_price,
+                "current_price": current_price,
+                "stop_loss": position.stop_loss,
+                "take_profit": position.take_profit,
+                "opened_at": (
+                    position.opened_at.isoformat()
+                    if hasattr(position.opened_at, "isoformat")
+                    else str(position.opened_at)
+                ),
+                "unrealized_pnl": (
+                    pip_diff * position.volume * pip_value
+                ),
+                "unrealized_pnl_pips": pip_diff,
+            })
+
+            # PM未登録ならアクション評価をスキップ
             managed = self._pm.get_position(pos_id)
             if managed is None:
                 continue
 
             try:
-                # ティック取得
-                tick = await self._data_provider.get_tick(
-                    position.symbol
-                )
-                if position.signal_type == SignalType.BUY:
-                    current_price = float(tick.get("bid", 0))
-                else:
-                    current_price = float(tick.get("ask", 0))
-
-                if current_price <= 0:
-                    continue
-
                 # ポジション評価
                 action = self._pm.evaluate(
                     position_id=pos_id,
@@ -793,35 +836,59 @@ class LiveTradingEngine:
                 )
 
                 # アクション実行
-                await self._execute_action(position, action)
+                await self._execute_action(
+                    position, action, current_price
+                )
             except Exception as e:
                 logger.error(
                     "ポジション管理エラー(ticket=%d): %s",
                     position.ticket, e,
                 )
 
-    async def _execute_action(self, position, action) -> None:
+        self._cached_positions = cache_list
+
+    async def _execute_action(
+        self, position, action, current_price: float = 0.0
+    ) -> None:
         """管理アクション実行
 
         Args:
             position: ポジションエンティティ
             action: ManagementAction
+            current_price: 現在価格（SL検証用）
         """
         if action.action_type == ManagementActionType.HOLD:
             return
 
         if action.action_type == ManagementActionType.UPDATE_SL:
             if action.new_sl is not None:
-                result = await self._executor.modify_position_async(
-                    position, stop_loss=action.new_sl
-                )
-                if result.success:
-                    logger.info(
-                        "SL更新: ticket=%d → %.3f (%s)",
+                # SL値のバリデーション: 現在価格と同方向か確認
+                # BUYのSLは現在価格より下、SELLのSLは現在価格より上
+                sl_valid = True
+                if current_price > 0:
+                    if position.signal_type == SignalType.BUY:
+                        sl_valid = action.new_sl < current_price
+                    else:
+                        sl_valid = action.new_sl > current_price
+                if not sl_valid:
+                    logger.warning(
+                        "SL値が無効（価格と逆側）: ticket=%d"
+                        " SL=%.3f price=%.3f スキップ",
                         position.ticket,
                         action.new_sl,
-                        action.reason,
+                        current_price,
                     )
+                else:
+                    result = await self._executor.modify_position_async(
+                        position, stop_loss=action.new_sl
+                    )
+                    if result.success:
+                        logger.info(
+                            "SL更新: ticket=%d → %.3f (%s)",
+                            position.ticket,
+                            action.new_sl,
+                            action.reason,
+                        )
 
         elif action.action_type == ManagementActionType.PARTIAL_CLOSE:
             close_vol = round(
@@ -836,11 +903,18 @@ class LiveTradingEngine:
                         "部分決済: ticket=%d %.2f lots (%s)",
                         position.ticket, close_vol, action.reason,
                     )
-                    # SL変更もあれば実行
+                    # SL変更もあれば実行（バリデーション付き）
                     if action.new_sl is not None:
-                        await self._executor.modify_position_async(
-                            position, stop_loss=action.new_sl
-                        )
+                        _sl_ok = True
+                        if current_price > 0:
+                            if position.signal_type == SignalType.BUY:
+                                _sl_ok = action.new_sl < current_price
+                            else:
+                                _sl_ok = action.new_sl > current_price
+                        if _sl_ok:
+                            await self._executor.modify_position_async(
+                                position, stop_loss=action.new_sl
+                            )
 
         elif action.action_type == ManagementActionType.FULL_CLOSE:
             result = await self._executor.close_position_async(

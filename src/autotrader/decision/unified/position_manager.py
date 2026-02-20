@@ -994,11 +994,16 @@ class PositionManager:
         if position.current_r < self.config.trailing_start_r:
             return None
 
-        # ATRベースのトレーリング距離
+        # ATRベースのトレーリング距離（atr=0時は無効化）
+        if atr <= 0:
+            return None
         trail_distance = atr * self.config.trailing_atr_multiplier
 
         if position.direction == SignalType.BUY:
             new_sl = position.highest_price - trail_distance
+            # SLが現在価格以上（MT5拒否の原因）は無効
+            if new_sl >= current_price:
+                return None
             if new_sl > position.current_sl:
                 position.current_sl = new_sl
                 position.trailing_activated = True
@@ -1009,6 +1014,9 @@ class PositionManager:
                 )
         else:
             new_sl = position.lowest_price + trail_distance
+            # SLが現在価格以下（MT5拒否の原因）は無効
+            if new_sl <= current_price:
+                return None
             if new_sl < position.current_sl:
                 position.current_sl = new_sl
                 position.trailing_activated = True
