@@ -317,7 +317,7 @@ const DashboardApp = {
       const penaltyBarW = Math.min(100, Math.round(penaltyTotal / 0.5 * 100));
       const penaltyBorderCls = penaltyTotal > 0 ? 'border-red-700/50 bg-red-900/10' : 'border-gray-700 bg-gray-800/60';
       const penaltyScColor = penaltyTotal > 0 ? 'text-red-400' : 'text-gray-500';
-      const penaltyCardHtml = `<div class="rounded border ${penaltyBorderCls} px-2 py-1.5 flex-1 min-w-[100px]">
+      const penaltyCardHtml = `<div class="rounded border ${penaltyBorderCls} px-2 py-1.5 min-w-0">
           <div class="flex items-center justify-between mb-0.5">
             <span class="text-[10px] text-gray-400 uppercase font-bold">PEN</span>
             <span class="text-xs font-bold tabular-nums ${penaltyScColor}">-${penaltyTotal.toFixed(2)}</span>
@@ -408,7 +408,7 @@ const DashboardApp = {
           }).join('');
         }
 
-        return `<div class="rounded border ${borderCls} px-2 py-1.5 flex-1 min-w-[100px]">
+        return `<div class="rounded border ${borderCls} px-2 py-1.5 min-w-0">
           <div class="flex items-center justify-between mb-0.5">
             <div class="flex items-center">
               <span class="${dirColor} text-[10px] mr-1">${dirIcon}</span>
@@ -424,7 +424,7 @@ const DashboardApp = {
         </div>`;
       }).join('');
 
-      tfEl.innerHTML = `<div class="w-full">${summaryHtml}</div>` + `<div class="flex gap-2 flex-wrap mt-2">${cardsHtml}${penaltyCardHtml}</div>`;
+      tfEl.innerHTML = `<div class="w-full">${summaryHtml}</div>` + `<div class="flex gap-1.5 mt-2">${cardsHtml}${penaltyCardHtml}</div>`;
     }
 
   },
