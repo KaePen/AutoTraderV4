@@ -313,32 +313,36 @@ const DashboardApp = {
       };
       // 全ペナルティ項目を固定順で表示（値0も含む）
       const penaltyItems = Object.keys(penaltyLabel).map(k => [k, pb[k] || 0]);
-      const penaltyHtml = `<div class="mb-2">
-          <div class="flex items-center justify-between text-[10px] mb-1">
-            <span class="text-gray-500">Penalties</span>
-            <span class="${(a.penalty_total || 0) > 0 ? 'text-red-400' : 'text-gray-500'} font-bold tabular-nums">-${(a.penalty_total || 0).toFixed(2)} total</span>
+      const penaltyTotal = a.penalty_total || 0;
+      const penaltyBarW = Math.min(100, Math.round(penaltyTotal / 0.5 * 100));
+      const penaltyBorderCls = penaltyTotal > 0 ? 'border-red-700/50 bg-red-900/10' : 'border-gray-700 bg-gray-800/60';
+      const penaltyScColor = penaltyTotal > 0 ? 'text-red-400' : 'text-gray-500';
+      const penaltyCardHtml = `<div class="rounded border ${penaltyBorderCls} px-2 py-1.5 flex-1 min-w-[100px]">
+          <div class="flex items-center justify-between mb-0.5">
+            <span class="text-[10px] text-gray-400 uppercase font-bold">PEN</span>
+            <span class="text-xs font-bold tabular-nums ${penaltyScColor}">-${penaltyTotal.toFixed(2)}</span>
           </div>
-          <div class="flex gap-1.5 flex-wrap">
+          <div class="w-full bg-gray-700/50 rounded-full h-1 mb-1">
+            <div class="bg-red-500/60 h-1 rounded-full" style="width:${penaltyBarW}%"></div>
+          </div>
+          <div class="space-y-0.5">
             ${penaltyItems.map(([k, v]) => {
               const lbl = penaltyLabel[k];
+              const c = v > 0 ? 'text-red-400' : 'text-gray-600';
               const w = Math.min(100, Math.round(v / 0.25 * 100));
               const valText = v > 0 ? `-${v.toFixed(2)}` : '0';
-              const valColor = v > 0 ? 'text-red-400' : 'text-gray-600';
-              const borderCls = v > 0 ? 'border-red-700/50 bg-red-900/20' : 'border-gray-700 bg-gray-800/60';
-              return `<div class="rounded border ${borderCls} px-2 py-1.5 flex-1 min-w-[55px]">
-                <div class="flex items-center justify-between mb-0.5">
-                  <span class="text-[9px] text-gray-400 uppercase font-bold">${lbl}</span>
-                  <span class="text-[9px] font-bold tabular-nums ${valColor}">${valText}</span>
+              return `<div class="flex items-center gap-1">
+                <span class="text-[8px] text-gray-500 w-7 text-right flex-shrink-0">${lbl}</span>
+                <div class="flex-1 h-1 bg-gray-700/40 rounded-full overflow-hidden">
+                  <div class="bg-red-500/40 h-full rounded-full" style="width:${w}%"></div>
                 </div>
-                <div class="w-full bg-gray-700/50 rounded-full h-1">
-                  <div class="bg-red-500/60 h-1 rounded-full" style="width:${w}%"></div>
-                </div>
+                <span class="text-[9px] tabular-nums ${c} w-8 text-right flex-shrink-0">${valText}</span>
               </div>`;
             }).join('')}
           </div>
         </div>`;
 
-      // 投票サマリーバー + ペナルティ
+      // 投票サマリーバー
       const summaryHtml = `
         <div class="mb-2">
           <div class="flex items-center gap-2 text-[10px] mb-1">
@@ -355,8 +359,7 @@ const DashboardApp = {
             <div class="bg-gray-600/50 h-full" style="width:${holdPct}%"></div>
             <div class="bg-red-500/70 h-full" style="width:${sellPct}%"></div>
           </div>
-        </div>
-        ${penaltyHtml}`;
+        </div>`;
 
       // 指標ラベル（短縮名）
       const indLabel = {
@@ -421,7 +424,7 @@ const DashboardApp = {
         </div>`;
       }).join('');
 
-      tfEl.innerHTML = `<div class="w-full">${summaryHtml}</div>` + `<div class="flex gap-2 flex-wrap mt-2">${cardsHtml}</div>`;
+      tfEl.innerHTML = `<div class="w-full">${summaryHtml}</div>` + `<div class="flex gap-2 flex-wrap mt-2">${cardsHtml}${penaltyCardHtml}</div>`;
     }
 
   },
