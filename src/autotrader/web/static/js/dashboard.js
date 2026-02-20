@@ -708,7 +708,8 @@ const DashboardApp = {
     if (trigLabel) trigLabel.textContent = this.symbol;
     if (trigMode) {
       trigMode.textContent = curMode.label;
-      trigMode.className = `font-normal ml-0.5 ${curMode.textCls}`;
+      // inline-block w-[2.5rem] で固定幅を維持してモード切替時のサイズ変化を防ぐ
+      trigMode.className = `font-normal inline-block w-[2.5rem] ${curMode.textCls}`;
     }
 
     // ドロップダウンリストを生成
