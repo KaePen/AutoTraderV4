@@ -12,6 +12,8 @@ const ChartManager = {
   symbol: 'USDJPY',
   signals: [],
   _trades: [],
+  _tradeLines: [],        // トレードライン LineSeries のリスト
+  _openTradeLineRefs: [], // オープン中ポジションのラインシリーズ（tick更新用）
   isLoading: false,
   resizeObserver: null,
   rsiResizeObserver: null,
@@ -484,6 +486,8 @@ const ChartManager = {
 
     // マーカー再描画（シグナル＋トレード）
     this._applyMarkers();
+    // トレードライン再描画（ローソク足データ更新後に必ず呼ぶ）
+    this._applyTradeLines();
   },
 
   /** 指標時系列を更新 */
@@ -543,6 +547,7 @@ const ChartManager = {
   setTrades(trades) {
     this._trades = trades || [];
     this._applyMarkers();
+    this._applyTradeLines();
   },
 
   /**
@@ -608,6 +613,76 @@ const ChartManager = {
   },
 
   /**
+   * エントリー→エグジット（またはエントリー→現在価格）の点線を描画
+   * LineSeries を各トレードごとに生成し、_tradeLines に保持する
+   */
+  _applyTradeLines() {
+    if (!this.chart) return;
+
+    // 既存ラインを全削除
+    for (const series of this._tradeLines) {
+      try { this.chart.removeSeries(series); } catch (_e) {}
+    }
+    this._tradeLines = [];
+    this._openTradeLineRefs = [];
+
+    if (!this._trades || this._trades.length === 0) return;
+
+    for (const t of this._trades) {
+      if (t.symbol !== this.symbol) continue;
+
+      const entryTime = new Date(t.opened_at).getTime() / 1000;
+      if (entryTime <= 0) continue;
+
+      let exitTime, exitPrice;
+
+      if (t.is_open) {
+        // オープン中：最新バーの時刻・価格まで延ばす
+        if (!this._lastBarData) continue;
+        exitTime = this._lastBarData.time;
+        exitPrice = this._lastBarData.close;
+      } else {
+        if (!t.closed_at || t.exit_price == null) continue;
+        exitTime = new Date(t.closed_at).getTime() / 1000;
+        exitPrice = t.exit_price;
+      }
+
+      // 同一時刻は描画不可（1本バーの中で開いて閉じた場合など）
+      if (entryTime >= exitTime) continue;
+
+      const isBuy = t.signal_type === 'BUY';
+      let lineColor;
+      if (t.is_open) {
+        // オープン中：方向色（半透明）
+        lineColor = isBuy ? '#22c55eaa' : '#ef4444aa';
+      } else {
+        // クローズ済み：損益色（半透明）
+        const isProfit = (t.profit_loss || 0) >= 0;
+        lineColor = isProfit ? '#4ade80aa' : '#f87171aa';
+      }
+
+      const series = this.chart.addLineSeries({
+        color: lineColor,
+        lineWidth: 1,
+        lineStyle: 2, // Dashed（破線）
+        priceLineVisible: false,
+        lastValueVisible: false,
+        crosshairMarkerVisible: false,
+      });
+
+      series.setData([
+        { time: entryTime, value: t.entry_price },
+        { time: exitTime, value: exitPrice },
+      ]);
+
+      this._tradeLines.push(series);
+      if (t.is_open) {
+        this._openTradeLineRefs.push(series);
+      }
+    }
+  },
+
+  /**
    * MT5のtick price_updateで最新バーのcloseをリアルタイム更新
    * ローソク足APIを呼ばずに高速でチャートを更新する。
    *
@@ -624,6 +699,10 @@ const ChartManager = {
     try {
       this.candleSeries.update(updated);
       this._lastBarData = updated;
+      // オープン中ポジションの線を現在価格まで延ばす
+      for (const series of this._openTradeLineRefs) {
+        try { series.update({ time: updated.time, value: bid }); } catch (_e) {}
+      }
     } catch (_e) {
       // チャート未準備時は無視
     }
@@ -652,6 +731,9 @@ const ChartManager = {
       this.rsiResizeObserver.disconnect();
     }
     if (this.chart) {
+      // トレードラインは chart.remove() で一括破棄される
+      this._tradeLines = [];
+      this._openTradeLineRefs = [];
       this.chart.remove();
       this.chart = null;
       this.candleSeries = null;
