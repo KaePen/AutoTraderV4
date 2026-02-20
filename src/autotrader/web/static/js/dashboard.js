@@ -419,7 +419,7 @@ const DashboardApp = {
         </div>`;
       }).join('');
 
-      tfEl.innerHTML = summaryHtml + `<div class="flex gap-2 flex-wrap">${cardsHtml}</div>`;
+      tfEl.innerHTML = `<div class="w-full">${summaryHtml}</div>` + `<div class="flex gap-2 flex-wrap mt-2">${cardsHtml}</div>`;
     }
 
   },
