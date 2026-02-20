@@ -1247,45 +1247,8 @@ const DashboardApp = {
 
   /** トレード履歴 */
   renderTradeHistory() {
-    const chipsEl = document.getElementById('trade-summary-chips');
     const tableEl = document.getElementById('trade-history-table');
-    if (!chipsEl || !tableEl) return;
-
-    // サマリーカード
-    if (this.tradeSummary) {
-      const s = this.tradeSummary;
-      const wrColor = s.win_rate >= 50 ? 'text-green-400' : 'text-red-400';
-      const pfColor = s.profit_factor >= 1 ? 'text-green-400' : 'text-red-400';
-      const netColor = s.net_profit >= 0 ? 'text-green-400' : 'text-red-400';
-      const netBg = s.net_profit >= 0
-        ? 'bg-green-900/10 border-green-800/30'
-        : 'bg-red-900/10 border-red-800/30';
-      chipsEl.innerHTML = `
-        <div class="bg-gray-800/60 border border-gray-700/40 rounded-lg p-2 text-center">
-          <p class="text-[9px] text-gray-500 uppercase tracking-wider mb-0.5">Win Rate</p>
-          <p class="text-base font-bold tabular-nums ${wrColor}">${s.win_rate.toFixed(1)}%</p>
-        </div>
-        <div class="bg-gray-800/60 border border-gray-700/40 rounded-lg p-2 text-center">
-          <p class="text-[9px] text-gray-500 uppercase tracking-wider mb-0.5">Profit Factor</p>
-          <p class="text-base font-bold tabular-nums ${pfColor}">${s.profit_factor.toFixed(2)}</p>
-        </div>
-        <div class="${netBg} border rounded-lg p-2 text-center">
-          <p class="text-[9px] text-gray-500 uppercase tracking-wider mb-0.5">Net P&amp;L</p>
-          <p class="text-base font-bold tabular-nums ${netColor}">${this.fmtCurrency(s.net_profit)}</p>
-        </div>
-        <div class="bg-gray-800/60 border border-gray-700/40 rounded-lg p-2 text-center">
-          <p class="text-[9px] text-gray-500 uppercase tracking-wider mb-0.5">Trades</p>
-          <p class="text-base font-bold tabular-nums text-gray-200">${s.total_trades}</p>
-          <p class="text-[9px] tabular-nums mt-0.5">
-            <span class="text-green-400">${s.winning_trades}W</span>
-            <span class="text-gray-600 mx-0.5">/</span>
-            <span class="text-red-400">${s.losing_trades}L</span>
-          </p>
-        </div>
-      `;
-    } else {
-      chipsEl.innerHTML = '';
-    }
+    if (!tableEl) return;
 
     // テーブル
     if (this.trades.length === 0) {
