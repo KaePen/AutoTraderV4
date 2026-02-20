@@ -1005,17 +1005,28 @@ const DashboardApp = {
             </div>
           </div>`;
 
+        // SL/TPマーカーの左位置（端はみ出し防止）
+        const slLeft = slPct <= 0 ? '0' : (slPct >= 100 ? 'calc(100% - 2px)' : `${slPct}%`);
+        const tpLeft = tpPct <= 0 ? '0' : (tpPct >= 100 ? 'calc(100% - 2px)' : `${tpPct}%`);
+
         progressHtml = `
           <div class="mb-2">
-            <div class="w-full h-2 bg-gray-700 rounded-full relative overflow-hidden">
-              <!-- 左ゾーン: BUY=SL側(赤), SELL=TP側(緑) -->
-              <div class="absolute inset-y-0 left-0 ${leftZoneBg}" style="width:${entryPct}%"></div>
-              <!-- 右ゾーン: BUY=TP側(緑), SELL=SL側(赤) -->
-              <div class="absolute inset-y-0 right-0 ${rightZoneBg}" style="width:${100 - entryPct}%"></div>
-              <!-- Entryマーカー（グレー縦線） -->
-              <div class="absolute inset-y-0 w-px bg-gray-300 opacity-50" style="left:${entryPct}%"></div>
-              <!-- 現在価格マーカー（損益色太縦線） -->
-              <div class="absolute inset-y-0 w-0.5 ${nowBg}" style="left:${nowPct}%"></div>
+            <div class="w-full h-3 relative">
+              <!-- バー本体 -->
+              <div class="absolute inset-x-0 top-0.5 bottom-0.5 bg-gray-700 rounded-full overflow-hidden">
+                <!-- 左ゾーン: BUY=SL側(赤), SELL=TP側(緑) -->
+                <div class="absolute inset-y-0 left-0 ${leftZoneBg}" style="width:${entryPct}%"></div>
+                <!-- 右ゾーン: BUY=TP側(緑), SELL=SL側(赤) -->
+                <div class="absolute inset-y-0 right-0 ${rightZoneBg}" style="width:${100 - entryPct}%"></div>
+                <!-- Entryマーカー（グレー縦線） -->
+                <div class="absolute inset-y-0 w-px bg-gray-300 opacity-50" style="left:${entryPct}%"></div>
+                <!-- 現在価格マーカー（損益色太縦線） -->
+                <div class="absolute inset-y-0 w-0.5 ${nowBg}" style="left:${nowPct}%"></div>
+              </div>
+              <!-- SLマーカー（赤縦線、バーを貫通） -->
+              <div class="absolute inset-y-0 w-0.5 bg-red-500" style="left:${slLeft}"></div>
+              <!-- TPマーカー（緑縦線、バーを貫通） -->
+              <div class="absolute inset-y-0 w-0.5 bg-green-500" style="left:${tpLeft}"></div>
             </div>
           </div>`;
       }
