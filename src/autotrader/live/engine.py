@@ -1133,11 +1133,56 @@ class LiveTradingEngine:
             logger.error("DB書き込みエラー（エントリー）: %s", e)
             return None
 
+    async def _handle_external_close(
+        self, ticket: int
+    ) -> None:
+        """外部決済（SL/TP/手動）をMT5約定履歴から取得してDB記録。
+
+        Args:
+            ticket: MT5ポジションID
+        """
+        logger.info(
+            "外部決済検出（手動/SL/TP）: ticket=%d", ticket
+        )
+        from autotrader.core.enums import ExitReason
+        deal = await self._executor.get_deal_by_position_async(
+            ticket
+        )
+        if deal:
+            exit_price = deal["price"]
+            profit_loss = deal["profit"]
+            # MT5 DEAL_REASON: 4=SL, 5=TP, その他=手動/外部
+            rc = deal["reason_code"]
+            if rc == 4:
+                exit_reason = ExitReason.STOP_LOSS.value
+            elif rc == 5:
+                exit_reason = ExitReason.TAKE_PROFIT.value
+            else:
+                exit_reason = ExitReason.EXTERNAL_CLOSE.value
+            logger.info(
+                "外部決済詳細: ticket=%d reason=%s"
+                " price=%.5f profit=%.2f",
+                ticket, exit_reason, exit_price, profit_loss,
+            )
+        else:
+            exit_price = 0.0
+            profit_loss = 0.0
+            exit_reason = ExitReason.EXTERNAL_CLOSE.value
+            logger.warning(
+                "外部決済の約定履歴取得失敗: ticket=%d"
+                " → EXTERNAL_CLOSEとして記録",
+                ticket,
+            )
+        self._write_close_to_db(
+            ticket, exit_price, exit_reason, profit_loss
+        )
+
     def _write_close_to_db(
         self,
         ticket: int,
         current_price: float,
         action_reason: str,
+        profit_loss: float = 0.0,
     ) -> None:
         """決済をDBに更新
 
@@ -1145,6 +1190,7 @@ class LiveTradingEngine:
             ticket: MT5チケットID
             current_price: 決済時の価格
             action_reason: 決済理由
+            profit_loss: 確定損益（金額）
         """
         from autotrader.adapters.database.connection import get_session
         from autotrader.adapters.database.repositories import (
@@ -1157,7 +1203,7 @@ class LiveTradingEngine:
         try:
             pos = self._pm.get_position(str(ticket))
             pnl_pips = 0.0
-            if pos:
+            if pos and current_price > 0:
                 pip_size = (
                     0.01 if "JPY" in self._config.symbol.upper()
                     else 0.0001
@@ -1179,7 +1225,7 @@ class LiveTradingEngine:
                         exit_price=current_price,
                         closed_at=closed_at,
                         exit_reason=action_reason,
-                        profit_loss=0.0,
+                        profit_loss=profit_loss,
                         profit_loss_pips=pnl_pips,
                     )
             self._closed_trades.append({
@@ -1192,8 +1238,8 @@ class LiveTradingEngine:
             })
             logger.info(
                 "DB記録（決済）: trade_id=%s ticket=%d"
-                " pnl_pips=%.1f",
-                trade_id, ticket, pnl_pips,
+                " pnl_pips=%.1f profit_loss=%.2f",
+                trade_id, ticket, pnl_pips, profit_loss,
             )
         except Exception as e:
             logger.error("DB書き込みエラー（決済）: %s", e)
@@ -1223,12 +1269,7 @@ class LiveTradingEngine:
                 set(self._open_trades.keys()) - current_tickets
             )
             for ticket in externally_closed:
-                logger.info(
-                    "外部決済検出（手動/SL/TP）: ticket=%d", ticket
-                )
-                self._write_close_to_db(
-                    ticket, 0.0, "EXTERNAL_CLOSE"
-                )
+                await self._handle_external_close(ticket)
 
         if not positions:
             self._cached_positions = []
