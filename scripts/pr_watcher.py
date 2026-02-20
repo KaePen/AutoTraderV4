@@ -102,15 +102,23 @@ REVIEW_PROMPT = """
 
 対象PR: #{pr_number} - {pr_title}
 ブランチ: {pr_branch} → main
+プロジェクトディレクトリ: {project_dir}
+
+【重要】git checkout は絶対に使わないこと。
+他のエージェントやVS Codeが同じディレクトリを使用しているため、
+ブランチ切り替えは git worktree で別ディレクトリに行うこと。
 
 以下の手順で対応してください:
-1. git diff main...{pr_branch} で変更内容を確認
-2. テスト実行 (.venv/Scripts/python -m pytest tests/ -q)
-3. コードレビュー（バグ・セキュリティ・スタイル）
-4. 問題なければ main にマージ（git merge --no-ff）
-5. git push origin main
+1. git fetch origin {pr_branch} でリモートブランチを取得
+2. git worktree add /tmp/pr_{pr_number}_review origin/{pr_branch} で一時ディレクトリを作成
+3. git diff origin/main...origin/{pr_branch} で変更内容を確認
+4. /tmp/pr_{pr_number}_review で .venv/Scripts/python -m pytest tests/ -q を実行
+5. コードレビュー（バグ・セキュリティ・スタイル）
+6. 問題なければ git merge --no-ff origin/{pr_branch} を {project_dir} で実行（checkout不要）
+7. git push origin main
+8. git worktree remove /tmp/pr_{pr_number}_review --force で後片付け
 
-問題がある場合は処理を中断して理由を説明してください。
+問題がある場合は worktree を削除してから処理を中断し理由を説明してください。
 """
 
 
@@ -144,6 +152,7 @@ def run_review_agent(pr: dict) -> None:
         pr_number=pr["number"],
         pr_title=pr["title"],
         pr_branch=pr["headRefName"],
+        project_dir=str(PROJECT_DIR),
     )
 
     print(
