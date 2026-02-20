@@ -7,6 +7,8 @@ const DashboardApp = {
   trades: [],
   tradeSummary: null,
   currentSignals: [],
+  // シグナルレーダー: { USDJPY: [...], EURUSD: [...] } 疎結合設計
+  radarData: {},
   indicators: null,
   indicatorTf: localStorage.getItem('indicator_tf') || 'M15',
   isLoading: true,
@@ -64,6 +66,7 @@ const DashboardApp = {
     // データ取得
     this.fetchAll();
     this.fetchSignals();
+    this.fetchSignalRadar();
     this.fetchIndicators();
     this.fetchTradingMode();
     this.fetchAnalysis();
@@ -77,6 +80,8 @@ const DashboardApp = {
     setInterval(() => this.fetchAnalysis(), 1000);
     // ポジション・トレードポーリング（2秒 = MT5更新と同期）
     setInterval(() => this.fetchPositionsAndTrades(), 2000);
+    // シグナルレーダーポーリング（10秒）
+    setInterval(() => this.fetchSignalRadar(), 10000);
 
     // シグナルWebSocket
     this.signalWs = createWebSocketClient('/ws/signals');
@@ -124,22 +129,25 @@ const DashboardApp = {
     const a = this.lastAnalysis;
     // エンジン未起動ならパネル非表示
     const isLive = this.tradingMode && this.tradingMode.mode === 'live';
-    const sigPanel = document.getElementById('signal-panel');
+    const posPanel = document.getElementById('position-panel');
+    const posList = document.getElementById('position-list');
     if (!isLive) {
       panel.classList.add('hidden');
-      // バックテスト時: シグナルを全幅（3列分）
-      if (sigPanel) {
-        sigPanel.classList.remove('lg:col-span-1');
-        sigPanel.classList.add('lg:col-span-3');
+      // バックテスト時: ポジションを全幅（3列分）・2列グリッド表示
+      if (posPanel) {
+        posPanel.classList.remove('lg:col-span-1');
+        posPanel.classList.add('lg:col-span-3');
       }
+      if (posList) posList.dataset.wide = 'true';
       return;
     }
     panel.classList.remove('hidden');
-    // ライブ時: シグナルを1/3幅
-    if (sigPanel) {
-      sigPanel.classList.remove('lg:col-span-3');
-      sigPanel.classList.add('lg:col-span-1');
+    // ライブ時: ポジションを1/3幅・1列表示
+    if (posPanel) {
+      posPanel.classList.remove('lg:col-span-3');
+      posPanel.classList.add('lg:col-span-1');
     }
+    if (posList) posList.dataset.wide = 'false';
 
     // エンジン/接続状態バナー（aがnullでも表示）
     const statusBanner = document.getElementById('ap-engine-status');
@@ -713,7 +721,7 @@ const DashboardApp = {
     }
   },
 
-  /** シグナル取得 */
+  /** シグナル取得（チャートマーカー更新用） */
   async fetchSignals() {
     try {
       this.currentSignals = await getCurrentSignals(this.symbol);
@@ -721,7 +729,75 @@ const DashboardApp = {
     } catch (e) {
       this.currentSignals = [];
     }
-    this.renderSignals();
+  },
+
+  /** シグナルレーダー取得（全シンボル） */
+  async fetchSignalRadar() {
+    try {
+      this.radarData = await getSignalRadar();
+    } catch (_e) {
+      // エラー時は既存データ維持
+    }
+    this.renderSignalRadar();
+  },
+
+  /** シグナルレーダー描画（疎結合: radarDataのシンボルを全て表示） */
+  renderSignalRadar() {
+    const listEl = document.getElementById('signal-radar-list');
+    const countEl = document.getElementById('signal-radar-count');
+    if (!listEl) return;
+
+    const symbols = Object.keys(this.radarData);
+    const totalSignals = symbols.reduce(
+      (acc, sym) => acc + (this.radarData[sym] || []).length, 0
+    );
+
+    if (countEl) {
+      countEl.textContent = totalSignals > 0
+        ? `${totalSignals} signals`
+        : 'シグナルなし';
+    }
+
+    if (totalSignals === 0) {
+      listEl.innerHTML = '<div class="text-xs text-gray-600 py-1">シグナル待機中...</div>';
+      return;
+    }
+
+    // シンボル別・順にカードを生成（シンボル追加はradarDataキー追加のみ）
+    const cards = symbols.flatMap((sym) =>
+      (this.radarData[sym] || []).map((sig) => this.signalRadarCard(sym, sig))
+    );
+    listEl.innerHTML = cards.join('');
+  },
+
+  /** シグナルレーダー 1枚カード */
+  signalRadarCard(symbol, sig) {
+    const isBuy = sig.signal_type === 'BUY';
+    const dirBg = isBuy
+      ? 'bg-green-500/20 text-green-400'
+      : 'bg-red-500/20 text-red-400';
+    const borderCls = isBuy ? 'border-green-500/30' : 'border-red-500/30';
+    const bgCls = isBuy ? 'bg-green-500/5' : 'bg-red-500/5';
+    const barCls = isBuy ? 'bg-green-500' : 'bg-red-500';
+    const confPct = Math.round((sig.confidence || 0) * 100);
+    const confLabel = sig.confidence_level || '';
+
+    return `
+      <div class="flex-shrink-0 w-44 rounded-lg border ${borderCls} ${bgCls} px-2.5 py-2">
+        <div class="flex items-center gap-1.5 mb-1.5">
+          <span class="text-[10px] font-bold px-1.5 py-0.5 rounded ${dirBg}">${sig.signal_type}</span>
+          <span class="text-xs font-bold text-gray-200">${symbol}</span>
+          <span class="text-[10px] text-gray-500">${sig.timeframe || ''}</span>
+        </div>
+        <div class="flex items-center gap-1.5 mb-1">
+          <div class="flex-1 h-1 bg-gray-700 rounded-full overflow-hidden">
+            <div class="h-full ${barCls} rounded-full transition-all" style="width:${confPct}%"></div>
+          </div>
+          <span class="text-[10px] text-gray-300 tabular-nums font-medium">${confPct}%</span>
+        </div>
+        ${confLabel ? `<span class="text-[9px] text-gray-500 uppercase tracking-wider">${confLabel}</span>` : ''}
+        ${sig.reasoning ? `<p class="text-[10px] text-gray-500 truncate mt-0.5">${this.escapeHtml(sig.reasoning)}</p>` : ''}
+      </div>`;
   },
 
   /** 指標取得 */
@@ -846,7 +922,12 @@ const DashboardApp = {
       return;
     }
 
-    listEl.innerHTML = '<div class="space-y-2">' + this.positions.map((p) => this.positionCard(p)).join('') + '</div>';
+    // wide モード（バックテスト時の全幅）は2列グリッド、通常は1列
+    const isWide = listEl.dataset.wide === 'true';
+    const wrapClass = isWide
+      ? 'grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3'
+      : 'space-y-2';
+    listEl.innerHTML = `<div class="${wrapClass}">` + this.positions.map((p) => this.positionCard(p)).join('') + '</div>';
   },
 
   positionCard(p) {
