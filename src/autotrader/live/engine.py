@@ -556,13 +556,19 @@ class LiveTradingEngine:
             signal: トレードシグナル
         """
         # 既存ポジションチェック
+        # デモモードではdemo_max_positions分まで許可
         positions = await self._executor.get_open_positions_async(
             self._config.symbol
         )
-        if positions:
+        max_pos = (
+            self._bot.config.demo_max_positions
+            if self._bot.config.demo_mode
+            else 1
+        )
+        if len(positions) >= max_pos:
             logger.info(
-                "既存ポジションあり(%d)、エントリースキップ",
-                len(positions),
+                "既存ポジション上限(%d/%d)、エントリースキップ",
+                len(positions), max_pos,
             )
             return
 
@@ -571,22 +577,12 @@ class LiveTradingEngine:
             logger.warning("口座情報なし、エントリースキップ")
             return
 
-        sl_pips = 0.0
-        if signal.stop_loss is not None:
-            tick = await self._data_provider.get_tick(
-                self._config.symbol
-            )
-            price = float(
-                tick.get("ask", 0)
-                if signal.signal_type == SignalType.BUY
-                else tick.get("bid", 0)
-            )
-            if price > 0 and signal.stop_loss > 0:
-                raw_diff = abs(price - signal.stop_loss)
-                if "JPY" in self._config.symbol.upper():
-                    sl_pips = raw_diff / 0.01
-                else:
-                    sl_pips = raw_diff / 0.0001
+        # signal.stop_lossはpips値（_consolidated_to_signalでsl_pipsを設定）
+        sl_pips = (
+            signal.stop_loss
+            if signal.stop_loss is not None and signal.stop_loss > 0
+            else 30.0
+        )
 
         # SizingContextを作成
         regime = MarketRegime.RANGE
