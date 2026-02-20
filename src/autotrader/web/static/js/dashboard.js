@@ -794,41 +794,32 @@ const DashboardApp = {
 
   /** ポジション＆トレードのみ即時取得（WebSocket通知時） */
   async fetchPositionsAndTrades() {
-    try {
-      const [pos, tr] = await Promise.all([
-        getPositions(null),
-        getTrades(this.symbol, 20),
-      ]);
-      this.positions = pos;
-      this.trades = tr;
-    } catch (e) {
-      // エラー時は既存データ維持
-    }
+    const [pos, tr] = await Promise.allSettled([
+      getPositions(null),
+      getTrades(this.symbol, 20),
+    ]);
+    if (pos.status === 'fulfilled') this.positions = pos.value;
+    if (tr.status === 'fulfilled') this.trades = tr.value;
     this.renderPositions();
     this.renderTradeHistory();
   },
 
   /** 全データ取得 */
   async fetchAll() {
-    try {
-      const [dash, pos, tr, summary] = await Promise.all([
-        getDashboard(),
-        getPositions(null),
-        getTrades(this.symbol, 20),
-        getTradeSummary(this.symbol, 30),
-      ]);
-      this.dashboard = dash;
-      this.positions = pos;
-      this.trades = tr;
-      this.tradeSummary = summary;
-    } catch (e) {
-      // エラー時は既存データ維持
-    } finally {
-      this.isLoading = false;
-      this.renderMetrics();
-      this.renderPositions();
-      this.renderTradeHistory();
-    }
+    const [dash, pos, tr, summary] = await Promise.allSettled([
+      getDashboard(),
+      getPositions(null),
+      getTrades(this.symbol, 20),
+      getTradeSummary(this.symbol, 30),
+    ]);
+    if (dash.status === 'fulfilled') this.dashboard = dash.value;
+    if (pos.status === 'fulfilled') this.positions = pos.value;
+    if (tr.status === 'fulfilled') this.trades = tr.value;
+    if (summary.status === 'fulfilled') this.tradeSummary = summary.value;
+    this.isLoading = false;
+    this.renderMetrics();
+    this.renderPositions();
+    this.renderTradeHistory();
   },
 
   /** シグナル取得（チャートマーカー更新用） */
