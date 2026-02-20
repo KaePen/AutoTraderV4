@@ -216,7 +216,6 @@ class LiveTradingEngine:
     def reset_data_update_timer(self) -> None:
         """データ更新タイマーをリセット（次回tick即時実行）"""
         self._last_tick_time = None
-        self._last_analysis = None  # 古い評価結果をクリア（切替直後に古い方向が残らないよう）
         logger.debug("データ更新タイマーリセット")
 
     def get_current_entry_threshold(
