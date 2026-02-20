@@ -97,7 +97,7 @@ class TradingModeSelector:
         TradingStrategyMode.DAY_TRADE: {
             "primary_tf": "M15",
             "entry_tf": "M5",
-            "confirm_tfs": ["H1", "H4"],
+            "confirm_tfs": ["H1", "H4", "H8"],
             "manage_tf": "M15",
             "max_holding_bars": 32,  # 8時間
             "tp_sl_ratio_range": (1.1, 1.4),  # 勝率55%・PF1.01達成
@@ -105,7 +105,7 @@ class TradingModeSelector:
         TradingStrategyMode.SWING: {
             "primary_tf": "H4",
             "entry_tf": "H1",
-            "confirm_tfs": ["D1"],
+            "confirm_tfs": ["H8", "D1"],
             "manage_tf": "H4",
             "max_holding_bars": 12,  # 2日
             "tp_sl_ratio_range": (1.2, 1.6),  # 勝率54%・PF1.01達成
