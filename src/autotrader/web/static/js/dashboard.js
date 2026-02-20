@@ -10,6 +10,7 @@ const DashboardApp = {
   // シグナルレーダー: { USDJPY: [...], EURUSD: [...] } 疎結合設計
   radarData: {},
   indicators: null,
+  indicatorsAllTf: {},
   indicatorTf: localStorage.getItem('indicator_tf') || 'M15',
   isLoading: true,
   tradeHistoryExpanded: true,
@@ -83,6 +84,7 @@ const DashboardApp = {
         this.fetchPositionsAndTrades();
         this.fetchSignalRadar();
         this.fetchTradingMode();
+        this.fetchIndicators();
       }
     }, 10000);
 
@@ -162,6 +164,15 @@ const DashboardApp = {
     if (data.radar) {
       this.radarData = data.radar;
       this.renderSignalRadar();
+    }
+
+    // インジケーター（全TFキャッシュ更新 + 選択中TF描画）
+    if (data.indicators) {
+      this.indicatorsAllTf = { ...this.indicatorsAllTf, ...data.indicators };
+      if (data.indicators[this.indicatorTf]) {
+        this.indicators = data.indicators[this.indicatorTf];
+        this.renderIndicators();
+      }
     }
   },
 
@@ -1043,8 +1054,12 @@ const DashboardApp = {
       btn.addEventListener('click', () => {
         this.indicatorTf = btn.dataset.tf;
         localStorage.setItem('indicator_tf', this.indicatorTf);
+        // キャッシュ済みデータを即時表示（WS接続中はAPI不要）
+        this.indicators = this.indicatorsAllTf[this.indicatorTf] || null;
         this.renderIndicatorTabs();
-        this.fetchIndicators();
+        this.renderIndicators();
+        // WS未接続時はAPIフォールバック
+        if (!this.wsActive) this.fetchIndicators();
       });
     });
   },

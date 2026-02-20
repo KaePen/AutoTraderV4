@@ -186,18 +186,31 @@ async def get_indicators(
     engine = getattr(request.app.state, "live_engine", None)
     if engine and engine.connected:
         try:
-            # 指標計算に十分な本数を取得
-            df = await engine._data_provider.get_candles_from_pos(
-                symbol, timeframe, 100
-            )
-            if not df.empty:
-                indicators = _calc_indicators(
-                    df, symbol, timeframe
+            # エンジン計算済みデータから取得（MT5再取得不要）
+            raw = engine._extract_indicators(timeframe.value)
+            if raw:
+                ind = IndicatorResponse(
+                    symbol=symbol,
+                    timeframe=timeframe,
+                    timestamp=datetime.now(timezone.utc),
+                    rsi=raw.get("rsi"),
+                    macd=raw.get("macd"),
+                    macd_signal=raw.get("macd_signal"),
+                    macd_hist=raw.get("macd_hist"),
+                    adx=raw.get("adx"),
+                    plus_di=raw.get("plus_di"),
+                    minus_di=raw.get("minus_di"),
+                    bb_upper=raw.get("bb_upper"),
+                    bb_middle=raw.get("bb_middle"),
+                    bb_lower=raw.get("bb_lower"),
+                    atr=raw.get("atr"),
+                    ema_fast=raw.get("ema_fast"),
+                    ema_slow=raw.get("ema_slow"),
                 )
-                return ApiResponse(data=indicators)
+                return ApiResponse(data=ind)
         except Exception as e:
             logger.warning(
-                "MT5指標計算失敗、スタブフォールバック: %s",
+                "エンジン指標取得失敗、スタブフォールバック: %s",
                 e,
             )
 
