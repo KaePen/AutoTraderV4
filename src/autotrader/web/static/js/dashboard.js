@@ -1142,6 +1142,8 @@ const DashboardApp = {
         <div id="${detailId}" class="hidden">
           ${priceRowHtml}
         </div>
+        <!-- トレードID -->
+        ${p.trade_id ? `<div class="mt-1 text-[9px] text-gray-700 tabular-nums truncate">ID: ${p.trade_id}</div>` : ''}
       </div>`;
   },
 

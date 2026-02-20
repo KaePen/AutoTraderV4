@@ -1209,6 +1209,9 @@ class LiveTradingEngine:
                 pip_diff = -pip_diff
             cache_list.append({
                 "position_id": str(position.ticket),
+                "trade_id": self._open_trades.get(
+                    position.ticket, ""
+                ),
                 "ticket": position.ticket,
                 "symbol": position.symbol,
                 "signal_type": position.signal_type.value,
