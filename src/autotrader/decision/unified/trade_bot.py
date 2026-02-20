@@ -412,11 +412,13 @@ class UnifiedTradeBot:
                 ))
             return self._hold_signal(reason)
 
-        # 選択TFのみ評価
+        # 全TFを評価（アナリティクス表示用）
+        # config.timeframes 全TFのスコアを計算してWebUIに表示する。
+        # コンセンサス計算はモード別TFセットのみ使用（役割ベース重み付け維持）。
         tf_signals: dict[str, TimeframeSignal] = {}
         consensus_signals: dict[str, ConsensusTimeframeSignal] = {}
 
-        for tf in tf_set.all_tfs:
+        for tf in self.timeframes:
             if tf not in self.evaluators:
                 continue
             row = self._get_current_row(tf, current_time)
@@ -428,9 +430,17 @@ class UnifiedTradeBot:
             )
             tf_signals[tf] = signal
 
-            # Consensusフォーマットに変換
+        # コンセンサスはモード別TFセットのみ対象（役割重みを保持）
+        for tf in tf_set.all_tfs:
+            if tf not in tf_signals:
+                continue
+            signal = tf_signals[tf]
             # 強度を0-1に正規化（net_strengthは-1から1の範囲）
-            strength = abs(signal.net_strength) if signal.direction != SignalType.HOLD else 0.0
+            strength = (
+                abs(signal.net_strength)
+                if signal.direction != SignalType.HOLD
+                else 0.0
+            )
             consensus_signals[tf] = ConsensusTimeframeSignal(
                 direction=signal.direction,
                 strength=strength,
