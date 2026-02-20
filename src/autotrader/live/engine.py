@@ -36,6 +36,7 @@ from autotrader.decision.unified.signal_consolidator import (
     ConsolidatedSignal,
 )
 from autotrader.live.tick_entry_optimizer import TickEntryOptimizer
+from autotrader.backtest.indicators import IndicatorCalculator
 
 logger = logging.getLogger(__name__)
 
@@ -501,6 +502,7 @@ class LiveTradingEngine:
             )
 
         if all_data:
+            all_data = self._calc_indicators(all_data)
             self._bot.set_market_data(all_data)
             logger.info(
                 "全TFデータ設定完了: %d時間足", len(all_data)
@@ -510,6 +512,7 @@ class LiveTradingEngine:
         """最新ローソク足データを取得してTradeBotに設定"""
         symbol = self._config.symbol
         # 全TFのデータを一括収集してから設定
+        # sma_50計算に50本必要なためバッファを含め200本取得
         # （個別set_market_dataは辞書を上書きするため）
         all_data: dict[str, pd.DataFrame] = {}
         for tf_str in self._bot.timeframes:
@@ -519,13 +522,38 @@ class LiveTradingEngine:
                 continue
 
             df = await self._data_provider.get_candles_from_pos(
-                symbol, tf, 30
+                symbol, tf, 200
             )
             if not df.empty:
                 all_data[tf_str] = df
 
         if all_data:
+            all_data = self._calc_indicators(all_data)
             self._bot.set_market_data(all_data)
+
+    def _calc_indicators(
+        self,
+        data: dict[str, pd.DataFrame],
+    ) -> dict[str, pd.DataFrame]:
+        """生OHLCVデータにテクニカル指標を計算して付加
+
+        Args:
+            data: 時間足別生OHLCVデータ
+
+        Returns:
+            dict[str, pd.DataFrame]: 指標付きデータ
+        """
+        calc = IndicatorCalculator()
+        result: dict[str, pd.DataFrame] = {}
+        for tf, df in data.items():
+            try:
+                result[tf] = calc.calculate_basic(df.copy())
+            except Exception as e:
+                logger.warning(
+                    "指標計算失敗: %s %s", tf, e
+                )
+                result[tf] = df
+        return result
 
     def _should_use_tick_optimizer(self) -> bool:
         """ティック最適化を使用すべきか判定
