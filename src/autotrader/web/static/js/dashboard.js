@@ -1452,7 +1452,7 @@ const DashboardApp = {
     tableEl.innerHTML = `
       <table class="table">
         <thead class="sticky top-0 bg-gray-800 z-10">
-          <tr><th>日時</th><th>方向</th><th>Lot</th><th>Entry</th><th>Exit</th><th>理由</th><th class="text-right">損益</th></tr>
+          <tr><th>日時</th><th>方向</th><th>Lot</th><th>Entry</th><th>Exit</th><th>ステータス</th><th class="text-right">損益</th></tr>
         </thead>
         <tbody>${rows}</tbody>
       </table>`;
