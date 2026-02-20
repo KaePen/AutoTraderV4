@@ -42,6 +42,8 @@ class ConsensusResult:
         threshold: 適用閾値
         aligned_tfs: 同方向TFリスト
         reasoning: 判断理由
+        buy_score: BUY方向の加重スコア（多面分析用）
+        sell_score: SELL方向の加重スコア（多面分析用）
     """
 
     direction: SignalType
@@ -49,6 +51,8 @@ class ConsensusResult:
     threshold: float
     aligned_tfs: list[str]
     reasoning: str
+    buy_score: float = 0.0
+    sell_score: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -63,6 +67,7 @@ class ConsensusConfig:
         scalping_threshold: スキャルピングモードの閾値
         day_trade_threshold: デイトレードモードの閾値
         swing_threshold: スイングモードの閾値
+        enable_counter_signal: 多面分析（逆方向シグナル活用）の有効化
     """
 
     primary_weight: float = 3.0
@@ -72,6 +77,7 @@ class ConsensusConfig:
     scalping_threshold: float = 3.5
     day_trade_threshold: float = 4.5
     swing_threshold: float = 6.0
+    enable_counter_signal: bool = True
 
 
 class ModeAwareScoreConsensus:
@@ -218,6 +224,8 @@ class ModeAwareScoreConsensus:
                 threshold=threshold,
                 aligned_tfs=aligned_tfs,
                 reasoning=reasoning,
+                buy_score=buy_score,
+                sell_score=sell_score,
             )
 
         # TF方向一致率チェック（低品質シグナルの排除）
@@ -238,6 +246,8 @@ class ModeAwareScoreConsensus:
                         f"{alignment_ratio:.0%} < 50%"
                         f"({plan.mode.value})"
                     ),
+                    buy_score=buy_score,
+                    sell_score=sell_score,
                 )
 
         # 競合シグナル比率チェック（BUY/SELL拮抗の排除）
@@ -249,6 +259,33 @@ class ModeAwareScoreConsensus:
             conflict_ratio = competing_score / final_score
             # 全モード共通: 競合スコアが勝方向の60%未満であること
             if conflict_ratio > 0.60:
+                # 多面分析: 競合方向も閾値超えなら逆方向シグナルとして採用
+                if self.config.enable_counter_signal:
+                    counter_direction = (
+                        SignalType.SELL
+                        if direction == SignalType.BUY
+                        else SignalType.BUY
+                    )
+                    counter_tfs = (
+                        sell_tfs
+                        if direction == SignalType.BUY
+                        else buy_tfs
+                    )
+                    if competing_score >= threshold:
+                        return ConsensusResult(
+                            direction=counter_direction,
+                            score=competing_score,
+                            threshold=threshold,
+                            aligned_tfs=counter_tfs,
+                            reasoning=(
+                                f"多面分析: 競合{conflict_ratio:.0%}超 → "
+                                f"{counter_direction.value}"
+                                f"({competing_score:.2f}>={threshold:.2f})"
+                                f"({plan.mode.value})"
+                            ),
+                            buy_score=buy_score,
+                            sell_score=sell_score,
+                        )
                 return ConsensusResult(
                     direction=SignalType.HOLD,
                     score=final_score,
@@ -258,6 +295,8 @@ class ModeAwareScoreConsensus:
                         f"競合シグナル強度過大: {conflict_ratio:.0%}"
                         f" > 60%({plan.mode.value})"
                     ),
+                    buy_score=buy_score,
+                    sell_score=sell_score,
                 )
 
         # スコア均一性チェック（一部TFのみ高スコアの偏りを除外）
@@ -288,6 +327,8 @@ class ModeAwareScoreConsensus:
                             f"スコア偏り過大(CV={_cv:.2f}>1.0)"
                             f"({plan.mode.value})"
                         ),
+                        buy_score=buy_score,
+                        sell_score=sell_score,
                     )
 
         reasoning = (
@@ -301,6 +342,8 @@ class ModeAwareScoreConsensus:
             threshold=threshold,
             aligned_tfs=aligned_tfs,
             reasoning=reasoning,
+            buy_score=buy_score,
+            sell_score=sell_score,
         )
 
     def _get_weight(
@@ -397,17 +440,25 @@ class ModeAwareScoreConsensus:
             )
 
         # コンセンサスとentry_tfの方向が一致しない場合はスキップ
+        # ただし多面分析による逆方向採用で"多面分析"が含まれる場合は許容
+        is_counter_signal = "多面分析" in result.reasoning
         if (
             result.direction != SignalType.HOLD
             and entry_signal.direction != SignalType.HOLD
             and result.direction != entry_signal.direction
+            and not is_counter_signal
         ):
             return ConsensusResult(
                 direction=SignalType.HOLD,
                 score=result.score,
                 threshold=result.threshold,
                 aligned_tfs=result.aligned_tfs,
-                reasoning=f"コンセンサス({result.direction.value})とentry_tf({entry_signal.direction.value})不一致",
+                reasoning=(
+                    f"コンセンサス({result.direction.value})"
+                    f"とentry_tf({entry_signal.direction.value})不一致"
+                ),
+                buy_score=result.buy_score,
+                sell_score=result.sell_score,
             )
 
         return result
