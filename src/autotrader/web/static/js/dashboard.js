@@ -912,13 +912,13 @@ const DashboardApp = {
     if (!grid) return;
 
     if (!this.indicators) {
-      grid.innerHTML = '<p class="text-gray-500 text-sm col-span-4">指標データなし</p>';
+      grid.innerHTML = '<p class="text-gray-500 text-sm col-span-2">指標データなし</p>';
       return;
     }
 
     const ind = this.indicators;
     grid.innerHTML = `
-      <div class="col-span-2 md:col-span-4">
+      <div class="col-span-2">
         <div class="flex items-center gap-2 mb-2">
           <span class="text-[9px] font-bold text-blue-400 uppercase tracking-widest">▶ Trend</span>
           <div class="flex-1 h-px bg-blue-900/50"></div>
@@ -929,7 +929,7 @@ const DashboardApp = {
           ${this.diIndicator(ind.plus_di, ind.minus_di)}
         </div>
       </div>
-      <div class="col-span-2 md:col-span-4">
+      <div class="col-span-2">
         <div class="flex items-center gap-2 mb-2">
           <span class="text-[9px] font-bold text-yellow-400 uppercase tracking-widest">▶ Momentum</span>
           <div class="flex-1 h-px bg-yellow-900/50"></div>
@@ -939,7 +939,7 @@ const DashboardApp = {
           ${this.macdIndicator(ind.macd, ind.macd_signal, ind.macd_hist)}
         </div>
       </div>
-      <div class="col-span-2 md:col-span-4">
+      <div class="col-span-2">
         <div class="flex items-center gap-2 mb-2">
           <span class="text-[9px] font-bold text-purple-400 uppercase tracking-widest">▶ Volatility</span>
           <div class="flex-1 h-px bg-purple-900/50"></div>
