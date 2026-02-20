@@ -95,7 +95,7 @@ CLAUDE_CMD = _find_claude_executable()
 # 設定
 REPO = "KaePen/AutoTraderV4"
 POLL_INTERVAL_SEC = 30
-MAX_PARALLEL_MERGES = 5  # 同時処理するPR数の上限
+MAX_PARALLEL_MERGES = 3  # 同時処理するPR数の上限
 PROJECT_DIR = Path(
     os.environ.get("PROJECT_DIR", Path(__file__).parent.parent)
 )
