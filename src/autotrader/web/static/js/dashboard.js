@@ -1413,20 +1413,31 @@ const DashboardApp = {
     };
 
     const rows = this.trades.map((t) => {
+      const isOpen = t.is_open === true;
       const pnl = t.profit_loss || 0;
       const isProfit = pnl >= 0;
       const dirColor = t.signal_type === 'BUY' ? 'text-green-400' : 'text-red-400';
       const pnlColor = isProfit ? 'text-green-400' : 'text-red-400';
-      const reason = t.exit_reason && exitReasonConfig[t.exit_reason];
-      const reasonHtml = reason
-        ? `<span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border ${reason.c}">${reason.l}</span>`
-        : '';
-      const pipsHtml = t.profit_loss_pips !== null
-        ? `<span class="text-gray-500 ml-1">(${t.profit_loss_pips.toFixed(1)}p)</span>` : '';
 
-      const rowBg = isProfit ? 'rgba(20,83,45,0.07)' : 'rgba(127,29,29,0.07)';
-      const borderClr = isProfit ? 'rgba(34,197,94,0.45)' : 'rgba(239,68,68,0.45)';
-      const pnlCellBg = isProfit ? 'rgba(20,83,45,0.18)' : 'rgba(127,29,29,0.18)';
+      let reasonHtml;
+      if (isOpen) {
+        reasonHtml = '<span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border bg-blue-900/40 text-blue-300 border-blue-700/50">OPEN</span>';
+      } else {
+        const reason = t.exit_reason && exitReasonConfig[t.exit_reason];
+        reasonHtml = reason
+          ? `<span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border ${reason.c}">${reason.l}</span>`
+          : '';
+      }
+
+      const pipsHtml = (!isOpen && t.profit_loss_pips !== null)
+        ? `<span class="text-gray-500 ml-1">(${t.profit_loss_pips.toFixed(1)}p)</span>` : '';
+      const pnlText = isOpen
+        ? '-'
+        : `${isProfit ? '+' : ''}${this.fmtCurrency(pnl)}${pipsHtml}`;
+
+      const rowBg = isOpen ? 'rgba(30,58,138,0.10)' : (isProfit ? 'rgba(20,83,45,0.07)' : 'rgba(127,29,29,0.07)');
+      const borderClr = isOpen ? 'rgba(96,165,250,0.5)' : (isProfit ? 'rgba(34,197,94,0.45)' : 'rgba(239,68,68,0.45)');
+      const pnlCellBg = isOpen ? 'transparent' : (isProfit ? 'rgba(20,83,45,0.18)' : 'rgba(127,29,29,0.18)');
       return `<tr style="background:${rowBg}">
         <td style="box-shadow:inset 3px 0 0 ${borderClr}" class="text-xs text-gray-400 whitespace-nowrap tabular-nums">${this.fmtDateTime(t.closed_at || t.opened_at)}</td>
         <td><span class="text-xs font-bold ${dirColor}">${t.signal_type}</span></td>
@@ -1434,7 +1445,7 @@ const DashboardApp = {
         <td class="text-xs text-gray-400 tabular-nums">${t.entry_price.toFixed(3)}</td>
         <td class="text-xs text-gray-400 tabular-nums">${t.exit_price !== null ? t.exit_price.toFixed(3) : '-'}</td>
         <td>${reasonHtml}</td>
-        <td style="background:${pnlCellBg}" class="text-right text-xs font-bold tabular-nums ${pnlColor}">${isProfit ? '+' : ''}${this.fmtCurrency(pnl)}${pipsHtml}</td>
+        <td style="background:${pnlCellBg}" class="text-right text-xs font-bold tabular-nums ${isOpen ? 'text-gray-500' : pnlColor}">${pnlText}</td>
       </tr>`;
     }).join('');
 
