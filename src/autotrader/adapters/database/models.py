@@ -35,6 +35,7 @@ class TradeRecord(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     trade_id = Column(String(36), unique=True, nullable=False, index=True)
+    ticket = Column(Integer, nullable=True, index=True)
     symbol = Column(String(20), nullable=False, index=True)
     signal_type = Column(String(10), nullable=False)
     volume = Column(Float, nullable=False)
@@ -58,6 +59,7 @@ class TradeRecord(Base):
         return {
             "id": self.id,
             "trade_id": self.trade_id,
+            "ticket": self.ticket,
             "symbol": self.symbol,
             "signal_type": self.signal_type,
             "volume": self.volume,
