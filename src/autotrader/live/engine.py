@@ -1505,13 +1505,24 @@ class LiveTradingEngine:
                     str(position.ticket)
                 )
                 # DB記録（決済）
-                # result.exit_price（MT5約定価格）を優先し、
-                # 取得できない場合はtickの現在価格をフォールバック
+                # MT5約定履歴から正確な約定価格・損益を取得し、
+                # 取得できない場合は order_send 価格・tick 価格でフォールバック
                 _actual_price = (
                     result.exit_price
                     if result.exit_price and result.exit_price > 0
                     else current_price
                 )
+                _profit_loss = 0.0
+                try:
+                    deal = await self._executor.get_deal_by_position_async(
+                        position.ticket
+                    )
+                    if deal:
+                        _profit_loss = deal["profit"]
+                        if deal["price"] > 0:
+                            _actual_price = deal["price"]
+                except Exception:
+                    pass
                 if _actual_price > 0:
                     _exit_reason_str = (
                         action.exit_reason.value
@@ -1522,6 +1533,7 @@ class LiveTradingEngine:
                         position.ticket,
                         _actual_price,
                         _exit_reason_str,
+                        _profit_loss,
                     )
 
     async def _sync_positions(self) -> None:
