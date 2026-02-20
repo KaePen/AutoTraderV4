@@ -122,11 +122,22 @@ const DashboardApp = {
     const a = this.lastAnalysis;
     // エンジン未起動ならパネル非表示
     const isLive = this.tradingMode && this.tradingMode.mode === 'live';
+    const sigPanel = document.getElementById('signal-panel');
     if (!isLive) {
       panel.classList.add('hidden');
+      // バックテスト時: シグナルを全幅（3列分）
+      if (sigPanel) {
+        sigPanel.classList.remove('lg:col-span-1');
+        sigPanel.classList.add('lg:col-span-3');
+      }
       return;
     }
     panel.classList.remove('hidden');
+    // ライブ時: シグナルを1/3幅
+    if (sigPanel) {
+      sigPanel.classList.remove('lg:col-span-3');
+      sigPanel.classList.add('lg:col-span-1');
+    }
 
     // エンジン/接続状態バナー（aがnullでも表示）
     const statusBanner = document.getElementById('ap-engine-status');
