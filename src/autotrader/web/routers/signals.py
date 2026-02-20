@@ -167,7 +167,7 @@ async def get_signal_radar(
             grouped.setdefault(s.symbol, []).append(s)
 
         for symbol, signals in grouped.items():
-            # HOLDを除外して信頼度降順、上位3件
+            # HOLDを除外して信頼度降順
             best = sorted(
                 [
                     s for s in signals
@@ -175,7 +175,7 @@ async def get_signal_radar(
                 ],
                 key=lambda s: s.confidence,
                 reverse=True,
-            )[:3]
+            )
             if best:
                 result[symbol] = [
                     _signal_to_response(s) for s in best
