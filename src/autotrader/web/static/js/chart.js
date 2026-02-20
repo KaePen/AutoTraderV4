@@ -14,6 +14,7 @@ const ChartManager = {
   _trades: [],
   _tradeLines: [],        // トレードライン LineSeries のリスト
   _openTradeLineRefs: [], // オープン中ポジションのラインシリーズ（tick更新用）
+  _seriesMarkers: null,   // createSeriesMarkers プリミティブ（v5）
 
   isLoading: false,
   resizeObserver: null,
@@ -90,7 +91,7 @@ const ChartManager = {
       },
     });
 
-    this.candleSeries = this.chart.addCandlestickSeries({
+    this.candleSeries = this.chart.addSeries(LightweightCharts.CandlestickSeries, {
       upColor: '#22c55e',
       downColor: '#ef4444',
       borderUpColor: '#22c55e',
@@ -105,7 +106,7 @@ const ChartManager = {
     });
 
     // EMA(12)
-    this._indicatorSeries.ema12 = this.chart.addLineSeries({
+    this._indicatorSeries.ema12 = this.chart.addSeries(LightweightCharts.LineSeries, {
       color: '#60a5fa',
       lineWidth: 1,
       priceLineVisible: false,
@@ -114,7 +115,7 @@ const ChartManager = {
     });
 
     // EMA(26)
-    this._indicatorSeries.ema26 = this.chart.addLineSeries({
+    this._indicatorSeries.ema26 = this.chart.addSeries(LightweightCharts.LineSeries, {
       color: '#f97316',
       lineWidth: 1,
       priceLineVisible: false,
@@ -123,7 +124,7 @@ const ChartManager = {
     });
 
     // EMA(50)
-    this._indicatorSeries.ema50 = this.chart.addLineSeries({
+    this._indicatorSeries.ema50 = this.chart.addSeries(LightweightCharts.LineSeries, {
       color: '#22d3ee',
       lineWidth: 1.5,
       priceLineVisible: false,
@@ -133,7 +134,7 @@ const ChartManager = {
     });
 
     // EMA(200)
-    this._indicatorSeries.ema200 = this.chart.addLineSeries({
+    this._indicatorSeries.ema200 = this.chart.addSeries(LightweightCharts.LineSeries, {
       color: '#e2e8f0',
       lineWidth: 2,
       priceLineVisible: false,
@@ -143,7 +144,7 @@ const ChartManager = {
     });
 
     // BB Upper
-    this._indicatorSeries.bbUpper = this.chart.addLineSeries({
+    this._indicatorSeries.bbUpper = this.chart.addSeries(LightweightCharts.LineSeries, {
       color: '#a78bfa',
       lineWidth: 1,
       lineStyle: 2, // Dashed
@@ -153,7 +154,7 @@ const ChartManager = {
     });
 
     // BB Middle
-    this._indicatorSeries.bbMiddle = this.chart.addLineSeries({
+    this._indicatorSeries.bbMiddle = this.chart.addSeries(LightweightCharts.LineSeries, {
       color: '#6b7280',
       lineWidth: 1,
       lineStyle: 1, // Dotted
@@ -163,7 +164,7 @@ const ChartManager = {
     });
 
     // BB Lower
-    this._indicatorSeries.bbLower = this.chart.addLineSeries({
+    this._indicatorSeries.bbLower = this.chart.addSeries(LightweightCharts.LineSeries, {
       color: '#a78bfa',
       lineWidth: 1,
       lineStyle: 2, // Dashed
@@ -173,7 +174,7 @@ const ChartManager = {
     });
 
     // VWAP
-    this._indicatorSeries.vwap = this.chart.addLineSeries({
+    this._indicatorSeries.vwap = this.chart.addSeries(LightweightCharts.LineSeries, {
       color: '#4ade80',
       lineWidth: 1.5,
       lineStyle: 0,
@@ -184,7 +185,7 @@ const ChartManager = {
     });
 
     // Volume（チャート下部30%に背景として表示）
-    this.volumeSeries = this.chart.addHistogramSeries({
+    this.volumeSeries = this.chart.addSeries(LightweightCharts.HistogramSeries, {
       priceFormat: { type: 'volume' },
       priceScaleId: 'volume',
     });
@@ -240,7 +241,7 @@ const ChartManager = {
     });
 
     // RSI ライン
-    this.rsiSeries = this.rsiChart.addLineSeries({
+    this.rsiSeries = this.rsiChart.addSeries(LightweightCharts.LineSeries, {
       color: '#facc15',
       lineWidth: 1.5,
       priceLineVisible: false,
@@ -248,7 +249,7 @@ const ChartManager = {
     });
 
     // 70ライン
-    this._rsiLine70 = this.rsiChart.addLineSeries({
+    this._rsiLine70 = this.rsiChart.addSeries(LightweightCharts.LineSeries, {
       color: '#ef4444',
       lineWidth: 1,
       lineStyle: 2,
@@ -258,7 +259,7 @@ const ChartManager = {
     });
 
     // 30ライン
-    this._rsiLine30 = this.rsiChart.addLineSeries({
+    this._rsiLine30 = this.rsiChart.addSeries(LightweightCharts.LineSeries, {
       color: '#22c55e',
       lineWidth: 1,
       lineStyle: 2,
@@ -593,14 +594,14 @@ const ChartManager = {
 
   /**
    * シグナルマーカーとトレードマーカーを統合してチャートに描画
-   * LightweightCharts の setMarkers は time 昇順が必須
+   * v5: createSeriesMarkers プリミティブで管理
+   * トレードマーカーはエントリー/エグジット価格位置に正確に表示
    */
   _applyMarkers() {
     if (!this.candleSeries) return;
-    const prec = this._getPricePrecision();
     const markers = [];
 
-    // シグナルマーカー
+    // シグナルマーカー（価格情報なし → belowBar/aboveBar）
     if (this.signals && this.signals.length > 0) {
       for (const s of this.signals) {
         if (s.timeframe !== this.timeframe) continue;
@@ -615,32 +616,37 @@ const ChartManager = {
       }
     }
 
-    // トレードマーカー（エントリー・エグジット）
+    // トレードマーカー（atPriceMiddle + price で正確な価格位置に表示）
     if (this._trades && this._trades.length > 0) {
       for (const t of this._trades) {
         if (t.symbol !== this.symbol) continue;
 
-        // エントリーマーカー
+        const isBuy = t.signal_type === 'BUY';
         const entryTime = new Date(t.opened_at).getTime() / 1000;
-        if (entryTime > 0) {
-          const isBuy = t.signal_type === 'BUY';
+
+        // エントリーマーカー
+        // 買い: ▲（arrowUp）緑 / 売り: ●（circle）赤
+        if (entryTime > 0 && t.entry_price != null) {
           markers.push({
             time: entryTime,
-            position: isBuy ? 'belowBar' : 'aboveBar',
+            position: 'atPriceMiddle',
+            price: t.entry_price,
             color: isBuy ? '#22c55e' : '#ef4444',
-            shape: isBuy ? 'arrowUp' : 'arrowDown',
+            shape: isBuy ? 'arrowUp' : 'circle',
           });
         }
 
         // エグジットマーカー（クローズ済みのみ）
+        // 買い: ▼（arrowDown）損益色 / 売り: ■（square）損益色
         if (!t.is_open && t.closed_at && t.exit_price != null) {
           const exitTime = new Date(t.closed_at).getTime() / 1000;
           const isProfit = (t.profit_loss || 0) >= 0;
           markers.push({
             time: exitTime,
-            position: t.signal_type === 'BUY' ? 'aboveBar' : 'belowBar',
+            position: 'atPriceMiddle',
+            price: t.exit_price,
             color: isProfit ? '#4ade80' : '#f87171',
-            shape: 'circle',
+            shape: isBuy ? 'arrowDown' : 'square',
           });
         }
       }
@@ -648,7 +654,15 @@ const ChartManager = {
 
     // time 昇順ソート（setMarkers の要件）
     markers.sort((a, b) => a.time - b.time);
-    this.candleSeries.setMarkers(markers);
+
+    // v5: createSeriesMarkers プリミティブで管理
+    if (!this._seriesMarkers) {
+      this._seriesMarkers = LightweightCharts.createSeriesMarkers(
+        this.candleSeries, markers
+      );
+    } else {
+      this._seriesMarkers.setMarkers(markers);
+    }
   },
 
   /**
@@ -705,7 +719,7 @@ const ChartManager = {
         lineColor = isProfit ? '#4ade80aa' : '#f87171aa';
       }
 
-      const series = this.chart.addLineSeries({
+      const series = this.chart.addSeries(LightweightCharts.LineSeries, {
         color: lineColor,
         lineWidth: 1,
         lineStyle: 2, // Dashed（破線）
@@ -775,9 +789,10 @@ const ChartManager = {
       this.rsiResizeObserver.disconnect();
     }
     if (this.chart) {
-      // トレードラインは chart.remove() で一括破棄される
+      // トレードライン・マーカーは chart.remove() で一括破棄される
       this._tradeLines = [];
       this._openTradeLineRefs = [];
+      this._seriesMarkers = null;
       this.chart.remove();
       this.chart = null;
       this.candleSeries = null;
