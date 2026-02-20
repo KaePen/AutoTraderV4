@@ -216,6 +216,26 @@ class LiveTradingEngine:
         self._last_tick_time = None
         logger.debug("データ更新タイマーリセット")
 
+    def get_current_entry_threshold(
+        self, mode_str: str | None
+    ) -> float | None:
+        """現在のbot設定からエントリー閾値を取得（デモ/ライブ切替即時反映）
+
+        Args:
+            mode_str: トレードモード文字列（"SCALPING"|"DAY_TRADE"|"SWING"）
+
+        Returns:
+            float | None: 現在の閾値。取得不可の場合はNone
+        """
+        if not mode_str or not self._bot:
+            return None
+        try:
+            from autotrader.core.enums import TradingStrategyMode
+            mode_enum = TradingStrategyMode(mode_str)
+            return self._bot.consensus.get_threshold_for_mode(mode_enum)
+        except (ValueError, AttributeError):
+            return None
+
     def update_bot_config(self, new_config: UnifiedBotConfig) -> None:
         """Botの設定を動的に更新する
 
@@ -526,7 +546,10 @@ class LiveTradingEngine:
                 "direction": cs.direction.value,
                 "confidence": cs.confidence,
                 "consensus_score": cs.consensus_score,
-                "entry_threshold": cs.entry_threshold,
+                "entry_threshold": (
+                    self.get_current_entry_threshold(cs.mode)
+                    or cs.entry_threshold
+                ),
                 "regime": cs.regime,
                 "mode": cs.mode,
                 "rationale": cs.rationale,
