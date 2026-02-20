@@ -16,7 +16,9 @@ const ChartManager = {
   rsiResizeObserver: null,
   // 自動更新
   _refreshTimer: null,
-  _refreshMs: 1000, // デフォルト1秒
+  _refreshMs: 0, // 0=無効（price_updateで駆動するため）
+  // 最新バーキャッシュ（price_update高速更新用）
+  _lastBarData: null,
   // 指標シリーズ（オーバーレイ）
   _indicatorSeries: {
     ema12: null,
@@ -494,13 +496,16 @@ const ChartManager = {
       );
 
       try {
-        this.candleSeries.update({
+        const bar = {
           time: latestTime,
           open: latest.open,
           high: latest.high,
           low: latest.low,
           close: latest.close,
-        });
+        };
+        this.candleSeries.update(bar);
+        // 最新バーをキャッシュ更新
+        this._lastBarData = { ...bar };
         if (this.volumeSeries) {
           this.volumeSeries.update({
             time: latestTime,
@@ -552,6 +557,11 @@ const ChartManager = {
     }));
 
     this.candleSeries.setData(chartData);
+
+    // 最新バーをキャッシュ（price_update高速更新用）
+    if (chartData.length > 0) {
+      this._lastBarData = { ...chartData[chartData.length - 1] };
+    }
 
     // ボリューム
     if (this.volumeSeries) {
@@ -628,6 +638,28 @@ const ChartManager = {
   /** シグナル設定 */
   setSignals(signals) {
     this.signals = signals;
+  },
+
+  /**
+   * MT5のtick price_updateで最新バーのcloseをリアルタイム更新
+   * ローソク足APIを呼ばずに高速でチャートを更新する。
+   *
+   * @param {number} bid - MT5のbid価格
+   */
+  updateLastBar(bid) {
+    if (!this.candleSeries || !this._lastBarData || bid <= 0) return;
+    const updated = {
+      ...this._lastBarData,
+      close: bid,
+      high: Math.max(this._lastBarData.high, bid),
+      low: Math.min(this._lastBarData.low, bid),
+    };
+    try {
+      this.candleSeries.update(updated);
+      this._lastBarData = updated;
+    } catch (_e) {
+      // チャート未準備時は無視
+    }
   },
 
   /** シンボル変更 */

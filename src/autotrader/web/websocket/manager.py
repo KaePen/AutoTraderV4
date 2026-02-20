@@ -20,6 +20,7 @@ class EventType(str, Enum):
     INDICATOR_UPDATE = "indicator_update"
     ACCOUNT_UPDATE = "account_update"
     TICK_UPDATE = "tick_update"
+    PRICE_UPDATE = "price_update"
     ALERT = "alert"
     HEARTBEAT = "heartbeat"
 
