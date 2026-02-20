@@ -221,6 +221,9 @@ class LiveTradingEngine:
     ) -> float | None:
         """現在のbot設定からエントリー閾値を取得（デモ/ライブ切替即時反映）
 
+        consensus オブジェクトを経由せず bot.config から直接計算するため、
+        update_bot_config 直後でも正しい閾値を返す。
+
         Args:
             mode_str: トレードモード文字列（"SCALPING"|"DAY_TRADE"|"SWING"）
 
@@ -230,10 +233,25 @@ class LiveTradingEngine:
         if not mode_str or not self._bot:
             return None
         try:
-            from autotrader.core.enums import TradingStrategyMode
-            mode_enum = TradingStrategyMode(mode_str)
-            return self._bot.consensus.get_threshold_for_mode(mode_enum)
-        except (ValueError, AttributeError):
+            from autotrader.decision.unified.mode_aware_consensus import (
+                ConsensusConfig,
+            )
+            cfg = self._bot.config
+            defaults = ConsensusConfig()
+            if cfg.demo_mode:
+                thresholds = {
+                    "SCALPING": cfg.demo_consensus_scalping_threshold,
+                    "DAY_TRADE": cfg.demo_consensus_day_trade_threshold,
+                    "SWING": cfg.demo_consensus_swing_threshold,
+                }
+            else:
+                thresholds = {
+                    "SCALPING": defaults.scalping_threshold,
+                    "DAY_TRADE": cfg.consensus_day_trade_threshold,
+                    "SWING": defaults.swing_threshold,
+                }
+            return thresholds.get(mode_str)
+        except AttributeError:
             return None
 
     def update_bot_config(self, new_config: UnifiedBotConfig) -> None:
