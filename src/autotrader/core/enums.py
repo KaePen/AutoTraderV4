@@ -109,6 +109,7 @@ class ExitReason(str, Enum):
     STAGNATION = "STAGNATION"
     TAKE_PROFIT_EARLY = "TP_EARLY"
     FORCE_CLOSE = "FORCE_CLOSE"
+    EXTERNAL_CLOSE = "EXTERNAL_CLOSE"
 
 
 class TrendDirection(str, Enum):

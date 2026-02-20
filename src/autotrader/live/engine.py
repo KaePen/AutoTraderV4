@@ -1227,7 +1227,7 @@ class LiveTradingEngine:
                     "外部決済検出（手動/SL/TP）: ticket=%d", ticket
                 )
                 self._write_close_to_db(
-                    ticket, 0.0, "external_close"
+                    ticket, 0.0, "EXTERNAL_CLOSE"
                 )
 
         if not positions:
