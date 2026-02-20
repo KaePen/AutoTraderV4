@@ -800,7 +800,7 @@ const DashboardApp = {
   async fetchPositionsAndTrades() {
     try {
       const [pos, tr] = await Promise.all([
-        getPositions(this.symbol),
+        getPositions(null),
         getTrades(this.symbol, 20),
       ]);
       this.positions = pos;
@@ -817,7 +817,7 @@ const DashboardApp = {
     try {
       const [dash, pos, tr, summary] = await Promise.all([
         getDashboard(),
-        getPositions(this.symbol),
+        getPositions(null),
         getTrades(this.symbol, 20),
         getTradeSummary(this.symbol, 30),
       ]);
@@ -946,11 +946,7 @@ const DashboardApp = {
         d.win_rate.toFixed(1) + '%',
         '本日 ' + d.today_trades + ' トレード',
         d.win_rate >= 55 ? 'profit' : d.win_rate >= 45 ? 'neutral' : 'loss')}
-      ${this.metricCard('ポジション',
-        this.positions.length + ' / ' + d.open_positions,
-        a.profit !== 0 ? '含み: ' + this.fmtCurrency(a.profit) : '含みなし',
-        a.profit > 0 ? 'profit' : a.profit < 0 ? 'loss' : 'neutral',
-        '実行中 / 総数')}
+      ${this.positionMetricCard()}
       ${this.metricCard('証拠金維持率',
         a.margin_level.toFixed(0) + '%',
         '余剰: ' + this.fmtCurrency(a.free_margin),
@@ -970,15 +966,61 @@ const DashboardApp = {
       </div>`;
   },
 
+  /** ポジションメトリクスカード（全通貨ペアのポジションをコンパクト表示） */
+  positionMetricCard() {
+    const positions = this.positions;
+    const totalCount = positions.length;
+    const totalProfit = positions.reduce((s, p) => s + (p.unrealized_pnl || 0), 0);
+    const variant = totalCount === 0 ? 'neutral' : (totalProfit >= 0 ? 'profit' : 'loss');
+    const borderColors = { profit: 'border-l-green-500/50', loss: 'border-l-red-500/50', neutral: 'border-l-gray-600' };
+    const valueColors = { profit: 'text-green-400', loss: 'text-red-400', neutral: 'text-gray-100' };
+
+    // 通貨ペアごとにグループ化してBUY/SELLアイコンを生成
+    const bySymbol = {};
+    for (const p of positions) {
+      if (!bySymbol[p.symbol]) bySymbol[p.symbol] = { buy: 0, sell: 0 };
+      if (p.signal_type === 'BUY') bySymbol[p.symbol].buy++;
+      else bySymbol[p.symbol].sell++;
+    }
+
+    const pills = Object.entries(bySymbol).map(([sym, cnt]) => {
+      const arrow = cnt.buy > 0 && cnt.sell > 0 ? '↑↓'
+        : cnt.buy > 0 ? '↑' : '↓';
+      const color = cnt.buy > 0 && cnt.sell > 0 ? 'text-yellow-400'
+        : cnt.buy > 0 ? 'text-green-400' : 'text-red-400';
+      return `<span class="inline-flex items-center gap-0.5 ${color} text-[10px] font-medium">${sym}<span>${arrow}</span></span>`;
+    }).join('<span class="text-gray-700 mx-0.5">·</span>');
+
+    const profitStr = totalCount > 0
+      ? `<p class="text-xs text-gray-500 mt-0.5 tabular-nums">${totalProfit >= 0 ? '+' : ''}${this.fmtCurrency(totalProfit)}</p>`
+      : '';
+    const pillsRow = totalCount > 0
+      ? `<p class="flex flex-wrap gap-y-0.5 items-center mt-1 leading-none">${pills}</p>`
+      : `<p class="text-xs text-gray-600 mt-0.5">ポジションなし</p>`;
+
+    return `
+      <div class="card border-l-2 ${borderColors[variant]} py-3">
+        <p class="text-xs text-gray-400 uppercase tracking-wider mb-1">ポジション</p>
+        <p class="text-lg font-bold tabular-nums ${valueColors[variant]}">${totalCount} open</p>
+        ${profitStr}
+        ${pillsRow}
+      </div>`;
+  },
+
   /** ポジション描画 */
   renderPositions() {
     const listEl = document.getElementById('position-list');
     const countEl = document.getElementById('position-count');
     if (!listEl) return;
 
-    if (countEl) countEl.textContent = this.positions.length > 0 ? this.positions.length + ' open' : 'no open';
+    // 選択中シンボルでフィルター（全ポジションから表示対象を絞る）
+    const displayPositions = this.symbol
+      ? this.positions.filter(p => p.symbol === this.symbol)
+      : this.positions;
 
-    if (this.positions.length === 0) {
+    if (countEl) countEl.textContent = displayPositions.length > 0 ? displayPositions.length + ' open' : 'no open';
+
+    if (displayPositions.length === 0) {
       listEl.innerHTML = '<div class="flex items-center justify-center h-16 text-gray-500 text-sm">ポジションなし</div>';
       return;
     }
@@ -988,7 +1030,7 @@ const DashboardApp = {
     const wrapClass = isWide
       ? 'grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3'
       : 'space-y-2';
-    listEl.innerHTML = `<div class="${wrapClass}">` + this.positions.map((p, i) => this.positionCard(p, i)).join('') + '</div>';
+    listEl.innerHTML = `<div class="${wrapClass}">` + displayPositions.map((p, i) => this.positionCard(p, i)).join('') + '</div>';
   },
 
   positionCard(p, idx) {
