@@ -641,7 +641,6 @@ const ChartManager = {
             position: t.signal_type === 'BUY' ? 'aboveBar' : 'belowBar',
             color: isProfit ? '#4ade80' : '#f87171',
             shape: 'circle',
-            text: `OUT ${t.exit_price.toFixed(prec)}`,
           });
         }
       }
@@ -687,8 +686,15 @@ const ChartManager = {
         exitPrice = t.exit_price;
       }
 
-      // 同一時刻は描画不可（1本バーの中で開いて閉じた場合など）
-      if (entryTime >= exitTime) continue;
+      // 同一バー内は破線描画不可（チャート破損を防ぐ）
+      const TF_SECONDS = {
+        M1: 60, M5: 300, M15: 900, M30: 1800,
+        H1: 3600, H4: 14400, D1: 86400,
+      };
+      const tfSec = TF_SECONDS[this.timeframe] || 900;
+      const entryBar = Math.floor(entryTime / tfSec) * tfSec;
+      const exitBar = Math.floor(exitTime / tfSec) * tfSec;
+      if (entryBar >= exitBar) continue;
 
       const isBuy = t.signal_type === 'BUY';
       let lineColor;
