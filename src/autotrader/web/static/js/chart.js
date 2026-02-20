@@ -74,6 +74,18 @@ const ChartManager = {
         borderColor: '#374151',
         timeVisible: true,
         secondsVisible: false,
+        tickMarkFormatter: (time, type) => this._jstTickMarkFormatter(time, type),
+      },
+      localization: {
+        timeFormatter: (time) => {
+          const d = new Date(time * 1000 + 9 * 3600 * 1000);
+          const Y = d.getUTCFullYear();
+          const M = String(d.getUTCMonth() + 1).padStart(2, '0');
+          const D = String(d.getUTCDate()).padStart(2, '0');
+          const h = String(d.getUTCHours()).padStart(2, '0');
+          const mi = String(d.getUTCMinutes()).padStart(2, '0');
+          return `${Y}/${M}/${D} ${h}:${mi} JST`;
+        },
       },
     });
 
@@ -222,6 +234,7 @@ const ChartManager = {
         borderColor: '#374151',
         timeVisible: true,
         secondsVisible: false,
+        tickMarkFormatter: (time, type) => this._jstTickMarkFormatter(time, type),
       },
     });
 
@@ -430,6 +443,31 @@ const ChartManager = {
   /** シンボルに応じた価格の小数点桁数 */
   _getPricePrecision() {
     return this.symbol && this.symbol.includes('JPY') ? 3 : 5;
+  },
+
+  /**
+   * 時間軸目盛りをJST（UTC+9）で返すフォーマッター
+   * LightweightCharts v4 の tickMarkFormatter コールバック
+   *
+   * @param {number} time - UNIX秒タイムスタンプ
+   * @param {number} type - TickMarkType (0=Year,1=Month,2=Day,3=Time,4=TimeWithSec)
+   * @returns {string} フォーマット済み文字列
+   */
+  _jstTickMarkFormatter(time, type) {
+    const d = new Date(time * 1000 + 9 * 3600 * 1000);
+    const Y = d.getUTCFullYear();
+    const M = String(d.getUTCMonth() + 1).padStart(2, '0');
+    const D = String(d.getUTCDate()).padStart(2, '0');
+    const h = String(d.getUTCHours()).padStart(2, '0');
+    const mi = String(d.getUTCMinutes()).padStart(2, '0');
+    switch (type) {
+      case 0: return String(Y);
+      case 1: return `${Y}/${M}`;
+      case 2: return `${M}/${D}`;
+      case 3: return `${h}:${mi}`;
+      case 4: return `${h}:${mi}`;
+      default: return `${h}:${mi}`;
+    }
   },
 
   /** ローソク足取得（全件） */
