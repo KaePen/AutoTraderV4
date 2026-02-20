@@ -49,8 +49,8 @@
           <div class="w-px h-4 bg-gray-700 flex-shrink-0"></div>
           <!-- ステータスチップ群（MT5 + 各通貨ペア） -->
           <div class="flex items-center gap-1.5">
-            <!-- MT5接続ステータス -->
-            <span id="tc-mt5-badge" class="hidden inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-gray-700/80 text-gray-400 border border-gray-700/50">
+            <!-- MT5接続ステータス（常時表示・状態のみ変化） -->
+            <span id="tc-mt5-badge" class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-gray-700/80 text-gray-400 border border-gray-700/50">
               <span class="w-1.5 h-1.5 rounded-full bg-gray-500"></span>MT5
             </span>
             <!-- 通貨ペアステータスチップ（lg:以上） -->
@@ -80,10 +80,12 @@
           <!-- シンボルドロップダウン（カスタム・各通貨モード統合） -->
           <div id="symbol-dropdown-wrapper" class="relative">
             <button id="symbol-dropdown-trigger"
-                    class="flex items-center gap-1.5 px-2.5 py-1 bg-gray-700 border border-gray-600 rounded text-xs font-semibold text-gray-200 hover:bg-gray-600 transition-colors whitespace-nowrap">
-              <span id="symbol-trigger-dot" class="w-1.5 h-1.5 rounded-full bg-gray-500 flex-shrink-0"></span>
-              <span id="symbol-trigger-label">USDJPY</span>
-              <span id="symbol-trigger-mode" class="font-normal text-gray-500 ml-0.5">待機</span>
+                    class="flex items-center gap-1.5 px-2.5 py-1 min-w-[8.5rem] justify-between bg-gray-700 border border-gray-600 rounded text-xs font-semibold text-gray-200 hover:bg-gray-600 transition-colors">
+              <div class="flex items-center gap-1.5 min-w-0">
+                <span id="symbol-trigger-dot" class="w-1.5 h-1.5 rounded-full bg-gray-500 flex-shrink-0"></span>
+                <span id="symbol-trigger-label" class="tabular-nums">USDJPY</span>
+                <span id="symbol-trigger-mode" class="font-normal text-gray-500 inline-block w-[2.5rem]">待機</span>
+              </div>
               <svg class="w-3 h-3 text-gray-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
               </svg>
