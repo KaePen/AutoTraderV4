@@ -417,9 +417,6 @@ const DashboardApp = {
       tfEl.innerHTML = summaryHtml + `<div class="flex gap-2 flex-wrap">${cardsHtml}</div>`;
     }
 
-    // 判断理由
-    const rationaleEl = document.getElementById('ap-rationale');
-    if (rationaleEl) rationaleEl.textContent = a.rationale || '--';
   },
 
   // ── トレーディングコントロール ──
