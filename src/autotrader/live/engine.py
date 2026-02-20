@@ -103,6 +103,10 @@ class LiveTradingEngine:
         self._cached_positions: list[dict] = []
         # シンボル別デモモード状態（UI表示用）
         self._symbol_demo_mode: dict[str, bool] = {}
+        # チケット→トレードID マッピング（DB記録用）
+        self._open_trades: dict[int, str] = {}
+        # クローズ済みトレード履歴（インメモリ）
+        self._closed_trades: list[dict] = []
 
     @property
     def connected(self) -> bool:
@@ -161,8 +165,8 @@ class LiveTradingEngine:
 
     @property
     def trade_history(self) -> list[dict]:
-        """クローズ済みトレード履歴（未実装：DBフォールバック用）"""
-        return []
+        """クローズ済みトレード履歴"""
+        return self._closed_trades
 
     @property
     def cached_positions(self) -> list[dict]:
@@ -555,20 +559,13 @@ class LiveTradingEngine:
         Args:
             signal: トレードシグナル
         """
-        # 既存ポジションチェック
-        # デモモードではdemo_max_positions分まで許可
+        # 既存ポジションチェック（デモも本番も最大1ポジション）
         positions = await self._executor.get_open_positions_async(
             self._config.symbol
         )
-        max_pos = (
-            self._bot.config.demo_max_positions
-            if self._bot.config.demo_mode
-            else 1
-        )
-        if len(positions) >= max_pos:
+        if len(positions) >= 1:
             logger.info(
-                "既存ポジション上限(%d/%d)、エントリースキップ",
-                len(positions), max_pos,
+                "既存ポジション上限(1)、エントリースキップ",
             )
             return
 
@@ -636,6 +633,12 @@ class LiveTradingEngine:
                 await self._register_new_position(
                     result.ticket, signal_with_lot, lot, entry_tick
                 )
+                # DB書き込み（エントリー記録）
+                trade_id = self._write_entry_to_db(
+                    result.ticket, signal_with_lot, lot, entry_tick
+                )
+                if trade_id:
+                    self._open_trades[result.ticket] = trade_id
             # TradeBotに通知（取引時刻を渡す）
             self._bot.on_trade_executed(signal.created_at)
             # WebSocketポジション更新ブロードキャスト
@@ -733,6 +736,140 @@ class LiveTradingEngine:
             plan=plan,
         )
 
+    def _write_entry_to_db(
+        self,
+        ticket: int,
+        signal: Signal,
+        lot: float,
+        entry_tick: dict | None,
+    ) -> str | None:
+        """エントリーをDBに記録
+
+        Args:
+            ticket: MT5チケットID
+            signal: トレードシグナル
+            lot: ロット数
+            entry_tick: エントリー時のtick情報
+
+        Returns:
+            str | None: 作成されたtrade_id（失敗時None）
+        """
+        from autotrader.adapters.database.connection import get_session
+        from autotrader.adapters.database.repositories import (
+            TradeRepository,
+        )
+        try:
+            is_buy = signal.signal_type == SignalType.BUY
+            if entry_tick:
+                entry_price = float(
+                    entry_tick.get("ask", 0) if is_buy
+                    else entry_tick.get("bid", 0)
+                )
+            else:
+                entry_price = 0.0
+            pip_size = (
+                0.01 if "JPY" in signal.symbol.upper()
+                else 0.0001
+            )
+            sl_price = None
+            tp_price = None
+            if entry_price > 0:
+                if signal.stop_loss and signal.stop_loss > 0:
+                    sl_dist = signal.stop_loss * pip_size
+                    sl_price = (
+                        entry_price - sl_dist if is_buy
+                        else entry_price + sl_dist
+                    )
+                if signal.take_profit and signal.take_profit > 0:
+                    tp_dist = signal.take_profit * pip_size
+                    tp_price = (
+                        entry_price + tp_dist if is_buy
+                        else entry_price - tp_dist
+                    )
+            with get_session() as db:
+                repo = TradeRepository(db)
+                trade = repo.create(
+                    symbol=signal.symbol,
+                    signal_type=signal.signal_type.value,
+                    volume=lot,
+                    entry_price=entry_price,
+                    opened_at=datetime.now(timezone.utc),
+                    stop_loss=sl_price,
+                    take_profit=tp_price,
+                )
+                trade_id = trade.trade_id
+            logger.info(
+                "DB記録（エントリー）: trade_id=%s ticket=%d",
+                trade_id, ticket,
+            )
+            return trade_id
+        except Exception as e:
+            logger.error("DB書き込みエラー（エントリー）: %s", e)
+            return None
+
+    def _write_close_to_db(
+        self,
+        ticket: int,
+        current_price: float,
+        action_reason: str,
+    ) -> None:
+        """決済をDBに更新
+
+        Args:
+            ticket: MT5チケットID
+            current_price: 決済時の価格
+            action_reason: 決済理由
+        """
+        from autotrader.adapters.database.connection import get_session
+        from autotrader.adapters.database.repositories import (
+            TradeRepository,
+        )
+        trade_id = self._open_trades.pop(ticket, None)
+        if not trade_id:
+            return
+        try:
+            pos = self._pm.get_position(str(ticket))
+            pnl_pips = 0.0
+            if pos:
+                pip_size = (
+                    0.01 if "JPY" in self._config.symbol.upper()
+                    else 0.0001
+                )
+                price_diff = (
+                    current_price - pos.entry_price
+                    if pos.direction == SignalType.BUY
+                    else pos.entry_price - current_price
+                )
+                pnl_pips = price_diff / pip_size
+            closed_at = datetime.now(timezone.utc)
+            with get_session() as db:
+                repo = TradeRepository(db)
+                trade_record = repo.get_by_id(trade_id)
+                if trade_record:
+                    repo.close(
+                        trade=trade_record,
+                        exit_price=current_price,
+                        closed_at=closed_at,
+                        exit_reason=action_reason,
+                        profit_loss=0.0,
+                        profit_loss_pips=pnl_pips,
+                    )
+            self._closed_trades.append({
+                "trade_id": trade_id,
+                "ticket": ticket,
+                "exit_price": current_price,
+                "exit_reason": action_reason,
+                "pnl_pips": round(pnl_pips, 1),
+                "closed_at": closed_at.isoformat(),
+            })
+            logger.info(
+                "DB記録（決済）: trade_id=%s ticket=%d"
+                " pnl_pips=%.1f",
+                trade_id, ticket, pnl_pips,
+            )
+        except Exception as e:
+            logger.error("DB書き込みエラー（決済）: %s", e)
+
     async def _manage_positions(self) -> None:
         """既存ポジションの管理
 
@@ -793,19 +930,24 @@ class LiveTradingEngine:
                 )
 
                 # アクション実行
-                await self._execute_action(position, action)
+                await self._execute_action(
+                    position, action, current_price
+                )
             except Exception as e:
                 logger.error(
                     "ポジション管理エラー(ticket=%d): %s",
                     position.ticket, e,
                 )
 
-    async def _execute_action(self, position, action) -> None:
+    async def _execute_action(
+        self, position, action, current_price: float = 0.0
+    ) -> None:
         """管理アクション実行
 
         Args:
             position: ポジションエンティティ
             action: ManagementAction
+            current_price: 現在価格（DB記録用）
         """
         if action.action_type == ManagementActionType.HOLD:
             return
@@ -854,6 +996,13 @@ class LiveTradingEngine:
                 self._pm.unregister_position(
                     str(position.ticket)
                 )
+                # DB記録（決済）
+                if current_price > 0:
+                    self._write_close_to_db(
+                        position.ticket,
+                        current_price,
+                        action.reason,
+                    )
 
     async def _sync_positions(self) -> None:
         """MT5の既存ポジションとPositionManagerを同期
