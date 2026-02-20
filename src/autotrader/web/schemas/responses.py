@@ -475,6 +475,7 @@ class AnalysisResponse(BaseModel):
     tf_breakdowns: dict[str, dict[str, float]] = Field(
         default_factory=dict
     )
+    tf_directions: dict[str, str] = Field(default_factory=dict)
     last_tick_time: str | None = None
     demo_mode: bool = False
     engine_running: bool = False

@@ -846,6 +846,12 @@ class UnifiedTradeBot:
             if sig.score_breakdown is not None:
                 tf_breakdowns[tf_name] = sig.score_breakdown.to_dict()
 
+        # TF別方向を集約（UI表示用）
+        tf_directions: dict[str, str] = {
+            tf: sig.direction.value
+            for tf, sig in tf_signals.items()
+        }
+
         # 返却用confidence計算
         ret_confidence = min(
             consensus.score / consensus.threshold,
@@ -872,6 +878,7 @@ class UnifiedTradeBot:
             mode=plan.mode.value,
             consensus_score=consensus.score,
             tf_score_breakdowns=tf_breakdowns,
+            tf_directions=tf_directions,
             strategy_id=_strategy_id,
             entry_threshold=consensus.threshold,
             htf_alignment=htf_alignment,
@@ -1061,6 +1068,12 @@ class UnifiedTradeBot:
                     sig.score_breakdown.to_dict()
                 )
 
+        # TF別方向を集約（UI表示用）
+        tf_directions: dict[str, str] = {
+            tf: sig.direction.value
+            for tf, sig in tf_signals.items()
+        }
+
         return ConsolidatedSignal(
             direction=SignalType.HOLD,
             confidence=0.0,
@@ -1077,6 +1090,7 @@ class UnifiedTradeBot:
             mode=plan.mode.value,
             consensus_score=consensus.score,
             tf_score_breakdowns=tf_breakdowns,
+            tf_directions=tf_directions,
             entry_threshold=consensus.threshold,
             htf_alignment=htf_alignment,
             penalty_total=(
