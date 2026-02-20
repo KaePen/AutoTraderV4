@@ -221,18 +221,13 @@ class ModeAwareScoreConsensus:
             )
 
         # TF方向一致率チェック（低品質シグナルの排除）
-        # 一部TFのみ高スコアの偏ったシグナルを除外する
+        # 過剰フィッティング防止のため単一閾値50%（多数決原則）を使用
         total_tfs = len(tf_signals)
         if total_tfs > 0 and direction != SignalType.HOLD:
             aligned_count = len(aligned_tfs)
             alignment_ratio = aligned_count / total_tfs
-            _min_ratios: dict[TradingStrategyMode, float] = {
-                TradingStrategyMode.SCALPING: 0.40,
-                TradingStrategyMode.DAY_TRADE: 0.55,
-                TradingStrategyMode.SWING: 0.60,
-            }
-            min_ratio = _min_ratios.get(plan.mode, 0.55)
-            if alignment_ratio < min_ratio:
+            # 全モード共通: 50%以上のTFが同方向に一致すること
+            if alignment_ratio < 0.50:
                 return ConsensusResult(
                     direction=SignalType.HOLD,
                     score=final_score,
@@ -240,25 +235,20 @@ class ModeAwareScoreConsensus:
                     aligned_tfs=aligned_tfs,
                     reasoning=(
                         f"TF整合率不足: {aligned_count}/{total_tfs}="
-                        f"{alignment_ratio:.0%} < {min_ratio:.0%}"
+                        f"{alignment_ratio:.0%} < 50%"
                         f"({plan.mode.value})"
                     ),
                 )
 
         # 競合シグナル比率チェック（BUY/SELL拮抗の排除）
-        # 反対方向のスコアが強い場合はエントリーしない
+        # 過剰フィッティング防止のため単一閾値60%（拮抗回避）を使用
         if final_score > 0 and direction != SignalType.HOLD:
             competing_score = (
                 sell_score if direction == SignalType.BUY else buy_score
             )
             conflict_ratio = competing_score / final_score
-            _max_conflicts: dict[TradingStrategyMode, float] = {
-                TradingStrategyMode.SCALPING: 0.60,
-                TradingStrategyMode.DAY_TRADE: 0.50,
-                TradingStrategyMode.SWING: 0.45,
-            }
-            max_conflict = _max_conflicts.get(plan.mode, 0.55)
-            if conflict_ratio > max_conflict:
+            # 全モード共通: 競合スコアが勝方向の60%未満であること
+            if conflict_ratio > 0.60:
                 return ConsensusResult(
                     direction=SignalType.HOLD,
                     score=final_score,
@@ -266,12 +256,13 @@ class ModeAwareScoreConsensus:
                     aligned_tfs=aligned_tfs,
                     reasoning=(
                         f"競合シグナル強度過大: {conflict_ratio:.0%}"
-                        f" > {max_conflict:.0%}({plan.mode.value})"
+                        f" > 60%({plan.mode.value})"
                     ),
                 )
 
         # スコア均一性チェック（一部TFのみ高スコアの偏りを除外）
-        # 変動係数(CV)が高い場合は特定TFのみ強いシグナルで除外
+        # 変動係数(CV) > 1.0: 1TFのスコアが平均より1標準偏差超過の偏り
+        # 過剰フィッティング防止のため単一閾値（モード共通1.0）を使用
         aligned_individual = (
             buy_individual
             if direction == SignalType.BUY
@@ -287,21 +278,15 @@ class ModeAwareScoreConsensus:
                     ) / len(aligned_individual)
                 ) ** 0.5
                 _cv = _std_s / _mean_s
-                _max_cvs: dict[TradingStrategyMode, float] = {
-                    TradingStrategyMode.SCALPING: 1.0,
-                    TradingStrategyMode.DAY_TRADE: 0.80,
-                    TradingStrategyMode.SWING: 0.70,
-                }
-                max_cv = _max_cvs.get(plan.mode, 0.80)
-                if _cv > max_cv:
+                if _cv > 1.0:
                     return ConsensusResult(
                         direction=SignalType.HOLD,
                         score=final_score,
                         threshold=threshold,
                         aligned_tfs=aligned_tfs,
                         reasoning=(
-                            f"スコア偏り過大(CV={_cv:.2f}"
-                            f">{max_cv:.2f})({plan.mode.value})"
+                            f"スコア偏り過大(CV={_cv:.2f}>1.0)"
+                            f"({plan.mode.value})"
                         ),
                     )
 

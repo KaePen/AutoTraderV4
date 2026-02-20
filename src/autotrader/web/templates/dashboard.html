@@ -2,37 +2,6 @@
 
 {% block content %}
 <div class="space-y-4">
-  <!-- トレーディングコントロール -->
-  <div id="trading-control" class="card border border-gray-700">
-    <div class="flex items-center justify-between flex-wrap gap-3">
-      <!-- 左: ステータス表示 -->
-      <div class="flex items-center gap-4">
-        <div class="flex items-center gap-2">
-          <span id="tc-mode-badge" class="inline-flex items-center px-2.5 py-1 rounded-full text-xs font-medium bg-gray-700 text-gray-400">
-            ---
-          </span>
-<span id="tc-mt5-badge" class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-gray-700 text-gray-400">
-            <span id="tc-mt5-dot" class="w-1.5 h-1.5 rounded-full bg-gray-500"></span>
-            MT5 未接続
-          </span>
-        </div>
-      </div>
-      <!-- 右: ボタン群 -->
-      <div class="flex items-center gap-2">
-        <button id="tc-demo-mode-btn"
-                class="px-4 py-1.5 rounded-lg text-sm font-semibold transition-all bg-gray-700 text-gray-500 cursor-not-allowed"
-                disabled>
-          デモモード
-        </button>
-        <button id="tc-auto-trade-btn"
-                class="px-4 py-1.5 rounded-lg text-sm font-semibold transition-all bg-gray-700 text-gray-500 cursor-not-allowed"
-                disabled>
-          自動トレード開始
-        </button>
-      </div>
-    </div>
-  </div>
-
   <!-- メトリクスストリップ -->
   <div id="metrics-strip" class="grid grid-cols-2 md:grid-cols-5 gap-3">
     <!-- スケルトン -->
