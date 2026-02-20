@@ -800,6 +800,7 @@ const DashboardApp = {
     ]);
     if (pos.status === 'fulfilled') this.positions = pos.value;
     if (tr.status === 'fulfilled') this.trades = tr.value;
+    ChartManager.setTrades(this.trades);
     this.renderPositions();
     this.renderTradeHistory();
   },
@@ -816,6 +817,7 @@ const DashboardApp = {
     if (pos.status === 'fulfilled') this.positions = pos.value;
     if (tr.status === 'fulfilled') this.trades = tr.value;
     if (summary.status === 'fulfilled') this.tradeSummary = summary.value;
+    ChartManager.setTrades(this.trades);
     this.isLoading = false;
     this.renderMetrics();
     this.renderPositions();

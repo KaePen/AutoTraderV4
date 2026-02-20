@@ -11,6 +11,7 @@ const ChartManager = {
   timeframe: 'M15',
   symbol: 'USDJPY',
   signals: [],
+  _trades: [],
   isLoading: false,
   resizeObserver: null,
   rsiResizeObserver: null,
@@ -481,19 +482,8 @@ const ChartManager = {
       this.volumeSeries.setData(volData);
     }
 
-    // シグナルマーカー
-    if (this.signals && this.signals.length > 0) {
-      const markers = this.signals
-        .filter((s) => s.timeframe === this.timeframe && s.signal_type !== 'HOLD')
-        .map((s) => ({
-          time: new Date(s.created_at).getTime() / 1000,
-          position: s.signal_type === 'BUY' ? 'belowBar' : 'aboveBar',
-          color: s.signal_type === 'BUY' ? '#22c55e' : '#ef4444',
-          shape: s.signal_type === 'BUY' ? 'arrowUp' : 'arrowDown',
-          text: s.signal_type + ' ' + (s.confidence * 100).toFixed(0) + '%',
-        }));
-      this.candleSeries.setMarkers(markers);
-    }
+    // マーカー再描画（シグナル＋トレード）
+    this._applyMarkers();
   },
 
   /** 指標時系列を更新 */
@@ -546,6 +536,75 @@ const ChartManager = {
   /** シグナル設定 */
   setSignals(signals) {
     this.signals = signals;
+    this._applyMarkers();
+  },
+
+  /** トレード設定（エントリー/エグジットマーカー更新） */
+  setTrades(trades) {
+    this._trades = trades || [];
+    this._applyMarkers();
+  },
+
+  /**
+   * シグナルマーカーとトレードマーカーを統合してチャートに描画
+   * LightweightCharts の setMarkers は time 昇順が必須
+   */
+  _applyMarkers() {
+    if (!this.candleSeries) return;
+    const prec = this._getPricePrecision();
+    const markers = [];
+
+    // シグナルマーカー
+    if (this.signals && this.signals.length > 0) {
+      for (const s of this.signals) {
+        if (s.timeframe !== this.timeframe) continue;
+        if (s.signal_type === 'HOLD') continue;
+        markers.push({
+          time: new Date(s.created_at).getTime() / 1000,
+          position: s.signal_type === 'BUY' ? 'belowBar' : 'aboveBar',
+          color: s.signal_type === 'BUY' ? '#60a5fa' : '#f87171',
+          shape: s.signal_type === 'BUY' ? 'arrowUp' : 'arrowDown',
+          text: s.signal_type + ' ' + (s.confidence * 100).toFixed(0) + '%',
+        });
+      }
+    }
+
+    // トレードマーカー（エントリー・エグジット）
+    if (this._trades && this._trades.length > 0) {
+      for (const t of this._trades) {
+        if (t.symbol !== this.symbol) continue;
+
+        // エントリーマーカー
+        const entryTime = new Date(t.opened_at).getTime() / 1000;
+        if (entryTime > 0) {
+          const isBuy = t.signal_type === 'BUY';
+          markers.push({
+            time: entryTime,
+            position: isBuy ? 'belowBar' : 'aboveBar',
+            color: isBuy ? '#22c55e' : '#ef4444',
+            shape: isBuy ? 'arrowUp' : 'arrowDown',
+            text: `IN ${t.entry_price.toFixed(prec)}`,
+          });
+        }
+
+        // エグジットマーカー（クローズ済みのみ）
+        if (!t.is_open && t.closed_at && t.exit_price != null) {
+          const exitTime = new Date(t.closed_at).getTime() / 1000;
+          const isProfit = (t.profit_loss || 0) >= 0;
+          markers.push({
+            time: exitTime,
+            position: t.signal_type === 'BUY' ? 'aboveBar' : 'belowBar',
+            color: isProfit ? '#4ade80' : '#f87171',
+            shape: 'circle',
+            text: `OUT ${t.exit_price.toFixed(prec)}`,
+          });
+        }
+      }
+    }
+
+    // time 昇順ソート（setMarkers の要件）
+    markers.sort((a, b) => a.time - b.time);
+    this.candleSeries.setMarkers(markers);
   },
 
   /**
