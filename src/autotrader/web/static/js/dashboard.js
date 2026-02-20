@@ -954,9 +954,11 @@ const DashboardApp = {
         const nowPct = toPct(now);
         const nowBg = pnlColor.replace('text-', 'bg-');
 
-        // SLゾーン幅・TPゾーン幅（BUY: 左がSL側、右がTP側）
-        const slZoneWidth = isBuy ? slPct : 100 - slPct;
-        const tpZoneWidth = isBuy ? 100 - tpPct : tpPct;
+        // Entryを基準にゾーン分け
+        // BUY: 左端〜Entry=SLゾーン(赤), Entry〜右端=TPゾーン(緑)
+        // SELL: 左端〜Entry=TPゾーン(緑), Entry〜右端=SLゾーン(赤)
+        const leftZoneBg = isBuy ? 'bg-red-500/35' : 'bg-green-500/25';
+        const rightZoneBg = isBuy ? 'bg-green-500/25' : 'bg-red-500/35';
 
         priceRowHtml = `
           <div class="grid grid-cols-4 text-center gap-1 mb-2">
@@ -980,17 +982,15 @@ const DashboardApp = {
 
         progressHtml = `
           <div class="mb-2">
-            <div class="w-full h-2 bg-gray-700 rounded-full relative">
-              <!-- SLゾーン（赤） -->
-              <div class="absolute inset-y-0 ${isBuy ? 'left-0 rounded-l-full' : 'right-0 rounded-r-full'} bg-red-500/30"
-                style="width:${slZoneWidth}%"></div>
-              <!-- TPゾーン（緑） -->
-              <div class="absolute inset-y-0 ${isBuy ? 'right-0 rounded-r-full' : 'left-0 rounded-l-full'} bg-green-500/20"
-                style="width:${tpZoneWidth}%"></div>
-              <!-- Entryマーカー（白縦線） -->
-              <div class="absolute inset-y-0 w-px bg-gray-400 opacity-60" style="left:${entryPct}%"></div>
-              <!-- 現在価格マーカー（カラー太縦線） -->
-              <div class="absolute inset-y-0 w-0.5 ${nowBg} shadow-lg rounded-full" style="left:${nowPct}%"></div>
+            <div class="w-full h-2 bg-gray-700 rounded-full relative overflow-hidden">
+              <!-- 左ゾーン: BUY=SL側(赤), SELL=TP側(緑) -->
+              <div class="absolute inset-y-0 left-0 ${leftZoneBg}" style="width:${entryPct}%"></div>
+              <!-- 右ゾーン: BUY=TP側(緑), SELL=SL側(赤) -->
+              <div class="absolute inset-y-0 right-0 ${rightZoneBg}" style="width:${100 - entryPct}%"></div>
+              <!-- Entryマーカー（グレー縦線） -->
+              <div class="absolute inset-y-0 w-px bg-gray-300 opacity-50" style="left:${entryPct}%"></div>
+              <!-- 現在価格マーカー（損益色太縦線） -->
+              <div class="absolute inset-y-0 w-0.5 ${nowBg}" style="left:${nowPct}%"></div>
             </div>
           </div>`;
       }
