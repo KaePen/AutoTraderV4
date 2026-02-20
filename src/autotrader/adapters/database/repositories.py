@@ -28,6 +28,7 @@ class TradeRepository:
         opened_at: datetime,
         stop_loss: float | None = None,
         take_profit: float | None = None,
+        ticket: int | None = None,
     ) -> TradeRecord:
         """トレードを作成
 
@@ -39,12 +40,14 @@ class TradeRepository:
             opened_at: オープン時刻
             stop_loss: 損切価格
             take_profit: 利確価格
+            ticket: MT5チケットID
 
         Returns:
             TradeRecord: 作成されたトレード
         """
         trade = TradeRecord(
             trade_id=str(uuid4()),
+            ticket=ticket,
             symbol=symbol,
             signal_type=signal_type,
             volume=volume,

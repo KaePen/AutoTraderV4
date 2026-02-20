@@ -1090,6 +1090,7 @@ class LiveTradingEngine:
                     opened_at=datetime.now(timezone.utc),
                     stop_loss=sl_price,
                     take_profit=tp_price,
+                    ticket=ticket,
                 )
                 trade_id = trade.trade_id
             logger.info(
@@ -1377,6 +1378,8 @@ class LiveTradingEngine:
         """MT5の既存ポジションとPositionManagerを同期
 
         エンジン起動時に呼び出される。
+        DBから is_open=True のレコードを検索して
+        _open_trades（ticket→trade_id）を復元する。
         """
         positions = await self._executor.get_open_positions_async(
             self._config.symbol
@@ -1384,6 +1387,11 @@ class LiveTradingEngine:
         if not positions:
             logger.info("同期対象ポジションなし")
             return
+
+        # DBからopenトレードを復元（再起動対応）
+        self._restore_open_trades_from_db(
+            [pos.ticket for pos in positions]
+        )
 
         logger.info(
             "%d件のポジションを同期", len(positions)
@@ -1424,3 +1432,47 @@ class LiveTradingEngine:
                     pos.signal_type.value,
                     pos.volume,
                 )
+
+    def _restore_open_trades_from_db(
+        self, tickets: list[int]
+    ) -> None:
+        """DBからオープントレードのtrade_idを復元
+
+        エンジン再起動時に _open_trades マッピングを
+        DBの is_open=True レコードから復元する。
+
+        Args:
+            tickets: 現在のMT5チケットIDリスト
+        """
+        from autotrader.adapters.database.connection import (
+            get_session,
+        )
+        from autotrader.adapters.database.models import (
+            TradeRecord,
+        )
+        from autotrader.config.settings import get_settings
+        try:
+            db_url = get_settings().database_url
+            with get_session(db_url) as db:
+                records = (
+                    db.query(TradeRecord)
+                    .filter(
+                        TradeRecord.is_open.is_(True),
+                        TradeRecord.ticket.in_(tickets),
+                    )
+                    .all()
+                )
+                for r in records:
+                    if r.ticket not in self._open_trades:
+                        self._open_trades[r.ticket] = (
+                            r.trade_id
+                        )
+                        logger.info(
+                            "trade_id復元: ticket=%d"
+                            " trade_id=%s",
+                            r.ticket, r.trade_id,
+                        )
+        except Exception as e:
+            logger.warning(
+                "trade_id復元スキップ: %s", e
+            )
