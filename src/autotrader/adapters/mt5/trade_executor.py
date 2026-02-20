@@ -451,3 +451,43 @@ class MT5TradeExecutor(TradeExecutor):
                 positions.append(mt5_position_to_entity(raw))
 
         return positions
+
+    async def get_deal_by_position_async(
+        self,
+        ticket: int,
+        lookback_seconds: int = 300,
+    ) -> dict | None:
+        """ポジション決済約定をMT5履歴から取得。
+
+        Args:
+            ticket: MT5ポジションID
+            lookback_seconds: 遡る秒数（デフォルト5分）
+
+        Returns:
+            dict | None: price, profit, reason_code を含む辞書。
+                未取得の場合はNone。
+        """
+        import time
+        date_to = int(time.time()) + 60
+        date_from = date_to - lookback_seconds
+        try:
+            async with self._conn.session() as transport:
+                deals = await transport.history_deals_get(
+                    date_from, date_to
+                )
+        except Exception as e:
+            logger.warning("約定履歴取得失敗: %s", e)
+            return None
+
+        # DEAL_ENTRY_OUT = 1（決済約定）
+        for deal in deals:
+            if (
+                deal.get("position_id") == ticket
+                and deal.get("entry") == 1
+            ):
+                return {
+                    "price": float(deal.get("price", 0.0)),
+                    "profit": float(deal.get("profit", 0.0)),
+                    "reason_code": int(deal.get("reason", -1)),
+                }
+        return None
