@@ -933,55 +933,97 @@ const DashboardApp = {
     const borderColor = isBuy ? 'border-l-green-500' : 'border-l-red-500';
     const dirBg = isBuy ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400';
     const pnlColor = isProfit ? 'text-green-400' : 'text-red-400';
+    const pnlBg = isProfit ? 'bg-green-500/10' : 'bg-red-500/10';
     const pnlSign = isProfit ? '+' : '';
+    // 小数点桁数: JPY系は3桁、それ以外は5桁
+    const digits = p.entry_price > 20 ? 3 : 5;
 
-    // SL/TPプログレスバー
+    // SL/TP/Entry/Now の4点を可視化
+    let priceRowHtml = '';
     let progressHtml = '';
     if (p.stop_loss != null && p.take_profit != null) {
       const sl = p.stop_loss, tp = p.take_profit;
-      const range = Math.abs(tp - sl);
+      const entry = p.entry_price, now = p.current_price;
+      const lo = Math.min(sl, tp), hi = Math.max(sl, tp);
+      const range = hi - lo;
       if (range > 0) {
-        const rawPct = (p.current_price - Math.min(sl, tp)) / range * 100;
-        const clampedPct = Math.max(0, Math.min(100, rawPct));
-        const displayPct = isBuy ? clampedPct : 100 - clampedPct;
-        const slLabel = sl.toFixed(3);
-        const tpLabel = tp.toFixed(3);
+        const toPct = (v) => Math.max(0, Math.min(100, (v - lo) / range * 100));
+        const slPct = toPct(sl);
+        const tpPct = toPct(tp);
+        const entryPct = toPct(entry);
+        const nowPct = toPct(now);
+        const nowBg = pnlColor.replace('text-', 'bg-');
+
+        // SLゾーン幅・TPゾーン幅（BUY: 左がSL側、右がTP側）
+        const slZoneWidth = isBuy ? slPct : 100 - slPct;
+        const tpZoneWidth = isBuy ? 100 - tpPct : tpPct;
+
+        priceRowHtml = `
+          <div class="grid grid-cols-4 text-center gap-1 mb-2">
+            <div>
+              <div class="text-[9px] text-gray-600 mb-0.5">SL</div>
+              <div class="text-[10px] tabular-nums text-red-400">${sl.toFixed(digits)}</div>
+            </div>
+            <div>
+              <div class="text-[9px] text-gray-600 mb-0.5">Entry</div>
+              <div class="text-[10px] tabular-nums text-gray-400">${entry.toFixed(digits)}</div>
+            </div>
+            <div>
+              <div class="text-[9px] text-gray-600 mb-0.5">Now</div>
+              <div class="text-[10px] tabular-nums font-semibold ${pnlColor}">${now.toFixed(digits)}</div>
+            </div>
+            <div>
+              <div class="text-[9px] text-gray-600 mb-0.5">TP</div>
+              <div class="text-[10px] tabular-nums text-green-400">${tp.toFixed(digits)}</div>
+            </div>
+          </div>`;
+
         progressHtml = `
           <div class="mb-2">
-            <div class="w-full h-1.5 bg-gray-700 rounded-full relative overflow-hidden">
-              <div class="absolute inset-y-0 left-0 bg-red-500/25 rounded-l-full" style="width:${isBuy ? 25 : 75}%"></div>
-              <div class="absolute inset-y-0 right-0 bg-green-500/25 rounded-r-full" style="width:${isBuy ? 25 : 25}%"></div>
-              <div class="absolute inset-y-0 w-px ${pnlColor.replace('text-', 'bg-')}" style="left:${displayPct}%"></div>
-            </div>
-            <div class="flex justify-between text-[10px] text-gray-600 mt-0.5">
-              <span>SL ${slLabel}</span><span>TP ${tpLabel}</span>
+            <div class="w-full h-2 bg-gray-700 rounded-full relative">
+              <!-- SLゾーン（赤） -->
+              <div class="absolute inset-y-0 ${isBuy ? 'left-0 rounded-l-full' : 'right-0 rounded-r-full'} bg-red-500/30"
+                style="width:${slZoneWidth}%"></div>
+              <!-- TPゾーン（緑） -->
+              <div class="absolute inset-y-0 ${isBuy ? 'right-0 rounded-r-full' : 'left-0 rounded-l-full'} bg-green-500/20"
+                style="width:${tpZoneWidth}%"></div>
+              <!-- Entryマーカー（白縦線） -->
+              <div class="absolute inset-y-0 w-px bg-gray-400 opacity-60" style="left:${entryPct}%"></div>
+              <!-- 現在価格マーカー（カラー太縦線） -->
+              <div class="absolute inset-y-0 w-0.5 ${nowBg} shadow-lg rounded-full" style="left:${nowPct}%"></div>
             </div>
           </div>`;
       }
+    } else {
+      // SL/TPなし: シンプルな価格表示
+      priceRowHtml = `
+        <div class="flex items-center gap-2 text-[11px] tabular-nums mb-2">
+          <span class="text-gray-500">Entry</span>
+          <span class="text-gray-400">${p.entry_price.toFixed(digits)}</span>
+          <span class="text-gray-600">→</span>
+          <span class="font-semibold ${pnlColor}">${p.current_price.toFixed(digits)}</span>
+        </div>`;
     }
 
     return `
       <div class="border-l-2 ${borderColor} bg-gray-800/60 rounded-r-lg px-3 py-2.5">
         <!-- 上段: 方向 + PnL -->
-        <div class="flex items-center justify-between mb-1.5">
+        <div class="flex items-center justify-between mb-2">
           <div class="flex items-center gap-1.5">
             <span class="text-[11px] font-bold px-1.5 py-0.5 rounded ${dirBg}">${p.signal_type}</span>
-            <span class="text-[11px] text-gray-400">${p.symbol}</span>
+            <span class="text-sm font-semibold text-gray-200">${p.symbol}</span>
             <span class="text-[10px] text-gray-600">${p.volume.toFixed(2)}lot</span>
           </div>
-          <div class="text-right">
-            <div class="text-base font-bold tabular-nums leading-none ${pnlColor}">${pnlSign}${this.fmtCurrency(p.unrealized_pnl)}</div>
-            <div class="text-[10px] tabular-nums ${pnlColor} opacity-80">${pnlSign}${p.unrealized_pnl_pips.toFixed(1)} pips</div>
+          <div class="flex items-baseline gap-1.5 ${pnlBg} px-2 py-0.5 rounded-md">
+            <span class="text-sm font-bold tabular-nums ${pnlColor}">${pnlSign}${this.fmtCurrency(p.unrealized_pnl)}</span>
+            <span class="text-[10px] tabular-nums ${pnlColor} opacity-70">${pnlSign}${p.unrealized_pnl_pips.toFixed(1)}p</span>
           </div>
         </div>
-        <!-- 中段: 価格 -->
-        <div class="flex items-center gap-3 text-[11px] tabular-nums mb-2">
-          <span class="text-gray-500">Entry <span class="text-gray-400">${p.entry_price.toFixed(3)}</span></span>
-          <span class="text-gray-600">→</span>
-          <span class="text-gray-300 font-semibold">${p.current_price.toFixed(3)}</span>
-        </div>
+        <!-- 価格グリッド -->
+        ${priceRowHtml}
+        <!-- SL/TPプログレスバー -->
         ${progressHtml}
-        <!-- 下段: 保有時間 -->
+        <!-- 保有時間 -->
         <div class="text-[10px] text-gray-600">${this.fmtHoldTime(p.opened_at)}</div>
       </div>`;
   },
