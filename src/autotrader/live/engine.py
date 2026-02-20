@@ -761,7 +761,12 @@ class LiveTradingEngine:
             )
 
     async def _update_market_data(self) -> None:
-        """最新ローソク足データを取得してTradeBotに設定"""
+        """最新ローソク足データを取得してTradeBotに設定
+
+        時間足確定を待たずリアルタイム評価するため、全TFの最後の
+        バーのclose/high/lowを現在のtick価格で上書きしてから
+        インジケータを再計算する。
+        """
         symbol = self._config.symbol
         # 全TFのデータを一括収集してから設定
         # sma_50計算に50本必要なためバッファを含め200本取得
@@ -778,6 +783,29 @@ class LiveTradingEngine:
             )
             if not df.empty:
                 all_data[tf_str] = df
+
+        # リアルタイム評価: 現在tick価格で最後のバーを更新
+        # これにより時間足確定を待たずシグナルが毎秒変化する
+        try:
+            tick = await self._data_provider.get_tick_fast(symbol)
+            if tick:
+                bid = float(tick.get("bid", 0.0))
+                ask = float(tick.get("ask", 0.0))
+                mid = (bid + ask) / 2.0
+                if mid > 0:
+                    for tf_str, df in all_data.items():
+                        if df.empty:
+                            continue
+                        df = df.copy()
+                        idx = df.index[-1]
+                        df.at[idx, "close"] = mid
+                        if mid > float(df.at[idx, "high"]):
+                            df.at[idx, "high"] = mid
+                        if mid < float(df.at[idx, "low"]):
+                            df.at[idx, "low"] = mid
+                        all_data[tf_str] = df
+        except Exception:
+            pass  # tick取得失敗時は確定済みデータのみ使用
 
         if all_data:
             all_data = self._calc_indicators(all_data)
