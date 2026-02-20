@@ -72,12 +72,18 @@ async def get_analysis(
     cs = engine.last_analysis
     tick_time = engine.last_tick_time
 
+    # 現在のbot設定から閾値を取得（デモ/ライブ切替を即時反映）
+    entry_threshold = (
+        engine.get_current_entry_threshold(cs.mode)
+        or cs.entry_threshold
+    )
+
     return ApiResponse(
         data=AnalysisResponse(
             direction=cs.direction.value,
             confidence=cs.confidence,
             consensus_score=cs.consensus_score,
-            entry_threshold=cs.entry_threshold,
+            entry_threshold=entry_threshold,
             regime=cs.regime,
             mode=cs.mode,
             rationale=cs.rationale,

@@ -510,6 +510,8 @@ const DashboardApp = {
     } finally {
       this.tcBusy = false;
       this.renderTradingControl();
+      // デモ/ライブ切替後に閾値を即時更新
+      this.fetchAnalysis();
     }
   },
 
