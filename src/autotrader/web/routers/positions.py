@@ -37,6 +37,7 @@ def _dict_to_position_response(d: dict) -> PositionResponse:
     return PositionResponse(
         position_id=d.get("position_id", ""),
         ticket=d.get("ticket", 0),
+        trade_id=d.get("trade_id", ""),
         symbol=d.get("symbol", ""),
         signal_type=signal_type_val,
         volume=d.get("volume", 0.0),
