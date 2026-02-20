@@ -12,6 +12,7 @@ from __future__ import annotations
 import io
 import json
 import os
+import shutil
 import subprocess
 import sys
 import time
@@ -188,6 +189,44 @@ def run_review_agent(pr: dict) -> None:
 
     status = "完了" if result.returncode == 0 else f"エラー(code={result.returncode})"
     print(f"[INFO] PR #{pr['number']} レビュー{status}", flush=True)
+
+    _cleanup_worktree(pr["number"])
+
+
+def _cleanup_worktree(pr_number: int) -> None:
+    """PRレビュー用の一時worktreeディレクトリを後片付けする。
+
+    エージェントが正常に削除した場合はno-op。
+    エージェントが異常終了した場合の安全網として機能する。
+
+    Args:
+        pr_number: PR番号
+    """
+    worktree_path = PROJECT_DIR / "tmp" / f"pr_{pr_number}_review"
+    if not worktree_path.exists():
+        return
+
+    # git worktreeとして登録されている場合はgit経由で削除
+    result = subprocess.run(
+        ["git", "-C", str(PROJECT_DIR), "worktree", "remove",
+         str(worktree_path), "--force"],
+        capture_output=True,
+        text=True,
+    )
+    if result.returncode != 0:
+        # git管理外の場合はディレクトリごと削除
+        shutil.rmtree(worktree_path, ignore_errors=True)
+
+    if worktree_path.exists():
+        print(
+            f"[WARN] PR #{pr_number} worktreeの削除に失敗: {worktree_path}",
+            flush=True,
+        )
+    else:
+        print(
+            f"[INFO] PR #{pr_number} worktreeを削除しました: {worktree_path}",
+            flush=True,
+        )
 
 
 def main() -> None:
