@@ -1246,6 +1246,17 @@ class LiveTradingEngine:
                     else pos.entry_price - current_price
                 )
                 pnl_pips = price_diff / pip_size
+                # MT5から損益が取得できなかった場合、
+                # pnl_pipsとvolumeから概算（スプレッド・スワップ除く）
+                if profit_loss == 0.0 and abs(pnl_pips) > 0:
+                    pip_val = (
+                        1000.0
+                        if "JPY" in self._config.symbol.upper()
+                        else 10.0
+                    )
+                    profit_loss = round(
+                        pnl_pips * pos.volume * pip_val, 2
+                    )
             closed_at = datetime.now(timezone.utc)
             db_url = get_settings().database_url
             with get_session(db_url) as db:
@@ -1501,12 +1512,9 @@ class LiveTradingEngine:
                     "全決済: ticket=%d (%s)",
                     position.ticket, action.reason,
                 )
-                self._pm.unregister_position(
-                    str(position.ticket)
-                )
                 # DB記録（決済）
-                # MT5約定履歴から正確な約定価格・損益を取得し、
-                # 取得できない場合は order_send 価格・tick 価格でフォールバック
+                # unregister_positionより先に行うことで、
+                # _write_close_to_db内のpos取得・pnl_pips計算を可能にする
                 _actual_price = (
                     result.exit_price
                     if result.exit_price and result.exit_price > 0
@@ -1535,6 +1543,10 @@ class LiveTradingEngine:
                         _exit_reason_str,
                         _profit_loss,
                     )
+                # DB記録後にPMからポジションを削除
+                self._pm.unregister_position(
+                    str(position.ticket)
+                )
 
     async def _sync_positions(self) -> None:
         """MT5の既存ポジションとPositionManagerを同期
