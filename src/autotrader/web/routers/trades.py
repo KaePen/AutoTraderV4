@@ -2,7 +2,10 @@
 
 from __future__ import annotations
 
+import logging
+
 from fastapi import APIRouter, Depends, Query, Request
+from sqlalchemy.exc import ProgrammingError
 from sqlalchemy.orm import Session
 
 from autotrader.web.dependencies import get_db
@@ -13,6 +16,7 @@ from autotrader.web.schemas import (
 )
 from autotrader.web.services.market_service import MarketService
 
+logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
@@ -48,7 +52,11 @@ async def get_trades(
         ApiResponse[list[TradeResponse]]: トレード履歴
     """
     service = MarketService(db)
-    trades = service.get_trades(symbol, limit, offset)
+    try:
+        trades = service.get_trades(symbol, limit, offset)
+    except ProgrammingError as e:
+        logger.error("DBテーブル未作成: %s", e)
+        return ApiResponse(data=[])
     return ApiResponse(data=trades)
 
 
@@ -80,5 +88,9 @@ async def get_trade_summary(
         ApiResponse[TradeSummaryResponse]: トレードサマリー
     """
     service = MarketService(db)
-    summary = service.get_trade_summary(symbol, days)
+    try:
+        summary = service.get_trade_summary(symbol, days)
+    except ProgrammingError as e:
+        logger.error("DBテーブル未作成: %s", e)
+        return ApiResponse(data=TradeSummaryResponse())
     return ApiResponse(data=summary)
