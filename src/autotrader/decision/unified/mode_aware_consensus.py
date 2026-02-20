@@ -171,6 +171,8 @@ class ModeAwareScoreConsensus:
         sell_score = 0.0
         buy_tfs: list[str] = []
         sell_tfs: list[str] = []
+        buy_individual: list[float] = []
+        sell_individual: list[float] = []
 
         for tf, signal in tf_signals.items():
             weight = self._get_weight(tf, tf_set, plan.mode)
@@ -182,9 +184,11 @@ class ModeAwareScoreConsensus:
             if direction_value > 0:
                 buy_score += weighted_score
                 buy_tfs.append(tf)
+                buy_individual.append(weighted_score)
             elif direction_value < 0:
                 sell_score += weighted_score
                 sell_tfs.append(tf)
+                sell_individual.append(weighted_score)
 
         # 最終スコアと方向を決定
         if buy_score > sell_score:
@@ -215,6 +219,91 @@ class ModeAwareScoreConsensus:
                 aligned_tfs=aligned_tfs,
                 reasoning=reasoning,
             )
+
+        # TF方向一致率チェック（低品質シグナルの排除）
+        # 一部TFのみ高スコアの偏ったシグナルを除外する
+        total_tfs = len(tf_signals)
+        if total_tfs > 0 and direction != SignalType.HOLD:
+            aligned_count = len(aligned_tfs)
+            alignment_ratio = aligned_count / total_tfs
+            _min_ratios: dict[TradingStrategyMode, float] = {
+                TradingStrategyMode.SCALPING: 0.40,
+                TradingStrategyMode.DAY_TRADE: 0.55,
+                TradingStrategyMode.SWING: 0.60,
+            }
+            min_ratio = _min_ratios.get(plan.mode, 0.55)
+            if alignment_ratio < min_ratio:
+                return ConsensusResult(
+                    direction=SignalType.HOLD,
+                    score=final_score,
+                    threshold=threshold,
+                    aligned_tfs=aligned_tfs,
+                    reasoning=(
+                        f"TF整合率不足: {aligned_count}/{total_tfs}="
+                        f"{alignment_ratio:.0%} < {min_ratio:.0%}"
+                        f"({plan.mode.value})"
+                    ),
+                )
+
+        # 競合シグナル比率チェック（BUY/SELL拮抗の排除）
+        # 反対方向のスコアが強い場合はエントリーしない
+        if final_score > 0 and direction != SignalType.HOLD:
+            competing_score = (
+                sell_score if direction == SignalType.BUY else buy_score
+            )
+            conflict_ratio = competing_score / final_score
+            _max_conflicts: dict[TradingStrategyMode, float] = {
+                TradingStrategyMode.SCALPING: 0.60,
+                TradingStrategyMode.DAY_TRADE: 0.50,
+                TradingStrategyMode.SWING: 0.45,
+            }
+            max_conflict = _max_conflicts.get(plan.mode, 0.55)
+            if conflict_ratio > max_conflict:
+                return ConsensusResult(
+                    direction=SignalType.HOLD,
+                    score=final_score,
+                    threshold=threshold,
+                    aligned_tfs=aligned_tfs,
+                    reasoning=(
+                        f"競合シグナル強度過大: {conflict_ratio:.0%}"
+                        f" > {max_conflict:.0%}({plan.mode.value})"
+                    ),
+                )
+
+        # スコア均一性チェック（一部TFのみ高スコアの偏りを除外）
+        # 変動係数(CV)が高い場合は特定TFのみ強いシグナルで除外
+        aligned_individual = (
+            buy_individual
+            if direction == SignalType.BUY
+            else sell_individual
+        )
+        if len(aligned_individual) >= 2:
+            _mean_s = sum(aligned_individual) / len(aligned_individual)
+            if _mean_s > 0:
+                _std_s = (
+                    sum(
+                        (s - _mean_s) ** 2
+                        for s in aligned_individual
+                    ) / len(aligned_individual)
+                ) ** 0.5
+                _cv = _std_s / _mean_s
+                _max_cvs: dict[TradingStrategyMode, float] = {
+                    TradingStrategyMode.SCALPING: 1.0,
+                    TradingStrategyMode.DAY_TRADE: 0.80,
+                    TradingStrategyMode.SWING: 0.70,
+                }
+                max_cv = _max_cvs.get(plan.mode, 0.80)
+                if _cv > max_cv:
+                    return ConsensusResult(
+                        direction=SignalType.HOLD,
+                        score=final_score,
+                        threshold=threshold,
+                        aligned_tfs=aligned_tfs,
+                        reasoning=(
+                            f"スコア偏り過大(CV={_cv:.2f}"
+                            f">{max_cv:.2f})({plan.mode.value})"
+                        ),
+                    )
 
         reasoning = (
             f"{direction.value}シグナル: スコア{final_score:.2f} >= "
