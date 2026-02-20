@@ -216,27 +216,6 @@ const DashboardApp = {
     }
     if (posList) posList.dataset.wide = 'false';
 
-    // エンジン/接続状態バナー（aがnullでも表示）
-    const statusBanner = document.getElementById('ap-engine-status');
-    if (statusBanner) {
-      if (!a) {
-        statusBanner.textContent = '⚠️ 分析データ取得中...';
-        statusBanner.className = 'text-xs text-yellow-400 mb-2';
-      } else {
-        const parts = [];
-        if (!a.engine_running) parts.push('⚠️ エンジン停止中');
-        else if (!a.mt5_connected) parts.push('📡 MT5未接続（デモシグナルモード）');
-        else parts.push('✅ MT5接続済み');
-        if (a.demo_mode) parts.push('🔵 デモモード');
-        if (a.auto_trade_enabled) parts.push('🤖 自動売買ON');
-        statusBanner.textContent = parts.join(' | ');
-        statusBanner.className = a.engine_running
-          ? (a.mt5_connected ? 'text-xs text-green-400 mb-2' : 'text-xs text-yellow-400 mb-2')
-          : 'text-xs text-red-400 mb-2';
-      }
-    }
-
-    // aがない場合はステータスバナーのみ表示して終了
     if (!a) return;
 
     // 方向バッジ
