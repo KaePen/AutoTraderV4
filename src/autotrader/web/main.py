@@ -100,9 +100,13 @@ async def lifespan(app: FastAPI):
             init_db,
         )
         from autotrader.config.settings import get_settings
-        init_db(get_settings().database_url)
+        db_url = get_settings().database_url
+        logger.info("DB初期化: %s", db_url.split("@")[-1] if "@" in db_url else db_url)
+        init_db(db_url)
+        logger.info("DB初期化完了")
     except Exception as e:
-        logger.warning("DB初期化スキップ: %s", e)
+        logger.error("DB初期化失敗（テーブルが存在しない可能性）: %s", e)
+        logger.error("scripts/init_db.py を実行してテーブルを作成してください")
 
     # MT5ライブエンジン初期化（常に作成、自動接続）
     try:
