@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy import (
@@ -46,8 +46,8 @@ class TradeRecord(Base):
     profit_loss = Column(Float, nullable=True)
     profit_loss_pips = Column(Float, nullable=True)
     exit_reason = Column(String(30), nullable=True)
-    opened_at = Column(DateTime, nullable=False)
-    closed_at = Column(DateTime, nullable=True)
+    opened_at = Column(DateTime(timezone=True), nullable=False)
+    closed_at = Column(DateTime(timezone=True), nullable=True)
     is_open = Column(Boolean, default=True, nullable=False)
 
     __table_args__ = (
@@ -92,7 +92,11 @@ class AuditLog(Base):
     after_state = Column(JSON, nullable=True)
     reason = Column(Text, nullable=True)
     user = Column(String(50), default="system")
-    timestamp = Column(DateTime, default=datetime.utcnow, nullable=False)
+    timestamp = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
 
     __table_args__ = (
         Index("ix_audit_event_time", "event_type", "timestamp"),
