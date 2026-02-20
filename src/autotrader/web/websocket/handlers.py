@@ -137,6 +137,18 @@ async def broadcast_tick_update(tick_data: dict[str, Any]) -> None:
     await manager.broadcast(EventType.TICK_UPDATE, tick_data, "dashboard")
 
 
+async def broadcast_price_update(price_data: dict[str, Any]) -> None:
+    """tick毎の価格更新をブロードキャスト
+
+    bid/ask/time_ms を高頻度で配信する。
+    フロントエンドはこれを受信してチャートのlastbarを更新する。
+
+    Args:
+        price_data: 価格データ（symbol, bid, ask, time_ms）
+    """
+    await manager.broadcast(EventType.PRICE_UPDATE, price_data, "dashboard")
+
+
 async def broadcast_alert(alert_data: dict[str, Any]) -> None:
     """アラートをブロードキャスト
 

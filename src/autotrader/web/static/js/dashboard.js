@@ -73,11 +73,10 @@ const DashboardApp = {
     this.fetchTradingMode();
     this.fetchAnalysis();
 
-    // チャート・インジケータのみ定期更新（データ量大のためWS対象外）
+    // チャートは30秒毎にフル再取得（ローソク足確定検知・バックアップ）
     this.pollInterval = setInterval(() => this.fetchAll(), 30000);
-    this.indicatorInterval = setInterval(() => this.fetchIndicators(), 30000);
 
-    // フォールバックpolling（WS切断中のみ動作）
+    // WS切断中フォールバック（10秒毎・必要最小限）
     this._fallbackInterval = setInterval(() => {
       if (!this.wsActive) {
         this.fetchAnalysis();
@@ -85,7 +84,7 @@ const DashboardApp = {
         this.fetchSignalRadar();
         this.fetchTradingMode();
       }
-    }, 3000);
+    }, 10000);
 
     // シグナルWebSocket（チャートマーカー更新）
     this.signalWs = createWebSocketClient('/ws/signals');
@@ -104,15 +103,18 @@ const DashboardApp = {
     });
     this.signalWs.connect();
 
-    // ダッシュボードWebSocket（tick_update で全UI一括更新）
+    // ダッシュボードWebSocket（price_update + tick_update で全UI駆動）
     this.dashWs = createWebSocketClient('/ws/dashboard');
+    // 高頻度: tick毎の価格更新 → チャートlastbar即時更新
+    this.dashWs.on('price_update', (msg) => {
+      this.wsActive = true;
+      const { bid } = msg.data;
+      if (bid > 0) ChartManager.updateLastBar(bid);
+    });
+    // 1秒毎: フル処理完了 → 全UI一括更新
     this.dashWs.on('tick_update', (msg) => {
       this.wsActive = true;
       this._applyTickUpdate(msg.data);
-    });
-    this.dashWs.on('position_update', () => {
-      // tick_update未対応の旧バックエンド向けフォールバック
-      if (!this.wsActive) this.fetchPositionsAndTrades();
     });
     this.dashWs.onStateChange((state) => {
       if (state === 'disconnected' || state === 'error') {

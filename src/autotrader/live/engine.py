@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import time as _time
 import uuid
 from datetime import datetime, timezone
 
@@ -108,6 +109,10 @@ class LiveTradingEngine:
         self._open_trades: dict[int, str] = {}
         # クローズ済みトレード履歴（インメモリ）
         self._closed_trades: list[dict] = []
+        # MT5 tick高速ポーリング用（最終tickのms単位時刻）
+        self._last_mt5_tick_ms: int = 0
+        # フル処理（ローソク足+指標+シグナル）最終実行時刻
+        self._last_full_tick_time: float = 0.0
 
     @property
     def connected(self) -> bool:
@@ -328,26 +333,79 @@ class LiveTradingEngine:
     async def _main_loop(self) -> None:
         """メインループ
 
-        check_interval_sec間隔で_tickを実行。
-        ティック監視中は高速ポーリング（100ms）。
+        2段階ループ:
+        - 0.1秒毎: MT5 tick変化検出 → 価格をbroadcast（軽い）
+        - check_interval_sec毎: ローソク足+指標+シグナル処理 → 全UI更新
+        - tick_optimizer稼働中: 100ms高速ポーリング（既存動作）
         """
         while self._running:
             try:
-                await self._tick()
+                if self._tick_optimizer.is_active:
+                    # tick最適化中は既存の高速ポーリング
+                    await self._tick()
+                    await asyncio.sleep(
+                        self._config.tick_entry_config
+                        .poll_interval_sec
+                    )
+                    continue
+
+                now = _time.monotonic()
+                if (
+                    now - self._last_full_tick_time
+                    >= self._config.check_interval_sec
+                ):
+                    # フル処理（ローソク足+指標+シグナル+全UI更新）
+                    await self._tick()
+                    self._last_full_tick_time = now
+                else:
+                    # 軽量処理（tick変化検出 → 価格配信のみ）
+                    await self._tick_price_update()
+
             except Exception as e:
                 logger.error(
                     "ティック処理エラー: %s", e, exc_info=True
                 )
 
-            if self._tick_optimizer.is_active:
-                await asyncio.sleep(
-                    self._config.tick_entry_config
-                    .poll_interval_sec
-                )
-            else:
-                await asyncio.sleep(
-                    self._config.check_interval_sec
-                )
+            await asyncio.sleep(0.1)
+
+    async def _tick_price_update(self) -> None:
+        """軽量tick処理: MT5のbid/askを取得して価格をbroadcast
+
+        ローソク足取得・指標計算を行わない高速版。
+        前回と同じtickであればbroadcastをスキップする。
+        """
+        try:
+            tick = await self._data_provider.get_tick_fast(
+                self._config.symbol
+            )
+        except Exception:
+            return
+
+        if not tick:
+            return
+
+        tick_ms = int(tick.get("time_msc", 0))
+        if tick_ms <= self._last_mt5_tick_ms:
+            return  # 新しいtickなし
+
+        self._last_mt5_tick_ms = tick_ms
+        bid = float(tick.get("bid", 0.0))
+        ask = float(tick.get("ask", 0.0))
+
+        try:
+            from autotrader.web.websocket.handlers import (
+                broadcast_price_update,
+            )
+            asyncio.create_task(
+                broadcast_price_update({
+                    "symbol": self._config.symbol,
+                    "bid": bid,
+                    "ask": ask,
+                    "time_ms": tick_ms,
+                })
+            )
+        except Exception:
+            pass
 
     async def _tick(self) -> None:
         """1ティック分の処理
