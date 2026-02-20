@@ -321,13 +321,35 @@ const DashboardApp = {
       const sellPct = total > 0 ? (sellCount / total * 100) : 0;
       const holdPct = total > 0 ? (holdCount / total * 100) : 0;
 
-      // ペナルティ内訳
+      // ペナルティ内訳（バー可視化）
       const pb = a.penalty_breakdown || {};
-      const penaltyItems = Object.entries(pb).filter(([, v]) => v > 0);
+      const penaltyItems = Object.entries(pb)
+        .filter(([, v]) => v > 0)
+        .sort((x, y) => y[1] - x[1]);
+      const penaltyLabel = {
+        high_spread: 'SPR', off_hours: 'HRS',
+        low_volatility: 'VOL↓', high_volatility: 'VOL↑',
+        recent_loss: 'LOSS', mtf_conflict: 'MTF', weak_trend: 'TRD',
+      };
       const penaltyHtml = penaltyItems.length > 0
-        ? `<div class="flex items-center gap-2 text-[10px] mb-2">
-            <span class="text-gray-500">Penalty:</span>
-            ${penaltyItems.map(([k, v]) => `<span class="text-red-400/80 bg-red-900/20 px-1.5 py-0.5 rounded">${k} -${v.toFixed(2)}</span>`).join('')}
+        ? `<div class="mb-2 border border-red-900/30 rounded px-2 py-1.5 bg-red-950/10">
+            <div class="flex items-center justify-between text-[10px] mb-1">
+              <span class="text-gray-500">Penalties</span>
+              <span class="text-red-400 font-bold tabular-nums">-${(a.penalty_total || 0).toFixed(2)} total</span>
+            </div>
+            <div class="space-y-0.5">
+              ${penaltyItems.map(([k, v]) => {
+                const lbl = penaltyLabel[k] || k.slice(0, 4).toUpperCase();
+                const w = Math.min(100, Math.round(v / 0.25 * 100));
+                return `<div class="flex items-center gap-1">
+                  <span class="text-[8px] text-gray-500 w-7 text-right flex-shrink-0">${lbl}</span>
+                  <div class="flex-1 h-1 bg-gray-700/40 rounded-full overflow-hidden">
+                    <div class="bg-red-500/60 h-full rounded-full" style="width:${w}%"></div>
+                  </div>
+                  <span class="text-[9px] tabular-nums text-red-400 w-8 text-right flex-shrink-0">-${v.toFixed(2)}</span>
+                </div>`;
+              }).join('')}
+            </div>
           </div>`
         : '';
 
