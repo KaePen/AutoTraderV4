@@ -167,7 +167,9 @@ class UnifiedBotConfig:
     demo_mode: bool = False
     # コンセンサス閾値（DAY_TRADE）本番用
     consensus_day_trade_threshold: float = 5.5
-    # デモモード時の最大同時ポジション数（本番と同じ=1）
+    # 最大同時ポジション数（ライブ用）
+    max_positions: int = 1
+    # デモモード時の最大同時ポジション数
     demo_max_positions: int = 1
     # デモモード時のクールダウン時間（分）: 0=無効
     demo_cooldown_minutes: int = 0

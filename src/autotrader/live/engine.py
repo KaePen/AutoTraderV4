@@ -844,13 +844,20 @@ class LiveTradingEngine:
         Args:
             signal: トレードシグナル
         """
-        # 既存ポジションチェック（デモも本番も最大1ポジション）
+        # 既存ポジションチェック（設定値に基づく上限）
         positions = await self._executor.get_open_positions_async(
             self._config.symbol
         )
-        if len(positions) >= 1:
+        cfg = self._bot.config
+        max_pos = (
+            cfg.demo_max_positions
+            if cfg.demo_mode
+            else cfg.max_positions
+        )
+        if len(positions) >= max_pos:
             logger.info(
-                "既存ポジション上限(1)、エントリースキップ",
+                "既存ポジション上限(%d)、エントリースキップ",
+                max_pos,
             )
             return
 

@@ -2,6 +2,8 @@
 # バックテストはCLI引数で別管理
 
 bot_config:
+  # 最大同時ポジション数
+  max_positions: 3
   range_day_bbw_threshold: 0.20
   range_day_score_premium: 0.55
   weak_hours_enabled: true
