@@ -797,15 +797,20 @@ const DashboardApp = {
     el.classList.remove('hidden');
   },
 
-  /** ポジション＆トレードのみ即時取得（WebSocket通知時） */
+  /** ポジション・トレード・サマリを即時取得（WebSocket position_update時） */
   async fetchPositionsAndTrades() {
-    const [pos, tr] = await Promise.allSettled([
+    const [dash, pos, tr, summary] = await Promise.allSettled([
+      getDashboard(),
       getPositions(null),
       getTrades(this.symbol, 20),
+      getTradeSummary(this.symbol, 30),
     ]);
+    if (dash.status === 'fulfilled') this.dashboard = dash.value;
     if (pos.status === 'fulfilled') this.positions = pos.value;
     if (tr.status === 'fulfilled') this.trades = tr.value;
+    if (summary.status === 'fulfilled') this.tradeSummary = summary.value;
     ChartManager.setTrades(this.trades);
+    this.renderMetrics();
     this.renderPositions();
     this.renderTradeHistory();
   },
