@@ -1025,6 +1025,8 @@ const DashboardApp = {
             <span class="text-[11px] font-bold px-1.5 py-0.5 rounded ${dirBg}">${p.signal_type}</span>
             <span class="text-sm font-semibold text-gray-200">${p.symbol}</span>
             <span class="text-[10px] text-gray-600">${p.volume.toFixed(2)}lot</span>
+            <span class="text-[10px] text-gray-600">·</span>
+            <span class="text-[10px] text-gray-500">${this.fmtHoldTime(p.opened_at)}</span>
           </div>
           <div class="flex items-baseline gap-1.5 ${pnlBg} px-2 py-0.5 rounded-md">
             <span class="text-sm font-bold tabular-nums ${pnlColor}">${pnlSign}${this.fmtCurrency(p.unrealized_pnl)}</span>
@@ -1035,8 +1037,6 @@ const DashboardApp = {
         ${priceRowHtml}
         <!-- SL/TPプログレスバー -->
         ${progressHtml}
-        <!-- 保有時間 -->
-        <div class="text-[10px] text-gray-600">${this.fmtHoldTime(p.opened_at)}</div>
       </div>`;
   },
 
@@ -1424,7 +1424,7 @@ const DashboardApp = {
   },
   fmtHoldTime(openedAt) {
     const diffMs = Date.now() - new Date(openedAt).getTime();
-    const diffMin = Math.floor(diffMs / 60000);
+    const diffMin = Math.max(0, Math.floor(diffMs / 60000));
     if (diffMin < 60) return diffMin + 'm';
     const diffHour = Math.floor(diffMin / 60);
     if (diffHour < 24) return diffHour + 'h ' + (diffMin % 60) + 'm';
