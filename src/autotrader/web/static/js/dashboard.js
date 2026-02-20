@@ -370,10 +370,10 @@ const DashboardApp = {
         const dirIcon = dir === 'BUY' ? '&#9650;' : dir === 'SELL' ? '&#9660;' : '&#9644;';
         const dirColor = dir === 'BUY' ? 'text-green-400' : dir === 'SELL' ? 'text-red-400' : 'text-gray-500';
         const borderCls = isAligned
-          ? 'border-green-600/60 bg-green-900/10'
+          ? (dir === 'SELL' ? 'border-red-600/60 bg-red-900/10' : 'border-green-600/60 bg-green-900/10')
           : 'border-gray-700 bg-gray-800/60';
         const alignBadge = isAligned
-          ? '<span class="text-[8px] text-green-400 font-bold ml-1">&#10003;</span>'
+          ? `<span class="text-[8px] ${dir === 'SELL' ? 'text-red-400' : 'text-green-400'} font-bold ml-1">&#10003;</span>`
           : '';
         const scColor = sc > 0.5 ? 'text-green-400' : sc > 0.2 ? 'text-yellow-400' : 'text-gray-500';
         const barW = Math.min(100, sc * 100);
