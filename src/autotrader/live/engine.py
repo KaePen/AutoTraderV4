@@ -852,9 +852,9 @@ class LiveTradingEngine:
         if getattr(self._bot.config, "demo_mode", False):
             return False
 
-        # 現在のモード判定
+        # 現在のモード判定（_last_modeはgenerate_signal後に設定される）
         current_mode = getattr(
-            self._bot, "current_mode", ""
+            self._bot, "_last_mode", ""
         )
         if isinstance(current_mode, str):
             mode_name = current_mode.upper()
