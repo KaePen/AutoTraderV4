@@ -214,16 +214,21 @@ class LiveTradingEngine:
         """Botの設定を動的に更新する
 
         デモ/ライブモード切り替え時やWebUI設定変更時に呼ばれる。
-        TradeBot.config と PositionSizer を新設定で再構築する。
+        TradeBot.config と内部コンポーネント（consensus含む）を再構築する。
 
         Args:
             new_config: 新しいUnifiedBotConfig
         """
         self._bot.config = new_config
+        # consensus等のコンポーネントをdemo_modeに合わせて再初期化
+        # （デモ時は閾値を大幅に下げてシグナルを活発化）
+        self._bot._init_new_components()
         self._sizer = PositionSizer(
             self._build_sizer_config(new_config)
         )
-        logger.info("BotConfig更新完了 demo_mode=%s", new_config.demo_mode)
+        logger.info(
+            "BotConfig更新完了 demo_mode=%s", new_config.demo_mode
+        )
 
     def update_pm_config(self, new_config: PositionManagerConfig) -> None:
         """PositionManagerの設定を動的に更新する
