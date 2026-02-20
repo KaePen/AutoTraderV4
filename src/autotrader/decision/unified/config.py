@@ -91,6 +91,7 @@ class RiskConfig:
         default_sl_pips: デフォルトSL(pips)
         default_tp_pips: デフォルトTP(pips)
         cooldown_minutes: クールダウン時間（分）
+        max_daily_trades: 日次最大トレード件数（0=無制限）
     """
 
     max_daily_loss_pct: float = 0.05
@@ -98,6 +99,7 @@ class RiskConfig:
     default_sl_pips: float = 15.0
     default_tp_pips: float = 25.0
     cooldown_minutes: int = 5
+    max_daily_trades: int = 0
 
 
 @dataclass(frozen=True)
@@ -162,6 +164,8 @@ class UnifiedBotConfig:
     demo_max_positions: int = 1
     # デモモード時のクールダウン時間（分）: 0=無効
     demo_cooldown_minutes: int = 0
+    # デモモード時の日次最大トレード件数（0=無制限）
+    demo_max_daily_trades: int = 5
     # デモモード時のコンセンサス閾値（大幅低下で活発にシグナル発火）
     demo_consensus_scalping_threshold: float = 1.0
     demo_consensus_day_trade_threshold: float = 1.5

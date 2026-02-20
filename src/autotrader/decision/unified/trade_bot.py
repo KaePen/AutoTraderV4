@@ -157,6 +157,11 @@ class RiskManager:
         if self._daily_pnl < -self.config.max_daily_loss_pct:
             return False, f"日次損失制限超過({self._daily_pnl:.2%})"
 
+        # 日次トレード件数制限チェック（0=無制限）
+        limit = self.config.max_daily_trades
+        if limit > 0 and self._daily_trades >= limit:
+            return False, f"日次トレード件数上限({self._daily_trades}/{limit}件)"
+
         # クールダウンチェック
         if self._last_trade_time is not None:
             cooldown = timedelta(minutes=self.config.cooldown_minutes)
@@ -270,6 +275,11 @@ class UnifiedTradeBot:
             cooldown_minutes=(
                 0 if self.config.demo_mode
                 else self.config.risk.cooldown_minutes
+            ),
+            max_daily_trades=(
+                self.config.demo_max_daily_trades
+                if self.config.demo_mode
+                else self.config.risk.max_daily_trades
             ),
         )
         self.risk_manager = RiskManager(risk_config)
