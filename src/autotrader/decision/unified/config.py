@@ -154,6 +154,13 @@ class UnifiedBotConfig:
     # 東京深夜SWINGフィルター（JST 02-06 = UTC 17-21）
     tokyo_night_swing_enabled: bool = True
     tokyo_night_swing_premium: float = 0.3
+    # SWING低ボラフィルター（entry_tf=H1絶対ATR最小値）
+    # 原則: スイングトレードは十分なATRがないと停滞しやすい
+    # 持続的低ボラ環境ではATR比率は1.0付近のため絶対値で判定
+    # スケール: H1 ATR基準（H4 ATRの約1/5）
+    # 実績: 好調年(2022-2025)H1 ATR=0.094-0.129, 不調年(2019,2021)H1 ATR=0.045
+    # 推奨閾値: 0.065（好調/不調の中間値）。デフォルト0.0=無効
+    swing_low_vol_atr_ratio: float = 0.0
     # デモモード（閾値を下げて活発にシグナルを発火させる）
     demo_mode: bool = False
     # コンセンサス閾値（DAY_TRADE）本番用

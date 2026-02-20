@@ -486,11 +486,12 @@ class UnifiedTradeBot:
             )
 
         # SoftGuardチェック（デモモードでも情報取得: 出力データに使用）
-        # ATR比率を計算してボラティリティ状態をSoftGuardに渡す
+        # ATR比率・絶対ATRを計算してボラティリティ状態をSoftGuardに渡す
         _primary_atr_row = self._get_current_row(
             plan.primary_tf, current_time,
         )
         _atr_ratio = 1.0
+        _primary_atr_abs = None  # 絶対ATR値（primary_tf基準）
         if _primary_atr_row is not None:
             _atr = _primary_atr_row.get("atr_14")
             _atr_ma = _primary_atr_row.get("atr_ma_20")
@@ -500,6 +501,18 @@ class UnifiedTradeBot:
                 and _atr_ma > 0
             ):
                 _atr_ratio = float(_atr) / float(_atr_ma)
+            if _atr is not None and not pd.isna(_atr):
+                _primary_atr_abs = float(_atr)
+        # SWING低ボラフィルター用: entry_tf(H1)のATRを取得
+        # entry_atr(CSV列)はH1由来のため、スケールを合わせる
+        _entry_tf_atr_abs = None
+        _entry_tf_row = self._get_current_row(
+            plan.entry_tf, current_time,
+        )
+        if _entry_tf_row is not None:
+            _e_atr = _entry_tf_row.get("atr_14")
+            if _e_atr is not None and not pd.isna(_e_atr):
+                _entry_tf_atr_abs = float(_e_atr)
         sg_context = {
             "spread_pips": self._get_spread_pips(current_time),
             "current_time": current_time.to_pydatetime(),
@@ -668,6 +681,23 @@ class UnifiedTradeBot:
                     f"東京深夜SWING: hour={hour_utc}, "
                     f"score={consensus.score:.1f}"
                     f"<{_tn_threshold:.1f}"
+                )
+
+            # SWING低ボラフィルター（entry_tf=H1絶対ATR）
+            # 原則: スイングトレードは市場が十分に動く時のみ有効
+            # 持続的低ボラ環境(ATR比率フィルターは持続低ボラに不感)
+            # entry_tf(H1)ATR < 閾値の場合、SWINGトレードは停滞しやすい
+            # 閾値基準: 好調年H1 ATR=0.094-0.129, 不調年H1 ATR=0.045
+            if (
+                regime_result.regime == MarketRegime.TREND
+                and plan.mode == TradingStrategyMode.SWING
+                and _entry_tf_atr_abs is not None
+                and _entry_tf_atr_abs
+                < self.config.swing_low_vol_atr_ratio
+            ):
+                return _filt_hold(
+                    f"SWING低ボラ制限: entry_atr={_entry_tf_atr_abs:.4f}"
+                    f"<{self.config.swing_low_vol_atr_ratio:.4f}"
                 )
 
             # RANGE+DAYスコアプレミアム（低スコア帯を除外）

@@ -383,6 +383,16 @@ def parse_args() -> argparse.Namespace:
         default=0.15,
         help="SWING×TREND Stagnation MFE閾値（デフォルト: 0.15）",
     )
+    # SWING低ボラフィルター（絶対ATR最小値）
+    parser.add_argument(
+        "--swing-min-atr",
+        type=float,
+        default=0.0,
+        help=(
+            "SWINGモード絶対ATR最小値（0.0=無効）"
+            " デフォルト: 0.0"
+        ),
+    )
     # RANGE×DAY 入口フィルター
     parser.add_argument(
         "--range-day-bbw",
@@ -825,6 +835,7 @@ def run_single_backtest(args: argparse.Namespace):
         weak_hours_score_premium=args.weak_hours_premium,
         tokyo_night_swing_enabled=not args.no_tokyo_night_swing,
         tokyo_night_swing_premium=args.tokyo_night_swing_premium,
+        swing_low_vol_atr_ratio=args.swing_min_atr,
         use_dynamic_lot=not args.fixed_lot,
         max_lot_per_trade=args.max_lot_per_trade,
         max_total_exposure_lot=args.max_total_exposure,
