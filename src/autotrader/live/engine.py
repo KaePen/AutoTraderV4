@@ -618,7 +618,10 @@ class LiveTradingEngine:
         # Signal にlotを付与
         signal_with_lot = signal.model_copy(update={"lot": lot})
 
-        # MT5発注
+        # MT5発注（発注直前のtick価格を取得してentry_priceに使用）
+        entry_tick = await self._data_provider.get_tick(
+            self._config.symbol
+        )
         result = await self._executor.open_position_async(
             signal_with_lot, lot
         )
@@ -631,7 +634,7 @@ class LiveTradingEngine:
             # PositionManagerに登録
             if result.ticket:
                 await self._register_new_position(
-                    result.ticket, signal_with_lot, lot
+                    result.ticket, signal_with_lot, lot, entry_tick
                 )
             # TradeBotに通知（取引時刻を渡す）
             self._bot.on_trade_executed(signal.created_at)
@@ -651,7 +654,11 @@ class LiveTradingEngine:
             logger.error("エントリー失敗: %s", result.message)
 
     async def _register_new_position(
-        self, ticket: int, signal: Signal, volume: float
+        self,
+        ticket: int,
+        signal: Signal,
+        volume: float,
+        entry_tick: dict | None = None,
     ) -> None:
         """新ポジションをPositionManagerに登録
 
@@ -659,11 +666,48 @@ class LiveTradingEngine:
             ticket: MT5チケットID
             signal: トレードシグナル
             volume: ロット数
+            entry_tick: エントリー時のtick情報（ask/bid）
         """
         from autotrader.decision.unified.mode_selector import (
             TradingPlan,
         )
         from autotrader.core.enums import TradingStrategyMode
+
+        # エントリー価格（実際のask/bid価格）
+        is_buy = signal.signal_type == SignalType.BUY
+        if entry_tick:
+            entry_price = float(
+                entry_tick.get("ask", 0) if is_buy
+                else entry_tick.get("bid", 0)
+            )
+        else:
+            entry_price = 0.0
+
+        # signal.stop_loss/take_profitはpips値 → 価格レベルに変換
+        # USDJPY: pip_size=0.01, その他: pip_size=0.0001
+        pip_size = (
+            0.01 if "JPY" in signal.symbol.upper() else 0.0001
+        )
+        sl_price = 0.0
+        tp_price = 0.0
+        if entry_price > 0:
+            if signal.stop_loss and signal.stop_loss > 0:
+                sl_dist = signal.stop_loss * pip_size
+                sl_price = (
+                    entry_price - sl_dist if is_buy
+                    else entry_price + sl_dist
+                )
+            if signal.take_profit and signal.take_profit > 0:
+                tp_dist = signal.take_profit * pip_size
+                tp_price = (
+                    entry_price + tp_dist if is_buy
+                    else entry_price - tp_dist
+                )
+
+        logger.info(
+            "PM登録: ticket=%d entry=%.3f sl=%.3f tp=%.3f",
+            ticket, entry_price, sl_price, tp_price,
+        )
 
         # デフォルトのトレーディングプラン
         plan = TradingPlan(
@@ -681,10 +725,10 @@ class LiveTradingEngine:
         self._pm.register_position(
             position_id=str(ticket),
             direction=signal.signal_type,
-            entry_price=signal.stop_loss or 0.0,
+            entry_price=entry_price,
             entry_time=datetime.now(timezone.utc),
-            sl=signal.stop_loss or 0.0,
-            tp=signal.take_profit or 0.0,
+            sl=sl_price,
+            tp=tp_price,
             volume=volume,
             plan=plan,
         )
@@ -726,29 +770,35 @@ class LiveTradingEngine:
             if managed is None:
                 continue
 
-            # ティック取得
-            tick = await self._data_provider.get_tick(
-                position.symbol
-            )
-            if position.signal_type == SignalType.BUY:
-                current_price = float(tick.get("bid", 0))
-            else:
-                current_price = float(tick.get("ask", 0))
+            try:
+                # ティック取得
+                tick = await self._data_provider.get_tick(
+                    position.symbol
+                )
+                if position.signal_type == SignalType.BUY:
+                    current_price = float(tick.get("bid", 0))
+                else:
+                    current_price = float(tick.get("ask", 0))
 
-            if current_price <= 0:
-                continue
+                if current_price <= 0:
+                    continue
 
-            # ポジション評価
-            action = self._pm.evaluate(
-                position_id=pos_id,
-                current_price=current_price,
-                current_time=datetime.now(timezone.utc),
-                atr=atr,
-                current_signal=current_signal_type,
-            )
+                # ポジション評価
+                action = self._pm.evaluate(
+                    position_id=pos_id,
+                    current_price=current_price,
+                    current_time=datetime.now(timezone.utc),
+                    atr=atr,
+                    current_signal=current_signal_type,
+                )
 
-            # アクション実行
-            await self._execute_action(position, action)
+                # アクション実行
+                await self._execute_action(position, action)
+            except Exception as e:
+                logger.error(
+                    "ポジション管理エラー(ticket=%d): %s",
+                    position.ticket, e,
+                )
 
     async def _execute_action(self, position, action) -> None:
         """管理アクション実行
