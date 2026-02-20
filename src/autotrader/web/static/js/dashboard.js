@@ -986,10 +986,10 @@ const DashboardApp = {
     const wrapClass = isWide
       ? 'grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3'
       : 'space-y-2';
-    listEl.innerHTML = `<div class="${wrapClass}">` + this.positions.map((p) => this.positionCard(p)).join('') + '</div>';
+    listEl.innerHTML = `<div class="${wrapClass}">` + this.positions.map((p, i) => this.positionCard(p, i)).join('') + '</div>';
   },
 
-  positionCard(p) {
+  positionCard(p, idx) {
     const isProfit = p.unrealized_pnl >= 0;
     const isBuy = p.signal_type === 'BUY';
     const borderColor = isBuy ? 'border-l-green-500' : 'border-l-red-500';
@@ -1067,10 +1067,13 @@ const DashboardApp = {
         </div>`;
     }
 
+    const detailId = `pos-detail-${idx}`;
+    const arrowId = `pos-arrow-${idx}`;
     return `
-      <div class="border-l-2 ${borderColor} bg-gray-800/60 rounded-r-lg px-3 py-2.5">
-        <!-- 上段: 方向 + PnL -->
-        <div class="flex items-center justify-between mb-2">
+      <div class="border-l-2 ${borderColor} bg-gray-800/60 rounded-r-lg px-3 py-2 cursor-pointer select-none"
+           onclick="DashboardApp.togglePositionDetail('${detailId}', '${arrowId}')">
+        <!-- 上段: 方向 + PnL + 展開矢印 -->
+        <div class="flex items-center justify-between mb-1.5">
           <div class="flex items-center gap-1.5">
             <span class="text-[11px] font-bold px-1.5 py-0.5 rounded ${dirBg}">${p.signal_type}</span>
             <span class="text-sm font-semibold text-gray-200">${p.symbol}</span>
@@ -1078,16 +1081,30 @@ const DashboardApp = {
             <span class="text-[10px] text-gray-600">·</span>
             <span class="text-[10px] text-gray-500">${this.fmtHoldTime(p.opened_at)}</span>
           </div>
-          <div class="flex items-baseline gap-1.5 ${pnlBg} px-2 py-0.5 rounded-md">
-            <span class="text-sm font-bold tabular-nums ${pnlColor}">${pnlSign}${this.fmtCurrency(p.unrealized_pnl)}</span>
-            <span class="text-[10px] tabular-nums ${pnlColor} opacity-70">${pnlSign}${p.unrealized_pnl_pips.toFixed(1)}p</span>
+          <div class="flex items-center gap-2">
+            <div class="flex items-baseline gap-1 ${pnlBg} px-2 py-0.5 rounded-md">
+              <span class="text-sm font-bold tabular-nums ${pnlColor}">${pnlSign}${this.fmtCurrency(p.unrealized_pnl)}</span>
+              <span class="text-[10px] tabular-nums ${pnlColor} opacity-70">${pnlSign}${p.unrealized_pnl_pips.toFixed(1)}p</span>
+            </div>
+            <span id="${arrowId}" class="text-[11px] text-gray-600">▸</span>
           </div>
         </div>
-        <!-- 価格グリッド -->
-        ${priceRowHtml}
-        <!-- SL/TPプログレスバー -->
+        <!-- バー（常に表示） -->
         ${progressHtml}
+        <!-- 詳細（折りたたみ）: 価格グリッド -->
+        <div id="${detailId}" class="hidden">
+          ${priceRowHtml}
+        </div>
       </div>`;
+  },
+
+  /** ポジションカードの詳細エリアをトグル */
+  togglePositionDetail(detailId, arrowId) {
+    const detail = document.getElementById(detailId);
+    const arrow = document.getElementById(arrowId);
+    if (!detail) return;
+    const isHidden = detail.classList.toggle('hidden');
+    if (arrow) arrow.textContent = isHidden ? '▸' : '▾';
   },
 
   /** インジケーター時間足タブを描画 */
