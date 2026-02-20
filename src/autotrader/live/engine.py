@@ -8,6 +8,7 @@ asyncioメインループで定期的にMT5データを取得し、
 from __future__ import annotations
 
 import asyncio
+import dataclasses
 import logging
 import time as _time
 import uuid
@@ -995,6 +996,7 @@ class LiveTradingEngine:
             entry_tick: エントリー時のtick情報（ask/bid）
         """
         from autotrader.decision.unified.mode_selector import (
+            TradingModeSelector,
             TradingPlan,
         )
         from autotrader.core.enums import TradingStrategyMode
@@ -1035,17 +1037,29 @@ class LiveTradingEngine:
             ticket, entry_price, sl_price, tp_price,
         )
 
-        # デフォルトのトレーディングプラン
-        plan = TradingPlan(
-            mode=TradingStrategyMode.DAY_TRADE,
-            primary_tf="M15",
-            entry_tf="M15",
-            confirm_tfs=["H1", "H4"],
-            manage_tf="M15",
-            max_holding_bars=32,
-            tp_sl_ratio_range=(1.1, 1.4),
-            selection_reason="live_default",
+        # signal.modeから実際のモードを解決（デフォルト: DAY_TRADE）
+        mode = TradingStrategyMode.DAY_TRADE
+        if signal.mode:
+            try:
+                mode = TradingStrategyMode(signal.mode.upper())
+            except ValueError:
+                logger.warning(
+                    "不明なモード: %s、DAY_TRADEを使用",
+                    signal.mode,
+                )
+
+        # ModeSelector経由でモード別プランパラメータを取得し
+        # regimeとselection_reasonを付与
+        _base_plan = TradingModeSelector().get_plan_for_mode(mode)
+        plan = dataclasses.replace(
+            _base_plan,
+            selection_reason="live",
             regime=signal.regime,
+        )
+        logger.info(
+            "PM登録プラン: mode=%s primary_tf=%s",
+            mode.value,
+            plan.primary_tf,
         )
 
         self._pm.register_position(
