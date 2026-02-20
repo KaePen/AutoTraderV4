@@ -29,7 +29,7 @@ class LiveTradingConfig:
     """
 
     symbol: str = "USDJPY"
-    check_interval_sec: float = 1.0
+    check_interval_sec: float = 0.5
     candle_lookback: int = 500
     bot_config: UnifiedBotConfig = field(
         default_factory=UnifiedBotConfig

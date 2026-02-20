@@ -125,6 +125,18 @@ async def broadcast_account_update(account_data: dict[str, Any]) -> None:
     await manager.broadcast(EventType.ACCOUNT_UPDATE, account_data, "dashboard")
 
 
+async def broadcast_tick_update(tick_data: dict[str, Any]) -> None:
+    """tick完了時の一括更新をブロードキャスト
+
+    analysis / account / positions / radar / mode を
+    1ペイロードでダッシュボードに送信する。
+
+    Args:
+        tick_data: tick更新データ
+    """
+    await manager.broadcast(EventType.TICK_UPDATE, tick_data, "dashboard")
+
+
 async def broadcast_alert(alert_data: dict[str, Any]) -> None:
     """アラートをブロードキャスト
 
