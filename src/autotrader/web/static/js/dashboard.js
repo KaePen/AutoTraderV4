@@ -242,7 +242,10 @@ const DashboardApp = {
       // バーの最大値は threshold * 1.4 として可視化
       const maxVal = threshold * 1.5;
       const pct = Math.min(100, (score / maxVal) * 100);
-      const barColor = score >= threshold ? 'bg-green-500' : score >= threshold * 0.7 ? 'bg-yellow-500' : 'bg-red-500';
+      const isSell = a.direction === 'SELL';
+      const barColor = isSell
+        ? (score >= threshold ? 'bg-red-500' : score >= threshold * 0.7 ? 'bg-orange-400' : 'bg-gray-500')
+        : (score >= threshold ? 'bg-green-500' : score >= threshold * 0.7 ? 'bg-yellow-500' : 'bg-red-500');
       scoreBar.style.width = pct + '%';
       scoreBar.className = 'h-full rounded-full transition-all duration-500 ' + barColor;
     }
