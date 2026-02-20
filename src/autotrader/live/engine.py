@@ -1258,6 +1258,18 @@ class LiveTradingEngine:
                 " pnl_pips=%.1f profit_loss=%.2f",
                 trade_id, ticket, pnl_pips, profit_loss,
             )
+            # WebSocketで決済イベントをUIに即時通知
+            try:
+                from autotrader.web.websocket.handlers import (
+                    broadcast_position_update,
+                )
+                asyncio.get_running_loop().create_task(
+                    broadcast_position_update(
+                        {"symbol": self._config.symbol}
+                    )
+                )
+            except Exception:
+                pass
         except Exception as e:
             logger.error("DB書き込みエラー（決済）: %s", e)
 
