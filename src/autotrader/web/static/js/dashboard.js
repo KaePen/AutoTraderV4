@@ -1411,16 +1411,19 @@ const DashboardApp = {
     }
 
     const exitReasonConfig = {
-      STOP_LOSS: { l: 'SL', c: 'bg-red-900/40 text-red-400 border-red-800/50' },
-      TAKE_PROFIT: { l: 'TP', c: 'bg-green-900/40 text-green-400 border-green-800/50' },
-      TRAILING_STOP: { l: 'TSL', c: 'bg-cyan-900/40 text-cyan-400 border-cyan-800/50' },
-      TIME_EXIT: { l: 'TIME', c: 'bg-gray-700 text-gray-400 border-gray-600' },
+      SL_HIT: { l: 'SL', c: 'bg-red-900/40 text-red-400 border-red-800/50' },
+      TP_HIT: { l: 'TP', c: 'bg-green-900/40 text-green-400 border-green-800/50' },
+      TP_1R: { l: 'TP1R', c: 'bg-green-900/40 text-green-300 border-green-800/50' },
+      TP_2R: { l: 'TP2R', c: 'bg-green-900/40 text-green-200 border-green-800/50' },
+      BE_HIT: { l: 'BE', c: 'bg-blue-900/40 text-blue-400 border-blue-800/50' },
+      TRAIL_HIT: { l: 'TSL', c: 'bg-cyan-900/40 text-cyan-400 border-cyan-800/50' },
+      TIME: { l: 'TIME', c: 'bg-gray-700 text-gray-400 border-gray-600' },
       MANUAL: { l: 'MAN', c: 'bg-gray-700 text-gray-400 border-gray-600' },
-      SIGNAL_REVERSAL: { l: 'REV', c: 'bg-yellow-900/40 text-yellow-400 border-yellow-800/50' },
-      FORCE_CLOSE: { l: 'FORCE', c: 'bg-orange-900/40 text-orange-400 border-orange-800/50' },
+      SIGNAL_REV: { l: 'REV', c: 'bg-yellow-900/40 text-yellow-400 border-yellow-800/50' },
       STAGNATION: { l: 'STAG', c: 'bg-purple-900/40 text-purple-400 border-purple-800/50' },
       TP_EARLY: { l: 'TP_E', c: 'bg-emerald-900/40 text-emerald-400 border-emerald-800/50' },
-      INSURANCE: { l: 'INS', c: 'bg-blue-900/40 text-blue-400 border-blue-800/50' },
+      FORCE_CLOSE: { l: 'FORCE', c: 'bg-orange-900/40 text-orange-400 border-orange-800/50' },
+      EXTERNAL_CLOSE: { l: 'EXT', c: 'bg-gray-700 text-gray-300 border-gray-500' },
     };
 
     const rows = this.trades.map((t) => {

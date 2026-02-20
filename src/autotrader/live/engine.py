@@ -1421,10 +1421,15 @@ class LiveTradingEngine:
                 )
                 # DB記録（決済）
                 if current_price > 0:
+                    _exit_reason_str = (
+                        action.exit_reason.value
+                        if action.exit_reason
+                        else "FORCE_CLOSE"
+                    )
                     self._write_close_to_db(
                         position.ticket,
                         current_price,
-                        action.reason,
+                        _exit_reason_str,
                     )
 
     async def _sync_positions(self) -> None:
