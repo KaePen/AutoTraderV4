@@ -284,7 +284,7 @@ const ChartManager = {
     const container = document.getElementById('chart-timeframe-buttons');
     if (!container) return;
 
-    const timeframes = ['M1', 'M5', 'M15', 'M30', 'H1', 'H4', 'D1'];
+    const timeframes = ['M1', 'M5', 'M15', 'M30', 'H1', 'H4', 'H8', 'D1'];
     container.innerHTML = timeframes.map((tf) => {
       const active = tf === this.timeframe;
       const cls = active

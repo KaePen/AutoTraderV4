@@ -1076,7 +1076,7 @@ const DashboardApp = {
   renderIndicatorTabs() {
     const container = document.getElementById('indicator-tf-tabs');
     if (!container) return;
-    const tfs = ['M1', 'M5', 'M15', 'M30', 'H1', 'H4', 'D1'];
+    const tfs = ['M1', 'M5', 'M15', 'M30', 'H1', 'H4', 'H8', 'D1'];
     container.innerHTML = tfs.map((tf) => {
       const cls = tf === this.indicatorTf
         ? 'bg-blue-600 text-white'
