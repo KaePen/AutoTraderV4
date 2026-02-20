@@ -7,8 +7,6 @@ const DashboardApp = {
   trades: [],
   tradeSummary: null,
   currentSignals: [],
-  // シグナルレーダー: { USDJPY: [...], EURUSD: [...] } 疎結合設計
-  radarData: {},
   indicators: null,
   indicatorsAllTf: {},
   indicatorTf: localStorage.getItem('indicator_tf') || 'M15',
@@ -62,7 +60,6 @@ const DashboardApp = {
     // データ取得
     this.fetchAll();
     this.fetchSignals();
-    this.fetchSignalRadar();
     this.fetchIndicators();
     this.fetchTradingMode();
     this.fetchAnalysis();
@@ -75,7 +72,6 @@ const DashboardApp = {
       if (!this.wsActive) {
         this.fetchAnalysis();
         this.fetchPositionsAndTrades();
-        this.fetchSignalRadar();
         this.fetchTradingMode();
         this.fetchIndicators();
       }
@@ -123,7 +119,7 @@ const DashboardApp = {
 
   /**
    * tick_updateペイロードを受信してUI全更新
-   * analysis / account / positions / radar をまとめて適用する。
+   * analysis / account / positions をまとめて適用する。
    *
    * @param {Object} data - tick_updateペイロード
    */
@@ -151,12 +147,6 @@ const DashboardApp = {
     if (data.positions !== undefined) {
       this.positions = data.positions;
       this.renderPositions();
-    }
-
-    // シグナルレーダー
-    if (data.radar) {
-      this.radarData = data.radar;
-      this.renderSignalRadar();
     }
 
     // インジケーター（全TFキャッシュ更新 + 選択中TF描画）
@@ -849,71 +839,6 @@ const DashboardApp = {
     } catch (e) {
       this.currentSignals = [];
     }
-  },
-
-  /** シグナルレーダー取得（全シンボル） */
-  async fetchSignalRadar() {
-    try {
-      this.radarData = await getSignalRadar();
-    } catch (_e) {
-      // エラー時は既存データ維持
-    }
-    this.renderSignalRadar();
-  },
-
-  /** シグナルレーダー描画（疎結合: radarDataのシンボルを全て表示） */
-  renderSignalRadar() {
-    const listEl = document.getElementById('signal-radar-list');
-    const countEl = document.getElementById('signal-radar-count');
-    if (!listEl) return;
-
-    const symbols = Object.keys(this.radarData);
-    const totalSignals = symbols.reduce(
-      (acc, sym) => acc + (this.radarData[sym] || []).length, 0
-    );
-
-    if (countEl) {
-      countEl.textContent = totalSignals > 0
-        ? `${totalSignals} signals`
-        : 'シグナルなし';
-    }
-
-    if (totalSignals === 0) {
-      listEl.innerHTML = '<div class="text-xs text-gray-600 py-1">シグナル待機中...</div>';
-      return;
-    }
-
-    // シンボル別・順にカードを生成（シンボル追加はradarDataキー追加のみ）
-    const cards = symbols.flatMap((sym) =>
-      (this.radarData[sym] || []).map((sig) => this.signalRadarCard(sym, sig))
-    );
-    listEl.innerHTML = cards.join('');
-  },
-
-  /** シグナルレーダー 1枚カード */
-  signalRadarCard(symbol, sig) {
-    const isBuy = sig.signal_type === 'BUY';
-    const dirBg = isBuy
-      ? 'bg-green-500/20 text-green-400'
-      : 'bg-red-500/20 text-red-400';
-    const borderCls = isBuy ? 'border-green-500/30' : 'border-red-500/30';
-    const bgCls = isBuy ? 'bg-green-500/5' : 'bg-red-500/5';
-    const barCls = isBuy ? 'bg-green-500' : 'bg-red-500';
-    const confPct = Math.round((sig.confidence || 0) * 100);
-
-    return `
-      <div class="flex-shrink-0 w-36 rounded-lg border ${borderCls} ${bgCls} px-2 py-1.5">
-        <div class="flex items-center gap-1.5 mb-1">
-          <span class="text-[10px] font-bold px-1.5 py-0.5 rounded ${dirBg}">${sig.signal_type}</span>
-          <span class="text-xs font-bold text-gray-200">${symbol}</span>
-        </div>
-        <div class="flex items-center gap-1.5">
-          <div class="flex-1 h-1 bg-gray-700 rounded-full overflow-hidden">
-            <div class="h-full ${barCls} rounded-full transition-all" style="width:${confPct}%"></div>
-          </div>
-          <span class="text-[10px] text-gray-300 tabular-nums font-medium">${confPct}%</span>
-        </div>
-      </div>`;
   },
 
   /** 指標取得 */

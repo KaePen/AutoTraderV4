@@ -144,54 +144,6 @@ async def get_current_signals(
 
 
 @router.get(
-    "/signals/radar",
-    response_model=ApiResponse[dict[str, list[SignalResponse]]],
-)
-async def get_signal_radar(
-    request: Request,
-) -> ApiResponse[dict[str, list[SignalResponse]]]:
-    """全シンボルのレーダーシグナルを取得
-
-    シンボルをキーとして、各シンボルの上位シグナル（HOLD除外・
-    信頼度降順・上位3件）を返す。
-    シンボル追加は engine.signal_history の拡張のみで対応可能な
-    疎結合設計。
-
-    Args:
-        request: FastAPIリクエスト
-
-    Returns:
-        ApiResponse[dict[str, list[SignalResponse]]]:
-            { "USDJPY": [...], "EURUSD": [...] } 形式
-    """
-    engine = getattr(request.app.state, "live_engine", None)
-    result: dict[str, list[SignalResponse]] = {}
-
-    if engine is not None and engine.signal_history:
-        # シンボル別にグループ化
-        grouped: dict[str, list] = {}
-        for s in engine.signal_history:
-            grouped.setdefault(s.symbol, []).append(s)
-
-        for symbol, signals in grouped.items():
-            # HOLDを除外して信頼度降順
-            best = sorted(
-                [
-                    s for s in signals
-                    if s.signal_type.value != "HOLD"
-                ],
-                key=lambda s: s.confidence,
-                reverse=True,
-            )
-            if best:
-                result[symbol] = [
-                    _signal_to_response(s) for s in best
-                ]
-
-    return ApiResponse(data=result)
-
-
-@router.get(
     "/signals/history",
     response_model=ApiResponse[list[SignalResponse]],
 )

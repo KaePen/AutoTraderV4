@@ -128,7 +128,7 @@ async def broadcast_account_update(account_data: dict[str, Any]) -> None:
 async def broadcast_tick_update(tick_data: dict[str, Any]) -> None:
     """tick完了時の一括更新をブロードキャスト
 
-    analysis / account / positions / radar / mode を
+    analysis / account / positions / mode を
     1ペイロードでダッシュボードに送信する。
 
     Args:
