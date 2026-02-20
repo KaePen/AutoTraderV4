@@ -1254,8 +1254,10 @@ class LiveTradingEngine:
                         if "JPY" in self._config.symbol.upper()
                         else 10.0
                     )
+                    # ManagedPositionはremaining_volumeを使用
+                    _vol = pos.remaining_volume
                     profit_loss = round(
-                        pnl_pips * pos.volume * pip_val, 2
+                        pnl_pips * _vol * pip_val, 2
                     )
             closed_at = datetime.now(timezone.utc)
             db_url = get_settings().database_url
