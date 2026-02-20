@@ -1212,6 +1212,12 @@ class LiveTradingEngine:
             self._cached_positions = []
             return
 
+        # _open_tradesが未復元の場合、DBから復元（起動タイミング対応）
+        if not self._open_trades:
+            self._restore_open_trades_from_db(
+                [pos.ticket for pos in positions]
+            )
+
         # ATR取得（ポジション管理で使用）
         # USDJPY換算で約20pips相当を最小値とする
         _min_atr = 0.20 if "JPY" in self._config.symbol.upper() else 0.0020
