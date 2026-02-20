@@ -107,6 +107,11 @@ const DashboardApp = {
       this.wsActive = true;
       this._applyTickUpdate(msg.data);
     });
+    // MT5エントリー確定時: ポジション即時更新
+    this.dashWs.on('position_update', () => {
+      this.wsActive = true;
+      this.fetchPositionsAndTrades();
+    });
     this.dashWs.onStateChange((state) => {
       if (state === 'disconnected' || state === 'error') {
         this.wsActive = false;
