@@ -56,6 +56,11 @@ function getCurrentSignals(symbol) {
   return fetchApi(`/signals/current?symbol=${symbol}`);
 }
 
+/** シグナルレーダー取得（全シンボル・信頼度上位） */
+function getSignalRadar() {
+  return fetchApi('/signals/radar');
+}
+
 /** シグナル履歴取得 */
 function getSignalHistory(symbol, limit, offset) {
   symbol = symbol || 'USDJPY';
