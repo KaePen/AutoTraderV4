@@ -591,11 +591,60 @@ class LiveTradingEngine:
             for sym, sigs in radar.items()
         }
 
+        # --- indicators (エンジン計算済みデータから取得) ---
+        indicators: dict[str, dict] = {}
+        if self._bot and hasattr(self._bot, "_market_data"):
+            for tf in self._bot._market_data:
+                indicators[tf] = self._extract_indicators(tf)
+
         return {
             "analysis": analysis,
             "account": account,
             "positions": self._cached_positions,
             "radar": radar_serialized,
+            "indicators": indicators,
+        }
+
+    def _extract_indicators(self, timeframe: str) -> dict:
+        """計算済み市場データから指標値を抽出
+
+        Args:
+            timeframe: 時間足文字列
+
+        Returns:
+            dict: renderIndicators()が期待するフィールド辞書
+        """
+        import math
+
+        md = self._bot._market_data if self._bot else {}
+        df = md.get(timeframe)
+        if df is None or df.empty:
+            return {}
+
+        row = df.iloc[-1]
+
+        def _v(col: str) -> float | None:
+            """NaN/欠損を None に変換"""
+            try:
+                v = row[col]
+                return None if math.isnan(float(v)) else float(v)
+            except (KeyError, TypeError, ValueError):
+                return None
+
+        return {
+            "rsi": _v("rsi_14"),
+            "macd": _v("macd"),
+            "macd_signal": _v("macd_signal"),
+            "macd_hist": _v("macd_histogram"),
+            "adx": _v("adx"),
+            "plus_di": _v("plus_di"),
+            "minus_di": _v("minus_di"),
+            "bb_upper": _v("bb_upper"),
+            "bb_middle": _v("bb_middle"),
+            "bb_lower": _v("bb_lower"),
+            "atr": _v("atr_14"),
+            "ema_fast": _v("ema_12"),
+            "ema_slow": _v("ema_26"),
         }
 
     def _consolidated_to_signal(

@@ -220,7 +220,7 @@ class IndicatorCalculator:
         # ATR移動平均（SoftGuard用）
         df["atr_ma_20"] = ta.sma(df["atr_14"], length=20)
 
-        # ADX
+        # ADX + DI
         adx = ta.adx(
             df["high"],
             df["low"],
@@ -229,22 +229,41 @@ class IndicatorCalculator:
         )
         if adx is not None:
             adx_cols = [c for c in adx.columns if c.startswith("ADX")]
+            dmp_cols = [
+                c for c in adx.columns if c.startswith("DMP")
+            ]
+            dmn_cols = [
+                c for c in adx.columns if c.startswith("DMN")
+            ]
             if adx_cols:
                 df["adx"] = adx[adx_cols[0]]
+            if dmp_cols:
+                df["plus_di"] = adx[dmp_cols[0]]
+            if dmn_cols:
+                df["minus_di"] = adx[dmn_cols[0]]
 
         # EMA（EMAクロス用）
         df["ema_12"] = ta.ema(df["close"], length=12)
         df["ema_26"] = ta.ema(df["close"], length=26)
 
-        # Bollinger Bands %B
+        # Bollinger Bands（%B / 幅 / 上中下限）
         bb = ta.bbands(df["close"], length=20)
         if bb is not None:
             pb_cols = [c for c in bb.columns if "BBP" in c]
             bw_cols = [c for c in bb.columns if "BBB" in c]
+            bbu_cols = [c for c in bb.columns if "BBU" in c]
+            bbm_cols = [c for c in bb.columns if "BBM" in c]
+            bbl_cols = [c for c in bb.columns if "BBL" in c]
             if pb_cols:
                 df["bb_percent_b"] = bb[pb_cols[0]]
             if bw_cols:
                 df["bb_width"] = bb[bw_cols[0]]
+            if bbu_cols:
+                df["bb_upper"] = bb[bbu_cols[0]]
+            if bbm_cols:
+                df["bb_middle"] = bb[bbm_cols[0]]
+            if bbl_cols:
+                df["bb_lower"] = bb[bbl_cols[0]]
 
         # MACDヒストグラムスロープ（前回差分）
         if "macd_histogram" in df.columns:
