@@ -1183,13 +1183,27 @@ class LiveTradingEngine:
                 ticket, exit_reason, exit_price, profit_loss,
             )
         else:
+            # 約定履歴取得失敗時はティック価格をフォールバックに使用
             exit_price = 0.0
+            try:
+                tick = await self._data_provider.get_tick(
+                    self._config.symbol
+                )
+                _bid = float(tick.get("bid", 0))
+                _ask = float(tick.get("ask", 0))
+                # 方向不明のためmid価格をフォールバック
+                if _bid > 0 and _ask > 0:
+                    exit_price = (_bid + _ask) / 2
+                elif _bid > 0:
+                    exit_price = _bid
+            except Exception:
+                pass
             profit_loss = 0.0
             exit_reason = ExitReason.EXTERNAL_CLOSE.value
             logger.warning(
                 "外部決済の約定履歴取得失敗: ticket=%d"
-                " → EXTERNAL_CLOSEとして記録",
-                ticket,
+                " → フォールバック価格=%.5f で記録",
+                ticket, exit_price,
             )
         self._write_close_to_db(
             ticket, exit_price, exit_reason, profit_loss
@@ -1491,7 +1505,14 @@ class LiveTradingEngine:
                     str(position.ticket)
                 )
                 # DB記録（決済）
-                if current_price > 0:
+                # result.exit_price（MT5約定価格）を優先し、
+                # 取得できない場合はtickの現在価格をフォールバック
+                _actual_price = (
+                    result.exit_price
+                    if result.exit_price and result.exit_price > 0
+                    else current_price
+                )
+                if _actual_price > 0:
                     _exit_reason_str = (
                         action.exit_reason.value
                         if action.exit_reason
@@ -1499,7 +1520,7 @@ class LiveTradingEngine:
                     )
                     self._write_close_to_db(
                         position.ticket,
-                        current_price,
+                        _actual_price,
                         _exit_reason_str,
                     )
 

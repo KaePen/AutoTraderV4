@@ -16,11 +16,13 @@ class ExecutionResult:
         success: 成功したか
         ticket: チケットID
         message: メッセージ
+        exit_price: 約定価格（決済時のみ）
     """
 
     success: bool
     ticket: int | None = None
     message: str = ""
+    exit_price: float | None = None
 
 
 class TradeExecutor(ABC):

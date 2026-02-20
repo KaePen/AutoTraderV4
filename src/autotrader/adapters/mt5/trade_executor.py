@@ -315,14 +315,17 @@ class MT5TradeExecutor(TradeExecutor):
 
         retcode = result.get("retcode", -1)
         if retcode in SUCCESS_RETCODES:
+            # MT5 OrderSendResult から実際の約定価格を取得
+            exec_price = float(result.get("price", 0)) or price
             logger.info(
-                "決済成功: ticket=%d retcode=%d",
-                position.ticket, retcode,
+                "決済成功: ticket=%d retcode=%d price=%.5f",
+                position.ticket, retcode, exec_price,
             )
             return ExecutionResult(
                 success=True,
                 ticket=int(result.get("order", 0)),
                 message=reason,
+                exit_price=exec_price,
             )
 
         msg = (
