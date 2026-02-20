@@ -183,7 +183,7 @@ class UnifiedTradeBot:
     ポジションサイジングを統合。
     """
 
-    DEFAULT_TIMEFRAMES = ["M1", "M5", "M15", "H1", "H4", "D1"]
+    DEFAULT_TIMEFRAMES = ["M1", "M5", "M15", "M30", "H1", "H4", "D1"]
 
     def __init__(self, config: UnifiedBotConfig | None = None):
         """初期化

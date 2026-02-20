@@ -169,7 +169,7 @@ class ModeMonitor:
         Returns:
             bool: 上位時間足の場合True
         """
-        tf_order = ["M1", "M5", "M15", "H1", "H4", "D1"]
+        tf_order = ["M1", "M5", "M15", "M30", "H1", "H4", "D1"]
         try:
             return tf_order.index(candidate) > tf_order.index(base)
         except ValueError:

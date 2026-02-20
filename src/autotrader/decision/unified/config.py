@@ -123,7 +123,7 @@ class UnifiedBotConfig:
     )
     risk: RiskConfig = field(default_factory=RiskConfig)
     timeframes: list[str] = field(
-        default_factory=lambda: ["M1", "M5", "M15", "H1", "H4", "D1"]
+        default_factory=lambda: ["M1", "M5", "M15", "M30", "H1", "H4", "D1"]
     )
     evaluator_configs: dict[str, EvaluatorConfig] = field(
         default_factory=dict
