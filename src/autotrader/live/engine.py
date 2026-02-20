@@ -1025,6 +1025,7 @@ class LiveTradingEngine:
         from autotrader.adapters.database.repositories import (
             TradeRepository,
         )
+        from autotrader.config.settings import get_settings
         try:
             is_buy = signal.signal_type == SignalType.BUY
             if entry_tick:
@@ -1053,7 +1054,8 @@ class LiveTradingEngine:
                         entry_price + tp_dist if is_buy
                         else entry_price - tp_dist
                     )
-            with get_session() as db:
+            db_url = get_settings().database_url
+            with get_session(db_url) as db:
                 repo = TradeRepository(db)
                 trade = repo.create(
                     symbol=signal.symbol,
@@ -1091,6 +1093,7 @@ class LiveTradingEngine:
         from autotrader.adapters.database.repositories import (
             TradeRepository,
         )
+        from autotrader.config.settings import get_settings
         trade_id = self._open_trades.pop(ticket, None)
         if not trade_id:
             return
@@ -1109,7 +1112,8 @@ class LiveTradingEngine:
                 )
                 pnl_pips = price_diff / pip_size
             closed_at = datetime.now(timezone.utc)
-            with get_session() as db:
+            db_url = get_settings().database_url
+            with get_session(db_url) as db:
                 repo = TradeRepository(db)
                 trade_record = repo.get_by_id(trade_id)
                 if trade_record:
