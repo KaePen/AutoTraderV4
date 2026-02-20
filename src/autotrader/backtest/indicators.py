@@ -193,6 +193,22 @@ class IndicatorCalculator:
                 df["macd_signal"] = macd[signal_cols[0]]
                 df["macd_histogram"] = macd[hist_cols[0]]
 
+        # Stochastic（K+D両方）
+        stoch = ta.stoch(
+            df["high"],
+            df["low"],
+            df["close"],
+            k=self._stoch_k,
+            d=self._stoch_d,
+        )
+        if stoch is not None:
+            k_cols = [c for c in stoch.columns if "STOCHk" in c]
+            d_cols = [c for c in stoch.columns if "STOCHd" in c]
+            if k_cols:
+                df["stoch_k"] = stoch[k_cols[0]]
+            if d_cols:
+                df["stoch_d"] = stoch[d_cols[0]]
+
         # ATR
         df["atr_14"] = ta.atr(
             df["high"],
@@ -200,6 +216,9 @@ class IndicatorCalculator:
             df["close"],
             length=self._atr_period,
         )
+
+        # ATR移動平均（SoftGuard用）
+        df["atr_ma_20"] = ta.sma(df["atr_14"], length=20)
 
         # ADX
         adx = ta.adx(
@@ -212,6 +231,24 @@ class IndicatorCalculator:
             adx_cols = [c for c in adx.columns if c.startswith("ADX")]
             if adx_cols:
                 df["adx"] = adx[adx_cols[0]]
+
+        # EMA（EMAクロス用）
+        df["ema_12"] = ta.ema(df["close"], length=12)
+        df["ema_26"] = ta.ema(df["close"], length=26)
+
+        # Bollinger Bands %B
+        bb = ta.bbands(df["close"], length=20)
+        if bb is not None:
+            pb_cols = [c for c in bb.columns if "BBP" in c]
+            bw_cols = [c for c in bb.columns if "BBB" in c]
+            if pb_cols:
+                df["bb_percent_b"] = bb[pb_cols[0]]
+            if bw_cols:
+                df["bb_width"] = bb[bw_cols[0]]
+
+        # MACDヒストグラムスロープ（前回差分）
+        if "macd_histogram" in df.columns:
+            df["macd_hist_slope"] = df["macd_histogram"].diff()
 
         return df
 
