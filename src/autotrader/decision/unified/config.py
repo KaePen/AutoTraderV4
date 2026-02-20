@@ -165,8 +165,10 @@ class UnifiedBotConfig:
     swing_low_vol_atr_ratio: float = 0.0
     # デモモード（閾値を下げて活発にシグナルを発火させる）
     demo_mode: bool = False
-    # コンセンサス閾値（DAY_TRADE）本番用
+    # コンセンサス閾値（ライブ本番用）
+    consensus_scalping_threshold: float = 3.5
     consensus_day_trade_threshold: float = 5.5
+    consensus_swing_threshold: float = 6.0
     # 最大同時ポジション数（ライブ用）
     max_positions: int = 1
     # デモモード時の最大同時ポジション数

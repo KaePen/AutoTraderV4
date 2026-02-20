@@ -216,6 +216,7 @@ class LiveTradingEngine:
     def reset_data_update_timer(self) -> None:
         """データ更新タイマーをリセット（次回tick即時実行）"""
         self._last_tick_time = None
+        self._last_analysis = None  # 古い評価結果をクリア（切替直後に古い方向が残らないよう）
         logger.debug("データ更新タイマーリセット")
 
     def get_current_entry_threshold(
@@ -248,9 +249,9 @@ class LiveTradingEngine:
                 }
             else:
                 thresholds = {
-                    "SCALPING": defaults.scalping_threshold,
+                    "SCALPING": cfg.consensus_scalping_threshold,
                     "DAY_TRADE": cfg.consensus_day_trade_threshold,
-                    "SWING": defaults.swing_threshold,
+                    "SWING": cfg.consensus_swing_threshold,
                 }
             return thresholds.get(mode_str)
         except AttributeError:
@@ -584,7 +585,7 @@ class LiveTradingEngine:
                 "last_tick_time": (
                     tick_time.isoformat() if tick_time else None
                 ),
-                "demo_mode": self._demo_mode_enabled,
+                "demo_mode": self.demo_mode_enabled,
                 "engine_running": self._running,
                 "auto_trade_enabled": self._enable_auto_trade,
                 "mt5_connected": self.connected,
@@ -594,7 +595,7 @@ class LiveTradingEngine:
                 "engine_running": self._running,
                 "mt5_connected": self.connected,
                 "auto_trade_enabled": self._enable_auto_trade,
-                "demo_mode": self._demo_mode_enabled,
+                "demo_mode": self.demo_mode_enabled,
             }
 
         # --- account (metrics用) ---
