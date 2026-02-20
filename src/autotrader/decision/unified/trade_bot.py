@@ -197,18 +197,7 @@ class UnifiedTradeBot:
             for tf in self.timeframes
         }
 
-        # リスク管理器（デモモード時はクールダウンを無効化）
-        if self.config.demo_mode:
-            import dataclasses as _dc
-            risk_config = _dc.replace(
-                self.config.risk,
-                cooldown_minutes=self.config.demo_cooldown_minutes,
-            )
-        else:
-            risk_config = self.config.risk
-        self.risk_manager = RiskManager(risk_config)
-
-        # 新アーキテクチャコンポーネント
+        # 新アーキテクチャコンポーネント（risk_manager を含む）
         self._init_new_components()
 
         # ボット状態
@@ -273,6 +262,17 @@ class UnifiedTradeBot:
 
         # ソフトガード
         self.soft_guard = SoftGuard(SoftGuardConfig())
+
+        # リスク管理器（デモモード時はクールダウンを排除）
+        import dataclasses as _dc
+        risk_config = _dc.replace(
+            self.config.risk,
+            cooldown_minutes=(
+                0 if self.config.demo_mode
+                else self.config.risk.cooldown_minutes
+            ),
+        )
+        self.risk_manager = RiskManager(risk_config)
 
 
     def set_market_data(
