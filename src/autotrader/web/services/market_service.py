@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 from sqlalchemy.orm import Session
 
 from autotrader.adapters.database.models import TradeRecord
-from autotrader.core.enums import Timeframe
+from autotrader.core.enums import ExitReason, Timeframe
 from autotrader.web.schemas import (
     DashboardResponse,
     PositionResponse,
@@ -18,6 +18,25 @@ from autotrader.web.schemas import (
 )
 from autotrader.web.schemas.responses import AccountInfoResponse
 from autotrader.web.services.candle_service import CandleService
+
+
+def _parse_exit_reason(
+    value: str | None,
+) -> ExitReason | None:
+    """DBのexit_reason文字列をExitReasonに変換。
+
+    Args:
+        value: DB保存値
+
+    Returns:
+        ExitReason | None: 変換結果（無効値はNone）
+    """
+    if value is None:
+        return None
+    try:
+        return ExitReason(value)
+    except ValueError:
+        return None
 
 
 class MarketService:
@@ -166,7 +185,7 @@ class MarketService:
                 take_profit=t.take_profit,
                 profit_loss=t.profit_loss,
                 profit_loss_pips=t.profit_loss_pips,
-                exit_reason=t.exit_reason,
+                exit_reason=_parse_exit_reason(t.exit_reason),
                 opened_at=t.opened_at,
                 closed_at=t.closed_at,
             )
