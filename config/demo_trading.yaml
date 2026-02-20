@@ -18,7 +18,7 @@ bot_config:
   # デモ時のクールダウン0分（連続エントリー可能）
   demo_cooldown_minutes: 0
   # デモ時の日次最大トレード件数（0=無制限）
-  demo_max_daily_trades: 5
+  demo_max_daily_trades: 0
   # デモ時のスキャルピング/スイング閾値も下げる
   demo_consensus_scalping_threshold: 1.0
   demo_consensus_swing_threshold: 2.0
