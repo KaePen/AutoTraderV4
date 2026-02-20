@@ -457,7 +457,9 @@ class LiveTradingEngine:
     async def _tick(self) -> None:
         """1ティック分の処理
 
-        口座情報→ローソク足→シグナル生成→エントリー判定→ポジション管理
+        口座情報→ローソク足→ポジション管理→シグナル生成→エントリー判定
+        ポジション管理を先行させることで、SL/TP発動等による
+        ポジション減少を即座にエントリー判断へ反映する。
         """
         # 1. 口座情報更新
         self._account_info = (
@@ -467,7 +469,12 @@ class LiveTradingEngine:
         # 2. 最新ローソク足データ取得・設定
         await self._update_market_data()
 
-        # 3. シグナル生成
+        # 3. ポジション管理（シグナル生成前に実行）
+        # SL/TP発動・手動決済による減少を_cached_positionsへ即時反映し、
+        # 同一tick内のエントリー判断で最新ポジション数を使えるようにする。
+        await self._manage_positions()
+
+        # 4. シグナル生成
         current_time = pd.Timestamp.now(tz="UTC")
         signal = self._bot.generate_signal(current_time)
 
@@ -538,10 +545,7 @@ class LiveTradingEngine:
                         await self._execute_entry(pending)
                 self._tick_optimizer.reset()
 
-        # 5. 既存ポジション管理
-        await self._manage_positions()
-
-        # 6. tick完了: 全UIデータをWebSocketで一括配信
+        # 5. tick完了: 全UIデータをWebSocketで一括配信
         asyncio.create_task(self._broadcast_tick_update())
 
     async def _broadcast_tick_update(self) -> None:
