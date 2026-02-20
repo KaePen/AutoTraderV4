@@ -701,6 +701,7 @@ const ChartManager = {
       }
 
       // 同一バー内は破線描画不可（チャート破損を防ぐ）
+      // time はバー開始時刻（整数）に丸めて使う
       const TF_SECONDS = {
         M1: 60, M5: 300, M15: 900, M30: 1800,
         H1: 3600, H4: 14400, D1: 86400,
@@ -728,9 +729,10 @@ const ChartManager = {
         crosshairMarkerVisible: false,
       });
 
+      // バー開始時刻（整数）を使うことでチャート時刻と一致させ崩れを防ぐ
       series.setData([
-        { time: entryTime, value: t.entry_price },
-        { time: exitTime, value: exitPrice },
+        { time: entryBar, value: t.entry_price },
+        { time: exitBar, value: exitPrice },
       ]);
 
       this._tradeLines.push(series);
