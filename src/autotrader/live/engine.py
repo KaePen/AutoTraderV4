@@ -36,6 +36,7 @@ from autotrader.decision.unified.signal_consolidator import (
     ConsolidatedSignal,
 )
 from autotrader.live.tick_entry_optimizer import TickEntryOptimizer
+from autotrader.backtest.indicators import IndicatorCalculator
 
 logger = logging.getLogger(__name__)
 
@@ -542,7 +543,6 @@ class LiveTradingEngine:
         Returns:
             dict[str, pd.DataFrame]: 指標付きデータ
         """
-        from autotrader.backtest.indicators import IndicatorCalculator
         calc = IndicatorCalculator()
         result: dict[str, pd.DataFrame] = {}
         for tf, df in data.items():
