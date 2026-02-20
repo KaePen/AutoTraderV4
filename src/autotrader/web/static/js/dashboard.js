@@ -300,16 +300,11 @@ const DashboardApp = {
       const bd = a.tf_breakdowns || {};
       const aligned = a.aligned_tfs || [];
 
-      // TF方向を内訳合計から推定
+      // TF方向をバックエンドから直接取得（tf_directionsが優先）
+      const tfDirsRaw = a.tf_directions || {};
       const tfDirs = {};
       for (const [tf] of tfs) {
-        const detail = bd[tf];
-        if (detail) {
-          const sum = Object.values(detail).reduce((s, v) => s + v, 0);
-          tfDirs[tf] = sum > 0.5 ? 'BUY' : sum < -0.5 ? 'SELL' : 'HOLD';
-        } else {
-          tfDirs[tf] = 'HOLD';
-        }
+        tfDirs[tf] = tfDirsRaw[tf] || 'HOLD';
       }
 
       // コンセンサス投票サマリー

@@ -62,6 +62,8 @@ class ConsolidatedSignal:
     tf_score_breakdowns: dict[str, dict[str, float]] = field(
         default_factory=dict
     )
+    # TF別方向（UI表示用: "BUY"|"SELL"|"HOLD"）
+    tf_directions: dict[str, str] = field(default_factory=dict)
     # エントリールート識別（mode_selection_reason）
     strategy_id: str = ""
     # ログ品質強化: エントリー閾値/HTF整合/ペナルティ/トレンド強度

@@ -91,6 +91,7 @@ async def get_analysis(
                 k: dict(v)
                 for k, v in cs.tf_score_breakdowns.items()
             },
+            tf_directions=dict(cs.tf_directions),
             last_tick_time=(
                 tick_time.isoformat() if tick_time else None
             ),
