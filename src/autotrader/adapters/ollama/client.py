@@ -19,12 +19,17 @@ from pydantic import BaseModel, ValidationError
 
 from autotrader.adapters.ollama.prompts import (
     SYSTEM_PROMPT_TRADING,
+    VETO_WITH_FUNDAMENTAL_SECTION,
     build_confidence_adjustment_prompt,
+    build_market_outlook_prompt,
+    build_post_event_analysis_prompt,
     build_veto_check_prompt,
     format_mtf_summary,
 )
 from autotrader.adapters.ollama.schemas import (
     ConfidenceAdjustmentOutput,
+    MarketOutlookOutput,
+    PostEventAnalysisOutput,
     VetoCheckOutput,
 )
 from autotrader.core.exceptions import (
@@ -278,6 +283,7 @@ class OllamaClient:
         entry_price: float,
         stop_loss: float,
         take_profit: float,
+        fundamental_context=None,
     ) -> VetoCheckOutput:
         """Veto判定を実行（同期）
 
@@ -295,6 +301,7 @@ class OllamaClient:
             entry_price: エントリー価格
             stop_loss: ストップロス
             take_profit: テイクプロフィット
+            fundamental_context: ファンダメンタルコンテキスト（None=使用しない）
 
         Returns:
             VetoCheckOutput: Veto判定結果
@@ -314,6 +321,13 @@ class OllamaClient:
             stop_loss=stop_loss,
             take_profit=take_profit,
         )
+        # ファンダメンタルコンテキストをプロンプトに追加
+        if fundamental_context is not None:
+            prompt += VETO_WITH_FUNDAMENTAL_SECTION.format(
+                fundamental_section=(
+                    fundamental_context.to_prompt_section()
+                )
+            )
 
         logger.info(
             f"[LLM] Veto判定開始: {symbol} {direction} "
@@ -365,6 +379,7 @@ class OllamaClient:
         entry_price: float,
         stop_loss: float,
         take_profit: float,
+        fundamental_context=None,
     ) -> VetoCheckOutput:
         """Veto判定を実行（非同期）
 
@@ -382,6 +397,7 @@ class OllamaClient:
             entry_price: エントリー価格
             stop_loss: ストップロス
             take_profit: テイクプロフィット
+            fundamental_context: ファンダメンタルコンテキスト
 
         Returns:
             VetoCheckOutput: Veto判定結果
@@ -401,6 +417,12 @@ class OllamaClient:
             stop_loss=stop_loss,
             take_profit=take_profit,
         )
+        if fundamental_context is not None:
+            prompt += VETO_WITH_FUNDAMENTAL_SECTION.format(
+                fundamental_section=(
+                    fundamental_context.to_prompt_section()
+                )
+            )
 
         try:
             client = self._get_async_client()
@@ -604,6 +626,153 @@ class OllamaClient:
             raise LLMConnectionError(f"信頼度調整接続エラー: {e}") from e
         except Exception as e:
             raise LLMResponseError(f"信頼度調整エラー: {e}") from e
+
+    async def analyze_market_outlook_async(
+        self,
+        symbol: str,
+        timestamp: str,
+        current_price: float,
+        upcoming_events: list[dict],
+        technical_summary: str = "",
+        valid_days: int = 7,
+    ) -> MarketOutlookOutput:
+        """市場観を非同期分析（毎朝の更新用）
+
+        Args:
+            symbol: 通貨ペア
+            timestamp: タイムスタンプ
+            current_price: 現在価格
+            upcoming_events: 直近イベントリスト
+            technical_summary: テクニカルサマリー
+            valid_days: 有効日数
+
+        Returns:
+            MarketOutlookOutput: 市場観分析結果
+        """
+        prompt = build_market_outlook_prompt(
+            symbol=symbol,
+            timestamp=timestamp,
+            current_price=current_price,
+            upcoming_events=upcoming_events,
+            technical_summary=technical_summary,
+            valid_days=valid_days,
+        )
+
+        try:
+            client = self._get_async_client()
+            response = await asyncio.wait_for(
+                client.chat(
+                    model=self._model,
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": SYSTEM_PROMPT_TRADING,
+                        },
+                        {"role": "user", "content": prompt},
+                    ],
+                    format=MarketOutlookOutput.model_json_schema(),
+                    options=self._get_options(),
+                    keep_alive=self._keep_alive,
+                ),
+                timeout=self._timeout,
+            )
+            result = self._parse_response(
+                response, MarketOutlookOutput
+            )
+            logger.info(
+                f"[LLM] 市場観分析完了: {symbol} "
+                f"score={result.direction_score:+.2f} "
+                f"conf={result.confidence:.1%}"
+            )
+            return result
+
+        except asyncio.TimeoutError as e:
+            raise LLMTimeoutError(f"市場観分析タイムアウト: {e}") from e
+        except (ConnectionError, OSError) as e:
+            raise LLMConnectionError(
+                f"市場観分析接続エラー: {e}"
+            ) from e
+        except Exception as e:
+            raise LLMResponseError(f"市場観分析エラー: {e}") from e
+
+    async def analyze_post_event_async(
+        self,
+        symbol: str,
+        timestamp: str,
+        event_name: str,
+        currency: str,
+        actual: float | None,
+        forecast: float | None,
+        previous: float | None,
+        current_price: float,
+        price_change: float = 0.0,
+    ) -> PostEventAnalysisOutput:
+        """指標後バイアスを非同期分析
+
+        Args:
+            symbol: 通貨ペア
+            timestamp: タイムスタンプ
+            event_name: イベント名
+            currency: 通貨コード
+            actual: 実績値
+            forecast: 予測値
+            previous: 前回値
+            current_price: 現在価格
+            price_change: 指標発表後の価格変化率
+
+        Returns:
+            PostEventAnalysisOutput: 指標後バイアス分析結果
+        """
+        prompt = build_post_event_analysis_prompt(
+            symbol=symbol,
+            timestamp=timestamp,
+            event_name=event_name,
+            currency=currency,
+            actual=actual,
+            forecast=forecast,
+            previous=previous,
+            current_price=current_price,
+            price_change=price_change,
+        )
+
+        try:
+            client = self._get_async_client()
+            response = await asyncio.wait_for(
+                client.chat(
+                    model=self._model,
+                    messages=[
+                        {
+                            "role": "system",
+                            "content": SYSTEM_PROMPT_TRADING,
+                        },
+                        {"role": "user", "content": prompt},
+                    ],
+                    format=PostEventAnalysisOutput.model_json_schema(),
+                    options=self._get_options(),
+                    keep_alive=self._keep_alive,
+                ),
+                timeout=self._timeout,
+            )
+            result = self._parse_response(
+                response, PostEventAnalysisOutput
+            )
+            logger.info(
+                f"[LLM] 指標後分析完了: {event_name} "
+                f"dir={result.surprise_direction} "
+                f"score={result.bias_score:+.2f}"
+            )
+            return result
+
+        except asyncio.TimeoutError as e:
+            raise LLMTimeoutError(
+                f"指標後分析タイムアウト: {e}"
+            ) from e
+        except (ConnectionError, OSError) as e:
+            raise LLMConnectionError(
+                f"指標後分析接続エラー: {e}"
+            ) from e
+        except Exception as e:
+            raise LLMResponseError(f"指標後分析エラー: {e}") from e
 
     async def health_check(self) -> bool:
         """ヘルスチェック

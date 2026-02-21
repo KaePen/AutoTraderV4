@@ -68,6 +68,9 @@ class ExecutorConfig:
         default_factory=lambda: DEFAULT_TRADING_PARAMS.pip_value
     )
     verbose: bool = False
+    # ファンダメンタル統合（デフォルトOFF）
+    fundamental_csv: str | None = None  # CSVパス（Noneで無効）
+    fundamental_guard_minutes: int = 30  # 指標前停止分数
 
     def get_years(self) -> list[int]:
         """対象年リストを取得
@@ -260,6 +263,10 @@ class BacktestExecutor:
             self._config.end_year,
             bot_config,
             use_m1=self._config.use_short_timeframe,
+            fundamental_csv=self._config.fundamental_csv,
+            fundamental_guard_minutes=(
+                self._config.fundamental_guard_minutes
+            ),
         )
 
         return self._convert_result(backtest_result)

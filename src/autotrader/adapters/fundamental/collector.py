@@ -1,0 +1,204 @@
+"""ファンダメンタルデータ収集スケジューラ
+
+エンジンと独立したasyncioタスクとして動作し、
+経済イベントを定期収集してDBに保存する。
+"""
+
+from __future__ import annotations
+
+import asyncio
+from datetime import datetime, timezone, timedelta
+
+from loguru import logger
+from sqlalchemy.orm import Session
+
+from autotrader.adapters.fundamental.schemas import (
+    EconomicEvent,
+    ImpactLevel,
+)
+from autotrader.adapters.fundamental.mt5_calendar import (
+    MT5CalendarClient,
+)
+from autotrader.adapters.fundamental.forex_factory import (
+    ForexFactoryClient,
+)
+from autotrader.adapters.fundamental.normalizer import (
+    EconomicEventNormalizer,
+)
+
+
+class FundamentalDataCollector:
+    """ファンダメンタルデータ収集スケジューラ
+
+    定期的にMT5カレンダーとForexFactoryからデータを収集し、
+    DBに保存する。エンジンのメインループとは独立して動作。
+
+    Args:
+        session_factory: SQLAlchemyセッションファクトリー
+        fetch_interval_minutes: 取得間隔（分）
+        use_mt5_calendar: MT5カレンダーを使用するか
+        use_forex_factory: ForexFactoryを使用するか
+        currencies: 対象通貨リスト
+    """
+
+    def __init__(
+        self,
+        session_factory,
+        fetch_interval_minutes: int = 60,
+        use_mt5_calendar: bool = True,
+        use_forex_factory: bool = False,
+        currencies: list[str] | None = None,
+    ) -> None:
+        """初期化
+
+        Args:
+            session_factory: SQLAlchemyセッションファクトリー
+            fetch_interval_minutes: 取得間隔（分）
+            use_mt5_calendar: MT5カレンダー使用フラグ
+            use_forex_factory: ForexFactory使用フラグ
+            currencies: 対象通貨リスト
+        """
+        self._session_factory = session_factory
+        self._interval = timedelta(minutes=fetch_interval_minutes)
+        self._use_mt5 = use_mt5_calendar
+        self._use_ff = use_forex_factory
+        self._currencies = currencies or [
+            "USD", "JPY", "EUR", "GBP", "AUD", "CAD", "CHF", "NZD"
+        ]
+        self._normalizer = EconomicEventNormalizer()
+        self._mt5_client = MT5CalendarClient(self._normalizer)
+        self._ff_client = ForexFactoryClient()
+        self._running = False
+        self._task: asyncio.Task | None = None
+        # メモリキャッシュ（DB不要時の参照用）
+        self._cached_events: list[EconomicEvent] = []
+        self._last_fetch: datetime | None = None
+
+    async def start(self) -> None:
+        """収集タスクを開始"""
+        if self._running:
+            return
+        self._running = True
+        self._task = asyncio.create_task(self._collect_loop())
+        logger.info("[Collector] ファンダメンタル収集タスク開始")
+
+    async def stop(self) -> None:
+        """収集タスクを停止"""
+        self._running = False
+        if self._task and not self._task.done():
+            self._task.cancel()
+            try:
+                await self._task
+            except asyncio.CancelledError:
+                pass
+        logger.info("[Collector] ファンダメンタル収集タスク停止")
+
+    def get_cached_events(self) -> list[EconomicEvent]:
+        """メモリキャッシュのイベントを取得
+
+        Returns:
+            list[EconomicEvent]: キャッシュ済みイベントリスト
+        """
+        return list(self._cached_events)
+
+    async def _collect_loop(self) -> None:
+        """収集ループ（バックグラウンドタスク）"""
+        # 起動直後に1回収集
+        await self._collect_once()
+
+        while self._running:
+            try:
+                await asyncio.sleep(self._interval.total_seconds())
+                await self._collect_once()
+            except asyncio.CancelledError:
+                break
+            except Exception as e:
+                logger.error(
+                    f"[Collector] 収集ループエラー: {e}"
+                )
+                # エラー後は短めにリトライ
+                await asyncio.sleep(60)
+
+    async def _collect_once(self) -> None:
+        """1回の収集処理"""
+        events: list[EconomicEvent] = []
+        now = datetime.now(timezone.utc)
+        from_date = now - timedelta(hours=1)
+        to_date = now + timedelta(days=7)
+
+        # MT5カレンダー取得
+        if self._use_mt5:
+            try:
+                mt5_events = await self._mt5_client.fetch_events_async(
+                    from_date=from_date,
+                    to_date=to_date,
+                    currencies=self._currencies,
+                )
+                events.extend(mt5_events)
+                logger.debug(
+                    f"[Collector] MT5から{len(mt5_events)}件取得"
+                )
+            except Exception as e:
+                logger.error(f"[Collector] MT5取得エラー: {e}")
+
+        # ForexFactory取得（MT5が空の場合フォールバック）
+        if self._use_ff and (not events or not self._use_mt5):
+            try:
+                ff_events = await self._ff_client.fetch_events_async(
+                    currencies=self._currencies
+                )
+                events.extend(ff_events)
+                logger.debug(
+                    f"[Collector] ForexFactoryから{len(ff_events)}件取得"
+                )
+            except Exception as e:
+                logger.error(
+                    f"[Collector] ForexFactory取得エラー: {e}"
+                )
+
+        # 重複排除
+        events = self._normalizer.deduplicate(events)
+
+        # メモリキャッシュ更新
+        self._cached_events = events
+        self._last_fetch = now
+
+        # DBに保存（セッションファクトリーが提供されている場合）
+        if self._session_factory and events:
+            await asyncio.to_thread(
+                self._save_to_db, events
+            )
+
+        logger.info(
+            f"[Collector] {len(events)}件のイベントをキャッシュ更新"
+        )
+
+    def _save_to_db(self, events: list[EconomicEvent]) -> None:
+        """イベントをDBに保存
+
+        Args:
+            events: 保存対象イベントリスト
+        """
+        try:
+            from autotrader.adapters.database.repositories import (
+                EconomicEventRepository,
+            )
+            with self._session_factory() as session:
+                repo = EconomicEventRepository(session)
+                saved_count = 0
+                for event in events:
+                    try:
+                        if not repo.exists(event.event_id):
+                            repo.create(event)
+                            saved_count += 1
+                    except Exception as e:
+                        logger.debug(
+                            f"[Collector] DB保存スキップ: {e}"
+                        )
+                session.commit()
+                if saved_count > 0:
+                    logger.debug(
+                        f"[Collector] {saved_count}件をDBに保存"
+                    )
+        except Exception as e:
+            logger.error(f"[Collector] DB保存エラー: {e}")

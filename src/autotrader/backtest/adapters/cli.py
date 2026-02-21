@@ -47,6 +47,11 @@ class CLIAdapter:
         # UNIVERSALモードオプション
         use_universal_mode = getattr(args, "universal", False)
 
+        # ファンダメンタルオプション
+        fundamental_enabled = getattr(args, "fundamental", False)
+        fundamental_csv = getattr(args, "fundamental_csv", None)
+        fundamental_guard = getattr(args, "fundamental_guard", 30)
+
         return ExecutorConfig(
             start_year=start_year,
             end_year=end_year,
@@ -61,6 +66,10 @@ class CLIAdapter:
             max_workers=max_workers,
             max_positions=args.max_positions,
             verbose=args.verbose,
+            fundamental_csv=(
+                fundamental_csv if fundamental_enabled else None
+            ),
+            fundamental_guard_minutes=fundamental_guard,
         )
 
     @staticmethod
@@ -159,6 +168,25 @@ class CLIAdapter:
             type=int,
             default=None,
             help="並列ワーカー数（デフォルト: CPUコア数）",
+        )
+
+        # ファンダメンタル統合
+        parser.add_argument(
+            "--fundamental",
+            action="store_true",
+            help="ファンダメンタルフィルターを有効化（CSVが必要）",
+        )
+        parser.add_argument(
+            "--fundamental-csv",
+            type=str,
+            default=None,
+            help="経済イベントCSVファイルパス",
+        )
+        parser.add_argument(
+            "--fundamental-guard",
+            type=int,
+            default=30,
+            help="重要指標前の取引停止分数（デフォルト: 30）",
         )
 
         # その他
