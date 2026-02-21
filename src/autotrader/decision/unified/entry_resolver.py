@@ -1,6 +1,6 @@
 """エントリータイムフレーム解決モジュール
 
-モード別にエントリー判断を行う時間足を決定する。
+UNIVERSALモードで動的にエントリー判断を行う。
 """
 
 from __future__ import annotations
@@ -27,33 +27,13 @@ class EntryConfig:
     min_score_threshold: float
 
 
-# モード別エントリー設定
-MODE_ENTRY_CONFIGS: dict[TradingStrategyMode, EntryConfig] = {
-    TradingStrategyMode.SCALPING: EntryConfig(
-        primary_tf="M5",
-        entry_tf="M1",
-        confirm_tfs=["M15"],
-        min_score_threshold=3.0,
-    ),
-    TradingStrategyMode.DAY_TRADE: EntryConfig(
-        primary_tf="M15",
-        entry_tf="M5",
-        confirm_tfs=["H1", "H4"],
-        min_score_threshold=4.0,
-    ),
-    TradingStrategyMode.SWING: EntryConfig(
-        primary_tf="H4",
-        entry_tf="H1",
-        confirm_tfs=["D1"],
-        min_score_threshold=5.0,
-    ),
-    TradingStrategyMode.UNIVERSAL: EntryConfig(
-        primary_tf="M15",
-        entry_tf="M5",
-        confirm_tfs=["M1", "H1", "H4", "H8", "D1"],
-        min_score_threshold=4.0,
-    ),
-}
+# UNIVERSALモードのエントリー設定
+UNIVERSAL_ENTRY_CONFIG = EntryConfig(
+    primary_tf="M15",
+    entry_tf="M5",
+    confirm_tfs=["M1", "H1", "H4", "H8", "D1"],
+    min_score_threshold=4.0,
+)
 
 
 @dataclass(frozen=True)
@@ -78,65 +58,56 @@ class EntryDecision:
 class EntryTimeframeResolver:
     """エントリータイムフレーム解決器
 
-    モードに応じたエントリー判断を行う。
-
-    判断ロジック:
-    1. モードからentry_tfを決定
-    2. entry_tf足確定時のみエントリー判断
-    3. primary_tf/confirm_tfsの方向整合性をチェック
-    4. スコア閾値で最終判断
+    UNIVERSALモードで任意のTF確定時にエントリー判断を行う。
     """
 
     def __init__(self) -> None:
         """初期化"""
-        self._configs = MODE_ENTRY_CONFIGS
+        self._config = UNIVERSAL_ENTRY_CONFIG
 
     def get_entry_config(
         self,
-        mode: TradingStrategyMode,
+        mode: TradingStrategyMode | None = None,
     ) -> EntryConfig:
-        """モード別エントリー設定を取得
+        """エントリー設定を取得
 
         Args:
-            mode: トレーディングモード
+            mode: 互換性のため残存（未使用）
 
         Returns:
-            EntryConfig: エントリー設定
+            EntryConfig: UNIVERSALエントリー設定
         """
-        return self._configs.get(mode, self._configs[TradingStrategyMode.DAY_TRADE])
+        return self._config
 
     def should_check_entry(
         self,
-        mode: TradingStrategyMode,
-        completed_tf: str,
+        mode: TradingStrategyMode | None = None,
+        completed_tf: str = "",
     ) -> bool:
         """エントリーチェックすべきかを判定
 
         UNIVERSALモードは任意のTF確定時に常にTrueを返す。
 
         Args:
-            mode: トレーディングモード
-            completed_tf: 確定した時間足
+            mode: 互換性のため残存（未使用）
+            completed_tf: 確定した時間足（未使用）
 
         Returns:
-            bool: entry_tf足確定時はTrue（UNIVERSALは常にTrue）
+            bool: 常にTrue
         """
-        if mode == TradingStrategyMode.UNIVERSAL:
-            return True
-        config = self.get_entry_config(mode)
-        return completed_tf == config.entry_tf
+        return True
 
     def resolve(
         self,
-        mode: TradingStrategyMode,
-        completed_tf: str,
-        tf_directions: dict[str, str],
-        tf_scores: dict[str, float],
+        mode: TradingStrategyMode | None = None,
+        completed_tf: str = "",
+        tf_directions: dict[str, str] | None = None,
+        tf_scores: dict[str, float] | None = None,
     ) -> EntryDecision:
-        """エントリー判定を解決
+        """エントリー判定を解決（UNIVERSALモード固定）
 
         Args:
-            mode: トレーディングモード
+            mode: 互換性のため残存（未使用）
             completed_tf: 確定した時間足
             tf_directions: TF別方向 (BUY/SELL/HOLD)
             tf_scores: TF別スコア
@@ -144,144 +115,59 @@ class EntryTimeframeResolver:
         Returns:
             EntryDecision: エントリー判定結果
         """
-        config = self.get_entry_config(mode)
+        tf_directions = tf_directions or {}
+        tf_scores = tf_scores or {}
+        config = self._config
 
-        # UNIVERSALモードは任意TFでエントリーチェック可能
-        # entry_tf未確定チェックをスキップし、completed_tfをentry_tfとして扱う
-        if mode == TradingStrategyMode.UNIVERSAL:
-            entry_direction = tf_directions.get(completed_tf, "HOLD")
-            if entry_direction == "HOLD":
-                return EntryDecision(
-                    should_enter=False,
-                    entry_tf=completed_tf,
-                    direction="HOLD",
-                    score=0.0,
-                    reasoning=f"UNIVERSAL: {completed_tf}がHOLD",
-                )
-            entry_score = tf_scores.get(completed_tf, 0.0)
-            normalized_score = entry_score
-            if normalized_score < config.min_score_threshold:
-                return EntryDecision(
-                    should_enter=False,
-                    entry_tf=completed_tf,
-                    direction=entry_direction,
-                    score=normalized_score,
-                    reasoning=(
-                        f"UNIVERSAL スコア不足: "
-                        f"{normalized_score:.2f} < "
-                        f"{config.min_score_threshold}"
-                    ),
-                )
-            return EntryDecision(
-                should_enter=True,
-                entry_tf=completed_tf,
-                direction=entry_direction,
-                score=normalized_score,
-                reasoning=(
-                    f"UNIVERSALモード: tf={completed_tf}, "
-                    f"score={normalized_score:.2f}"
-                ),
-            )
-
-        # entry_tf足確定時のみ判断
-        if completed_tf != config.entry_tf:
-            return EntryDecision(
-                should_enter=False,
-                entry_tf=None,
-                direction="HOLD",
-                score=0.0,
-                reasoning=f"entry_tf({config.entry_tf})未確定",
-            )
-
-        # 方向の取得
-        entry_direction = tf_directions.get(config.entry_tf, "HOLD")
-        primary_direction = tf_directions.get(config.primary_tf, "HOLD")
-
-        # HOLDなら見送り
+        # 任意TFでエントリーチェック
+        entry_direction = tf_directions.get(completed_tf, "HOLD")
         if entry_direction == "HOLD":
             return EntryDecision(
                 should_enter=False,
-                entry_tf=config.entry_tf,
+                entry_tf=completed_tf,
                 direction="HOLD",
                 score=0.0,
-                reasoning="entry_tfがHOLD",
+                reasoning=f"UNIVERSAL: {completed_tf}がHOLD",
             )
 
-        # primary_tfとの整合性チェック
-        if primary_direction != "HOLD" and primary_direction != entry_direction:
+        entry_score = tf_scores.get(completed_tf, 0.0)
+        if entry_score < config.min_score_threshold:
             return EntryDecision(
                 should_enter=False,
-                entry_tf=config.entry_tf,
-                direction="HOLD",
-                score=0.0,
-                reasoning=f"方向不一致: entry={entry_direction}, primary={primary_direction}",
-            )
-
-        # confirm_tfsの整合性チェック
-        confirm_aligned = 0
-        confirm_conflict = 0
-        for tf in config.confirm_tfs:
-            direction = tf_directions.get(tf, "HOLD")
-            if direction == entry_direction:
-                confirm_aligned += 1
-            elif direction != "HOLD":
-                confirm_conflict += 1
-
-        # 過半数の確認TFが逆方向ならスキップ
-        if confirm_conflict > confirm_aligned and len(config.confirm_tfs) > 0:
-            return EntryDecision(
-                should_enter=False,
-                entry_tf=config.entry_tf,
-                direction="HOLD",
-                score=0.0,
-                reasoning=f"confirm_tf逆方向優勢: aligned={confirm_aligned}, conflict={confirm_conflict}",
-            )
-
-        # スコア計算
-        entry_score = tf_scores.get(config.entry_tf, 0.0)
-        primary_score = tf_scores.get(config.primary_tf, 0.0)
-
-        # 重み付けスコア
-        weighted_score = entry_score * 2.0 + primary_score * 3.0
-        for tf in config.confirm_tfs:
-            weighted_score += tf_scores.get(tf, 0.0) * 1.5
-
-        # 正規化（最大で10点程度に収める）
-        total_weight = 2.0 + 3.0 + len(config.confirm_tfs) * 1.5
-        normalized_score = weighted_score / total_weight * 5.0
-
-        # 閾値判定
-        if normalized_score < config.min_score_threshold:
-            return EntryDecision(
-                should_enter=False,
-                entry_tf=config.entry_tf,
+                entry_tf=completed_tf,
                 direction=entry_direction,
-                score=normalized_score,
-                reasoning=f"スコア不足: {normalized_score:.2f} < {config.min_score_threshold}",
+                score=entry_score,
+                reasoning=(
+                    f"スコア不足: "
+                    f"{entry_score:.2f} < "
+                    f"{config.min_score_threshold}"
+                ),
             )
 
-        # エントリー決定
         return EntryDecision(
             should_enter=True,
-            entry_tf=config.entry_tf,
+            entry_tf=completed_tf,
             direction=entry_direction,
-            score=normalized_score,
-            reasoning=f"{mode.value}モード: score={normalized_score:.2f}, aligned_confirm={confirm_aligned}",
+            score=entry_score,
+            reasoning=(
+                f"UNIVERSALモード: tf={completed_tf}, "
+                f"score={entry_score:.2f}"
+            ),
         )
 
     def get_all_required_tfs(
         self,
-        mode: TradingStrategyMode,
+        mode: TradingStrategyMode | None = None,
     ) -> list[str]:
-        """モードで必要な全時間足を取得
+        """UNIVERSALモードで必要な全時間足を取得
 
         Args:
-            mode: トレーディングモード
+            mode: 互換性のため残存（未使用）
 
         Returns:
             list[str]: 必要な時間足リスト（重複なし）
         """
-        config = self.get_entry_config(mode)
+        config = self._config
         tfs = {config.primary_tf, config.entry_tf}
         tfs.update(config.confirm_tfs)
         return list(tfs)

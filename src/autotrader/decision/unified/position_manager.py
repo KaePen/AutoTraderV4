@@ -195,8 +195,6 @@ class PositionManagerConfig:
     spread_pips: float = 1.5
     slippage_pips: float = 0.5
     be_enabled_modes: tuple[TradingStrategyMode, ...] = (
-        TradingStrategyMode.SWING,
-        TradingStrategyMode.DAY_TRADE,
         TradingStrategyMode.UNIVERSAL,
     )
     early_breakeven_r: float = 0.5
@@ -229,13 +227,6 @@ class PositionManagerConfig:
     insurance_trigger_r: float = 1.0
     insurance_block_high_mfe_r: float = 0.8
     insurance_min_holding_minutes: float = 15.0
-    # SWING専用stagnation（CLIで調整可能）
-    swing_stagnation_exit_minutes: float = 120.0
-    swing_stagnation_min_mfe_r: float = 0.15
-    # SWING×TREND専用stagnation（緩和版）
-    swing_trend_stagnation_enabled: bool = True
-    swing_trend_stagnation_exit_minutes: float = 90.0
-    swing_trend_stagnation_min_mfe_r: float = 0.15
     # RANGE×DAY 0.5R部分確定
     range_day_half_r_partial_enabled: bool = True
     range_day_half_r_partial_ratio: float = 0.20
@@ -253,13 +244,8 @@ class PositionManager:
     5. トレーリング更新（ATRベース、建値移動）
     """
 
-    # モード別最大保有時間（分）
-    MODE_MAX_HOLDING_MINUTES: dict[TradingStrategyMode, int] = {
-        TradingStrategyMode.SCALPING: 90,       # 90分
-        TradingStrategyMode.DAY_TRADE: 480,     # 8時間
-        TradingStrategyMode.SWING: 2880,        # 2日
-        TradingStrategyMode.UNIVERSAL: 480,     # デフォルト（動的に上書き）
-    }
+    # デフォルト最大保有時間（分）※動的TFにより上書きされる
+    DEFAULT_MAX_HOLDING_MINUTES: int = 480
 
     def __init__(self, config: PositionManagerConfig | None = None) -> None:
         """初期化
@@ -495,10 +481,8 @@ class PositionManager:
 
         一定時間経過後、MFE(highest_r)が閾値未満なら撤退。
         """
-        is_range_day = (
+        is_range = (
             getattr(position.plan, "regime", None) == "RANGE"
-            and position.plan.mode
-            == TradingStrategyMode.DAY_TRADE
         )
         elapsed = (
             (current_time - position.entry_time).total_seconds()
@@ -506,7 +490,7 @@ class PositionManager:
         )
 
         if (
-            is_range_day
+            is_range
             and self.config.range_day_stagnation_enabled
         ):
             # Stage1: 45分 + MFE<0.05R → 早期撤退
@@ -549,24 +533,9 @@ class PositionManager:
                 )
             return None
 
-        # SWINGモード: H4基準なので短縮stagnation
-        is_swing = (
-            position.plan.mode
-            == TradingStrategyMode.SWING
-        )
-        if is_swing:
-            stag_minutes = (
-                self.config.swing_stagnation_exit_minutes
-            )
-            stag_mfe = (
-                self.config.swing_stagnation_min_mfe_r
-            )
-        else:
-            # 通常モード(DAY_TRADE等): 120分 + MFE<0.15R
-            stag_minutes = (
-                self.config.stagnation_exit_minutes
-            )
-            stag_mfe = self.config.stagnation_min_mfe_r
+        # UNIVERSALモード: stagnation設定を使用
+        stag_minutes = self.config.stagnation_exit_minutes
+        stag_mfe = self.config.stagnation_min_mfe_r
 
         if (
             elapsed >= stag_minutes
@@ -587,22 +556,17 @@ class PositionManager:
         current_price: float,
     ) -> ManagementAction | None:
         """時間決済チェック"""
-        # UNIVERSALモードは dynamic_entry_tf に基づいて保有時間を動的計算
-        if position.plan.mode == TradingStrategyMode.UNIVERSAL:
-            from autotrader.decision.unified.dynamic_tf_selector import (
-                DynamicTFSelector,
-            )
-            entry_tf = (
-                getattr(position.plan, "dynamic_entry_tf", None)
-                or position.plan.entry_tf
-            )
-            max_minutes = DynamicTFSelector.HOLDING_MINUTES_BY_ENTRY_TF.get(
-                entry_tf, 480
-            )
-        else:
-            max_minutes = self.MODE_MAX_HOLDING_MINUTES.get(
-                position.plan.mode, 480
-            )
+        # dynamic_entry_tf に基づいて保有時間を動的計算
+        from autotrader.decision.unified.dynamic_tf_selector import (
+            DynamicTFSelector,
+        )
+        entry_tf = (
+            getattr(position.plan, "dynamic_entry_tf", None)
+            or position.plan.entry_tf
+        )
+        max_minutes = DynamicTFSelector.HOLDING_MINUTES_BY_ENTRY_TF.get(
+            entry_tf, self.DEFAULT_MAX_HOLDING_MINUTES
+        )
         elapsed = (current_time - position.entry_time).total_seconds() / 60
 
         if elapsed >= max_minutes:
@@ -663,10 +627,9 @@ class PositionManager:
         mode = position.plan.mode
         be_allowed = mode in self.config.be_enabled_modes
 
-        # regime判定
-        is_range_day = (
+        # regime判定（UNIVERSALモードはregimeのみで判定）
+        is_range = (
             getattr(position.plan, "regime", None) == "RANGE"
-            and mode == TradingStrategyMode.DAY_TRADE
         )
 
         # === 2R（最高優先）===
@@ -744,7 +707,7 @@ class PositionManager:
 
         # === RANGE×DAY 0.5R部分利確 ===
         if (
-            is_range_day
+            is_range
             and self.config.range_day_half_r_partial_enabled
             and position.current_r
             >= self.config.range_day_half_r_trigger
@@ -783,7 +746,7 @@ class PositionManager:
 
         # === RANGE×DAY 軽い保険（1Rの後、早期BEの前）===
         if (
-            is_range_day
+            is_range
             and self.config.range_day_insurance_enabled
         ):
             elapsed_min = (
@@ -926,7 +889,7 @@ class PositionManager:
             return None
 
         effective_be_r = self.config.early_breakeven_r  # 0.5
-        if is_range_day and self.config.range_day_be_disabled:
+        if is_range and self.config.range_day_be_disabled:
             if self.config.range_day_fast_be_enabled:
                 elapsed_min = (
                     (current_time - position.entry_time)

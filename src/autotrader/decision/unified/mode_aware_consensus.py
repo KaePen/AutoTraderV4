@@ -66,9 +66,7 @@ class ConsensusConfig:
         entry_weight: エントリーTFの重み
         confirm_weight: 確認TFの重み
         other_weight: その他TFの重み
-        scalping_threshold: スキャルピングモードの閾値
-        day_trade_threshold: デイトレードモードの閾値
-        swing_threshold: スイングモードの閾値
+        threshold: コンセンサス閾値（UNIVERSALモード）
         enable_counter_signal: 多面分析（逆方向シグナル活用）の有効化
     """
 
@@ -76,10 +74,7 @@ class ConsensusConfig:
     entry_weight: float = 2.0
     confirm_weight: float = 1.5
     other_weight: float = 0.5
-    scalping_threshold: float = 3.5
-    day_trade_threshold: float = 4.5
-    swing_threshold: float = 6.0
-    universal_threshold: float = 4.5
+    threshold: float = 4.5
     enable_counter_signal: bool = True
 
 
@@ -96,48 +91,13 @@ class ModeAwareScoreConsensus:
     4. モード別閾値で判定
     """
 
-    # 役割別デフォルト重み
+    # 役割別重み（UNIVERSAL固定）
     ROLE_WEIGHTS: dict[TimeframeRole, float] = {
         TimeframeRole.PRIMARY: 3.0,
-        TimeframeRole.ENTRY: 2.0,
-        TimeframeRole.CONFIRM: 1.5,
-        TimeframeRole.MANAGE: 1.0,
-        TimeframeRole.OTHER: 0.5,
-    }
-
-    # モード別役割重み
-    # SCALPING: ENTRY(M1)重視で素早いエントリー
-    # DAY_TRADE: PRIMARY(M15)とCONFIRM(H1,H4)のバランス
-    # SWING: PRIMARY(H4)とCONFIRM(D1)重視で高品質シグナル
-    ROLE_WEIGHTS_BY_MODE: dict[TradingStrategyMode, dict[TimeframeRole, float]] = {
-        TradingStrategyMode.SCALPING: {
-            TimeframeRole.PRIMARY: 2.0,
-            TimeframeRole.ENTRY: 3.0,     # M1重視
-            TimeframeRole.CONFIRM: 2.5,   # M15確認
-            TimeframeRole.MANAGE: 1.0,
-            TimeframeRole.OTHER: 0.2,
-        },
-        TradingStrategyMode.DAY_TRADE: {
-            TimeframeRole.PRIMARY: 3.0,   # M15
-            TimeframeRole.ENTRY: 2.5,     # M5
-            TimeframeRole.CONFIRM: 2.0,   # H1, H4
-            TimeframeRole.MANAGE: 1.5,
-            TimeframeRole.OTHER: 0.3,
-        },
-        TradingStrategyMode.SWING: {
-            TimeframeRole.PRIMARY: 3.5,   # H4重視
-            TimeframeRole.ENTRY: 2.0,     # H1
-            TimeframeRole.CONFIRM: 2.5,   # D1重視
-            TimeframeRole.MANAGE: 1.5,
-            TimeframeRole.OTHER: 0.3,
-        },
-        TradingStrategyMode.UNIVERSAL: {
-            TimeframeRole.PRIMARY: 3.0,
-            TimeframeRole.ENTRY: 2.5,
-            TimeframeRole.CONFIRM: 2.0,
-            TimeframeRole.MANAGE: 1.5,
-            TimeframeRole.OTHER: 1.0,
-        },
+        TimeframeRole.ENTRY: 2.5,
+        TimeframeRole.CONFIRM: 2.0,
+        TimeframeRole.MANAGE: 1.5,
+        TimeframeRole.OTHER: 1.0,
     }
 
     def __init__(self, config: ConsensusConfig | None = None) -> None:
@@ -153,16 +113,11 @@ class ModeAwareScoreConsensus:
             TimeframeRole.PRIMARY: self.config.primary_weight,
             TimeframeRole.ENTRY: self.config.entry_weight,
             TimeframeRole.CONFIRM: self.config.confirm_weight,
-            TimeframeRole.MANAGE: 1.0,
+            TimeframeRole.MANAGE: 1.5,
             TimeframeRole.OTHER: self.config.other_weight,
         }
 
-        self.mode_thresholds = {
-            TradingStrategyMode.SCALPING: self.config.scalping_threshold,
-            TradingStrategyMode.DAY_TRADE: self.config.day_trade_threshold,
-            TradingStrategyMode.SWING: self.config.swing_threshold,
-            TradingStrategyMode.UNIVERSAL: self.config.universal_threshold,
-        }
+        self.threshold = self.config.threshold
 
     def consolidate(
         self,
@@ -222,7 +177,7 @@ class ModeAwareScoreConsensus:
             direction = SignalType.HOLD
 
         # 閾値判定
-        threshold = self.mode_thresholds.get(plan.mode, 4.0)
+        threshold = self.threshold
 
         if final_score < threshold:
             reasoning = (
@@ -368,18 +323,12 @@ class ModeAwareScoreConsensus:
         Args:
             tf: 時間足
             tf_set: 時間足セット
-            mode: トレーディングモード（指定時はモード別重みを使用）
+            mode: 互換性のため残存（未使用）
 
         Returns:
             float: 重み
         """
         role = tf_set.get_role(tf)
-
-        # モード別重みがあれば使用
-        if mode is not None and mode in self.ROLE_WEIGHTS_BY_MODE:
-            mode_weights = self.ROLE_WEIGHTS_BY_MODE[mode]
-            return mode_weights.get(role, 0.3)
-
         return self.role_weights.get(role, self.config.other_weight)
 
     def _direction_to_value(self, direction: SignalType) -> int:
@@ -397,16 +346,19 @@ class ModeAwareScoreConsensus:
             return -1
         return 0
 
-    def get_threshold_for_mode(self, mode: TradingStrategyMode) -> float:
-        """モードの閾値を取得
+    def get_threshold_for_mode(
+        self,
+        mode: TradingStrategyMode | None = None,
+    ) -> float:
+        """閾値を取得
 
         Args:
-            mode: トレーディングモード
+            mode: 互換性のため残存（未使用）
 
         Returns:
             float: 閾値
         """
-        return self.mode_thresholds.get(mode, 4.0)
+        return self.threshold
 
     def check_entry_conditions(
         self,
@@ -426,28 +378,13 @@ class ModeAwareScoreConsensus:
         Returns:
             ConsensusResult: コンセンサス結果
         """
-        # UNIVERSALモードでは全TF確定でエントリー判断
-        # それ以外はentry_tf足確定時のみ判断
-        if plan.mode != TradingStrategyMode.UNIVERSAL:
-            if completed_tf != plan.entry_tf:
-                return ConsensusResult(
-                    direction=SignalType.HOLD,
-                    score=0.0,
-                    threshold=self.get_threshold_for_mode(plan.mode),
-                    aligned_tfs=[],
-                    reasoning=f"entry_tf({plan.entry_tf})未確定",
-                )
-
+        # UNIVERSALモード: 全TF確定でエントリー判断（dynamic_entry_tf優先）
         # 通常のコンセンサス処理
         result = self.consolidate(tf_signals, plan)
 
-        # entry_tfの方向と整合性チェック
-        # UNIVERSALモードではdynamic_entry_tfが設定されていればそれを使う
-        if plan.mode == TradingStrategyMode.UNIVERSAL:
-            entry_tf_key = plan.dynamic_entry_tf or plan.entry_tf
-            entry_signal = tf_signals.get(entry_tf_key)
-        else:
-            entry_signal = tf_signals.get(plan.entry_tf)
+        # entry_tfの方向と整合性チェック（dynamic_entry_tf優先）
+        entry_tf_key = plan.dynamic_entry_tf or plan.entry_tf
+        entry_signal = tf_signals.get(entry_tf_key)
         if entry_signal is None:
             return ConsensusResult(
                 direction=SignalType.HOLD,

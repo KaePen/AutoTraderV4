@@ -297,7 +297,7 @@ class TradeFlowAnalyzer:
                 f"{mode_note[labels[i]]}"
             )
 
-        lines.append("  ※ SCALP閾値=3.5, DAY_TRADE=4.5, SWING=6.0")
+        lines.append("  ※ UNIVERSAL閾値=4.5")
         return lines
 
     def _build_mode_distribution(self, total: int) -> list[str]:
@@ -314,7 +314,7 @@ class TradeFlowAnalyzer:
                 if r.final_direction not in ("HOLD", ""):
                     mode_signals[r.mode] += 1
 
-        for mode in ["SCALPING", "DAY_TRADE", "SWING"]:
+        for mode in ["UNIVERSAL"]:
             mc = mode_counts.get(mode, 0)
             ms = mode_signals.get(mode, 0)
             pct = mc / total * 100 if total else 0
@@ -344,7 +344,7 @@ class TradeFlowAnalyzer:
             m = modes[i] if i < len(modes) else "UNKNOWN"
             mode_trades[m].append(t)
 
-        for mode in ["SCALPING", "DAY_TRADE", "SWING", "UNKNOWN"]:
+        for mode in ["UNIVERSAL", "UNKNOWN"]:
             tlist = mode_trades.get(mode, [])
             if not tlist:
                 continue
@@ -585,7 +585,7 @@ class TradeFlowAnalyzer:
                 if r.final_direction not in ("HOLD", ""):
                     mode_signals[r.mode] += 1
 
-        for mode in ["SCALPING", "DAY_TRADE", "SWING"]:
+        for mode in ["UNIVERSAL"]:
             mc = mode_counts.get(mode, 0)
             ms = mode_signals.get(mode, 0)
             if mc > 0 and ms == 0:

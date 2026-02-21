@@ -19,8 +19,8 @@ class TestModeAwareScoreConsensus:
     def setup_method(self) -> None:
         """テストセットアップ"""
         self.consensus = ModeAwareScoreConsensus()
-        self.day_trade_plan = TradingPlan(
-            mode=TradingStrategyMode.DAY_TRADE,
+        self.universal_plan = TradingPlan(
+            mode=TradingStrategyMode.UNIVERSAL,
             primary_tf="M15",
             entry_tf="M5",
             confirm_tfs=["H1", "H4"],
@@ -58,7 +58,7 @@ class TestModeAwareScoreConsensus:
             ),
         }
 
-        result = self.consensus.consolidate(signals, self.day_trade_plan)
+        result = self.consensus.consolidate(signals, self.universal_plan)
 
         assert result.direction == SignalType.BUY
         assert result.score > result.threshold
@@ -87,7 +87,7 @@ class TestModeAwareScoreConsensus:
             ),
         }
 
-        result = self.consensus.consolidate(signals, self.day_trade_plan)
+        result = self.consensus.consolidate(signals, self.universal_plan)
 
         assert result.direction == SignalType.SELL
         assert "SELL" in result.reasoning
@@ -103,7 +103,7 @@ class TestModeAwareScoreConsensus:
             ),
         }
 
-        result = self.consensus.consolidate(signals, self.day_trade_plan)
+        result = self.consensus.consolidate(signals, self.universal_plan)
 
         assert result.direction == SignalType.HOLD
         assert "スコア不足" in result.reasoning
@@ -125,7 +125,7 @@ class TestModeAwareScoreConsensus:
             ),
         }
 
-        result = self.consensus.consolidate(signals, self.day_trade_plan)
+        result = self.consensus.consolidate(signals, self.universal_plan)
 
         # 相殺されてスコア不足
         assert result.direction == SignalType.HOLD
@@ -154,60 +154,10 @@ class TestModeAwareScoreConsensus:
             ),
         }
 
-        result = self.consensus.consolidate(signals, self.day_trade_plan)
+        result = self.consensus.consolidate(signals, self.universal_plan)
 
         # primary_tf(3.0×1.0=3.0) + entry_tf(2.0×0.8=1.6) + H1(1.5×0.5=0.75) = 5.35 > 4.0
         assert result.direction == SignalType.BUY
-
-    def test_mode_threshold_scalping(self) -> None:
-        """SCALPINGモードの低閾値"""
-        scalp_plan = TradingPlan(
-            mode=TradingStrategyMode.SCALPING,
-            primary_tf="M5",
-            entry_tf="M1",
-            confirm_tfs=["M15"],
-            manage_tf="M5",
-            max_holding_bars=18,
-            tp_sl_ratio_range=(1.0, 1.5),
-        )
-
-        signals = {
-            "M5": TimeframeSignal(
-                direction=SignalType.BUY,
-                strength=0.7,
-                sl_pips=10.0,
-                tp_pips=15.0,
-            ),
-            "M1": TimeframeSignal(
-                direction=SignalType.BUY,
-                strength=0.6,
-                sl_pips=8.0,
-                tp_pips=12.0,
-            ),
-        }
-
-        result = self.consensus.consolidate(signals, scalp_plan)
-
-        # SCALPING閾値（バランス型）
-        assert result.threshold == 3.5
-
-    def test_mode_threshold_swing(self) -> None:
-        """SWINGモードの高閾値"""
-        swing_plan = TradingPlan(
-            mode=TradingStrategyMode.SWING,
-            primary_tf="H4",
-            entry_tf="H1",
-            confirm_tfs=["D1"],
-            manage_tf="H4",
-            max_holding_bars=12,
-            tp_sl_ratio_range=(2.0, 4.0),
-        )
-
-        threshold = self.consensus.get_threshold_for_mode(
-            TradingStrategyMode.SWING
-        )
-
-        assert threshold == 6.0  # 高品質シグナル閾値
 
 
 class TestUniversalModeConsensus:
@@ -248,7 +198,7 @@ class TestUniversalModeConsensus:
 
     def test_universal_mode_custom_threshold(self) -> None:
         """UNIVERSALモードのカスタム閾値"""
-        config = ConsensusConfig(universal_threshold=3.0)
+        config = ConsensusConfig(threshold=3.0)
         consensus = ModeAwareScoreConsensus(config)
         threshold = consensus.get_threshold_for_mode(
             TradingStrategyMode.UNIVERSAL
@@ -269,7 +219,7 @@ class TestConsensusConfig:
         consensus = ModeAwareScoreConsensus(config)
 
         plan = TradingPlan(
-            mode=TradingStrategyMode.DAY_TRADE,
+            mode=TradingStrategyMode.UNIVERSAL,
             primary_tf="M15",
             entry_tf="M5",
             confirm_tfs=["H1"],
@@ -296,14 +246,12 @@ class TestConsensusConfig:
     def test_custom_thresholds(self) -> None:
         """カスタム閾値"""
         config = ConsensusConfig(
-            scalping_threshold=2.0,  # 低い閾値
-            day_trade_threshold=3.0,
-            swing_threshold=4.0,
+            threshold=2.0,  # 低い閾値
         )
         consensus = ModeAwareScoreConsensus(config)
 
         threshold = consensus.get_threshold_for_mode(
-            TradingStrategyMode.SCALPING
+            TradingStrategyMode.UNIVERSAL,
         )
 
         assert threshold == 2.0

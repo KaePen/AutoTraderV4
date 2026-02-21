@@ -34,7 +34,7 @@ def tick_enabled_config() -> LiveTradingConfig:
         ),
         tick_entry_config=TickEntryConfig(
             enabled=True,
-            enabled_modes=("SCALPING",),
+            enabled_modes=("UNIVERSAL",),
             poll_interval_sec=0.01,
             max_monitoring_sec=1.0,
         ),
@@ -87,7 +87,7 @@ class TestEngineTickOptimizer:
         engine = LiveTradingEngine(tick_enabled_config)
 
         # モード設定（botのcurrent_modeモック）
-        engine._bot.current_mode = "SCALPING"  # type: ignore[attr-defined]
+        engine._bot.current_mode = "UNIVERSAL"  # type: ignore[attr-defined]
 
         result = engine._should_use_tick_optimizer()
         assert result is True
@@ -121,7 +121,7 @@ class TestEngineTickOptimizer:
     ) -> None:
         """有効モード外では使用しない"""
         engine = LiveTradingEngine(tick_enabled_config)
-        engine._bot._last_mode = "SWING"  # type: ignore[attr-defined]
+        engine._bot._last_mode = "INVALID_MODE"  # type: ignore[attr-defined]
 
         result = engine._should_use_tick_optimizer()
         assert result is False

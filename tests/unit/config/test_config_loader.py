@@ -172,7 +172,7 @@ class TestConfigLoader:
         config_data = {
             "pm_config": {
                 "be_enabled_modes": [
-                    "SWING", "DAY_TRADE",
+                    "UNIVERSAL",
                 ],
             },
         }
@@ -184,4 +184,4 @@ class TestConfigLoader:
         _, pm = loader.load_live_config()
 
         assert isinstance(pm.be_enabled_modes, tuple)
-        assert len(pm.be_enabled_modes) == 2
+        assert len(pm.be_enabled_modes) == 1

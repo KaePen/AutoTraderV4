@@ -153,22 +153,10 @@ class UnifiedBotConfig:
     equity_caution_pct: float = 0.50
     # SLスリッページバッファ（pips）
     slippage_buffer_pips: float = 2.0
-    # 東京深夜SWINGフィルター（JST 02-06 = UTC 17-21）
-    tokyo_night_swing_enabled: bool = True
-    tokyo_night_swing_premium: float = 0.3
-    # SWING低ボラフィルター（entry_tf=H1絶対ATR最小値）
-    # 原則: スイングトレードは十分なATRがないと停滞しやすい
-    # 持続的低ボラ環境ではATR比率は1.0付近のため絶対値で判定
-    # スケール: H1 ATR基準（H4 ATRの約1/5）
-    # 実績: 好調年(2022-2025)H1 ATR=0.094-0.129, 不調年(2019,2021)H1 ATR=0.045
-    # 推奨閾値: 0.065（好調/不調の中間値）。デフォルト0.0=無効
-    swing_low_vol_atr_ratio: float = 0.0
     # デモモード（閾値を下げて活発にシグナルを発火させる）
     demo_mode: bool = False
     # コンセンサス閾値（ライブ本番用）
-    consensus_scalping_threshold: float = 3.5
-    consensus_day_trade_threshold: float = 5.5
-    consensus_swing_threshold: float = 6.0
+    consensus_threshold: float = 4.5
     # 最大同時ポジション数（ライブ用）
     max_positions: int = 1
     # デモモード時の最大同時ポジション数
@@ -178,11 +166,7 @@ class UnifiedBotConfig:
     # デモモード時の日次最大トレード件数（0=無制限）
     demo_max_daily_trades: int = 5
     # デモモード時のコンセンサス閾値（大幅低下で活発にシグナル発火）
-    demo_consensus_scalping_threshold: float = 1.0
-    demo_consensus_day_trade_threshold: float = 1.5
-    demo_consensus_swing_threshold: float = 1.5
-    # UNIVERSALモード（動的TF選択）
-    use_universal_mode: bool = False
+    demo_consensus_threshold: float = 1.5
 
     def get_evaluator_config(self, timeframe: str) -> EvaluatorConfig:
         """時間足別評価器設定を取得
