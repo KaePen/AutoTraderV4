@@ -447,6 +447,10 @@ class RichEventListener(EventListener):
 
         elif event.event_type == EventType.BACKTEST_END:
             if self._is_tty and self._progress:
+                # year_parallelタスクが残っていれば削除してからstop
+                if self._prep_task_id is not None:
+                    self._progress.remove_task(self._prep_task_id)
+                    self._prep_task_id = None
                 self._progress.stop()
             cancelled = event.data.get("results", {}).get("cancelled", False)
             if cancelled:
@@ -589,10 +593,13 @@ class RichEventListener(EventListener):
             )
             desc_plain = f"  インジケータ計算: {event.label} ({event.current}/{event.total})"
         elif event.phase == "year_parallel":
-            desc_tty = (
-                f"[cyan]年バックテスト並列実行中[/cyan] "
-                f"[dim]{event.label}完了[/dim]"
-            )
+            if event.current == 0:
+                desc_tty = "[cyan]年バックテスト並列実行中...[/cyan]"
+            else:
+                desc_tty = (
+                    f"[cyan]年バックテスト並列実行中[/cyan] "
+                    f"[dim]{event.label}完了[/dim]"
+                )
             desc_plain = f"  並列処理: {event.current}/{event.total}年完了"
         else:
             return
@@ -614,8 +621,9 @@ class RichEventListener(EventListener):
                     completed=event.current,
                     description=desc_tty,
                 )
-            # フェーズ完了時にタスクを削除
-            if event.current >= event.total:
+            # tf_loadingフェーズのみ完了時に削除
+            # year_parallelはBACKTEST_ENDまで残して結果表示中の空白を防ぐ
+            if event.current >= event.total and event.phase == "tf_loading":
                 self._progress.remove_task(self._prep_task_id)
                 self._prep_task_id = None
         else:
