@@ -669,6 +669,8 @@ class BacktestRunner:
         pm_config: "PositionManagerConfig | None" = None,
         fundamental_csv: str | None = None,
         fundamental_guard_minutes: int = 30,
+        period_start: datetime | None = None,
+        period_end: datetime | None = None,
     ) -> BacktestResult:
         """統合ボットでのバックテスト実行
 
@@ -683,6 +685,8 @@ class BacktestRunner:
             pm_config: PositionManager設定（外部注入）
             fundamental_csv: 経済イベントCSVパス（Noneで無効）
             fundamental_guard_minutes: 重要指標前の停止分数
+            period_start: 日単位の開始日時（Noneで年始）
+            period_end: 日単位の終了日時・exclusive（Noneで年末）
 
         Returns:
             BacktestResult: バックテスト結果
@@ -791,6 +795,8 @@ class BacktestRunner:
                 use_m1=use_m1,
                 multi_mode_controller=multi_mode_controller,
                 fundamental_provider=fundamental_provider,
+                period_start=period_start,
+                period_end=period_end,
             )
             if year_result is None and self._check_cancel_requested():
                 # キャンセルによる中断
@@ -1016,6 +1022,8 @@ class BacktestRunner:
         use_m1: bool = False,
         multi_mode_controller: Any = None,
         fundamental_provider: Any = None,
+        period_start: datetime | None = None,
+        period_end: datetime | None = None,
     ) -> dict[str, Any] | None:
         """統合ボットで1年分のバックテスト実行
 
@@ -1026,14 +1034,25 @@ class BacktestRunner:
             monthly_results: 月別結果リスト
             use_m1: M1データを基準タイムフレームとして使用
             multi_mode_controller: マルチモードコントローラー
+            period_start: 日単位の開始日時（Noneで年始）
+            period_end: 日単位の終了日時・exclusive（Noneで年末）
 
         Returns:
             年別結果
         """
         from autotrader.decision.unified import UnifiedTradeBot
 
+        # 年の標準範囲
         start_date = datetime(year, 1, 1)
         end_date = datetime(year + 1, 1, 1)
+        # 日単位の期間指定で範囲を絞り込む
+        if period_start is not None:
+            start_date = max(start_date, period_start)
+        if period_end is not None:
+            end_date = min(end_date, period_end)
+        # 有効な期間がなければスキップ
+        if start_date >= end_date:
+            return None
 
         # 基準タイムフレームの選択（M1 > M5 > M15 > H1）
         if use_m1 and self._m1_df is not None:
