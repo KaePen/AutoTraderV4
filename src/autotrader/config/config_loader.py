@@ -148,7 +148,6 @@ class ConfigLoader:
                 if f.default is not dataclasses.MISSING
             }
             bot_defaults["demo_mode"] = True
-            bot_defaults["consensus_day_trade_threshold"] = 4.5
             return UnifiedBotConfig(**bot_defaults), PositionManagerConfig()
 
         with open(path, encoding="utf-8") as f:

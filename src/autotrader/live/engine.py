@@ -228,32 +228,18 @@ class LiveTradingEngine:
         update_bot_config 直後でも正しい閾値を返す。
 
         Args:
-            mode_str: トレードモード文字列（"SCALPING"|"DAY_TRADE"|"SWING"）
+            mode_str: 互換性のため残存（未使用）
 
         Returns:
             float | None: 現在の閾値。取得不可の場合はNone
         """
-        if not mode_str or not self._bot:
+        if not self._bot:
             return None
         try:
-            from autotrader.decision.unified.mode_aware_consensus import (
-                ConsensusConfig,
-            )
             cfg = self._bot.config
-            defaults = ConsensusConfig()
             if cfg.demo_mode:
-                thresholds = {
-                    "SCALPING": cfg.demo_consensus_scalping_threshold,
-                    "DAY_TRADE": cfg.demo_consensus_day_trade_threshold,
-                    "SWING": cfg.demo_consensus_swing_threshold,
-                }
-            else:
-                thresholds = {
-                    "SCALPING": cfg.consensus_scalping_threshold,
-                    "DAY_TRADE": cfg.consensus_day_trade_threshold,
-                    "SWING": cfg.consensus_swing_threshold,
-                }
-            return thresholds.get(mode_str)
+                return cfg.demo_consensus_threshold
+            return cfg.consensus_threshold
         except AttributeError:
             return None
 

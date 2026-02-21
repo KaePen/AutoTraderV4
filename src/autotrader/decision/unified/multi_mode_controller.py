@@ -1,7 +1,6 @@
 """マルチモード並列制御
 
-SCALPING/DAY_TRADE/SWINGの3モードを並列評価し、
-統合されたトレード機会を検出する。
+UNIVERSALモードで全TFを評価し、統合されたトレード機会を検出する。
 """
 
 from __future__ import annotations
@@ -14,9 +13,6 @@ import pandas as pd
 
 from autotrader.core.enums import SignalType, TradingStrategyMode
 from autotrader.decision.unified.mode_monitor import (
-    DAY_TRADE_CONFIG,
-    SCALPING_CONFIG,
-    SWING_CONFIG,
     UNIVERSAL_CONFIG,
     ModeConfig,
     ModeMonitor,
@@ -41,9 +37,7 @@ class MultiModeConfig:
 
     enabled_modes: list[TradingStrategyMode] = field(
         default_factory=lambda: [
-            TradingStrategyMode.SCALPING,
-            TradingStrategyMode.DAY_TRADE,
-            TradingStrategyMode.SWING,
+            TradingStrategyMode.UNIVERSAL,
         ]
     )
     max_total_positions: int = 3
@@ -95,11 +89,8 @@ class MultiModeController:
     コンフリクト解決後の最適なシグナルを返す。
     """
 
-    # モード設定マッピング
+    # モード設定マッピング（UNIVERSAL固定）
     MODE_CONFIGS: dict[TradingStrategyMode, ModeConfig] = {
-        TradingStrategyMode.SCALPING: SCALPING_CONFIG,
-        TradingStrategyMode.DAY_TRADE: DAY_TRADE_CONFIG,
-        TradingStrategyMode.SWING: SWING_CONFIG,
         TradingStrategyMode.UNIVERSAL: UNIVERSAL_CONFIG,
     }
 

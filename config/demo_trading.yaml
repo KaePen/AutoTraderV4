@@ -5,23 +5,20 @@
 # デモモードの特徴:
 #   - HTFトレンドフィルターをスキップ（方向性要件なし）
 #   - SoftGuardセッションブロックをスキップ
-#   - RANGE+DAYフィルターをスキップ
-#   - コンセンサス閾値を大幅低下（5.5→1.5）で積極的取引
+#   - RANGEフィルターをスキップ
+#   - コンセンサス閾値を大幅低下（4.5→1.5）で積極的取引
 #   - クールダウン0分（連続エントリー可能）
 #   - チェック間隔1秒（リアルタイム検知）
 
 bot_config:
   # デモモード有効（フィルター緩和）
   demo_mode: true
-  # コンセンサス閾値を極限まで下げて取引頻度を最大化（本番: 5.5）
-  consensus_day_trade_threshold: 1.5
+  # コンセンサス閾値を極限まで下げて取引頻度を最大化（本番: 4.5）
+  demo_consensus_threshold: 1.5
   # デモ時のクールダウン0分（連続エントリー可能）
   demo_cooldown_minutes: 0
   # デモ時の日次最大トレード件数（0=無制限）
   demo_max_daily_trades: 0
-  # デモ時のスキャルピング/スイング閾値も下げる
-  demo_consensus_scalping_threshold: 1.0
-  demo_consensus_swing_threshold: 2.0
   # デモ時の最大同時ポジション数（本番は1固定）
   demo_max_positions: 3
   # エントリーフィルター（緩和）
@@ -29,8 +26,6 @@ bot_config:
   range_day_score_premium: 0.0
   weak_hours_enabled: false
   weak_hours_score_premium: 0.0
-  tokyo_night_swing_enabled: false
-  tokyo_night_swing_premium: 0.0
   # 資金管理（デモは小ロット）
   use_dynamic_lot: true
   base_risk_pct: 0.01
@@ -56,11 +51,6 @@ pm_config:
   # Stagnation
   stagnation_exit_minutes: 120.0
   stagnation_min_mfe_r: 0.15
-  swing_stagnation_exit_minutes: 120.0
-  swing_stagnation_min_mfe_r: 0.15
-  swing_trend_stagnation_enabled: true
-  swing_trend_stagnation_exit_minutes: 90.0
-  swing_trend_stagnation_min_mfe_r: 0.15
   # 保険
   range_day_insurance_enabled: true
   insurance_trigger_r: 1.0

@@ -121,20 +121,6 @@ class PositionManagementUpdate(BaseModel):
     range_day_half_r_trigger: float | None = Field(
         default=None, ge=0.1, le=2.0
     )
-    # SWING stagnation
-    swing_stagnation_exit_minutes: float | None = Field(
-        default=None, ge=10.0, le=600.0
-    )
-    swing_stagnation_min_mfe_r: float | None = Field(
-        default=None, ge=0.0, le=1.0
-    )
-    swing_trend_stagnation_enabled: bool | None = None
-    swing_trend_stagnation_exit_minutes: float | None = (
-        Field(default=None, ge=10.0, le=600.0)
-    )
-    swing_trend_stagnation_min_mfe_r: float | None = (
-        Field(default=None, ge=0.0, le=1.0)
-    )
 
 
 class TradingConfigUpdate(BaseModel):

@@ -16,9 +16,9 @@ from autotrader.decision.unified.position_manager import (
     PositionManagerConfig,
 )
 
-# SWINGプラン（BE有効）
+# 長期保有プラン
 SWING_PLAN = TradingPlan(
-    mode=TradingStrategyMode.SWING,
+    mode=TradingStrategyMode.UNIVERSAL,
     primary_tf="H1",
     entry_tf="M15",
     confirm_tfs=["H4"],
@@ -27,9 +27,9 @@ SWING_PLAN = TradingPlan(
     tp_sl_ratio_range=(1.2, 1.6),
 )
 
-# SCALPINGプラン（BE無効）
+# 短期保有プラン
 SCALP_PLAN = TradingPlan(
-    mode=TradingStrategyMode.SCALPING,
+    mode=TradingStrategyMode.UNIVERSAL,
     primary_tf="M5",
     entry_tf="M1",
     confirm_tfs=["M15"],
@@ -45,9 +45,9 @@ class TestPositionManager:
     def setup_method(self) -> None:
         """テストセットアップ"""
         self.manager = PositionManager()
-        # DAY_TRADEプラン（BE有効）
+        # UNIVERSALプラン（BE有効）
         self.plan = TradingPlan(
-            mode=TradingStrategyMode.DAY_TRADE,
+            mode=TradingStrategyMode.UNIVERSAL,
             primary_tf="M15",
             entry_tf="M5",
             confirm_tfs=["H1"],
@@ -196,7 +196,7 @@ class TestPositionManager:
         assert action.exit_reason == ExitReason.TAKE_PROFIT
 
     def test_time_exit_day_trade(self) -> None:
-        """DAY_TRADEの時間決済"""
+        """UNIVERSALの時間決済"""
         self.manager.register_position(
             position_id="test1",
             direction=SignalType.BUY,
@@ -208,7 +208,7 @@ class TestPositionManager:
             plan=self.plan,
         )
 
-        # 8時間後（DAY_TRADEの最大保有時間）
+        # 8時間後（最大保有時間）
         action = self.manager.evaluate(
             position_id="test1",
             current_price=150.2,  # 利益状態
@@ -220,7 +220,7 @@ class TestPositionManager:
         assert action.exit_reason == ExitReason.TIME_EXIT
 
     def test_time_exit_scalping(self) -> None:
-        """SCALPINGの時間決済（90分）"""
+        """時間決済（90分）"""
         self.manager.register_position(
             position_id="test1",
             direction=SignalType.BUY,
@@ -232,10 +232,16 @@ class TestPositionManager:
             plan=SCALP_PLAN,
         )
 
-        # 90分後
+        # early_BE通過済みにして（0.6Rで発火させる）
+        self.manager.evaluate(
+            "test1", 150.06,
+            self.entry_time + timedelta(minutes=10), 0.1,
+        )
+
+        # 90分後（M1 entry_tfの最大保有時間）
         action = self.manager.evaluate(
             position_id="test1",
-            current_price=150.05,
+            current_price=150.02,  # 0.2R（early_BE未到達）
             current_time=self.entry_time + timedelta(minutes=95),
             atr=0.1,
         )
@@ -256,7 +262,7 @@ class TestPositionManager:
             plan=self.plan,
         )
 
-        # 早期BE通過（0.5R閾値、DAY_TRADEもBE有効）
+        # 早期BE通過（0.5R閾値、BE有効）
         self.manager.evaluate(
             "test1", 150.3,
             self.entry_time + timedelta(minutes=15), 0.5,
@@ -312,7 +318,7 @@ class TestPositionManager:
             plan=self.plan,
         )
 
-        # 早期BE通過（0.5R閾値、DAY_TRADEもBE有効）
+        # 早期BE通過（0.5R閾値、BE有効）
         self.manager.evaluate(
             "test1", 150.3,
             self.entry_time + timedelta(minutes=15), 0.5,
@@ -612,7 +618,7 @@ class TestStagnationExit:
         )
         self.manager = PositionManager(config=self.config)
         self.plan = TradingPlan(
-            mode=TradingStrategyMode.DAY_TRADE,
+            mode=TradingStrategyMode.UNIVERSAL,
             primary_tf="M15",
             entry_tf="M5",
             confirm_tfs=["H1"],
@@ -760,7 +766,7 @@ class TestBreakevenImprovement:
     def test_day_trade_early_be_at_0_5r(self) -> None:
         """DAY_TRADEで0.5RでBE発火"""
         day_plan = TradingPlan(
-            mode=TradingStrategyMode.DAY_TRADE,
+            mode=TradingStrategyMode.UNIVERSAL,
             primary_tf="M15",
             entry_tf="M5",
             confirm_tfs=["H1"],
@@ -798,8 +804,8 @@ class TestBreakevenImprovement:
         assert action.action_type == ManagementActionType.UPDATE_SL
         assert action.new_sl == pytest.approx(150.01)
 
-    def test_be_blocked_for_scalping(self) -> None:
-        """SCALPINGでBE未発火"""
+    def test_be_applied_for_universal(self) -> None:
+        """UNIVERSALでBE発火"""
         self.manager.register_position(
             position_id="test1",
             direction=SignalType.BUY,
@@ -811,20 +817,20 @@ class TestBreakevenImprovement:
             plan=SCALP_PLAN,
         )
 
-        # 0.8R超過
+        # 0.8R超過（0.5R early_BE閾値を超える）
         action = self.manager.evaluate(
             position_id="test1",
             current_price=150.08,  # 0.8R
             current_time=self.entry_time + timedelta(minutes=5),
             atr=0.1,
         )
-        # SCALPINGでは早期BEなし → HOLD
-        assert action.action_type == ManagementActionType.HOLD
+        # UNIVERSALではBE有効 → UPDATE_SL
+        assert action.action_type == ManagementActionType.UPDATE_SL
 
     def test_partial_close_with_be_for_day_trade(self) -> None:
         """DAY_TRADEで1R部分利確+BE移動"""
         day_plan = TradingPlan(
-            mode=TradingStrategyMode.DAY_TRADE,
+            mode=TradingStrategyMode.UNIVERSAL,
             primary_tf="M15",
             entry_tf="M5",
             confirm_tfs=["H1"],
@@ -1042,7 +1048,7 @@ class TestManagementAction:
 
 
 class TestRangeDayBeFix:
-    """DAY_TRADE×RANGE BE修正のテスト"""
+    """UNIVERSAL×RANGE BE修正のテスト"""
 
     def setup_method(self) -> None:
         """テストセットアップ"""
@@ -1056,9 +1062,9 @@ class TestRangeDayBeFix:
         self.manager = PositionManager(self.config)
         self.entry_time = datetime(2024, 1, 1, 10, 0, 0)
 
-        # RANGE×DAY_TRADEプラン
+        # RANGE×UNIVERSALプラン
         self.range_day_plan = TradingPlan(
-            mode=TradingStrategyMode.DAY_TRADE,
+            mode=TradingStrategyMode.UNIVERSAL,
             primary_tf="M15",
             entry_tf="M5",
             confirm_tfs=["H1"],
@@ -1068,9 +1074,9 @@ class TestRangeDayBeFix:
             regime="RANGE",
         )
 
-        # TREND×DAY_TRADEプラン
+        # TREND×UNIVERSALプラン
         self.trend_day_plan = TradingPlan(
-            mode=TradingStrategyMode.DAY_TRADE,
+            mode=TradingStrategyMode.UNIVERSAL,
             primary_tf="M15",
             entry_tf="M5",
             confirm_tfs=["H1"],
@@ -1135,10 +1141,10 @@ class TestRangeDayBeFix:
             ManagementActionType.UPDATE_SL
         )
 
-    def test_swing_unaffected(self) -> None:
-        """SWINGはregime無関係で従来動作"""
-        swing_range_plan = TradingPlan(
-            mode=TradingStrategyMode.SWING,
+    def test_range_regime_applies_range_day_be_disabled(self) -> None:
+        """RANGE regimeではrange_day_be_disabled設定が適用される"""
+        range_plan = TradingPlan(
+            mode=TradingStrategyMode.UNIVERSAL,
             primary_tf="H1",
             entry_tf="M15",
             confirm_tfs=["H4"],
@@ -1147,15 +1153,16 @@ class TestRangeDayBeFix:
             tp_sl_ratio_range=(1.2, 1.6),
             regime="RANGE",
         )
-        self._register(swing_range_plan)
+        self._register(range_plan)
         now = self.entry_time + timedelta(minutes=15)
 
-        # 0.5R到達 → SWINGなので従来通りBE
+        # 0.5R到達 → range_day_be_disabled=True + range_day_early_be_r=1.0
+        # なので0.5Rでは発火しない → HOLD
         action = self.manager.evaluate(
             "pos1", 150.25, now, atr=0.5,
         )
         assert action.action_type == (
-            ManagementActionType.UPDATE_SL
+            ManagementActionType.HOLD
         )
 
     def test_1r_priority_over_early_be_same_tick(
@@ -1210,7 +1217,7 @@ class TestFastBeAndStagnation:
         """テストセットアップ"""
         self.entry_time = datetime(2024, 1, 1, 10, 0, 0)
         self.range_day_plan = TradingPlan(
-            mode=TradingStrategyMode.DAY_TRADE,
+            mode=TradingStrategyMode.UNIVERSAL,
             primary_tf="M15",
             entry_tf="M5",
             confirm_tfs=["H1"],
@@ -1220,7 +1227,7 @@ class TestFastBeAndStagnation:
             regime="RANGE",
         )
         self.trend_day_plan = TradingPlan(
-            mode=TradingStrategyMode.DAY_TRADE,
+            mode=TradingStrategyMode.UNIVERSAL,
             primary_tf="M15",
             entry_tf="M5",
             confirm_tfs=["H1"],
@@ -1449,7 +1456,7 @@ class TestRangeDayInsurance:
         """テストセットアップ"""
         self.entry_time = datetime(2024, 1, 1, 10, 0, 0)
         self.range_day_plan = TradingPlan(
-            mode=TradingStrategyMode.DAY_TRADE,
+            mode=TradingStrategyMode.UNIVERSAL,
             primary_tf="M15",
             entry_tf="M5",
             confirm_tfs=["H1"],
@@ -1459,7 +1466,7 @@ class TestRangeDayInsurance:
             regime="RANGE",
         )
         self.trend_day_plan = TradingPlan(
-            mode=TradingStrategyMode.DAY_TRADE,
+            mode=TradingStrategyMode.UNIVERSAL,
             primary_tf="M15",
             entry_tf="M5",
             confirm_tfs=["H1"],
@@ -1893,7 +1900,7 @@ class TestRangeDayHalfRPartial:
         """テストセットアップ"""
         self.entry_time = datetime(2024, 1, 1, 10, 0, 0)
         self.range_day_plan = TradingPlan(
-            mode=TradingStrategyMode.DAY_TRADE,
+            mode=TradingStrategyMode.UNIVERSAL,
             primary_tf="M15",
             entry_tf="M5",
             confirm_tfs=["H1"],
@@ -1903,7 +1910,7 @@ class TestRangeDayHalfRPartial:
             regime="RANGE",
         )
         self.trend_day_plan = TradingPlan(
-            mode=TradingStrategyMode.DAY_TRADE,
+            mode=TradingStrategyMode.UNIVERSAL,
             primary_tf="M15",
             entry_tf="M5",
             confirm_tfs=["H1"],

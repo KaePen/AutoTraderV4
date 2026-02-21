@@ -218,11 +218,9 @@ const DashboardApp = {
       dirBadge.className = 'inline-flex items-center px-2 py-0.5 rounded text-xs font-bold ' + (dirStyles[a.direction] || dirStyles.HOLD);
     }
 
-    // レジーム・モード
+    // レジーム
     const regime = document.getElementById('ap-regime');
-    const mode = document.getElementById('ap-mode');
     if (regime) regime.textContent = a.regime || '--';
-    if (mode) mode.textContent = a.mode ? a.mode.replace('_', ' ') : '--';
 
     // 最終tick時刻
     const tickTime = document.getElementById('ap-tick-time');

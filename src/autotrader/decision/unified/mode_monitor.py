@@ -1,7 +1,6 @@
 """モード別監視クラス
 
-SCALPING/DAY_TRADE/SWINGの各モードを独立して監視し、
-それぞれの時間足セットでシグナルを評価する。
+UNIVERSALモードで全TFセットを監視し、シグナルを評価する。
 """
 
 from __future__ import annotations
@@ -47,40 +46,7 @@ class ModeConfig:
     min_confidence: float = 0.5
 
 
-# 各モードのデフォルト設定
-SCALPING_CONFIG = ModeConfig(
-    mode=TradingStrategyMode.SCALPING,
-    primary_tf="M5",
-    entry_tf="M1",
-    confirm_tfs=["M15"],
-    max_hold_minutes=90,
-    sl_range=(10.0, 20.0),
-    tp_range=(10.0, 30.0),
-    min_confidence=0.6,
-)
-
-DAY_TRADE_CONFIG = ModeConfig(
-    mode=TradingStrategyMode.DAY_TRADE,
-    primary_tf="M15",
-    entry_tf="M5",
-    confirm_tfs=["H1", "H4"],
-    max_hold_minutes=480,  # 8時間
-    sl_range=(20.0, 40.0),
-    tp_range=(40.0, 100.0),
-    min_confidence=0.55,
-)
-
-SWING_CONFIG = ModeConfig(
-    mode=TradingStrategyMode.SWING,
-    primary_tf="H4",
-    entry_tf="H1",
-    confirm_tfs=["D1"],
-    max_hold_minutes=2880,  # 2日
-    sl_range=(50.0, 100.0),
-    tp_range=(100.0, 400.0),
-    min_confidence=0.5,
-)
-
+# UNIVERSALモードの設定
 UNIVERSAL_CONFIG = ModeConfig(
     mode=TradingStrategyMode.UNIVERSAL,
     primary_tf="M15",

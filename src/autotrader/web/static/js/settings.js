@@ -187,8 +187,6 @@ const SettingsManager = {
           ${this.settingItem('RANGE×DAY スコアプレミアム', c.range_day_score_premium)}
           ${this.settingItem('Weak Hours', c.weak_hours_enabled ? 'ON' : 'OFF')}
           ${this.settingItem('Weak Hours プレミアム', c.weak_hours_score_premium)}
-          ${this.settingItem('東京深夜SWING', c.tokyo_night_swing_enabled ? 'ON' : 'OFF')}
-          ${this.settingItem('東京深夜 プレミアム', c.tokyo_night_swing_premium)}
         </div>
         <p class="text-xs text-gray-500">※ 変更にはアプリの再起動が必要です</p>
       </div>`;

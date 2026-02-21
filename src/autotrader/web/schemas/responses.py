@@ -391,12 +391,6 @@ class PositionManagementConfigResponse(BaseModel):
     range_day_half_r_partial_enabled: bool = True
     range_day_half_r_partial_ratio: float = 0.20
     range_day_half_r_trigger: float = 0.5
-    # SWING stagnation
-    swing_stagnation_exit_minutes: float = 120.0
-    swing_stagnation_min_mfe_r: float = 0.15
-    swing_trend_stagnation_enabled: bool = True
-    swing_trend_stagnation_exit_minutes: float = 90.0
-    swing_trend_stagnation_min_mfe_r: float = 0.15
 
 
 class TradingConfigResponse(BaseModel):
@@ -466,7 +460,6 @@ class AnalysisResponse(BaseModel):
     consensus_score: float | None = None
     entry_threshold: float = 0.0
     regime: str | None = None
-    mode: str | None = None
     rationale: str = "データなし"
     htf_alignment: float = 0.0
     penalty_total: float = 0.0

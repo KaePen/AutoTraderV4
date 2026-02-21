@@ -245,7 +245,7 @@ class FileEventListener(EventListener):
         # Exit×Regime×Modeクロス集計
         self._write_cross_stats()
 
-        # DAY_TRADE×RANGEサマリー
+        # UNIVERSAL×RANGEサマリー
         self._write_range_day_summary()
 
         self._write_summary("")
@@ -323,11 +323,11 @@ class FileEventListener(EventListener):
         self._write_summary("")
 
     def _write_range_day_summary(self) -> None:
-        """DAY_TRADE×RANGEサマリー"""
+        """UNIVERSAL×RANGEサマリー"""
         if not self._cross_stats:
             return
 
-        # RANGE×DAY_TRADEのキーを抽出
+        # RANGE×UNIVERSALのキーを抽出
         range_day: dict[str, dict[str, float]] = {}
         for key, s in self._cross_stats.items():
             parts = key.split("|")
@@ -335,7 +335,7 @@ class FileEventListener(EventListener):
                 continue
             regime = parts[1].strip()
             mode = parts[2].strip()
-            if regime == "RANGE" and mode == "DAY_TRADE":
+            if regime == "RANGE" and mode == "UNIVERSAL":
                 exit_r = parts[0].strip()
                 range_day[exit_r] = s
 
@@ -343,7 +343,7 @@ class FileEventListener(EventListener):
             return
 
         self._write_summary(
-            "--- DAY_TRADE×RANGE サマリー ---"
+            "--- UNIVERSAL×RANGE サマリー ---"
         )
         self._write_summary(
             f"{'Exit理由':<20} {'取引':>5} "

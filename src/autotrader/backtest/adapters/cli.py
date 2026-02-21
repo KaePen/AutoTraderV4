@@ -44,9 +44,6 @@ class CLIAdapter:
         # マルチモードオプション
         use_multi_mode = getattr(args, "multi_mode", False)
 
-        # UNIVERSALモードオプション
-        use_universal_mode = getattr(args, "universal", False)
-
         return ExecutorConfig(
             start_year=start_year,
             end_year=end_year,
@@ -55,7 +52,6 @@ class CLIAdapter:
             symbol=args.symbol,
             data_dir=args.data_dir,
             use_short_timeframe=use_short_tf,
-            use_universal_mode=use_universal_mode,
             use_multi_mode=use_multi_mode,
             parallel_years=parallel_years,
             max_workers=max_workers,

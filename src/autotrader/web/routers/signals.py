@@ -74,7 +74,7 @@ async def get_analysis(
 
     # 現在のbot設定から閾値を取得（デモ/ライブ切替を即時反映）
     entry_threshold = (
-        engine.get_current_entry_threshold(cs.mode)
+        engine.get_current_entry_threshold()
         or cs.entry_threshold
     )
 
@@ -85,7 +85,6 @@ async def get_analysis(
             consensus_score=cs.consensus_score,
             entry_threshold=entry_threshold,
             regime=cs.regime,
-            mode=cs.mode,
             rationale=cs.rationale,
             htf_alignment=cs.htf_alignment,
             penalty_total=cs.penalty_total,

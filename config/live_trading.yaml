@@ -8,8 +8,6 @@ bot_config:
   range_day_score_premium: 0.55
   weak_hours_enabled: true
   weak_hours_score_premium: 0.5
-  tokyo_night_swing_enabled: true
-  tokyo_night_swing_premium: 0.3
   use_dynamic_lot: true
   base_risk_pct: 0.02
   max_lot_per_trade: 2.0
@@ -34,11 +32,6 @@ pm_config:
   # Stagnation
   stagnation_exit_minutes: 120.0
   stagnation_min_mfe_r: 0.15
-  swing_stagnation_exit_minutes: 120.0
-  swing_stagnation_min_mfe_r: 0.15
-  swing_trend_stagnation_enabled: true
-  swing_trend_stagnation_exit_minutes: 90.0
-  swing_trend_stagnation_min_mfe_r: 0.15
   # 保険
   range_day_insurance_enabled: true
   insurance_trigger_r: 1.0

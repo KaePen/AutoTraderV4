@@ -703,7 +703,6 @@ class BacktestRunner:
         _needs_short_tf = (
             use_m1
             or enable_scalping
-            or getattr(bot_config, "use_universal_mode", False)
             or bool(set(bot_config.timeframes) & _short_tfs)
         )
         market_data = self._load_all_timeframes(include_m1=_needs_short_tf)

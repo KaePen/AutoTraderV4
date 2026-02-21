@@ -22,7 +22,7 @@ from autotrader.constraint.soft_guard import (
     SoftGuardConfig,
     SoftGuardResult,
 )
-from autotrader.core.enums import MarketRegime, SignalType, TradingStrategyMode
+from autotrader.core.enums import MarketRegime, SignalType
 from autotrader.core.interfaces.position_sizing import SizingContext
 
 from .config import RiskConfig, UnifiedBotConfig
@@ -225,39 +225,23 @@ class UnifiedTradeBot:
         )
         self.regime_detector = MarketRegimeDetector(RegimeDetectorConfig())
 
-        # モード選択器
-        use_universal = getattr(
-            self.config, "use_universal_mode", False
-        )
-        self.mode_selector = TradingModeSelector(
-            ModeSelectorConfig(),
-            use_universal_mode=use_universal,
-        )
+        # モード選択器（UNIVERSAL固定）
+        self.mode_selector = TradingModeSelector(ModeSelectorConfig())
 
         # タイムフレームルーター
         self.tf_router = TimeframeRouter()
 
-        # コンセンサス統合器（デモモード時は全閾値を大幅に下げる）
+        # コンセンサス統合器（デモモード時は閾値を大幅に下げる）
         if self.config.demo_mode:
             self.consensus = ModeAwareScoreConsensus(
                 ConsensusConfig(
-                    scalping_threshold=(
-                        self.config.demo_consensus_scalping_threshold
-                    ),
-                    day_trade_threshold=(
-                        self.config.demo_consensus_day_trade_threshold
-                    ),
-                    swing_threshold=(
-                        self.config.demo_consensus_swing_threshold
-                    ),
+                    threshold=self.config.demo_consensus_threshold,
                 )
             )
         else:
             self.consensus = ModeAwareScoreConsensus(
                 ConsensusConfig(
-                    day_trade_threshold=(
-                        self.config.consensus_day_trade_threshold
-                    ),
+                    threshold=self.config.consensus_threshold,
                 )
             )
 
@@ -405,9 +389,7 @@ class UnifiedTradeBot:
             hour_utc=hour_utc,
         )
 
-        # UNIVERSALモード: 動的TF選択（tf_signals取得前のプレースホルダー）
-        # ※実際の動的TF選択はtf_signals取得後に行う（後述）
-        _universal_mode = plan.mode == TradingStrategyMode.UNIVERSAL
+        # UNIVERSALモード固定: 動的TF選択（tf_signals取得後に実行）
 
         # 分析用に最後のモード/レジームを保持
         self._last_mode = plan.mode.value
@@ -457,7 +439,7 @@ class UnifiedTradeBot:
             tf_signals[tf] = signal
 
         # UNIVERSALモード: 全TFシグナル取得後に動的TF選択でplanを更新
-        if _universal_mode and tf_signals:
+        if tf_signals:
             # コンセンサス方向を支配方向として渡す（先のコンセンサス前のため
             # None で全TF評価）
             _dynamic_result = self._dynamic_tf_selector.select(tf_signals)
@@ -634,52 +616,30 @@ class UnifiedTradeBot:
                     f"score={consensus.score:.1f}<6.6"
                 )
 
-            # LOW_VOL + DAY_TRADE: スコア品質要件を高める
+            # LOW_VOL制限: スコア品質要件を高める
             # 低ボラティリティ環境はスプレッド影響が大きく不利
-            # UNIVERSALモードでDAY_TRADE相当(M15/H1)の場合も同様
-            _effective_mode_for_filter = plan.mode
-            if plan.mode == TradingStrategyMode.UNIVERSAL:
-                _dyn_tf = plan.dynamic_entry_tf or plan.entry_tf
-                if _dyn_tf in ("M1", "M5"):
-                    _effective_mode_for_filter = (
-                        TradingStrategyMode.SCALPING
-                    )
-                elif _dyn_tf in ("M15", "H1"):
-                    _effective_mode_for_filter = (
-                        TradingStrategyMode.DAY_TRADE
-                    )
-                elif _dyn_tf in ("H4", "H8", "D1"):
-                    _effective_mode_for_filter = (
-                        TradingStrategyMode.SWING
-                    )
             if (
                 regime_result.regime == MarketRegime.LOW_VOL
-                and _effective_mode_for_filter
-                == TradingStrategyMode.DAY_TRADE
                 and consensus.score < consensus.threshold + 1.5
             ):
                 return _filt_hold(
-                    f"LOW_VOL+DAY制限: score={consensus.score:.2f}"
+                    f"LOW_VOL制限: score={consensus.score:.2f}"
                     f" < threshold+1.5={consensus.threshold + 1.5:.2f}"
                 )
 
-            # RANGE + DAY(ShortMid相当) 制限
+            # RANGE + トレンド弱制限
             if (
                 regime_result.regime == MarketRegime.RANGE
-                and _effective_mode_for_filter
-                == TradingStrategyMode.DAY_TRADE
                 and regime_result.trend_strength < 0.3
             ):
                 return _filt_hold(
-                    f"RANGE+DAY制限: trend_strength="
+                    f"RANGE制限: trend_strength="
                     f"{regime_result.trend_strength:.2f}"
                 )
 
-            # RANGE+DAY ペナルティ+低ボラ制限
+            # RANGE ペナルティ+低ボラ制限
             if (
                 regime_result.regime == MarketRegime.RANGE
-                and _effective_mode_for_filter
-                == TradingStrategyMode.DAY_TRADE
                 and sg_result.total_penalty > 0
             ):
                 _primary_row = self._get_current_row(
@@ -694,7 +654,7 @@ class UnifiedTradeBot:
                         < self.config.range_day_bbw_threshold
                     ):
                         return _filt_hold(
-                            f"RANGE+DAY低ボラ制限: "
+                            f"RANGE低ボラ制限: "
                             f"penalty="
                             f"{sg_result.total_penalty:.2f}"
                             f", bb_width="
@@ -720,57 +680,30 @@ class UnifiedTradeBot:
                     f"<{_wh_threshold:.1f}"
                 )
 
-            # 東京深夜SWINGフィルター（JST 02-06 = UTC 17-21）
+            # 東京深夜フィルター（JST 02-06 = UTC 17-21）
             # 東京深夜は流動性低下でトレンド追従が困難
             if (
-                self.config.tokyo_night_swing_enabled
-                and 17 <= hour_utc <= 21
+                17 <= hour_utc <= 21
                 and regime_result.regime == MarketRegime.TREND
-                and _effective_mode_for_filter
-                == TradingStrategyMode.SWING
-                and consensus.score < consensus.threshold
-                    + self.config.tokyo_night_swing_premium
+                and consensus.score < consensus.threshold + 0.3
             ):
-                _tn_threshold = (
-                    consensus.threshold
-                    + self.config.tokyo_night_swing_premium
-                )
+                _tn_threshold = consensus.threshold + 0.3
                 return _filt_hold(
-                    f"東京深夜SWING: hour={hour_utc}, "
+                    f"東京深夜TREND: hour={hour_utc}, "
                     f"score={consensus.score:.1f}"
                     f"<{_tn_threshold:.1f}"
                 )
 
-            # SWING低ボラフィルター（entry_tf=H1絶対ATR）
-            # 原則: スイングトレードは市場が十分に動く時のみ有効
-            # 持続的低ボラ環境(ATR比率フィルターは持続低ボラに不感)
-            # entry_tf(H1)ATR < 閾値の場合、SWINGトレードは停滞しやすい
-            # 閾値基準: 好調年H1 ATR=0.094-0.129, 不調年H1 ATR=0.045
-            if (
-                regime_result.regime == MarketRegime.TREND
-                and _effective_mode_for_filter
-                == TradingStrategyMode.SWING
-                and _entry_tf_atr_abs is not None
-                and _entry_tf_atr_abs
-                < self.config.swing_low_vol_atr_ratio
-            ):
-                return _filt_hold(
-                    f"SWING低ボラ制限: entry_atr={_entry_tf_atr_abs:.4f}"
-                    f"<{self.config.swing_low_vol_atr_ratio:.4f}"
-                )
-
-            # RANGE+DAYスコアプレミアム（低スコア帯を除外）
+            # RANGEスコアプレミアム（低スコア帯を除外）
             _score_premium = self.config.range_day_score_premium
             if (
                 _score_premium > 0
                 and regime_result.regime == MarketRegime.RANGE
-                and _effective_mode_for_filter
-                == TradingStrategyMode.DAY_TRADE
                 and consensus.score
                 < consensus.threshold + _score_premium
             ):
                 return _filt_hold(
-                    f"RANGE+DAYスコアプレミアム: "
+                    f"RANGEスコアプレミアム: "
                     f"score={consensus.score:.1f}"
                     f"<{consensus.threshold + _score_premium:.1f}"
                 )
