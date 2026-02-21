@@ -179,7 +179,7 @@ def parse_args() -> argparse.Namespace:
         "--use-short-tf",
         action="store_true",
         default=True,
-        help="短い時間足（M5）を基準に使用（デフォルト: True）",
+        help="短い時間足（M1）を基準に使用（デフォルト: True）",
     )
     parser.add_argument(
         "--no-short-tf",
@@ -487,7 +487,7 @@ def parse_years(years_str: str) -> tuple[int, int]:
 def print_header(args: argparse.Namespace) -> None:
     """ヘッダーを表示"""
     use_short_tf = not args.no_short_tf
-    base_tf = "M5（5分毎判断）" if use_short_tf else "M15（15分毎判断）"
+    base_tf = "M1（1分毎判断）" if use_short_tf else "M15（15分毎判断）"
 
     try:
         from rich.console import Console
@@ -503,7 +503,7 @@ def print_header(args: argparse.Namespace) -> None:
 
         table.add_row("シンボル", args.symbol)
         table.add_row("判断頻度", base_tf)
-        table.add_row("評価時間足", "M5, M15, H1, H4, D1")
+        table.add_row("評価時間足", "M15, H1, H4, D1")
         if args.start_date or args.end_date:
             _sy, _ey = parse_years(args.years)
             _s = args.start_date or f"{_sy}-01-01"
@@ -533,7 +533,7 @@ def print_header(args: argparse.Namespace) -> None:
         print("=" * 80)
         print(f"シンボル: {args.symbol}")
         print(f"トレード判断頻度: {base_tf}")
-        print(f"評価時間足: M5, M15, H1, H4, D1（マルチタイムフレーム）")
+        print(f"評価時間足: M15, H1, H4, D1（マルチタイムフレーム）")
         if args.start_date or args.end_date:
             _sy, _ey = parse_years(args.years)
             _s = args.start_date or f"{_sy}-01-01"
