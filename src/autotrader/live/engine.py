@@ -227,7 +227,7 @@ class LiveTradingEngine:
         logger.debug("データ更新タイマーリセット")
 
     def get_current_entry_threshold(
-        self, mode_str: str | None
+        self, mode_str: str | None = None,
     ) -> float | None:
         """現在のbot設定からエントリー閾値を取得（デモ/ライブ切替即時反映）
 
