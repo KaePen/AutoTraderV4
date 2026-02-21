@@ -121,6 +121,20 @@ def parse_args() -> argparse.Namespace:
         default="2020-2024",
         help="バックテスト期間（例: 2020-2024）",
     )
+    parser.add_argument(
+        "--start-date",
+        type=str,
+        default=None,
+        metavar="YYYY-MM-DD",
+        help="開始日（日単位指定、--yearsより優先、例: 2023-06-01）",
+    )
+    parser.add_argument(
+        "--end-date",
+        type=str,
+        default=None,
+        metavar="YYYY-MM-DD",
+        help="終了日（日単位指定、--yearsより優先、例: 2025-09-30）",
+    )
 
     # シンボル・時間足設定
     parser.add_argument(
@@ -490,7 +504,13 @@ def print_header(args: argparse.Namespace) -> None:
         table.add_row("シンボル", args.symbol)
         table.add_row("判断頻度", base_tf)
         table.add_row("評価時間足", "M5, M15, H1, H4, D1")
-        table.add_row("期間", args.years)
+        if args.start_date or args.end_date:
+            _sy, _ey = parse_years(args.years)
+            _s = args.start_date or f"{_sy}-01-01"
+            _e = args.end_date or f"{_ey}-12-31"
+            table.add_row("期間", f"{_s} ～ {_e}")
+        else:
+            table.add_row("期間", args.years)
         table.add_row("初期残高", f"JPY{args.initial_balance:,.0f}")
         table.add_row("ボリューム", str(args.volume))
         if args.parallel:
@@ -514,7 +534,13 @@ def print_header(args: argparse.Namespace) -> None:
         print(f"シンボル: {args.symbol}")
         print(f"トレード判断頻度: {base_tf}")
         print(f"評価時間足: M5, M15, H1, H4, D1（マルチタイムフレーム）")
-        print(f"期間: {args.years}")
+        if args.start_date or args.end_date:
+            _sy, _ey = parse_years(args.years)
+            _s = args.start_date or f"{_sy}-01-01"
+            _e = args.end_date or f"{_ey}-12-31"
+            print(f"期間: {_s} ～ {_e}")
+        else:
+            print(f"期間: {args.years}")
         print(f"初期残高: JPY{args.initial_balance:,.0f}")
         print(f"ボリューム: {args.volume}")
         print("=" * 80)
@@ -606,30 +632,68 @@ def print_yearly_results(yearly_results: list) -> None:
     if not yearly_results:
         return
 
-    print(f"\n{'=' * 80}")
-    print("年別詳細")
-    print(f"{'=' * 80}")
-    print(
-        f"{'年':<6} {'取引数':>8} {'勝率':>8} {'非敗率':>8} "
-        f"{'PF':>8} {'利益':>14} {'DD':>8}"
-    )
-    print("-" * 90)
+    try:
+        from rich.console import Console
+        from rich.table import Table
 
-    for r in yearly_results:
-        nlr = r.get("non_loss_rate", 0.0)
-        print(
-            f"{r['year']:<6} "
-            f"{r['trades']:>8} "
-            f"{r['win_rate']:>7.1f}% "
-            f"{nlr:>7.1f}% "
-            f"{r['profit_factor']:>7.2f} "
-            f"JPY{r['net_profit']:>+12,.0f} "
-            f"{r['max_drawdown']:>7.2f}%"
+        console = Console()
+        n = len(yearly_results)
+        profitable = sum(1 for r in yearly_results if r["net_profit"] > 0)
+
+        table = Table(
+            title=f"年別詳細（{n}年分）",
+            show_header=True,
+            header_style="bold cyan",
         )
+        table.add_column("年", style="bold", justify="right")
+        table.add_column("取引数", justify="right")
+        table.add_column("勝率", justify="right")
+        table.add_column("非敗率", justify="right")
+        table.add_column("PF", justify="right")
+        table.add_column("利益", justify="right")
+        table.add_column("DD", justify="right")
 
-    print("-" * 90)
-    profitable = sum(1 for r in yearly_results if r["net_profit"] > 0)
-    print(f"黒字年: {profitable}/{len(yearly_results)}")
+        for r in yearly_results:
+            nlr = r.get("non_loss_rate", 0.0)
+            profit = r["net_profit"]
+            color = "green" if profit >= 0 else "red"
+            table.add_row(
+                str(r["year"]),
+                str(r["trades"]),
+                f"{r['win_rate']:.1f}%",
+                f"{nlr:.1f}%",
+                f"{r['profit_factor']:.2f}",
+                f"[{color}]JPY{profit:+,.0f}[/{color}]",
+                f"{r['max_drawdown']:.2f}%",
+            )
+
+        console.print()
+        console.print(table)
+        console.print(f"黒字年: {profitable}/{n}")
+
+    except ImportError:
+        print(f"\n{'=' * 80}")
+        print(f"年別詳細（{len(yearly_results)}年分）")
+        print(f"{'=' * 80}")
+        print(
+            f"{'年':<6} {'取引数':>8} {'勝率':>8} {'非敗率':>8} "
+            f"{'PF':>8} {'利益':>14} {'DD':>8}"
+        )
+        print("-" * 90)
+        for r in yearly_results:
+            nlr = r.get("non_loss_rate", 0.0)
+            print(
+                f"{r['year']:<6} "
+                f"{r['trades']:>8} "
+                f"{r['win_rate']:>7.1f}% "
+                f"{nlr:>7.1f}% "
+                f"{r['profit_factor']:>7.2f} "
+                f"JPY{r['net_profit']:>+12,.0f} "
+                f"{r['max_drawdown']:>7.2f}%"
+            )
+        print("-" * 90)
+        profitable = sum(1 for r in yearly_results if r["net_profit"] > 0)
+        print(f"黒字年: {profitable}/{len(yearly_results)}")
 
 
 def print_monthly_summary(monthly_results: list, verbose: bool = False) -> None:
@@ -710,7 +774,30 @@ def run_single_backtest(args: argparse.Namespace):
     )
     from autotrader.backtest.events import RichEventListener
 
+    from datetime import datetime as _dt, timedelta as _td
+
     start_year, end_year = parse_years(args.years)
+
+    # 日単位の期間指定（--start-date/--end-date）
+    period_start: _dt | None = None
+    period_end: _dt | None = None
+    if args.start_date:
+        period_start = _dt.strptime(args.start_date, "%Y-%m-%d")
+        start_year = period_start.year
+    if args.end_date:
+        _end_day = _dt.strptime(args.end_date, "%Y-%m-%d")
+        # 終了日を含む（exclusive end = 翌日0時）
+        period_end = _end_day + _td(days=1)
+        end_year = _end_day.year
+
+    # --parallel と日付指定の組み合わせは非対応
+    if args.parallel and (period_start is not None or period_end is not None):
+        print(
+            "警告: --parallel モードは --start-date/--end-date に"
+            "対応していません。日単位の期間指定は無視されます。"
+        )
+        period_start = None
+        period_end = None
 
     # 短い時間足オプション（--no-short-tfが指定されていなければTrue）
     use_short_tf = not args.no_short_tf
@@ -830,6 +917,8 @@ def run_single_backtest(args: argparse.Namespace):
         use_parallel_tf=args.parallel,
         enable_scalping=args.enable_scalping,
         pm_config=pm_config,
+        period_start=period_start,
+        period_end=period_end,
     )
 
     print_results(result)
