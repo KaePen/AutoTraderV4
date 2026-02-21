@@ -433,6 +433,11 @@ class RichEventListener(EventListener):
                 )
                 if self._progress:
                     self._progress.start()
+                    # 準備フェーズを即座に可視化（TFロード前の空白期間対策）
+                    self._prep_task_id = self._progress.add_task(
+                        "[yellow]準備中...[/yellow]",
+                        total=None,
+                    )
             else:
                 print(f"\n=== バックテスト開始: {start_year}-{end_year} ===", flush=True)
 
@@ -594,15 +599,18 @@ class RichEventListener(EventListener):
 
         if self._is_tty and self._progress:
             if self._prep_task_id is None:
-                # 最初のイベント: タスクを新規作成
+                # タスク未作成の場合のみ新規作成
                 self._prep_task_id = self._progress.add_task(
                     desc_tty,
                     total=event.total,
                     completed=event.current,
                 )
             else:
+                # BACKTEST_START で作成済みの「準備中...」タスクを更新
+                # （total=None → 確定値に変更し、進捗を反映）
                 self._progress.update(
                     self._prep_task_id,
+                    total=event.total,
                     completed=event.current,
                     description=desc_tty,
                 )
