@@ -503,7 +503,7 @@ def print_header(args: argparse.Namespace) -> None:
 
         table.add_row("シンボル", args.symbol)
         table.add_row("判断頻度", base_tf)
-        table.add_row("評価時間足", "M15, H1, H4, D1")
+        table.add_row("評価時間足", "M1, M5, M15, M30, H1, H4, H8, D1")
         if args.start_date or args.end_date:
             _sy, _ey = parse_years(args.years)
             _s = args.start_date or f"{_sy}-01-01"
@@ -533,7 +533,7 @@ def print_header(args: argparse.Namespace) -> None:
         print("=" * 80)
         print(f"シンボル: {args.symbol}")
         print(f"トレード判断頻度: {base_tf}")
-        print(f"評価時間足: M15, H1, H4, D1（マルチタイムフレーム）")
+        print(f"評価時間足: M1, M5, M15, M30, H1, H4, H8, D1（マルチタイムフレーム）")
         if args.start_date or args.end_date:
             _sy, _ey = parse_years(args.years)
             _s = args.start_date or f"{_sy}-01-01"
@@ -862,7 +862,6 @@ def run_single_backtest(args: argparse.Namespace):
         else args.range_day_score_premium
     )
     bot_config = UnifiedBotConfig(
-        timeframes=["M15", "H1", "H4", "D1"],
         range_day_bbw_threshold=args.range_day_bbw,
         range_day_score_premium=_score_prem,
         weak_hours_enabled=not args.no_weak_hours,
