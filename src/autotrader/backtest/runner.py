@@ -853,6 +853,10 @@ class BacktestRunner:
             max_workers = min(len(years), os.cpu_count() or 4)
             _total_years = len(years)
             _completed_count = 0
+            # 並列開始を即座に通知（最初の年完了まで空白が出ないように）
+            self._emitter.emit_init_progress(
+                "year_parallel", "", 0, _total_years
+            )
             with ThreadPoolExecutor(
                 max_workers=max_workers
             ) as executor:
