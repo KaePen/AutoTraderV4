@@ -128,12 +128,6 @@ class SettingsService:
                 weak_hours_score_premium=(
                     bot.weak_hours_score_premium
                 ),
-                tokyo_night_swing_enabled=(
-                    bot.tokyo_night_swing_enabled
-                ),
-                tokyo_night_swing_premium=(
-                    bot.tokyo_night_swing_premium
-                ),
             ),
             capital_management=CapitalManagementConfigResponse(
                 use_dynamic_lot=bot.use_dynamic_lot,

@@ -34,10 +34,6 @@ class EntryFilterUpdate(BaseModel):
     weak_hours_score_premium: float | None = Field(
         default=None, ge=0.0, le=2.0
     )
-    tokyo_night_swing_enabled: bool | None = None
-    tokyo_night_swing_premium: float | None = Field(
-        default=None, ge=0.0, le=2.0
-    )
 
 
 class CapitalManagementUpdate(BaseModel):
