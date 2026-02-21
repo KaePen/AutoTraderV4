@@ -182,10 +182,20 @@ class BacktestRunner:
             return False
         return self._cancel_callback()
 
-    def load_data(self) -> None:
-        """データを読み込み"""
+    def load_data(
+        self,
+        on_tf_loaded: "Callable[[str, int, int], None] | None" = None,
+    ) -> None:
+        """データを読み込み
+
+        Args:
+            on_tf_loaded: TFロード完了コールバック(tf名, 完了数, 全数)。
+                各タイムフレームのインジケータ計算後に呼ばれ、UIへの進捗通知に使用。
+        """
         symbol = self.config.symbol
         tf = self.config.timeframe
+        _total = 4  # H1, H4, D1, M15
+        _loaded = 0
 
         # メイン時間足
         main_files = list(self.data_dir.glob(f"{symbol}_{tf}_*.csv"))
@@ -195,12 +205,18 @@ class BacktestRunner:
         if main_files:
             self._h1_df = DataLoader.load_mt5_csv(main_files[0])
             self._h1_df = self._calculate_indicators(self._h1_df)
+        _loaded += 1
+        if on_tf_loaded:
+            on_tf_loaded("H1", _loaded, _total)
 
         # 上位足（H4）
         h4_files = list(self.data_dir.glob(f"{symbol}_H4_*.csv"))
         if h4_files:
             self._h4_df = DataLoader.load_mt5_csv(h4_files[0])
             self._h4_df = self._calculate_indicators(self._h4_df)
+        _loaded += 1
+        if on_tf_loaded:
+            on_tf_loaded("H4", _loaded, _total)
 
         # 日足
         d1_files = list(self.data_dir.glob(f"{symbol}_Daily_*.csv"))
@@ -209,12 +225,18 @@ class BacktestRunner:
         if d1_files:
             self._d1_df = DataLoader.load_mt5_csv(d1_files[0])
             self._d1_df = self._calculate_indicators(self._d1_df)
+        _loaded += 1
+        if on_tf_loaded:
+            on_tf_loaded("D1", _loaded, _total)
 
         # M15（マルチ戦略用）
         m15_files = list(self.data_dir.glob(f"{symbol}_M15_*.csv"))
         if m15_files:
             self._m15_df = DataLoader.load_mt5_csv(m15_files[0])
             self._m15_df = self._calculate_indicators(self._m15_df)
+        _loaded += 1
+        if on_tf_loaded:
+            on_tf_loaded("M15", _loaded, _total)
 
     def _calculate_indicators(self, df: pd.DataFrame) -> pd.DataFrame:
         """インジケータを計算

@@ -822,19 +822,49 @@ def run_single_backtest(args: argparse.Namespace):
     # データ読み込み（進捗表示付き）
     try:
         from rich.console import Console
-        from rich.progress import Progress, SpinnerColumn, TextColumn
+        from rich.progress import (
+            BarColumn,
+            Progress,
+            SpinnerColumn,
+            TaskProgressColumn,
+            TextColumn,
+        )
 
         console = Console()
 
         with Progress(
             SpinnerColumn(),
             TextColumn("[bold blue]{task.description}"),
+            BarColumn(),
+            TaskProgressColumn(),
             console=console,
             transient=True,
         ) as progress:
-            progress.add_task("データ読み込み中...", total=None)
+            task_id = progress.add_task(
+                "読み込み中: H1", total=4
+            )
             runner = service.create_runner()
-            runner.load_data()
+
+            def _on_tf_loaded(tf: str, current: int, total: int) -> None:
+                next_labels = {
+                    "H1": "H4",
+                    "H4": "D1",
+                    "D1": "M15",
+                    "M15": "完了",
+                }
+                next_tf = next_labels.get(tf, "完了")
+                desc = (
+                    f"読み込み中: {next_tf}"
+                    if next_tf != "完了"
+                    else "[green]データ読み込み完了[/green]"
+                )
+                progress.update(
+                    task_id,
+                    completed=current,
+                    description=desc,
+                )
+
+            runner.load_data(on_tf_loaded=_on_tf_loaded)
 
         console.print("[green]✓[/green] データ読み込み完了")
 
