@@ -142,6 +142,11 @@ class UnifiedBotConfig:
     # Weak Hours RANGEフィルター（JST 18-21 = UTC 9-12）
     weak_hours_enabled: bool = True
     weak_hours_score_premium: float = 0.5
+    # 東京深夜SWINGフィルター
+    tokyo_night_swing_enabled: bool = True
+    tokyo_night_swing_premium: float = 0.3
+    # SWING低ボラATR比率フィルター（0.0=無効）
+    swing_low_vol_atr_ratio: float = 0.0
     # 動的ロットサイズ（PositionSizer結果をSimulatorに渡す）
     use_dynamic_lot: bool = True
     # 資金管理パラメータ（PositionSizerConfigに渡す）
@@ -157,6 +162,8 @@ class UnifiedBotConfig:
     demo_mode: bool = False
     # コンセンサス閾値（ライブ本番用）
     consensus_threshold: float = 4.5
+    # バックテスト用コンセンサス閾値
+    consensus_day_trade_threshold: float = 5.5
     # 最大同時ポジション数（ライブ用）
     max_positions: int = 1
     # デモモード時の最大同時ポジション数
