@@ -6,7 +6,9 @@
 from __future__ import annotations
 
 import logging
+import os
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -536,11 +538,31 @@ class BacktestRunner:
         yearly_results: list[dict[str, Any]],
         monthly_results: list[dict[str, Any]],
     ) -> BacktestResult:
-        """結果を集計
+        """結果を集計（後方互換用）
 
         Args:
             yearly_results: 年別結果
             monthly_results: 月別結果
+
+        Returns:
+            BacktestResult: 集計結果
+        """
+        result = self._aggregate_results_from_yearly(yearly_results)
+        # 外部から monthly_results が渡された場合は上書き
+        if monthly_results:
+            result.monthly_results = monthly_results
+        return result
+
+    def _aggregate_results_from_yearly(
+        self,
+        yearly_results: list[dict[str, Any]],
+    ) -> BacktestResult:
+        """年別結果から集計結果を生成
+
+        各年の結果から月別結果を抽出して集計する。
+
+        Args:
+            yearly_results: 年別結果（monthly_results フィールドを含む）
 
         Returns:
             BacktestResult: 集計結果
@@ -565,7 +587,17 @@ class BacktestRunner:
         )
 
         years = len(yearly_results)
-        annual_return = total_profit / self.config.initial_balance * 100 / years
+        annual_return = (
+            total_profit / self.config.initial_balance * 100 / years
+        )
+
+        # 各年の月別結果をマージして時系列順にソート
+        monthly_results: list[dict[str, Any]] = []
+        for yr in yearly_results:
+            monthly_results.extend(yr.get("monthly_results", []))
+        monthly_results.sort(
+            key=lambda r: (r.get("year", 0), r.get("month", 0))
+        )
 
         return BacktestResult(
             trades=total_trades,
@@ -671,8 +703,13 @@ class BacktestRunner:
         fundamental_guard_minutes: int = 30,
         period_start: datetime | None = None,
         period_end: datetime | None = None,
+        sequential: bool = False,
     ) -> BacktestResult:
         """統合ボットでのバックテスト実行
+
+        複数年指定時はデフォルトで年単位の並列実行を行う。
+        各年が独立した UnifiedTradeBot インスタンスを使用するため
+        年をまたいだ状態の汚染が発生しない。
 
         Args:
             start_year: 開始年
@@ -687,11 +724,12 @@ class BacktestRunner:
             fundamental_guard_minutes: 重要指標前の停止分数
             period_start: 日単位の開始日時（Noneで年始）
             period_end: 日単位の終了日時・exclusive（Noneで年末）
+            sequential: Trueでシーケンシャル実行を強制（デバッグ用）
 
         Returns:
             BacktestResult: バックテスト結果
         """
-        from autotrader.decision.unified import UnifiedBotConfig, UnifiedTradeBot
+        from autotrader.decision.unified import UnifiedBotConfig
 
         if self._h1_df is None:
             self.load_data()
@@ -716,13 +754,8 @@ class BacktestRunner:
                     f"[Fundamental] CSV読込失敗（無効化）: {e}"
                 )
 
-        # 統合ボット生成
+        # ボット設定（各年の bot インスタンスはこの設定から生成）
         bot_config = config or UnifiedBotConfig()
-        bot = UnifiedTradeBot(bot_config)
-        # 初期資金を資金管理の基準としてセット
-        bot.state.initial_equity = self.config.initial_balance
-        bot.state.equity = self.config.initial_balance
-        bot.state.peak_equity = self.config.initial_balance
 
         # UNIVERSALモードまたはbot_configにM1/M5が含まれる場合は自動でロード。
         # enable_scalping/use_m1は後方互換性のため維持するが、
@@ -734,9 +767,8 @@ class BacktestRunner:
             or bool(set(bot_config.timeframes) & _short_tfs)
         )
         market_data = self._load_all_timeframes(include_m1=_needs_short_tf)
-        bot.set_market_data(market_data)
 
-        # 並列マルチTFモードの場合
+        # 並列マルチTFモードの場合（旧方式・後方互換）
         if use_parallel_tf:
             return self._run_parallel_multi_tf(
                 start_year=start_year,
@@ -766,9 +798,8 @@ class BacktestRunner:
             use_dynamic_lot=bot_config.use_dynamic_lot,
         )
 
-        # 年別・月別結果を収集
-        yearly_results = []
-        monthly_results = []
+        years = list(range(start_year, end_year + 1))
+        yearly_results: list[dict[str, Any]] = []
 
         # イベント発行: バックテスト開始
         self._emitter.emit_backtest_start(
@@ -783,37 +814,84 @@ class BacktestRunner:
             }
         )
 
-        for year in range(start_year, end_year + 1):
-            # キャンセルチェック
-            if self._check_cancel_requested():
-                self._emitter.emit_backtest_end({"cancelled": True})
-                return self._aggregate_results(yearly_results, monthly_results)
+        if len(years) > 1 and not sequential:
+            # 年単位並列実行：各年が独立した bot インスタンスを使用
+            max_workers = min(len(years), os.cpu_count() or 4)
+            with ThreadPoolExecutor(
+                max_workers=max_workers
+            ) as executor:
+                futures = {
+                    executor.submit(
+                        self._run_unified_year,
+                        bot_config,
+                        sim_config,
+                        year,
+                        market_data,
+                        use_m1=use_m1,
+                        multi_mode_controller=multi_mode_controller,
+                        fundamental_provider=fundamental_provider,
+                        period_start=period_start,
+                        period_end=period_end,
+                        emitter=BacktestEventEmitter(),  # リスナーなし
+                    ): year
+                    for year in years
+                }
+                for future in as_completed(futures):
+                    year_result = future.result()
+                    if year_result is not None:
+                        yearly_results.append(year_result)
 
-            self._emitter.emit_year_start(year)
-            year_result = self._run_unified_year(
-                bot, sim_config, year, monthly_results,
-                use_m1=use_m1,
-                multi_mode_controller=multi_mode_controller,
-                fundamental_provider=fundamental_provider,
-                period_start=period_start,
-                period_end=period_end,
-            )
-            if year_result is None and self._check_cancel_requested():
-                # キャンセルによる中断
-                return self._aggregate_results(yearly_results, monthly_results)
-            if year_result:
-                yearly_results.append(year_result)
-                self._emitter.emit_year_end(year_result)
+            yearly_results.sort(key=lambda r: r["year"])
+        else:
+            # シーケンシャル実行（単年 または --sequential 指定時）
+            for year in years:
+                # キャンセルチェック
+                if self._check_cancel_requested():
+                    self._emitter.emit_backtest_end(
+                        {"cancelled": True}
+                    )
+                    return self._aggregate_results_from_yearly(
+                        yearly_results
+                    )
 
-        result = self._aggregate_results(yearly_results, monthly_results)
-        
+                self._emitter.emit_year_start(year)
+                year_result = self._run_unified_year(
+                    bot_config,
+                    sim_config,
+                    year,
+                    market_data,
+                    use_m1=use_m1,
+                    multi_mode_controller=multi_mode_controller,
+                    fundamental_provider=fundamental_provider,
+                    period_start=period_start,
+                    period_end=period_end,
+                )
+                if (
+                    year_result is None
+                    and self._check_cancel_requested()
+                ):
+                    return self._aggregate_results_from_yearly(
+                        yearly_results
+                    )
+                if year_result is not None:
+                    yearly_results.append(year_result)
+                    self._emitter.emit_year_end(year_result)
+
+        # 並列実行後: 年別サマリをまとめて発行
+        if len(years) > 1 and not sequential:
+            for yr in yearly_results:
+                self._emitter.emit_year_start(yr["year"])
+                self._emitter.emit_year_end(yr)
+
+        result = self._aggregate_results_from_yearly(yearly_results)
+
         # イベント発行: バックテスト終了
         self._emitter.emit_backtest_end({
             "total_trades": result.trades,
             "win_rate": result.win_rate,
             "profit_factor": result.profit_factor,
         })
-        
+
         return result
 
     def _load_all_timeframes(
@@ -1015,32 +1093,49 @@ class BacktestRunner:
 
     def _run_unified_year(
         self,
-        bot: "UnifiedTradeBot",
+        bot_config: "UnifiedBotConfig",
         sim_config: SimulatorConfig,
         year: int,
-        monthly_results: list[dict[str, Any]],
+        market_data: "dict[str, pd.DataFrame]",
         use_m1: bool = False,
         multi_mode_controller: Any = None,
         fundamental_provider: Any = None,
         period_start: datetime | None = None,
         period_end: datetime | None = None,
+        emitter: "BacktestEventEmitter | None" = None,
     ) -> dict[str, Any] | None:
-        """統合ボットで1年分のバックテスト実行
+        """統合ボットで1年分のバックテスト実行（self-contained）
+
+        年ごとに新しい UnifiedTradeBot インスタンスを生成するため、
+        年をまたいだ状態の累積が発生しない。
+        並列実行に対応している。
 
         Args:
-            bot: 統合トレードボット
+            bot_config: ボット設定（各年で fresh な bot を生成）
             sim_config: シミュレーター設定
             year: 対象年
-            monthly_results: 月別結果リスト
+            market_data: 全時間足データ
             use_m1: M1データを基準タイムフレームとして使用
             multi_mode_controller: マルチモードコントローラー
+            fundamental_provider: ファンダメンタルプロバイダー
             period_start: 日単位の開始日時（Noneで年始）
             period_end: 日単位の終了日時・exclusive（Noneで年末）
+            emitter: イベントエミッター（Noneの場合は self._emitter）
 
         Returns:
-            年別結果
+            年別結果（monthly_results フィールドを含む）
         """
-        from autotrader.decision.unified import UnifiedTradeBot
+        from autotrader.decision.unified import UnifiedTradeBot, UnifiedBotConfig  # noqa: F401
+
+        # 年ごとに fresh な bot を生成（状態の累積を防止）
+        bot = UnifiedTradeBot(bot_config)
+        bot.state.initial_equity = sim_config.initial_balance
+        bot.state.equity = sim_config.initial_balance
+        bot.state.peak_equity = sim_config.initial_balance
+        bot.set_market_data(market_data)
+
+        # イベントエミッター（並列時はリスナーなしの no-op emitter）
+        _emitter = emitter if emitter is not None else self._emitter
 
         # 年の標準範囲
         start_date = datetime(year, 1, 1)
@@ -1089,7 +1184,8 @@ class BacktestRunner:
         _pos_evt_logger = PositionEventLogger()
         simulator.set_position_event_logger(_pos_evt_logger)
 
-        # 月別トラッキング
+        # 月別トラッキング（スレッド安全なローカルリスト）
+        _monthly_results: list[dict[str, Any]] = []
         current_month = None
         month_start_balance = sim_config.initial_balance
         month_trades = 0
@@ -1097,7 +1193,7 @@ class BacktestRunner:
         # 進捗トラッキング
         total_rows = len(period_df)
         start_time = time.time()
-        
+
         # メトリクス追跡
         winning_trades = 0
         losing_trades = 0
@@ -1129,9 +1225,9 @@ class BacktestRunner:
                     "pnl": month_pnl,
                     "return_pct": month_return,
                 }
-                monthly_results.append(month_result)
-                self._emitter.emit_month_end(month_result)
-                
+                _monthly_results.append(month_result)
+                _emitter.emit_month_end(month_result)
+
                 current_month = candle_month
                 month_start_balance = simulator.state.balance
                 month_trades = 0
@@ -1175,7 +1271,7 @@ class BacktestRunner:
 
             # シグナルイベント発行（HOLD以外）
             if consolidated.direction.value != "HOLD":
-                self._emitter.emit_signal(
+                _emitter.emit_signal(
                     signal_type=consolidated.direction.value,
                     symbol=self.config.symbol,
                     timeframe=tf.value,
@@ -1332,7 +1428,7 @@ class BacktestRunner:
                             consolidated.trend_strength
                         ),
                     }
-                    self._emitter.emit_trade_opened(
+                    _emitter.emit_trade_opened(
                         trade_id=pos.position_id,
                         symbol=pos.symbol,
                         direction=pos.signal_type.value,
@@ -1441,7 +1537,7 @@ class BacktestRunner:
                 _position_id = (
                     new_trade.position_id or ""
                 )
-                self._emitter.emit_trade_closed(
+                _emitter.emit_trade_closed(
                     trade_id=new_trade.trade_id,
                     symbol=new_trade.symbol,
                     direction=new_trade.signal_type.value,
@@ -1535,7 +1631,7 @@ class BacktestRunner:
 
                 # メトリクス発行
                 total_trades = len(closed_trades)
-                self._emitter.emit_metrics(
+                _emitter.emit_metrics(
                     balance=simulator.state.balance,
                     equity=simulator.state.balance,
                     total_trades=total_trades,
@@ -1548,7 +1644,7 @@ class BacktestRunner:
             progress_interval = 500 if tf == Timeframe.M1 else 100
             if idx % progress_interval == 0:
                 elapsed = time.time() - start_time
-                self._emitter.emit_progress(
+                _emitter.emit_progress(
                     current=idx,
                     total=total_rows,
                     elapsed=elapsed,
@@ -1557,7 +1653,7 @@ class BacktestRunner:
 
                 # キャンセルチェック
                 if self._check_cancel_requested():
-                    self._emitter.emit_backtest_end({"cancelled": True})
+                    _emitter.emit_backtest_end({"cancelled": True})
                     return None
 
         # 強制決済
@@ -1575,8 +1671,8 @@ class BacktestRunner:
                 "pnl": month_pnl,
                 "return_pct": month_return,
             }
-            monthly_results.append(month_result)
-            self._emitter.emit_month_end(month_result)
+            _monthly_results.append(month_result)
+            _emitter.emit_month_end(month_result)
 
         # ポジションイベントCSV出力
         if _pos_evt_logger.event_count > 0:
@@ -1611,6 +1707,7 @@ class BacktestRunner:
             "max_drawdown": metrics.max_drawdown_pct * 100,
             "sharpe": metrics.sharpe_ratio or 0,
             "breakdown": breakdown,
+            "monthly_results": _monthly_results,
         }
 
     def _validate_trade_log(
