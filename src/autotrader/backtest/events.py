@@ -39,6 +39,9 @@ class EventType(Enum):
     METRICS_UPDATE = "metrics_update"
     INDICATOR_UPDATE = "indicator_update"
 
+    # 初期化進捗イベント（TFロード・年並列実行の無音フェーズを可視化）
+    INIT_PROGRESS = "init_progress"
+
 
 @dataclass
 class BacktestEvent:
@@ -64,6 +67,28 @@ class ProgressEvent(BacktestEvent):
     def __post_init__(self):
         if self.total > 0:
             self.percentage = (self.current / self.total) * 100
+
+
+@dataclass
+class InitProgressEvent(BacktestEvent):
+    """初期化進捗イベント
+
+    TFインジケータ計算・年並列実行など、無音のフェーズをUIに通知する。
+
+    Attributes:
+        phase: フェーズ識別子
+            "tf_loading": タイムフレームごとのインジケータ計算
+            "year_parallel": 年並列バックテストの完了通知
+        label: 現在処理中の項目ラベル（例: "M1", "2023年"）
+        current: 完了済み件数
+        total: 全件数
+    """
+
+    event_type: EventType = field(default=EventType.INIT_PROGRESS)
+    phase: str = ""
+    label: str = ""
+    current: int = 0
+    total: int = 0
 
 
 @dataclass
@@ -359,6 +384,7 @@ class RichEventListener(EventListener):
         self._task_id = None
         self._console = None
         self._year_task_id = None
+        self._prep_task_id = None
         self._current_year = None
         self._last_progress_pct = -10
         self._is_tty = True
@@ -409,6 +435,10 @@ class RichEventListener(EventListener):
                     self._progress.start()
             else:
                 print(f"\n=== バックテスト開始: {start_year}-{end_year} ===", flush=True)
+
+        elif event.event_type == EventType.INIT_PROGRESS:
+            if isinstance(event, InitProgressEvent):
+                self._handle_init_progress(event)
 
         elif event.event_type == EventType.BACKTEST_END:
             if self._is_tty and self._progress:
@@ -545,6 +575,44 @@ class RichEventListener(EventListener):
                             flush=True
                         )
 
+    def _handle_init_progress(self, event: InitProgressEvent) -> None:
+        """初期化進捗イベントを処理（TFロード・年並列）"""
+        if event.phase == "tf_loading":
+            desc_tty = (
+                f"[yellow]インジケータ計算[/yellow] "
+                f"[dim]{event.label}[/dim]"
+            )
+            desc_plain = f"  インジケータ計算: {event.label} ({event.current}/{event.total})"
+        elif event.phase == "year_parallel":
+            desc_tty = (
+                f"[cyan]年バックテスト並列実行中[/cyan] "
+                f"[dim]{event.label}完了[/dim]"
+            )
+            desc_plain = f"  並列処理: {event.current}/{event.total}年完了"
+        else:
+            return
+
+        if self._is_tty and self._progress:
+            if self._prep_task_id is None:
+                # 最初のイベント: タスクを新規作成
+                self._prep_task_id = self._progress.add_task(
+                    desc_tty,
+                    total=event.total,
+                    completed=event.current,
+                )
+            else:
+                self._progress.update(
+                    self._prep_task_id,
+                    completed=event.current,
+                    description=desc_tty,
+                )
+            # フェーズ完了時にタスクを削除
+            if event.current >= event.total:
+                self._progress.remove_task(self._prep_task_id)
+                self._prep_task_id = None
+        else:
+            print(desc_plain, flush=True)
+
     def _handle_event_fallback(self, event: BacktestEvent) -> None:
         """richなしでのイベント処理"""
         if event.event_type == EventType.BACKTEST_START:
@@ -581,6 +649,20 @@ class RichEventListener(EventListener):
                 if pct_10 > self._last_progress_pct:
                     self._last_progress_pct = pct_10
                     print(f"    進捗: {pct_10}%", flush=True)
+
+        elif event.event_type == EventType.INIT_PROGRESS:
+            if isinstance(event, InitProgressEvent):
+                if event.phase == "tf_loading":
+                    print(
+                        f"  インジケータ計算: {event.label}"
+                        f" ({event.current}/{event.total})",
+                        flush=True,
+                    )
+                elif event.phase == "year_parallel":
+                    print(
+                        f"  並列処理: {event.current}/{event.total}年完了",
+                        flush=True,
+                    )
 
 
 class ConsoleEventListener(EventListener):
@@ -690,9 +772,24 @@ class BacktestEventEmitter:
             except Exception as e:
                 logger.warning(f"コールバックエラー: {e}")
     
+    def emit_init_progress(
+        self,
+        phase: str,
+        label: str,
+        current: int,
+        total: int,
+    ) -> None:
+        """初期化進捗イベント（TFロード・年並列）"""
+        self.emit(InitProgressEvent(
+            phase=phase,
+            label=label,
+            current=current,
+            total=total,
+        ))
+
     def emit_backtest_start(
-        self, 
-        start_year: int, 
+        self,
+        start_year: int,
         end_year: int,
         config: dict | None = None
     ) -> None:

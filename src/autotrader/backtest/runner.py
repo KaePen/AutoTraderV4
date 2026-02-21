@@ -766,7 +766,35 @@ class BacktestRunner:
             or enable_scalping
             or bool(set(bot_config.timeframes) & _short_tfs)
         )
-        market_data = self._load_all_timeframes(include_m1=_needs_short_tf)
+
+        years = list(range(start_year, end_year + 1))
+        yearly_results: list[dict[str, Any]] = []
+
+        # イベント発行: バックテスト開始（TFロード前に発行しUIを起動）
+        # use_parallel_tf は _run_parallel_multi_tf 内で発行するためスキップ
+        if not use_parallel_tf:
+            self._emitter.emit_backtest_start(
+                start_year=start_year,
+                end_year=end_year,
+                config={
+                    "min_alignment": bot_config.consolidator.min_alignment,
+                    "timeframes": bot_config.timeframes,
+                    "use_m1": use_m1,
+                    "use_multi_mode": use_multi_mode,
+                    "use_parallel_tf": use_parallel_tf,
+                }
+            )
+
+        # TFロード進捗コールバック（use_parallel_tf時はなし）
+        def _on_tf_loaded(tf: str, current: int, total: int) -> None:
+            self._emitter.emit_init_progress(
+                "tf_loading", tf, current, total
+            )
+
+        market_data = self._load_all_timeframes(
+            include_m1=_needs_short_tf,
+            on_tf_loaded=_on_tf_loaded if not use_parallel_tf else None,
+        )
 
         # 並列マルチTFモードの場合（旧方式・後方互換）
         if use_parallel_tf:
@@ -798,25 +826,11 @@ class BacktestRunner:
             use_dynamic_lot=bot_config.use_dynamic_lot,
         )
 
-        years = list(range(start_year, end_year + 1))
-        yearly_results: list[dict[str, Any]] = []
-
-        # イベント発行: バックテスト開始
-        self._emitter.emit_backtest_start(
-            start_year=start_year,
-            end_year=end_year,
-            config={
-                "min_alignment": bot_config.consolidator.min_alignment,
-                "timeframes": bot_config.timeframes,
-                "use_m1": use_m1,
-                "use_multi_mode": use_multi_mode,
-                "use_parallel_tf": use_parallel_tf,
-            }
-        )
-
         if len(years) > 1 and not sequential:
             # 年単位並列実行：各年が独立した bot インスタンスを使用
             max_workers = min(len(years), os.cpu_count() or 4)
+            _total_years = len(years)
+            _completed_count = 0
             with ThreadPoolExecutor(
                 max_workers=max_workers
             ) as executor:
@@ -838,8 +852,17 @@ class BacktestRunner:
                 }
                 for future in as_completed(futures):
                     year_result = future.result()
+                    completed_year = futures[future]
                     if year_result is not None:
                         yearly_results.append(year_result)
+                    _completed_count += 1
+                    # 年完了をUIに通知
+                    self._emitter.emit_init_progress(
+                        "year_parallel",
+                        f"{completed_year}年",
+                        _completed_count,
+                        _total_years,
+                    )
 
             yearly_results.sort(key=lambda r: r["year"])
         else:
@@ -897,12 +920,15 @@ class BacktestRunner:
     def _load_all_timeframes(
         self,
         include_m1: bool = False,
+        on_tf_loaded: "Callable[[str, int, int], None] | None" = None,
     ) -> dict[str, pd.DataFrame]:
         """全時間足データをロード
 
         Args:
             include_m1: M1/M5データを含める（メモリ使用量増加）。
                 UNIVERSALモードでは自動的にTrueになる。
+            on_tf_loaded: TFロード完了コールバック(tf名, 完了数, 全数)。
+                インジケータ計算後に呼ばれ、UIへの進捗通知に使用。
 
         Returns:
             dict[str, pd.DataFrame]: 時間足別データフレーム
@@ -919,6 +945,8 @@ class BacktestRunner:
         else:
             timeframes_to_load = ["M15", "M30", "H1", "H4", "H8", "D1"]
 
+        total_tf = len(timeframes_to_load)
+
         # インスタンス変数との対応マップ
         _tf_attr_map = {
             "M1": "_m1_df",
@@ -927,7 +955,7 @@ class BacktestRunner:
             "H8": "_h8_df",
         }
 
-        for tf in timeframes_to_load:
+        for i, tf in enumerate(timeframes_to_load):
             # ワイルドカードでファイル検索
             pattern = f"USDJPY_{tf}_*.csv"
             tf_files = list(self.data_dir.glob(pattern))
@@ -947,6 +975,10 @@ class BacktestRunner:
                     attr = _tf_attr_map.get(tf)
                     if attr:
                         setattr(self, attr, df)
+
+            # TFロード・インジケータ計算完了を通知
+            if on_tf_loaded is not None:
+                on_tf_loaded(tf, i + 1, total_tf)
 
         # 既にロード済みのデータをマージ（load_data()で先にロードした分）
         for tf, attr in [

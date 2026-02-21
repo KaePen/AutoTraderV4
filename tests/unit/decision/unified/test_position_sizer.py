@@ -272,7 +272,7 @@ class TestSlippageBuffer:
         context = SizingContext(
             equity=1_000_000,
             sl_pips=20.0,
-            confidence=0.7,  # ちょうど1.2x
+            confidence=0.7,  # 0.3 + 0.7*0.7 = 0.79x (区分線形)
             regime=MarketRegime.TREND,
             consecutive_losses=0,
             current_dd_pct=0.0,
@@ -280,11 +280,11 @@ class TestSlippageBuffer:
 
         result = sizer.calculate(context)
 
-        # 手計算: 1M * 0.02 * 1.2 / ((20+2) * 1000) = 1.09
-        # ただしmax_lot_per_trade=2.0で制限される場合あり
-        # risk_budget上限チェックも考慮
+        # 手計算: conf_adjust = 0.3 + 0.7*0.7 = 0.79
+        # 1M * 0.02 * 0.79 / ((20+2) * 1000) ≈ 0.718 → 0.72
+        conf_adjust = 0.3 + 0.7 * 0.7
         expected_lot = (
-            1_000_000 * 0.02 * 1.2
+            1_000_000 * 0.02 * conf_adjust
         ) / (22.0 * 1000.0)
         # max_risk_pct_absoluteによる上限
         max_lot_risk = (
