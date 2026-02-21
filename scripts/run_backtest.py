@@ -327,18 +327,6 @@ def parse_args() -> argparse.Namespace:
         default=0.5,
         help="Weak Hoursスコアプレミアム（デフォルト: 0.5）",
     )
-    # 東京深夜SWINGフィルター
-    parser.add_argument(
-        "--no-tokyo-night-swing",
-        action="store_true",
-        help="東京深夜SWINGフィルター無効化",
-    )
-    parser.add_argument(
-        "--tokyo-night-swing-premium",
-        type=float,
-        default=0.3,
-        help="東京深夜SWINGスコアプレミアム（デフォルト: 0.3）",
-    )
     # 通常Stagnation設定
     parser.add_argument(
         "--stag-exit-minutes",
@@ -351,47 +339,6 @@ def parse_args() -> argparse.Namespace:
         type=float,
         default=0.15,
         help="通常Stagnation MFE閾値（デフォルト: 0.15）",
-    )
-    # SWING専用Stagnation設定
-    parser.add_argument(
-        "--swing-stag-minutes",
-        type=float,
-        default=120.0,
-        help="SWING Stagnation時間（デフォルト: 120分）",
-    )
-    parser.add_argument(
-        "--swing-stag-mfe",
-        type=float,
-        default=0.15,
-        help="SWING Stagnation MFE閾値（デフォルト: 0.15）",
-    )
-    # SWING×TREND専用Stagnation設定
-    parser.add_argument(
-        "--no-swing-trend-stag",
-        action="store_true",
-        help="SWING×TREND stagnation厳格化を無効化",
-    )
-    parser.add_argument(
-        "--swing-trend-stag-minutes",
-        type=float,
-        default=90.0,
-        help="SWING×TREND Stagnation時間（デフォルト: 90分）",
-    )
-    parser.add_argument(
-        "--swing-trend-stag-mfe",
-        type=float,
-        default=0.15,
-        help="SWING×TREND Stagnation MFE閾値（デフォルト: 0.15）",
-    )
-    # SWING低ボラフィルター（絶対ATR最小値）
-    parser.add_argument(
-        "--swing-min-atr",
-        type=float,
-        default=0.0,
-        help=(
-            "SWINGモード絶対ATR最小値（0.0=無効）"
-            " デフォルト: 0.0"
-        ),
     )
     # RANGE×DAY 入口フィルター
     parser.add_argument(
@@ -833,9 +780,6 @@ def run_single_backtest(args: argparse.Namespace):
         range_day_score_premium=_score_prem,
         weak_hours_enabled=not args.no_weak_hours,
         weak_hours_score_premium=args.weak_hours_premium,
-        tokyo_night_swing_enabled=not args.no_tokyo_night_swing,
-        tokyo_night_swing_premium=args.tokyo_night_swing_premium,
-        swing_low_vol_atr_ratio=args.swing_min_atr,
         use_dynamic_lot=not args.fixed_lot,
         max_lot_per_trade=args.max_lot_per_trade,
         max_total_exposure_lot=args.max_total_exposure,
@@ -845,7 +789,7 @@ def run_single_backtest(args: argparse.Namespace):
         equity_caution_pct=args.equity_caution,
         slippage_buffer_pips=args.slippage_buffer,
         tp_sl_ratio=args.tp_sl_ratio,
-        consensus_day_trade_threshold=args.consensus_threshold,
+        consensus_threshold=args.consensus_threshold,
     )
 
     # PositionManagerConfig構築
@@ -872,17 +816,6 @@ def run_single_backtest(args: argparse.Namespace):
             999.0 if args.no_insurance_mfe_block else 0.8
         ),
         insurance_min_holding_minutes=args.insurance_min_hold,
-        swing_stagnation_exit_minutes=args.swing_stag_minutes,
-        swing_stagnation_min_mfe_r=args.swing_stag_mfe,
-        swing_trend_stagnation_enabled=(
-            not args.no_swing_trend_stag
-        ),
-        swing_trend_stagnation_exit_minutes=(
-            args.swing_trend_stag_minutes
-        ),
-        swing_trend_stagnation_min_mfe_r=(
-            args.swing_trend_stag_mfe
-        ),
         range_day_half_r_partial_enabled=(
             not args.no_range_day_half_r_partial
         ),

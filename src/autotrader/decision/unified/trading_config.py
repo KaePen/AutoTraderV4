@@ -7,38 +7,6 @@ TP/SL比率、エントリー閾値、HTFフィルター設定などを集約。
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from enum import Enum
-
-
-class TradingMode(Enum):
-    """トレーディングモード"""
-
-    SCALP = "scalp"
-    SHORT_MID = "short_mid"
-    SWING = "swing"
-
-
-@dataclass(frozen=True)
-class ModeConfig:
-    """モード別設定
-
-    Attributes:
-        mode: トレーディングモード
-        timeframes: 使用する時間足リスト
-        tp_sl_ratio_min: TP/SL比率下限
-        tp_sl_ratio_max: TP/SL比率上限
-        min_score: エントリー最小スコア
-        min_confidence: エントリー最小確度
-        htf_alignment_required: HTF整合性が必須か
-    """
-
-    mode: TradingMode
-    timeframes: tuple[str, ...]
-    tp_sl_ratio_min: float
-    tp_sl_ratio_max: float
-    min_score: float
-    min_confidence: float
-    htf_alignment_required: bool = True
 
 
 @dataclass
@@ -47,37 +15,6 @@ class TradingConfig:
 
     全ての戦略パラメータを一元管理。
     """
-
-    # モード別設定
-    MODE_CONFIGS: dict[TradingMode, ModeConfig] = field(default_factory=lambda: {
-        TradingMode.SCALP: ModeConfig(
-            mode=TradingMode.SCALP,
-            timeframes=("M1", "M5", "M15"),
-            tp_sl_ratio_min=1.5,
-            tp_sl_ratio_max=2.0,
-            min_score=2.0,
-            min_confidence=0.5,
-            htf_alignment_required=True,
-        ),
-        TradingMode.SHORT_MID: ModeConfig(
-            mode=TradingMode.SHORT_MID,
-            timeframes=("M15", "H1", "H4"),
-            tp_sl_ratio_min=1.6,
-            tp_sl_ratio_max=2.2,
-            min_score=2.5,
-            min_confidence=0.55,
-            htf_alignment_required=True,
-        ),
-        TradingMode.SWING: ModeConfig(
-            mode=TradingMode.SWING,
-            timeframes=("H1", "H4", "D1"),
-            tp_sl_ratio_min=1.8,
-            tp_sl_ratio_max=2.5,
-            min_score=3.0,
-            min_confidence=0.6,
-            htf_alignment_required=True,
-        ),
-    })
 
     # 時間足別設定
     TIMEFRAME_CONFIGS: dict[str, dict] = field(default_factory=lambda: {
@@ -144,17 +81,6 @@ class TradingConfig:
     spread_pips: float = 1.5
     slippage_pips: float = 0.5
 
-    def get_mode_config(self, mode: TradingMode) -> ModeConfig:
-        """モード設定を取得
-
-        Args:
-            mode: トレーディングモード
-
-        Returns:
-            ModeConfig: モード設定
-        """
-        return self.MODE_CONFIGS[mode]
-
     def get_timeframe_config(self, timeframe: str) -> dict:
         """時間足設定を取得
 
@@ -165,18 +91,6 @@ class TradingConfig:
             dict: 時間足設定
         """
         return self.TIMEFRAME_CONFIGS.get(timeframe, self.TIMEFRAME_CONFIGS["M15"])
-
-    def get_recommended_tp_sl_ratio(self, mode: TradingMode) -> float:
-        """推奨TP/SL比率を取得
-
-        Args:
-            mode: トレーディングモード
-
-        Returns:
-            float: 推奨TP/SL比率（範囲の中央値）
-        """
-        config = self.get_mode_config(mode)
-        return (config.tp_sl_ratio_min + config.tp_sl_ratio_max) / 2
 
     def get_sl_atr_multiplier(self, timeframe: str) -> float:
         """SL用ATR乗数を取得

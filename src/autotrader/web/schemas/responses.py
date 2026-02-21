@@ -345,8 +345,6 @@ class EntryFilterConfigResponse(BaseModel):
     range_day_score_premium: float = 0.55
     weak_hours_enabled: bool = True
     weak_hours_score_premium: float = 0.5
-    tokyo_night_swing_enabled: bool = True
-    tokyo_night_swing_premium: float = 0.3
 
 
 class CapitalManagementConfigResponse(BaseModel):

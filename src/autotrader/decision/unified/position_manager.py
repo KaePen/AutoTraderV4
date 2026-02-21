@@ -231,13 +231,6 @@ class PositionManagerConfig:
     range_day_half_r_partial_enabled: bool = True
     range_day_half_r_partial_ratio: float = 0.20
     range_day_half_r_trigger: float = 0.5
-    # SWING専用Stagnation
-    swing_stagnation_exit_minutes: float = 120.0
-    swing_stagnation_min_mfe_r: float = 0.15
-    # SWING×TREND専用Stagnation
-    swing_trend_stagnation_enabled: bool = True
-    swing_trend_stagnation_exit_minutes: float = 90.0
-    swing_trend_stagnation_min_mfe_r: float = 0.15
 
 
 class PositionManager:
