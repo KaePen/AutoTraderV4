@@ -770,9 +770,8 @@ class UnifiedTradeBot:
         # ポジションサイジング
         lot = 0.01
         if self.config.enable_position_sizing:
-            confidence = min(
-                consensus.score / consensus.threshold,
-                1.0,
+            confidence = (
+                consensus.score / consensus.threshold
             )
             sizing_context = SizingContext(
                 equity=self.state.equity,

@@ -187,9 +187,9 @@ def parse_args() -> argparse.Namespace:
         help="短い時間足を使用しない（M15基準）",
     )
     parser.add_argument(
-        "--parallel",
+        "--sequential",
         action="store_true",
-        help="並列マルチTFバックテストを実行（全TFでエントリー可能）",
+        help="シーケンシャル実行を強制（デバッグ用。デフォルトは年単位並列）",
     )
     parser.add_argument(
         "--enable-scalping",
@@ -513,8 +513,10 @@ def print_header(args: argparse.Namespace) -> None:
             table.add_row("期間", args.years)
         table.add_row("初期残高", f"JPY{args.initial_balance:,.0f}")
         table.add_row("ボリューム", str(args.volume))
-        if args.parallel:
-            table.add_row("並列TF", "[green]有効[/green]")
+        if args.sequential:
+            table.add_row("実行モード", "[yellow]シーケンシャル[/yellow]")
+        else:
+            table.add_row("実行モード", "[green]年並列[/green]")
         if args.enable_scalping:
             table.add_row("スキャルピング", "[green]有効[/green]")
 
@@ -790,15 +792,6 @@ def run_single_backtest(args: argparse.Namespace):
         period_end = _end_day + _td(days=1)
         end_year = _end_day.year
 
-    # --parallel と日付指定の組み合わせは非対応
-    if args.parallel and (period_start is not None or period_end is not None):
-        print(
-            "警告: --parallel モードは --start-date/--end-date に"
-            "対応していません。日単位の期間指定は無視されます。"
-        )
-        period_start = None
-        period_end = None
-
     # 短い時間足オプション（--no-short-tfが指定されていなければTrue）
     use_short_tf = not args.no_short_tf
 
@@ -813,7 +806,6 @@ def run_single_backtest(args: argparse.Namespace):
         max_positions=args.max_positions,
         verbose=False,
         use_short_timeframe=use_short_tf,
-        use_parallel_tf=args.parallel,
         enable_scalping=args.enable_scalping,
     )
     # spread/slippage上書き
@@ -913,11 +905,11 @@ def run_single_backtest(args: argparse.Namespace):
         end_year,
         bot_config,
         use_m1=use_short_tf,
-        use_parallel_tf=args.parallel,
         enable_scalping=args.enable_scalping,
         pm_config=pm_config,
         period_start=period_start,
         period_end=period_end,
+        sequential=args.sequential,
     )
 
     print_results(result)
