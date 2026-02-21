@@ -667,6 +667,8 @@ class BacktestRunner:
         use_parallel_tf: bool = False,
         enable_scalping: bool = False,
         pm_config: "PositionManagerConfig | None" = None,
+        fundamental_csv: str | None = None,
+        fundamental_guard_minutes: int = 30,
     ) -> BacktestResult:
         """統合ボットでのバックテスト実行
 
@@ -679,6 +681,8 @@ class BacktestRunner:
             use_parallel_tf: 並列マルチTFモード（全TFでエントリー可能）
             enable_scalping: スキャルピングモード有効化（M1/M5からエントリー可能）
             pm_config: PositionManager設定（外部注入）
+            fundamental_csv: 経済イベントCSVパス（Noneで無効）
+            fundamental_guard_minutes: 重要指標前の停止分数
 
         Returns:
             BacktestResult: バックテスト結果
@@ -687,6 +691,26 @@ class BacktestRunner:
 
         if self._h1_df is None:
             self.load_data()
+
+        # ファンダメンタルプロバイダー初期化
+        fundamental_provider = None
+        if fundamental_csv:
+            try:
+                from autotrader.adapters.fundamental.backtest_provider import (
+                    BacktestFundamentalProvider,
+                )
+                fundamental_provider = BacktestFundamentalProvider(
+                    event_guard_minutes=fundamental_guard_minutes
+                )
+                count = fundamental_provider.load_csv(fundamental_csv)
+                logger.info(
+                    f"[Fundamental] バックテスト用CSV読込: "
+                    f"{count}件"
+                )
+            except Exception as e:
+                logger.warning(
+                    f"[Fundamental] CSV読込失敗（無効化）: {e}"
+                )
 
         # 統合ボット生成
         bot_config = config or UnifiedBotConfig()
@@ -766,6 +790,7 @@ class BacktestRunner:
                 bot, sim_config, year, monthly_results,
                 use_m1=use_m1,
                 multi_mode_controller=multi_mode_controller,
+                fundamental_provider=fundamental_provider,
             )
             if year_result is None and self._check_cancel_requested():
                 # キャンセルによる中断
@@ -990,6 +1015,7 @@ class BacktestRunner:
         monthly_results: list[dict[str, Any]],
         use_m1: bool = False,
         multi_mode_controller: Any = None,
+        fundamental_provider: Any = None,
     ) -> dict[str, Any] | None:
         """統合ボットで1年分のバックテスト実行
 
@@ -1109,8 +1135,23 @@ class BacktestRunner:
                 buy_lot, sell_lot
             )
 
-            # 統合ボットでシグナル生成
+            # [FUNDAMENTAL] 重要指標前スキップチェック
             current_time = pd.Timestamp(candle_time)
+            if fundamental_provider is not None:
+                import datetime as _dt
+                _now_utc = _dt.datetime(
+                    candle_time.year, candle_time.month,
+                    candle_time.day, candle_time.hour,
+                    candle_time.minute,
+                    tzinfo=_dt.timezone.utc,
+                )
+                _fctx = fundamental_provider.get_context(
+                    _now_utc, self.config.symbol
+                )
+                if _fctx.has_high_impact_within_30min:
+                    continue  # 重要指標直前はスキップ
+
+            # 統合ボットでシグナル生成
             consolidated = bot.generate_signal(current_time, candle)
 
             # シグナルイベント発行（HOLD以外）

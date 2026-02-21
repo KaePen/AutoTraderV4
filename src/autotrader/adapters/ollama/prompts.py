@@ -254,3 +254,151 @@ def format_mtf_summary(mtf_data: dict[str, Any]) -> str:
         )
 
     return "\n".join(lines) if lines else "データなし"
+
+
+# ==== ファンダメンタルコンテキスト関連プロンプト ====
+
+MARKET_OUTLOOK_PROMPT = """## 市場観分析リクエスト
+
+シンボル: {symbol}
+分析日時: {timestamp}
+現在価格: {current_price}
+
+## 直近の経済指標
+{upcoming_events_section}
+
+## テクニカルサマリー
+{technical_summary}
+
+---
+
+上記の情報を基に、今後{valid_days}日間の市場観を分析してください。
+
+出力フォーマット:
+- direction_score: 方向性スコア（-1.0=強い売り、0=中立、+1.0=強い買い）
+- confidence: 確信度（0.0-1.0）
+- macro_summary: マクロ要約（日本語50文字以内）
+- key_factors: 主要要因リスト（3-5個）
+- valid_days: この見通しの有効日数（1-30）
+- risk_events: 今週の注意すべきイベントリスト"""
+
+
+POST_EVENT_ANALYSIS_PROMPT = """## 指標後バイアス分析リクエスト
+
+シンボル: {symbol}
+分析日時: {timestamp}
+イベント名: {event_name}
+通貨: {currency}
+
+## 発表結果
+- 実績: {actual}
+- 予測: {forecast}
+- 前回: {previous}
+- 予測比サプライズ: {surprise_pct:+.1%}
+
+## 現在の市場状況
+- 現在価格: {current_price}
+- 指標発表後の価格変動: {price_change:+.1%}
+
+---
+
+上記の経済指標発表結果を基に、今後の市場バイアスを分析してください。
+
+出力フォーマット:
+- surprise_direction: サプライズ方向（BULLISH/BEARISH/NEUTRAL）
+- expected_duration_hours: バイアスの持続時間（1-72時間）
+- bias_score: バイアススコア（-1.0=強い売り、+1.0=強い買い）
+- analysis: 分析内容（日本語、具体的に）"""
+
+
+VETO_WITH_FUNDAMENTAL_SECTION = """\n\n## ファンダメンタルコンテキスト
+{fundamental_section}"""
+
+
+def build_market_outlook_prompt(
+    symbol: str,
+    timestamp: str,
+    current_price: float,
+    upcoming_events: list[dict],
+    technical_summary: str = "",
+    valid_days: int = 7,
+) -> str:
+    """市場観分析プロンプトを構築
+
+    Args:
+        symbol: 通貨ペア
+        timestamp: タイムスタンプ
+        current_price: 現在価格
+        upcoming_events: 直近イベントリスト
+        technical_summary: テクニカルサマリー
+        valid_days: 有効日数
+
+    Returns:
+        str: プロンプト文字列
+    """
+    if upcoming_events:
+        event_lines = []
+        for ev in upcoming_events[:5]:
+            event_lines.append(
+                f"  - {ev.get('name', '不明')} "
+                f"({ev.get('minutes_until', 0):.0f}分後, "
+                f"インパクト: {ev.get('impact', '不明')})"
+            )
+        events_section = "\n".join(event_lines)
+    else:
+        events_section = "  直近に重要指標なし"
+
+    return MARKET_OUTLOOK_PROMPT.format(
+        symbol=symbol,
+        timestamp=timestamp,
+        current_price=current_price,
+        upcoming_events_section=events_section,
+        technical_summary=technical_summary or "データなし",
+        valid_days=valid_days,
+    )
+
+
+def build_post_event_analysis_prompt(
+    symbol: str,
+    timestamp: str,
+    event_name: str,
+    currency: str,
+    actual: float | None,
+    forecast: float | None,
+    previous: float | None,
+    current_price: float,
+    price_change: float = 0.0,
+) -> str:
+    """指標後バイアス分析プロンプトを構築
+
+    Args:
+        symbol: 通貨ペア
+        timestamp: タイムスタンプ
+        event_name: イベント名
+        currency: 通貨コード
+        actual: 実績値
+        forecast: 予測値
+        previous: 前回値
+        current_price: 現在価格
+        price_change: 指標発表後の価格変化率
+
+    Returns:
+        str: プロンプト文字列
+    """
+    # サプライズ率計算
+    surprise_pct = 0.0
+    if actual is not None and forecast is not None and forecast != 0:
+        surprise_pct = (actual - forecast) / abs(forecast)
+
+    return POST_EVENT_ANALYSIS_PROMPT.format(
+        symbol=symbol,
+        timestamp=timestamp,
+        event_name=event_name,
+        currency=currency,
+        actual=f"{actual:.4f}" if actual is not None else "未発表",
+        forecast=f"{forecast:.4f}" if forecast is not None else "なし",
+        previous=f"{previous:.4f}" if previous is not None else "なし",
+        surprise_pct=surprise_pct,
+        current_price=current_price,
+        price_change=price_change,
+    )

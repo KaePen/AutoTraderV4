@@ -113,3 +113,142 @@ class AuditLog(Base):
             "user": self.user,
             "timestamp": self.timestamp.isoformat() if self.timestamp else None,
         }
+
+
+class EconomicEventRecord(Base):
+    """経済イベントテーブル
+
+    MT5カレンダー・ForexFactoryから収集した経済指標イベント。
+    """
+
+    __tablename__ = "economic_events"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    event_id = Column(
+        String(64), unique=True, nullable=False, index=True
+    )
+    event_time = Column(DateTime(timezone=True), nullable=False)
+    currency = Column(String(10), nullable=False)
+    symbol = Column(String(20), nullable=True)
+    event_name = Column(String(200), nullable=False)
+    impact = Column(String(10), nullable=False)  # high/medium/low
+    actual = Column(Float, nullable=True)
+    forecast = Column(Float, nullable=True)
+    previous = Column(Float, nullable=True)
+    source = Column(String(20), nullable=False)  # MT5/forex_factory
+    fetched_at = Column(DateTime(timezone=True), nullable=False)
+
+    __table_args__ = (
+        Index(
+            "ix_econ_events_time_currency",
+            "event_time",
+            "currency",
+        ),
+    )
+
+    def to_dict(self) -> dict[str, Any]:
+        """辞書に変換"""
+        return {
+            "id": self.id,
+            "event_id": self.event_id,
+            "event_time": (
+                self.event_time.isoformat()
+                if self.event_time else None
+            ),
+            "currency": self.currency,
+            "symbol": self.symbol,
+            "event_name": self.event_name,
+            "impact": self.impact,
+            "actual": self.actual,
+            "forecast": self.forecast,
+            "previous": self.previous,
+            "source": self.source,
+        }
+
+
+class NewsSentimentRecord(Base):
+    """ニュースセンチメントテーブル
+
+    ニュースから生成したセンチメントスコアを記録。
+    """
+
+    __tablename__ = "news_sentiment"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    symbol = Column(String(20), nullable=False, index=True)
+    sentiment_score = Column(Float, nullable=False)  # -1.0〜+1.0
+    headline = Column(String(500), nullable=True)
+    source = Column(String(50), nullable=True)
+    recorded_at = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+
+    __table_args__ = (
+        Index(
+            "ix_news_sentiment_symbol_time",
+            "symbol",
+            "recorded_at",
+        ),
+    )
+
+
+class MarketMemoryRecord(Base):
+    """市場記憶テーブル
+
+    LLMが生成した方向性の記憶をTTL付きで蓄積。
+    マクロバイアス・指標後バイアス・センチメントを保存。
+    """
+
+    __tablename__ = "market_memory"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    memory_id = Column(
+        String(36), unique=True, nullable=False, index=True
+    )
+    symbol = Column(String(20), nullable=False, index=True)
+    # MACRO_BIAS / POST_EVENT_BIAS / SENTIMENT_SCORE
+    memory_type = Column(String(30), nullable=False)
+    direction_score = Column(Float, nullable=False)  # -1.0〜+1.0
+    confidence = Column(Float, nullable=False)  # 0.0〜1.0
+    summary = Column(Text, nullable=True)
+    source_event = Column(String(200), nullable=True)
+    valid_until = Column(
+        DateTime(timezone=True), nullable=False, index=True
+    )
+    created_at = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )
+    llm_reasoning = Column(Text, nullable=True)
+
+    __table_args__ = (
+        Index(
+            "ix_market_memory_symbol_type_valid",
+            "symbol",
+            "memory_type",
+            "valid_until",
+        ),
+    )
+
+    def to_dict(self) -> dict[str, Any]:
+        """辞書に変換"""
+        return {
+            "memory_id": self.memory_id,
+            "symbol": self.symbol,
+            "memory_type": self.memory_type,
+            "direction_score": self.direction_score,
+            "confidence": self.confidence,
+            "summary": self.summary,
+            "source_event": self.source_event,
+            "valid_until": (
+                self.valid_until.isoformat()
+                if self.valid_until else None
+            ),
+            "created_at": (
+                self.created_at.isoformat()
+                if self.created_at else None
+            ),
+        }

@@ -33,7 +33,7 @@ from autotrader.decision.unified.position_sizer import (
     PositionSizerConfig,
 )
 from autotrader.decision.unified.trade_bot import UnifiedTradeBot
-from autotrader.live.config import LiveTradingConfig
+from autotrader.live.config import FundamentalConfig, LiveTradingConfig
 from autotrader.decision.unified.signal_consolidator import (
     ConsolidatedSignal,
 )
@@ -116,6 +116,13 @@ class LiveTradingEngine:
         self._last_tick_data: dict | None = None
         # フル処理（ローソク足+指標+シグナル）最終実行時刻
         self._last_full_tick_time: float = 0.0
+
+        # ファンダメンタル関連（FundamentalConfig.enabled=Trueのみ初期化）
+        self._fundamental_memory = None
+        self._fundamental_collector = None
+        self._morning_update_done_date: datetime | None = None
+        if config.fundamental_config.enabled:
+            self._init_fundamental(config.fundamental_config)
 
     @property
     def connected(self) -> bool:
@@ -456,6 +463,22 @@ class LiveTradingEngine:
         # SL/TP発動・手動決済による減少を_cached_positionsへ即時反映し、
         # 同一tick内のエントリー判断で最新ポジション数を使えるようにする。
         await self._manage_positions()
+
+        # [FUNDAMENTAL] ファンダメンタルコンテキスト取得・指標前スキップ
+        now_utc = datetime.now(timezone.utc)
+        if self._fundamental_memory:
+            fundamental_ctx = (
+                self._fundamental_memory.get_context_for_llm(
+                    self._config.symbol, now_utc
+                )
+            )
+            if fundamental_ctx.has_high_impact_within_30min:
+                logger.info(
+                    "[Fundamental] 重要指標直前のためスキップ"
+                )
+                return
+        else:
+            fundamental_ctx = None
 
         # 4. シグナル生成
         current_time = pd.Timestamp.now(tz="UTC")
@@ -1637,4 +1660,196 @@ class LiveTradingEngine:
         except Exception as e:
             logger.warning(
                 "trade_id復元スキップ: %s", e
+            )
+
+    # ==== ファンダメンタル統合メソッド ====
+
+    def _init_fundamental(
+        self, cfg: FundamentalConfig
+    ) -> None:
+        """ファンダメンタル機能を初期化
+
+        Args:
+            cfg: FundamentalConfig
+        """
+        try:
+            from autotrader.adapters.fundamental.memory import (
+                FundamentalMemoryService,
+            )
+            from autotrader.adapters.fundamental.collector import (
+                FundamentalDataCollector,
+            )
+            from autotrader.adapters.database.connection import (
+                DatabaseManager,
+            )
+
+            # DBセッションファクトリー取得
+            db_manager = DatabaseManager.get_instance()
+
+            self._fundamental_collector = FundamentalDataCollector(
+                session_factory=db_manager.get_session,
+                fetch_interval_minutes=cfg.fetch_interval_minutes,
+                use_mt5_calendar=cfg.use_mt5_calendar,
+                use_forex_factory=cfg.use_forex_factory,
+            )
+            self._fundamental_memory = FundamentalMemoryService(
+                session_factory=db_manager.get_session,
+                event_guard_minutes=cfg.event_guard_minutes,
+                cached_events_getter=(
+                    self._fundamental_collector.get_cached_events
+                ),
+            )
+            logger.info(
+                "[Fundamental] ファンダメンタル機能初期化完了"
+            )
+        except Exception as e:
+            logger.error(
+                f"[Fundamental] 初期化失敗（無効化）: {e}"
+            )
+            self._fundamental_memory = None
+            self._fundamental_collector = None
+
+    async def _start_fundamental_tasks(self) -> None:
+        """ファンダメンタル収集タスクを起動"""
+        if self._fundamental_collector:
+            await self._fundamental_collector.start()
+            logger.info(
+                "[Fundamental] 収集タスク起動"
+            )
+
+    async def _stop_fundamental_tasks(self) -> None:
+        """ファンダメンタル収集タスクを停止"""
+        if self._fundamental_collector:
+            await self._fundamental_collector.stop()
+
+    async def _run_morning_update(self) -> None:
+        """毎朝のLLM市場観更新
+
+        UTC21時（日本時間6時）に実行。当日実行済みならスキップ。
+        LLMが利用できない場合は警告ログのみ。
+        """
+        if not self._fundamental_memory:
+            return
+
+        now = datetime.now(timezone.utc)
+        today = now.date()
+
+        # 当日実行済みチェック
+        if (
+            self._morning_update_done_date
+            and self._morning_update_done_date == today
+        ):
+            return
+
+        # 設定の更新時刻に達しているか確認
+        cfg = self._config.fundamental_config
+        if now.hour != cfg.morning_update_utc_hour:
+            return
+
+        try:
+            from autotrader.adapters.ollama.client import OllamaClient
+            llm_client = OllamaClient()
+
+            # 現在価格取得
+            symbol = self._config.symbol
+            upcoming_events = (
+                self._fundamental_memory.get_upcoming_events(
+                    symbol, now, window_minutes=168  # 7日間
+                )
+            )
+            upcoming_dicts = [
+                {
+                    "name": ev.event_name,
+                    "minutes_until": ev.minutes_until(now),
+                    "impact": ev.impact.value,
+                }
+                for ev in upcoming_events
+            ]
+
+            result = await llm_client.analyze_market_outlook_async(
+                symbol=symbol,
+                timestamp=now.isoformat(),
+                current_price=0.0,  # 価格なしでも分析可能
+                upcoming_events=upcoming_dicts,
+                valid_days=7,
+            )
+
+            self._fundamental_memory.write_macro_bias(
+                symbol=symbol,
+                direction_score=result.direction_score,
+                confidence=result.confidence,
+                summary=result.macro_summary,
+                llm_reasoning=str(result.key_factors),
+            )
+            self._morning_update_done_date = today
+            logger.info(
+                f"[Fundamental] 朝の市場観更新完了: "
+                f"score={result.direction_score:+.2f}"
+            )
+
+        except Exception as e:
+            logger.warning(
+                f"[Fundamental] 朝の市場観更新失敗: {e}"
+            )
+
+    async def _handle_post_event_analysis(
+        self,
+        event_name: str,
+        currency: str,
+        actual: float | None,
+        forecast: float | None,
+        previous: float | None,
+        current_price: float,
+        price_change: float = 0.0,
+    ) -> None:
+        """指標後バイアス分析を実行しDBに保存
+
+        重要指標発表後30分以内に呼び出す。
+
+        Args:
+            event_name: イベント名
+            currency: 通貨コード
+            actual: 実績値
+            forecast: 予測値
+            previous: 前回値
+            current_price: 現在価格
+            price_change: 指標発表後の価格変化率
+        """
+        if not self._fundamental_memory:
+            return
+
+        try:
+            from autotrader.adapters.ollama.client import OllamaClient
+            llm_client = OllamaClient()
+            now = datetime.now(timezone.utc)
+            symbol = self._config.symbol
+
+            result = await llm_client.analyze_post_event_async(
+                symbol=symbol,
+                timestamp=now.isoformat(),
+                event_name=event_name,
+                currency=currency,
+                actual=actual,
+                forecast=forecast,
+                previous=previous,
+                current_price=current_price,
+                price_change=price_change,
+            )
+
+            self._fundamental_memory.write_post_event_bias(
+                symbol=symbol,
+                direction_score=result.bias_score,
+                confidence=0.7,
+                summary=result.analysis[:100],
+                source_event=event_name,
+                llm_reasoning=result.analysis,
+            )
+            logger.info(
+                f"[Fundamental] 指標後バイアス保存: "
+                f"{event_name} score={result.bias_score:+.2f}"
+            )
+
+        except Exception as e:
+            logger.warning(
+                f"[Fundamental] 指標後分析失敗: {e}"
             )

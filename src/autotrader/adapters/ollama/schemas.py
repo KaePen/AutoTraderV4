@@ -94,6 +94,82 @@ class ConfidenceAdjustmentOutput(BaseModel):
     )
 
 
+class MarketOutlookOutput(BaseModel):
+    """市場観出力スキーマ
+
+    毎朝のLLM市場観分析結果。
+
+    Attributes:
+        direction_score: 方向性スコア (-1.0〜+1.0)
+        confidence: 確信度 (0.0〜1.0)
+        macro_summary: マクロ要約（日本語50文字以内）
+        key_factors: 主要要因リスト
+        valid_days: 有効日数（デフォルト7）
+        risk_events: 今週の注意イベント
+    """
+
+    direction_score: float = Field(
+        ge=-1.0,
+        le=1.0,
+        description="方向性スコア（-1.0=強い売り、+1.0=強い買い）",
+    )
+    confidence: float = Field(
+        ge=0.0,
+        le=1.0,
+        description="確信度（0.0-1.0）",
+    )
+    macro_summary: str = Field(
+        description="マクロ要約（日本語50文字以内）",
+    )
+    key_factors: list[str] = Field(
+        default_factory=list,
+        description="主要要因リスト",
+    )
+    valid_days: int = Field(
+        default=7,
+        ge=1,
+        le=30,
+        description="有効日数",
+    )
+    risk_events: list[str] = Field(
+        default_factory=list,
+        description="今週の注意イベントリスト",
+    )
+
+
+class PostEventAnalysisOutput(BaseModel):
+    """指標後バイアス分析出力スキーマ
+
+    重要経済指標発表後のLLM分析結果。
+
+    Attributes:
+        surprise_direction: サプライズ方向
+        expected_duration_hours: バイアス持続時間（時間）
+        bias_score: バイアススコア (-1.0〜+1.0)
+        analysis: 分析内容（日本語）
+    """
+
+    surprise_direction: Literal[
+        "BULLISH", "BEARISH", "NEUTRAL"
+    ] = Field(
+        description="サプライズ方向（BULLISH/BEARISH/NEUTRAL）",
+    )
+    expected_duration_hours: int = Field(
+        default=4,
+        ge=1,
+        le=72,
+        description="バイアス持続時間（1-72時間）",
+    )
+    bias_score: float = Field(
+        ge=-1.0,
+        le=1.0,
+        description="バイアススコア（-1.0=強い売り、+1.0=強い買い）",
+    )
+    analysis: str = Field(
+        description="分析内容（日本語）",
+    )
+
+
 class MarketAnalysisOutput(BaseModel):
     """市場分析出力スキーマ
 
