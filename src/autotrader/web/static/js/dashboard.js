@@ -649,7 +649,10 @@ const DashboardApp = {
     // スタンバイ / デモ / リアル の3状態で表示
     const pairStrip = document.getElementById('header-pair-strip');
     if (pairStrip) {
-      const pairs = ['USDJPY', 'EURUSD', 'GBPUSD', 'AUDUSD', 'EURJPY'];
+      const pairs = [
+        'EURUSD', 'GBPUSD', 'AUDUSD', 'NZDUSD', 'USDCHF', 'USDCAD',
+        'USDJPY', 'EURJPY', 'GBPJPY', 'AUDJPY', 'CADJPY', 'CHFJPY',
+      ];
       pairStrip.innerHTML = pairs.map((pair) => {
         const pairAutoOn = Object.prototype.hasOwnProperty.call(symbolAutoStates, pair)
           ? symbolAutoStates[pair] : false;
@@ -686,7 +689,17 @@ const DashboardApp = {
 
   /** カスタムシンボルドロップダウン描画 */
   renderSymbolDropdown() {
-    const pairs = ['USDJPY', 'EURUSD', 'GBPUSD', 'AUDUSD', 'EURJPY'];
+    // グループ定義（グループヘッダー付きで整理表示）
+    const symbolGroups = [
+      {
+        label: 'USD ペア',
+        pairs: ['EURUSD', 'GBPUSD', 'AUDUSD', 'NZDUSD', 'USDCHF', 'USDCAD'],
+      },
+      {
+        label: 'JPY ペア',
+        pairs: ['USDJPY', 'EURJPY', 'GBPJPY', 'AUDJPY', 'CADJPY', 'CHFJPY'],
+      },
+    ];
     const m = this.tradingMode;
     const isConnected = m && m.connected;
     const symbolAutoStates = (m && m.symbol_auto_trade) || {};
@@ -717,10 +730,12 @@ const DashboardApp = {
       trigMode.className = `font-normal inline-block w-[2.5rem] ${curMode.textCls}`;
     }
 
-    // ドロップダウンリストを生成
+    // ドロップダウンリストをグループ別に生成
     const list = document.getElementById('symbol-dropdown-list');
     if (!list) return;
-    list.innerHTML = pairs.map((pair) => {
+
+    /** ペア1件分のHTML */
+    const renderPairItem = (pair) => {
       const mode = getPairMode(pair);
       const isSelected = pair === this.symbol;
       const selectedCls = isSelected ? 'bg-gray-700/60' : '';
@@ -732,6 +747,14 @@ const DashboardApp = {
         <span class="text-xs ${mode.textCls}">${mode.label}</span>
         ${isSelected ? '<svg class="w-3 h-3 text-blue-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>' : '<span class="w-3 h-3 flex-shrink-0"></span>'}
       </div>`;
+    };
+
+    list.innerHTML = symbolGroups.map((group, groupIdx) => {
+      const divider = groupIdx > 0
+        ? '<div class="border-t border-gray-700/60 my-1"></div>'
+        : '';
+      const header = `<div class="px-3 pt-1.5 pb-0.5 text-[10px] font-semibold text-gray-500 uppercase tracking-wider">${group.label}</div>`;
+      return divider + header + group.pairs.map(renderPairItem).join('');
     }).join('');
   },
 
