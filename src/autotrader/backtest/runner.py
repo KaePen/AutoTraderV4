@@ -222,7 +222,7 @@ class BacktestRunner:
         config: BacktestConfig | None = None,
         verbose: bool = True,
         log_to_file: bool = True,
-        log_dir: str | Path = "logs/backtest_log",
+        log_dir: str | Path | None = None,
     ) -> None:
         """初期化
 
@@ -231,7 +231,8 @@ class BacktestRunner:
             config: バックテスト設定
             verbose: 詳細ログ出力
             log_to_file: ファイルログ出力
-            log_dir: ログ出力先ディレクトリ
+            log_dir: ログ出力先ディレクトリ。Noneの場合は
+                ``logs/backtest_log/{symbol}/`` を自動設定する。
         """
         self.config = config or BacktestConfig()
         # 通貨ペア別サブディレクトリに解決
@@ -256,8 +257,14 @@ class BacktestRunner:
         # ファイルログリスナー追加
         self._file_listener: FileEventListener | None = None
         if log_to_file:
+            # log_dir未指定時は通貨ペア別サブディレクトリを自動設定
+            _log_dir = (
+                Path(log_dir)
+                if log_dir is not None
+                else Path("logs/backtest_log") / self.config.symbol
+            )
             self._file_listener = FileEventListener(
-                log_dir=log_dir, verbose=verbose
+                log_dir=_log_dir, verbose=verbose
             )
             self._emitter.add_listener(self._file_listener)
 
