@@ -193,21 +193,6 @@ class SettingsService:
                 range_day_half_r_trigger=(
                     pm.range_day_half_r_trigger
                 ),
-                swing_stagnation_exit_minutes=(
-                    pm.swing_stagnation_exit_minutes
-                ),
-                swing_stagnation_min_mfe_r=(
-                    pm.swing_stagnation_min_mfe_r
-                ),
-                swing_trend_stagnation_enabled=(
-                    pm.swing_trend_stagnation_enabled
-                ),
-                swing_trend_stagnation_exit_minutes=(
-                    pm.swing_trend_stagnation_exit_minutes
-                ),
-                swing_trend_stagnation_min_mfe_r=(
-                    pm.swing_trend_stagnation_min_mfe_r
-                ),
             ),
         )
 
