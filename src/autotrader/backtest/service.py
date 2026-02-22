@@ -35,7 +35,7 @@ class BacktestServiceConfig:
     end_year: int = 2024
     initial_balance: float = 1_000_000.0
     volume: float = 1.0
-    data_dir: str = "data/csv"
+    data_dir: str = "data"
     symbol: str = "USDJPY"
     timeframe: str = "M5"
     max_positions: int = 1

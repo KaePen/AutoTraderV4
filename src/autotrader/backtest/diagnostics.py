@@ -36,16 +36,17 @@ class BacktestDiagnostics:
 
     def __init__(
         self,
-        data_dir: str | Path = "data/csv",
+        data_dir: str | Path = "data",
         symbol: str = "USDJPY",
     ) -> None:
         """初期化
 
         Args:
-            data_dir: データディレクトリパス
+            data_dir: データ基底ディレクトリパス（通貨ペアサブディレクトリの親）
             symbol: 通貨ペア
         """
-        self.data_dir = Path(data_dir)
+        # 通貨ペア別サブディレクトリに解決
+        self.data_dir = Path(data_dir) / symbol
         self.symbol = symbol
         self.market_data: dict[str, pd.DataFrame] = {}
 
@@ -472,7 +473,7 @@ class SignalDebugger:
 
 def run_diagnostics(
     year: int,
-    data_dir: str = "data/csv",
+    data_dir: str = "data",
     symbol: str = "USDJPY",
 ) -> None:
     """診断を実行して結果を表示
@@ -540,7 +541,7 @@ def run_diagnostics(
 
 def run_debug_signal(
     target_time: str,
-    data_dir: str = "data/csv",
+    data_dir: str = "data",
     symbol: str = "USDJPY",
 ) -> None:
     """特定時刻のシグナルをデバッグ表示
