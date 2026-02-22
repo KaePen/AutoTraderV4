@@ -388,6 +388,10 @@ class RichEventListener(EventListener):
         self._current_year = None
         self._last_progress_pct = -10
         self._is_tty = True
+        # 年別進捗バー（並列実行中の年ごとのタスクID）
+        self._year_row_tasks: dict[int, any] = {}
+        # 非TTY用：年別の最終進捗（25%刻み重複防止）
+        self._year_last_pct: dict[int, int] = {}
 
         try:
             from rich.console import Console
@@ -447,6 +451,10 @@ class RichEventListener(EventListener):
 
         elif event.event_type == EventType.BACKTEST_END:
             if self._is_tty and self._progress:
+                # 残存している年別バーをすべて削除
+                for task_id in list(self._year_row_tasks.values()):
+                    self._progress.remove_task(task_id)
+                self._year_row_tasks.clear()
                 # year_parallelタスクが残っていれば削除してからstop
                 if self._prep_task_id is not None:
                     self._progress.remove_task(self._prep_task_id)
@@ -650,35 +658,45 @@ class RichEventListener(EventListener):
             else:
                 print(desc_plain, flush=True)
 
-        elif event.phase == "year_rows":
-            # 全年合算の行レベル進捗（並列実行中のリアルタイム進捗）
-            pct = (
-                event.current / event.total * 100
-                if event.total > 0 else 0
-            )
-            desc_tty = (
-                f"[cyan]年バックテスト並列実行中...[/cyan] "
-                f"[dim]{event.current:,}/{event.total:,}足"
-                f" ({pct:.0f}%)[/dim]"
-            )
-            desc_plain = (
-                f"  並列処理中: {event.current:,}/{event.total:,}足"
-                f" ({pct:.0f}%)"
-            )
+        elif event.phase == "year_row_update":
+            # 年別個別バー（並列実行中の年ごとのローソク足進捗）
+            year = int(event.label)
             if self._is_tty and self._progress:
-                if self._prep_task_id is not None:
-                    self._progress.update(
-                        self._prep_task_id,
+                if year not in self._year_row_tasks:
+                    # 年バーを新規作成
+                    task_id = self._progress.add_task(
+                        f"  [dim]{year}年[/dim]",
                         total=event.total,
                         completed=event.current,
-                        description=desc_tty,
+                    )
+                    self._year_row_tasks[year] = task_id
+                else:
+                    self._progress.update(
+                        self._year_row_tasks[year],
+                        completed=event.current,
+                        total=event.total,
+                    )
+                # 完了したら年バーを削除
+                if event.total > 0 and event.current >= event.total:
+                    self._progress.remove_task(
+                        self._year_row_tasks.pop(year)
                     )
             else:
-                # 10%刻みで出力
-                pct_10 = int(pct // 10) * 10
-                if pct_10 > self._last_progress_pct:
-                    self._last_progress_pct = pct_10
-                    print(desc_plain, flush=True)
+                # 非TTY：25%刻みで出力
+                pct = (
+                    event.current / event.total * 100
+                    if event.total > 0 else 0
+                )
+                pct_25 = int(pct // 25) * 25
+                last = self._year_last_pct.get(year, -1)
+                if pct_25 > last:
+                    self._year_last_pct[year] = pct_25
+                    print(
+                        f"  {year}年: "
+                        f"{event.current:,}/{event.total:,}足"
+                        f" ({pct:.0f}%)",
+                        flush=True,
+                    )
 
     def _handle_event_fallback(self, event: BacktestEvent) -> None:
         """richなしでのイベント処理"""
@@ -730,6 +748,22 @@ class RichEventListener(EventListener):
                         f"  並列処理: {event.current}/{event.total}年完了",
                         flush=True,
                     )
+                elif event.phase == "year_row_update":
+                    year = int(event.label)
+                    pct = (
+                        event.current / event.total * 100
+                        if event.total > 0 else 0
+                    )
+                    pct_25 = int(pct // 25) * 25
+                    last = self._year_last_pct.get(year, -1)
+                    if pct_25 > last:
+                        self._year_last_pct[year] = pct_25
+                        print(
+                            f"  {year}年: "
+                            f"{event.current:,}/{event.total:,}足"
+                            f" ({pct:.0f}%)",
+                            flush=True,
+                        )
 
 
 class ConsoleEventListener(EventListener):
