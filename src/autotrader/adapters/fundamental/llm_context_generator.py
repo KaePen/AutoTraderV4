@@ -553,10 +553,6 @@ class LLMContextGenerator:
             f"JSON解析失敗\nコンテンツ: {content[:200]}"
         )
 
-        raise ValueError(
-            f"パースエラー（到達不可コード）: {content[:100]}"
-        )
-
     def _build_result(
         self, data: dict
     ) -> dict[str, float | str]:
