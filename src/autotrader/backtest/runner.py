@@ -1138,6 +1138,20 @@ class BacktestRunner:
                     )
 
             yearly_results.sort(key=lambda r: r["year"])
+
+            # ワーカー収集データをFileEventListenerにマージ
+            for _listener in self._emitter._listeners:
+                if not isinstance(
+                    _listener, FileEventListener
+                ):
+                    continue
+                for yr in yearly_results:
+                    _listener.merge_worker_data(
+                        yr.pop("_worker_trade_rows", []),
+                        yr.pop("_worker_stats", {}),
+                    )
+                _listener.sort_trade_rows()
+                break
         else:
             # シーケンシャル実行（単年 または --sequential 指定時）
             for year in years:
@@ -2240,7 +2254,16 @@ def _run_year_worker(
             except Exception:
                 pass
 
-    return runner._run_unified_year(
+    from autotrader.backtest.file_listener import (
+        TradeRowCollector,
+    )
+
+    # トレードデータ収集用エミッターとコレクターを設定
+    _emitter = BacktestEventEmitter()
+    _collector = TradeRowCollector()
+    _emitter.add_listener(_collector)
+
+    result = runner._run_unified_year(
         bot_config=bot_config,
         sim_config=sim_config,
         year=year,
@@ -2250,6 +2273,15 @@ def _run_year_worker(
         fundamental_provider=fundamental_provider,
         period_start=period_start,
         period_end=period_end,
-        emitter=BacktestEventEmitter(),
+        emitter=_emitter,
         row_progress_callback=_progress_cb,
     )
+
+    # 収集したトレードデータを結果に付加
+    if result is not None:
+        result["_worker_trade_rows"] = (
+            _collector._trade_rows
+        )
+        result["_worker_stats"] = _collector.get_stats()
+
+    return result
