@@ -6,10 +6,15 @@
 from __future__ import annotations
 
 import logging
+import multiprocessing
 import os
 import threading
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import (
+    ProcessPoolExecutor,
+    ThreadPoolExecutor,
+    as_completed,
+)
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -954,58 +959,182 @@ class BacktestRunner:
         )
 
         if len(years) > 1 and not sequential:
-            # 年単位並列実行：各年が独立した bot インスタンスを使用
+            # 年単位並列実行：ProcessPoolExecutorで真のCPU並列化（GIL回避）
+            import pickle as _pickle
+
+            _log = logging.getLogger(__name__)
             max_workers = min(len(years), os.cpu_count() or 4)
             _total_years = len(years)
             _completed_count = 0
 
-            # 行レベル進捗の共有カウンター（スレッドセーフ）
-            def _make_row_cb(
-                year: int,
-            ) -> Callable[[int, int], None]:
-                """年ごとの行進捗コールバックを生成（年別バー用）"""
-                def _cb(done: int, total: int) -> None:
-                    self._emitter.emit_init_progress(
-                        "year_row_update", str(year), done, total
+            # pickle前チェック: 不可の場合はシーケンシャルにフォールバック
+            _can_parallel = True
+            for _obj, _name in [
+                (bot_config, "bot_config"),
+                (sim_config, "sim_config"),
+            ]:
+                try:
+                    _pickle.dumps(_obj)
+                except Exception as _pe:
+                    _log.warning(
+                        "%s がpickle不可: シーケンシャル実行にフォールバック"
+                        " (%s)",
+                        _name,
+                        _pe,
                     )
-                return _cb
+                    _can_parallel = False
+                    break
 
-            # 並列開始を即座に通知（スピナー表示）
-            self._emitter.emit_init_progress(
-                "year_parallel", "", 0, _total_years
-            )
-            with ThreadPoolExecutor(
-                max_workers=max_workers
-            ) as executor:
-                futures = {
-                    executor.submit(
-                        self._run_unified_year,
-                        bot_config,
-                        sim_config,
-                        year,
-                        market_data,
+            # fundamental_providerのpickle確認（Noneの場合はスキップ）
+            _fp_picklable = fundamental_provider is None
+            if not _fp_picklable:
+                try:
+                    _pickle.dumps(fundamental_provider)
+                    _fp_picklable = True
+                except Exception as _fpe:
+                    _log.warning(
+                        "fundamental_provider がpickle不可:"
+                        " 並列実行でスキップ (%s)",
+                        _fpe,
+                    )
+                    _fp_picklable = False
+
+            if not _can_parallel:
+                # pickle失敗 → シーケンシャルで実行
+                for year in years:
+                    if self._check_cancel_requested():
+                        break
+                    yr = self._run_unified_year(
+                        bot_config, sim_config, year, market_data,
                         use_m1=use_m1,
                         multi_mode_controller=multi_mode_controller,
                         fundamental_provider=fundamental_provider,
                         period_start=period_start,
                         period_end=period_end,
-                        emitter=BacktestEventEmitter(),  # リスナーなし
-                        row_progress_callback=_make_row_cb(year),
-                    ): year
-                    for year in years
-                }
-                for future in as_completed(futures):
-                    year_result = future.result()
-                    completed_year = futures[future]
-                    if year_result is not None:
-                        yearly_results.append(year_result)
-                    _completed_count += 1
-                    # 年完了をUIに通知
+                    )
+                    if yr is not None:
+                        yearly_results.append(yr)
+            else:
+                # worktree対応: 現在ロード中のrunner.pyのsrcディレクトリ
+                _src_dir = str(
+                    Path(__file__).resolve().parent.parent.parent
+                )
+
+                # 年ごとのmarket_dataを事前フィルタリング（IPC転送量削減）
+                _year_md: dict[int, dict[str, pd.DataFrame]] = {}
+                for _yr in years:
+                    _s = datetime(_yr, 1, 1)
+                    _e = datetime(_yr + 1, 1, 1)
+                    _year_md[_yr] = {
+                        tf: df[
+                            (df["time"] >= _s) & (df["time"] < _e)
+                        ].reset_index(drop=True)
+                        for tf, df in market_data.items()
+                    }
+
+                # Manager Queueでクロスプロセス進捗通知
+                with multiprocessing.Manager() as _manager:
+                    _progress_q = _manager.Queue()
+                    _stop_drain = threading.Event()
+
+                    def _drain_progress() -> None:
+                        """キューを消費して進捗イベントをエミット"""
+                        while not _stop_drain.is_set():
+                            try:
+                                msg = _progress_q.get(timeout=0.1)
+                                self._emitter.emit_init_progress(
+                                    "year_row_update",
+                                    str(msg["year"]),
+                                    msg["done"],
+                                    msg["total"],
+                                )
+                            except Exception:
+                                pass
+                        # 残余アイテムを消化
+                        while True:
+                            try:
+                                msg = _progress_q.get_nowait()
+                                self._emitter.emit_init_progress(
+                                    "year_row_update",
+                                    str(msg["year"]),
+                                    msg["done"],
+                                    msg["total"],
+                                )
+                            except Exception:
+                                break
+
+                    _drain_thread = threading.Thread(
+                        target=_drain_progress, daemon=True
+                    )
+                    _drain_thread.start()
+
+                    # 並列開始を即座に通知
                     self._emitter.emit_init_progress(
-                        "year_parallel",
-                        f"{completed_year}年",
-                        _completed_count,
-                        _total_years,
+                        "year_parallel", "", 0, _total_years
+                    )
+
+                    _mp_ctx = multiprocessing.get_context("spawn")
+                    with ProcessPoolExecutor(
+                        max_workers=max_workers,
+                        mp_context=_mp_ctx,
+                        initializer=_worker_process_init,
+                        initargs=(_src_dir, _progress_q),
+                    ) as executor:
+                        futures = {
+                            executor.submit(
+                                _run_year_worker,
+                                (
+                                    str(self.data_dir.parent),
+                                    self.config,
+                                    bot_config,
+                                    sim_config,
+                                    year,
+                                    _year_md[year],
+                                    use_m1,
+                                    use_multi_mode,
+                                    (
+                                        fundamental_provider
+                                        if _fp_picklable
+                                        else None
+                                    ),
+                                    period_start,
+                                    period_end,
+                                ),
+                            ): year
+                            for year in years
+                        }
+                        for future in as_completed(futures):
+                            try:
+                                year_result = future.result()
+                            except Exception as exc:
+                                _log.error(
+                                    "年バックテスト失敗: %s",
+                                    exc,
+                                    exc_info=True,
+                                )
+                                year_result = None
+                            completed_year = futures[future]
+                            if year_result is not None:
+                                yearly_results.append(year_result)
+                            _completed_count += 1
+                            self._emitter.emit_init_progress(
+                                "year_parallel",
+                                f"{completed_year}年",
+                                _completed_count,
+                                _total_years,
+                            )
+
+                    _stop_drain.set()
+                    _drain_thread.join(timeout=2.0)
+
+                # 失敗した年を警告
+                _missing = set(years) - {
+                    r["year"] for r in yearly_results
+                }
+                if _missing:
+                    _log.error(
+                        "並列バックテスト失敗年: %s",
+                        sorted(_missing),
                     )
 
             yearly_results.sort(key=lambda r: r["year"])
@@ -2007,3 +2136,120 @@ class BacktestRunner:
                 + "\n".join(errors[:10])
             )
             _log.warning(msg)
+
+
+# ---------------------------------------------------------------------------
+# ProcessPool用モジュールレベル関数（picklable）
+# ---------------------------------------------------------------------------
+
+# ワーカープロセスの進捗キュー（initializerが設定）
+_WORKER_PROGRESS_QUEUE: Any = None
+
+
+def _worker_process_init(
+    src_dir: str,
+    progress_queue: Any,
+) -> None:
+    """ProcessPoolワーカープロセス初期化
+
+    spawn起動後にPythonパスと進捗キューを設定する。
+    各ワーカープロセスで一度だけ呼ばれる。
+
+    Args:
+        src_dir: autotraderパッケージのsrcディレクトリパス
+        progress_queue: メインプロセスへの進捗通知キュー
+    """
+    import sys
+
+    global _WORKER_PROGRESS_QUEUE
+    if src_dir not in sys.path:
+        sys.path.insert(0, src_dir)
+    _WORKER_PROGRESS_QUEUE = progress_queue
+
+
+def _run_year_worker(
+    task_args: tuple,
+) -> "dict[str, Any] | None":
+    """年バックテストワーカー関数（ProcessPool用モジュールレベル）
+
+    ProcessPoolExecutorから呼び出されるpicklable関数。
+    サブプロセス内でBacktestRunnerを再構築して_run_unified_yearを実行。
+    進捗はグローバルキュー経由でメインプロセスへ送信する。
+
+    Args:
+        task_args: (data_dir_base, backtest_config, bot_config,
+                    sim_config, year, year_market_data,
+                    use_m1, use_multi_mode, fundamental_provider,
+                    period_start, period_end) のタプル
+
+    Returns:
+        年別結果 または None
+    """
+    from autotrader.backtest.events import BacktestEventEmitter
+    from autotrader.backtest.runner import BacktestRunner
+
+    (
+        data_dir_base,
+        backtest_config,
+        bot_config,
+        sim_config,
+        year,
+        year_market_data,
+        use_m1,
+        use_multi_mode,
+        fundamental_provider,
+        period_start,
+        period_end,
+    ) = task_args
+
+    # サブプロセス内でRunnerを最小設定で再構築（リスナーなし）
+    runner = BacktestRunner(
+        data_dir=data_dir_base,
+        config=backtest_config,
+        verbose=False,
+        log_to_file=False,
+    )
+
+    # 全時間足のインスタンス変数を設定（_run_unified_yearが参照）
+    runner._m1_df = year_market_data.get("M1")
+    runner._m5_df = year_market_data.get("M5")
+    runner._m15_df = year_market_data.get("M15")
+    runner._m30_df = year_market_data.get("M30")
+    runner._h1_df = year_market_data.get("H1")
+    runner._h4_df = year_market_data.get("H4")
+    runner._h8_df = year_market_data.get("H8")
+    runner._d1_df = year_market_data.get("D1")
+
+    # マルチモードコントローラーをサブプロセスで再構築
+    multi_mode_controller = None
+    if use_multi_mode:
+        try:
+            from autotrader.decision.unified import MultiModeController
+            multi_mode_controller = MultiModeController()
+            multi_mode_controller.set_market_data(year_market_data)
+        except Exception:
+            pass
+
+    # 進捗コールバック → グローバルキューに送信
+    def _progress_cb(done: int, total: int) -> None:
+        if _WORKER_PROGRESS_QUEUE is not None:
+            try:
+                _WORKER_PROGRESS_QUEUE.put_nowait(
+                    {"year": year, "done": done, "total": total}
+                )
+            except Exception:
+                pass
+
+    return runner._run_unified_year(
+        bot_config=bot_config,
+        sim_config=sim_config,
+        year=year,
+        market_data=year_market_data,
+        use_m1=use_m1,
+        multi_mode_controller=multi_mode_controller,
+        fundamental_provider=fundamental_provider,
+        period_start=period_start,
+        period_end=period_end,
+        emitter=BacktestEventEmitter(),
+        row_progress_callback=_progress_cb,
+    )
