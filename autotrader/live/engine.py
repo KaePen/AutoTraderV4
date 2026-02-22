@@ -38,7 +38,9 @@ from autotrader.decision.unified.signal_consolidator import (
     ConsolidatedSignal,
 )
 from autotrader.live.tick_entry_optimizer import TickEntryOptimizer
-from autotrader.backtest.indicators import IndicatorCalculator
+from autotrader.calculator.technical.batch import (
+    TechnicalIndicatorBatch as IndicatorCalculator,
+)
 
 logger = logging.getLogger(__name__)
 
