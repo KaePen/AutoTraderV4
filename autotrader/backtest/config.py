@@ -10,6 +10,7 @@ from datetime import datetime
 from typing import Any
 
 from autotrader.config import DEFAULT_TRADING_PARAMS
+from autotrader.config.trading_params import get_preset
 from autotrader.core.enums import Timeframe
 
 
@@ -69,6 +70,42 @@ class UnifiedBacktestConfig:
     min_confidence: float = 0.6
     data_dir: str = "data/csv"
     verbose: bool = False
+
+    @classmethod
+    def from_preset(
+        cls,
+        symbol: str,
+        *,
+        start_year: int = 2020,
+        end_year: int = 2024,
+        initial_balance: float = 1_000_000.0,
+        data_dir: str = "data/csv",
+    ) -> UnifiedBacktestConfig:
+        """SymbolPreset からバックテスト設定を生成.
+
+        Args:
+            symbol: 通貨ペア名（例: "USDJPY"）
+            start_year: 開始年
+            end_year: 終了年
+            initial_balance: 初期残高
+            data_dir: データディレクトリ
+
+        Returns:
+            UnifiedBacktestConfig: プリセットベースの設定
+        """
+        p = get_preset(symbol)
+        return cls(
+            symbol=symbol,
+            start_year=start_year,
+            end_year=end_year,
+            initial_balance=initial_balance,
+            spread_pips=p.spread_pips,
+            pip_value=p.pip_value,
+            stop_loss_pips=p.default_sl_pips,
+            take_profit_pips=p.default_tp_pips,
+            max_positions=p.max_positions,
+            data_dir=data_dir,
+        )
 
     def get_effective_timeframe(self) -> str:
         """実効時間足を取得
