@@ -89,6 +89,10 @@ class BacktestConfig:
     pip_value: float = field(
         default_factory=lambda: DEFAULT_TRADING_PARAMS.pip_value
     )
+    commission_per_lot: float = field(
+        default_factory=lambda: DEFAULT_TRADING_PARAMS.commission_per_lot
+    )
+    use_session_spread: bool = False
 
     @classmethod
     def from_preset(
@@ -1024,6 +1028,8 @@ class BacktestRunner:
             pm_config=pm_config,
             use_dynamic_lot=bot_config.use_dynamic_lot,
             pip_unit=_pip_unit,
+            commission_per_lot=self.config.commission_per_lot,
+            use_session_spread=self.config.use_session_spread,
         )
 
         if len(years) > 1 and not sequential:

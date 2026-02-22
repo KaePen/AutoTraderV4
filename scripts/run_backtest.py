@@ -444,6 +444,100 @@ def parse_args() -> argparse.Namespace:
         "--slippage", type=float, default=None,
         help="スリッページ上書き（pips）",
     )
+    # --- ポジション管理（PM）設定 ---
+    parser.add_argument(
+        "--partial-1r-ratio",
+        type=float,
+        default=0.3,
+        help="1R到達時の部分決済比率（デフォルト: 0.3）",
+    )
+    parser.add_argument(
+        "--partial-2r-ratio",
+        type=float,
+        default=0.3,
+        help="2R到達時の部分決済比率（デフォルト: 0.3）",
+    )
+    parser.add_argument(
+        "--no-breakeven-1r",
+        action="store_true",
+        help="1R建値移動を無効化",
+    )
+    parser.add_argument(
+        "--trailing-start-r",
+        type=float,
+        default=2.0,
+        help="トレーリング開始R値（デフォルト: 2.0）",
+    )
+    parser.add_argument(
+        "--trailing-atr-mult",
+        type=float,
+        default=2.0,
+        help="ATRトレーリング倍率（デフォルト: 2.0）",
+    )
+    parser.add_argument(
+        "--early-be-r",
+        type=float,
+        default=0.5,
+        help="早期BE移動のR閾値（デフォルト: 0.5）",
+    )
+    parser.add_argument(
+        "--no-early-be",
+        action="store_true",
+        help="早期BE移動を無効化",
+    )
+    parser.add_argument(
+        "--signal-rev-ratio",
+        type=float,
+        default=0.5,
+        help="シグナル反転決済比率（デフォルト: 0.5）",
+    )
+    parser.add_argument(
+        "--half-r-ratio",
+        type=float,
+        default=0.20,
+        help="0.5R部分利確比率（デフォルト: 0.20）",
+    )
+    parser.add_argument(
+        "--half-r-trigger",
+        type=float,
+        default=0.5,
+        help="0.5R部分利確トリガーR値（デフォルト: 0.5）",
+    )
+    parser.add_argument(
+        "--no-time-exit",
+        action="store_true",
+        help="時間決済を無効化",
+    )
+    # --- ボット設定 ---
+    parser.add_argument(
+        "--bonus-max-positions",
+        type=int,
+        default=0,
+        help="高品質シグナル追加枠数（デフォルト: 0=無効）",
+    )
+    parser.add_argument(
+        "--bonus-score-threshold",
+        type=float,
+        default=7.0,
+        help="bonus発動コンセンサス閾値（デフォルト: 7.0）",
+    )
+    parser.add_argument(
+        "--no-position-sizing",
+        action="store_true",
+        help="ポジションサイジング無効化",
+    )
+    # --- シミュレーター設定 ---
+    parser.add_argument(
+        "--commission",
+        type=float,
+        default=None,
+        help="ロット当たり手数料上書き（デフォルト: preset値）",
+    )
+    parser.add_argument(
+        "--session-spread",
+        action="store_true",
+        help="セッション別スプレッド有効化",
+    )
     # その他
     parser.add_argument(
         "--data-dir",
@@ -816,6 +910,11 @@ def run_single_backtest(args: argparse.Namespace):
     # シンボルプリセットからデフォルト値取得
     _preset = _get_preset(args.symbol)
 
+    # commission: CLI明示指定 > preset値
+    _commission = (
+        args.commission if args.commission is not None
+        else _preset.commission_per_lot
+    )
     config = BacktestServiceConfig(
         start_year=start_year,
         end_year=end_year,
@@ -830,6 +929,11 @@ def run_single_backtest(args: argparse.Namespace):
         verbose=False,
         use_short_timeframe=use_short_tf,
         enable_scalping=args.enable_scalping,
+        commission_per_lot=_commission,
+        use_session_spread=args.session_spread,
+        bonus_max_positions=args.bonus_max_positions,
+        bonus_score_threshold=args.bonus_score_threshold,
+        pip_value=_preset.pip_value,
     )
     # spread/slippage上書き（--spread/--slippage の明示指定を優先）
     if args.spread is not None:
@@ -921,6 +1025,9 @@ def run_single_backtest(args: argparse.Namespace):
         slippage_buffer_pips=args.slippage_buffer,
         tp_sl_ratio=args.tp_sl_ratio,
         consensus_threshold=args.consensus_threshold,
+        bonus_max_positions=args.bonus_max_positions,
+        bonus_score_threshold=args.bonus_score_threshold,
+        enable_position_sizing=not args.no_position_sizing,
     )
 
     # PositionManagerConfig構築
@@ -951,6 +1058,17 @@ def run_single_backtest(args: argparse.Namespace):
             not args.no_range_day_half_r_partial
         ),
         disable_tp_after_partial=not args.keep_tp_after_partial,
+        partial_close_1r_ratio=args.partial_1r_ratio,
+        partial_close_2r_ratio=args.partial_2r_ratio,
+        breakeven_at_1r=not args.no_breakeven_1r,
+        trailing_start_r=args.trailing_start_r,
+        trailing_atr_multiplier=args.trailing_atr_mult,
+        early_breakeven_r=args.early_be_r,
+        early_breakeven_enabled=not args.no_early_be,
+        signal_rev_close_ratio=args.signal_rev_ratio,
+        range_day_half_r_partial_ratio=args.half_r_ratio,
+        range_day_half_r_trigger=args.half_r_trigger,
+        time_exit_enabled=not args.no_time_exit,
     )
 
     # ファンダメンタルCSVリスト構築
