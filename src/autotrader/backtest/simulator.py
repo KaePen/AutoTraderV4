@@ -10,6 +10,8 @@ from datetime import datetime
 from typing import Any
 from uuid import uuid4
 
+import pandas as pd
+
 from autotrader.config import DEFAULT_TRADING_PARAMS
 from autotrader.core.entities import Signal, Trade, Position, Candle
 from autotrader.core.enums import SignalType, ExitReason, TradingStrategyMode
@@ -31,13 +33,15 @@ class SimulatorConfig:
     Attributes:
         initial_balance: 初期残高
         spread_pips: スプレッド（pips）
-        pip_value: 1pipの価値
+        pip_value: 1pipの価値（固定値。quote_jpy_seriesがある場合は動的計算）
         max_positions: 最大ポジション数
         default_volume: デフォルトロット数
         slippage_pips: スリッページ（pips）
         commission_per_lot: ロット当たり手数料
         strategy_max_positions: 戦略別最大ポジション数
         pip_unit: 1pipの価格単位（JPY系=0.01、非JPY系=0.0001）
+        quote_jpy_series: クォート通貨/JPYの時系列レート（動的pip_value計算用）
+            Noneの場合は固定pip_valueを使用。インデックスはdatetime。
     """
 
     initial_balance: float = 1_000_000.0
@@ -58,6 +62,11 @@ class SimulatorConfig:
         default_factory=lambda: DEFAULT_TRADING_PARAMS.commission_per_lot
     )
     strategy_max_positions: dict[str, int] = field(default_factory=dict)
+    # クォート通貨/JPYの時系列レート（動的pip_value計算用）
+    # Noneの場合は固定pip_valueにフォールバック
+    quote_jpy_series: pd.Series | None = field(
+        default=None, compare=False, repr=False
+    )
     # PositionManager統合（デフォルトOFF=ベースライン保持）
     use_position_manager: bool = False
     # PositionManagerConfig（外部から注入）
@@ -139,6 +148,14 @@ class TradeSimulator:
             self.config.slippage_pips * self._pip_unit
         )
         self._pip_value = self.config.pip_value
+        # 動的pip_value用シリーズ（asof参照用にソート済みを確保）
+        if self.config.quote_jpy_series is not None:
+            s = self.config.quote_jpy_series
+            if not s.index.is_monotonic_increasing:
+                s = s.sort_index()
+            self._quote_jpy_series: pd.Series | None = s
+        else:
+            self._quote_jpy_series = None
         self._single_position = self.config.max_positions == 1
         # 日次PnL: 前回記録日キャッシュ（strftime回避）
         self._last_pnl_date: int = -1
@@ -207,6 +224,28 @@ class TradeSimulator:
     ) -> PositionEventLogger | None:
         """ポジションイベントロガーを取得"""
         return self._pos_event_logger
+
+    def _get_pip_value(self, time: datetime) -> float:
+        """時刻に対応するpip価値をJPYで取得
+
+        quote_jpy_seriesが設定されている場合は動的に計算。
+        計算式: pip_unit × 10,000 × quote/JPYレート
+        例(EURUSD): 0.0001 × 10,000 × USDJPY_close = USDJPY_close
+
+        Noneまたはレート取得失敗時は固定_pip_valueにフォールバック。
+
+        Args:
+            time: 参照時刻
+
+        Returns:
+            float: 1pip・0.1lotあたりのJPY価値
+        """
+        if self._quote_jpy_series is None:
+            return self._pip_value
+        rate = self._quote_jpy_series.asof(time)
+        if pd.isna(rate) or rate <= 0:
+            return self._pip_value
+        return self._pip_unit * 10_000.0 * float(rate)
 
     def reset(self) -> None:
         """状態をリセット"""
@@ -575,7 +614,7 @@ class TradeSimulator:
             )
 
         profit_loss = (
-            profit_pips * self._pip_value * close_volume
+            profit_pips * self._get_pip_value(candle.time) * close_volume
         )
         commission = self.config.commission_per_lot * close_volume
         profit_loss -= commission
@@ -745,9 +784,11 @@ class TradeSimulator:
         if signal.stop_loss and entry_price > 0:
             _sl_pips = abs(
                 entry_price - signal.stop_loss
-            ) * 100
+            ) / self._pip_unit
             _risk = (
-                _sl_pips * self._pip_value * volume
+                _sl_pips
+                * self._get_pip_value(candle.time)
+                * volume
             )
             if self.state.balance > 0:
                 _risk_pct = _risk / self.state.balance * 100
@@ -848,7 +889,11 @@ class TradeSimulator:
                 / self._pip_unit
             )
 
-        profit_loss = profit_pips * self._pip_value * position.volume
+        profit_loss = (
+            profit_pips
+            * self._get_pip_value(exit_time)
+            * position.volume
+        )
 
         # BREAKEVEN は損益0扱い
         if exit_reason == ExitReason.BREAKEVEN:
@@ -1088,7 +1133,7 @@ class TradeSimulator:
             return
 
         close_price = candle.close
-        pip_val = self._pip_value
+        pip_val = self._get_pip_value(candle.time)
         unrealized_pnl = 0.0
 
         for position in open_pos:

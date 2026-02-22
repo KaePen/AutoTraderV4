@@ -87,6 +87,71 @@ def _calc_pip_value(symbol: str) -> float:
     return 100.0
 
 
+def _load_quote_jpy_series(
+    data_dir_base: Path,
+    symbol: str,
+    start_dt: datetime,
+    end_dt: datetime,
+) -> "pd.Series | None":
+    """クォート通貨/JPYの時系列レートをH1データから読み込む
+
+    JPYクォートペアは換算不要のためNoneを返す。
+    データが存在しない場合もNoneを返す（固定値にフォールバック）。
+
+    計算式: pip_value = pip_unit × 10,000 × quote/JPYレート
+    例(EURUSD): 0.0001 × 10,000 × USDJPY_close = USDJPY_close
+
+    Args:
+        data_dir_base: データ基底ディレクトリ（通貨ペアの親ディレクトリ）
+        symbol: 対象通貨ペア（例: EURUSD）
+        start_dt: 読み込み開始日時
+        end_dt: 読み込み終了日時
+
+    Returns:
+        pd.Series | None: インデックス=datetime, 値=close価格のシリーズ
+    """
+    if len(symbol) < 6:
+        return None
+    quote = symbol[-3:].upper()
+    if quote == "JPY":
+        # JPYクォートは換算不要
+        return None
+
+    jpy_symbol = f"{quote}JPY"
+    jpy_dir = data_dir_base / jpy_symbol
+    if not jpy_dir.is_dir():
+        _log = logging.getLogger(__name__)
+        _log.warning(
+            "%s データなし: 固定pip_valueを使用 (%s)",
+            jpy_symbol, symbol,
+        )
+        return None
+
+    # H1データを優先（精度とファイルサイズのバランス）
+    h1_files = sorted(jpy_dir.glob(f"{jpy_symbol}_H1_*.csv"))
+    if not h1_files:
+        _log = logging.getLogger(__name__)
+        _log.warning(
+            "%s H1データなし: 固定pip_valueを使用", jpy_symbol,
+        )
+        return None
+
+    try:
+        df = DataLoader.load_mt5_csv(h1_files[0])
+        df = df[
+            (df["time"] >= start_dt) & (df["time"] <= end_dt)
+        ]
+        if df.empty:
+            return None
+        series = df.set_index("time")["close"]
+        series.index = pd.DatetimeIndex(series.index)
+        return series
+    except Exception as e:
+        _log = logging.getLogger(__name__)
+        _log.warning("%s 読み込みエラー: %s", jpy_symbol, e)
+        return None
+
+
 @dataclass
 class BacktestConfig:
     """バックテスト設定
@@ -559,6 +624,12 @@ class BacktestRunner:
             if "JPY" in self.config.symbol.upper()
             else 0.0001
         )
+        _start_dt = datetime(start_year, 1, 1)
+        _end_dt = datetime(end_year + 1, 1, 1)
+        _quote_jpy = _load_quote_jpy_series(
+            self.data_dir.parent, self.config.symbol,
+            _start_dt, _end_dt,
+        )
         sim_config = SimulatorConfig(
             initial_balance=self.config.initial_balance,
             spread_pips=self.config.spread_pips,
@@ -566,6 +637,7 @@ class BacktestRunner:
             max_positions=self.config.max_positions,
             default_volume=volume,
             pip_unit=_pip_unit,
+            quote_jpy_series=_quote_jpy,
         )
 
         # 年別・月別結果を収集
@@ -990,6 +1062,12 @@ class BacktestRunner:
             if "JPY" in self.config.symbol.upper()
             else 0.0001
         )
+        _start_dt = datetime(start_year, 1, 1)
+        _end_dt = datetime(end_year + 1, 1, 1)
+        _quote_jpy = _load_quote_jpy_series(
+            self.data_dir.parent, self.config.symbol,
+            _start_dt, _end_dt,
+        )
         sim_config = SimulatorConfig(
             initial_balance=self.config.initial_balance,
             spread_pips=self.config.spread_pips,
@@ -1001,6 +1079,7 @@ class BacktestRunner:
             pm_config=pm_config,
             use_dynamic_lot=bot_config.use_dynamic_lot,
             pip_unit=_pip_unit,
+            quote_jpy_series=_quote_jpy,
         )
 
         if len(years) > 1 and not sequential:

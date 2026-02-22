@@ -20,6 +20,7 @@ from autotrader.backtest.events import (
 # CSV出力カラム定義
 CSV_COLUMNS = [
     "trade_id",
+    "symbol",
     "direction",
     "entry_time",
     "exit_time",
@@ -491,6 +492,7 @@ class FileEventListener(EventListener):
         # CSV行構築
         row: dict[str, object] = {
             "trade_id": event.trade_id,
+            "symbol": event.symbol or "",
             "direction": event.direction,
             "entry_time": (
                 self._format_timestamp(event.opened_at)
@@ -815,6 +817,7 @@ class TradeRowCollector(EventListener):
 
         row: dict[str, object] = {
             "trade_id": event.trade_id,
+            "symbol": event.symbol or "",
             "direction": event.direction,
             "entry_time": (
                 _fmt(event.opened_at)
