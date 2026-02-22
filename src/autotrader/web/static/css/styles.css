@@ -5,15 +5,6 @@
   font-variant-numeric: tabular-nums;
 }
 
-/* スクロールバー非表示（ヘッダーペアストリップ等） */
-.scrollbar-none {
-  -ms-overflow-style: none;
-  scrollbar-width: none;
-}
-.scrollbar-none::-webkit-scrollbar {
-  display: none;
-}
-
 /* カード */
 .card {
   background-color: rgb(31 41 55);

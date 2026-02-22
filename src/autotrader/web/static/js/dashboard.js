@@ -645,41 +645,6 @@ const DashboardApp = {
       }
     }
 
-    // ヘッダー通貨ペアステータスチップ更新
-    // スタンバイ / デモ / リアル の3状態で表示
-    const pairStrip = document.getElementById('header-pair-strip');
-    if (pairStrip) {
-      const pairs = [
-        'EURUSD', 'GBPUSD', 'AUDUSD', 'NZDUSD', 'USDCHF', 'USDCAD',
-        'USDJPY', 'EURJPY', 'GBPJPY', 'AUDJPY', 'CADJPY', 'CHFJPY',
-      ];
-      pairStrip.innerHTML = pairs.map((pair) => {
-        const pairAutoOn = Object.prototype.hasOwnProperty.call(symbolAutoStates, pair)
-          ? symbolAutoStates[pair] : false;
-        const pairDemoOn = Object.prototype.hasOwnProperty.call(symbolDemoStates, pair)
-          ? symbolDemoStates[pair] : false;
-        const isReal = isConnected && pairAutoOn && !pairDemoOn;
-        const isDemo = isConnected && pairAutoOn && pairDemoOn;
-        // ドットとチップ色をMT5バッジと統一（w-1.5 h-1.5 rounded-full）
-        const dot = isReal
-          ? '<span class="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse flex-shrink-0"></span>'
-          : isDemo
-            ? '<span class="w-1.5 h-1.5 rounded-full bg-orange-400 animate-pulse flex-shrink-0"></span>'
-            : '<span class="w-1.5 h-1.5 rounded-full bg-gray-500 flex-shrink-0"></span>';
-        const chipCls = isReal
-          ? 'border-green-800/50 bg-green-900/20 text-gray-300 hover:bg-green-900/35 cursor-pointer'
-          : isDemo
-            ? 'border-orange-800/50 bg-orange-900/20 text-gray-300 hover:bg-orange-900/35 cursor-pointer'
-            : 'border-gray-700/50 bg-gray-700/80 text-gray-400 cursor-default';
-        const clickAttr = isConnected
-          ? `onclick="DashboardApp.handleSymbolAutoTradeToggle('${pair}')"`
-          : '';
-        return `<span ${clickAttr} class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border ${chipCls} transition-colors select-none text-xs font-medium tabular-nums">
-          ${dot}${pair}
-        </span>`;
-      }).join('');
-    }
-
     // カスタムシンボルドロップダウン更新
     this.renderSymbolDropdown();
 
