@@ -2,12 +2,16 @@
 
 CSVファイルから過去の経済イベントを読み込み、
 バックテスト時刻に合わせてFundamentalContextを提供する。
+
+事前生成済みLLMコンテキストCSVがある場合はそちらを優先し、
+マクロバイアス・センチメントスコアを正確に再現する。
 """
 
 from __future__ import annotations
 
+import bisect
 import csv
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timezone
 from pathlib import Path
 
 from loguru import logger
@@ -22,11 +26,30 @@ from autotrader.adapters.fundamental.normalizer import (
     EconomicEventNormalizer,
 )
 
-# CSVカラム定義
+# 経済イベントCSVカラム定義
 _CSV_COLUMNS = [
     "event_id", "event_time", "currency", "event_name",
     "impact", "actual", "forecast", "previous",
 ]
+
+# LLMコンテキストCSVカラム定義
+_LLM_CSV_COLUMNS = [
+    "period_start",
+    "macro_bias_score",
+    "macro_bias_summary",
+    "post_event_bias_score",
+    "post_event_summary",
+    "sentiment_score",
+]
+
+# LLMコンテキストのデフォルト値（データなし時）
+_DEFAULT_LLM_CONTEXT = {
+    "macro_bias_score": 0.0,
+    "macro_bias_summary": "バックテスト（LLMコンテキストなし）",
+    "post_event_bias_score": 0.0,
+    "post_event_summary": "バックテスト（LLMコンテキストなし）",
+    "sentiment_score": 0.0,
+}
 
 
 class BacktestFundamentalProvider:
@@ -34,6 +57,10 @@ class BacktestFundamentalProvider:
 
     MT5の過去データCSVを読み込み、バックテスト時刻に
     合わせてFundamentalContextを提供する。
+
+    事前生成済みLLMコンテキストCSV（`llm_context_SYMBOL_YYYY.csv`）が
+    あれば `load_llm_context_csv()` で読み込む。
+    LLMコンテキストがある場合はそちらのバイアス値を優先する。
 
     使用するCSVフォーマット（`data/fundamental/events_YYYY.csv`）:
     ```
@@ -53,8 +80,14 @@ class BacktestFundamentalProvider:
         """
         self._guard_minutes = event_guard_minutes
         self._events: list[EconomicEvent] = []
+        self._events_sorted_ts: list[float] = []
         self._normalizer = EconomicEventNormalizer()
         self._loaded_files: list[str] = []
+
+        # LLMコンテキスト: symbol → (period_start_ts一覧, コンテキスト一覧)
+        # bisect用にUNIXタイムスタンプのソート済みリストを保持
+        self._llm_ts: dict[str, list[float]] = {}
+        self._llm_data: dict[str, list[dict]] = {}
 
     def load_csv(self, csv_path: str | Path) -> int:
         """CSVファイルから経済イベントを読み込み
@@ -94,6 +127,11 @@ class BacktestFundamentalProvider:
             self._events = self._normalizer.deduplicate(
                 self._events
             )
+            # イベントを時系列順にソートしてbisect用TSリストを構築
+            self._events.sort(key=lambda e: e.event_time)
+            self._events_sorted_ts = [
+                e.event_time.timestamp() for e in self._events
+            ]
             self._loaded_files.append(str(path))
 
             logger.info(
@@ -108,10 +146,117 @@ class BacktestFundamentalProvider:
             )
             return 0
 
+    def load_llm_context_csv(
+        self,
+        csv_path: str | Path,
+        symbol: str,
+    ) -> int:
+        """事前生成済みLLMコンテキストCSVを読み込み
+
+        `generate_fundamental_llm.py` で生成した
+        `llm_context_SYMBOL_YYYY.csv` を読み込む。
+
+        Args:
+            csv_path: LLMコンテキストCSVファイルパス
+            symbol: 対象シンボル（例: USDJPY）
+
+        Returns:
+            int: 読み込んだ期間数（月数）
+        """
+        path = Path(csv_path)
+        if not path.exists():
+            logger.warning(
+                f"[BacktestFundamental] LLMコンテキストCSV"
+                f"が見つかりません: {path}"
+            )
+            return 0
+
+        def _f(val: str, default: float = 0.0) -> float:
+            """文字列をfloatに変換"""
+            try:
+                return float(val) if val else default
+            except ValueError:
+                return default
+
+        ts_list: list[float] = []
+        data_list: list[dict] = []
+
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    period_str = row.get("period_start", "")
+                    if not period_str:
+                        continue
+                    try:
+                        period_dt = datetime.fromisoformat(
+                            period_str
+                        )
+                        if period_dt.tzinfo is None:
+                            period_dt = period_dt.replace(
+                                tzinfo=timezone.utc
+                            )
+                    except ValueError:
+                        continue
+
+                    ts_list.append(period_dt.timestamp())
+                    data_list.append({
+                        "macro_bias_score": _f(
+                            row.get("macro_bias_score", "")
+                        ),
+                        "macro_bias_summary": row.get(
+                            "macro_bias_summary", ""
+                        ),
+                        "post_event_bias_score": _f(
+                            row.get("post_event_bias_score", "")
+                        ),
+                        "post_event_summary": row.get(
+                            "post_event_summary", ""
+                        ),
+                        "sentiment_score": _f(
+                            row.get("sentiment_score", "")
+                        ),
+                    })
+
+            # シンボルに追記（既存データとマージ）
+            existing_ts = self._llm_ts.get(symbol, [])
+            existing_data = self._llm_data.get(symbol, [])
+
+            # マージしてソート
+            combined = sorted(
+                zip(existing_ts + ts_list,
+                    existing_data + data_list),
+                key=lambda x: x[0],
+            )
+            if combined:
+                merged_ts, merged_data = zip(*combined)
+                self._llm_ts[symbol] = list(merged_ts)
+                self._llm_data[symbol] = list(merged_data)
+            else:
+                self._llm_ts[symbol] = []
+                self._llm_data[symbol] = []
+
+            loaded = len(ts_list)
+            logger.info(
+                f"[BacktestFundamental] LLMコンテキスト"
+                f"{loaded}期間読込: {path.name} ({symbol})"
+            )
+            return loaded
+
+        except Exception as e:
+            logger.error(
+                f"[BacktestFundamental] LLMコンテキストCSV"
+                f"読込エラー: {e}"
+            )
+            return 0
+
     def get_context(
         self, current_time: datetime, symbol: str
     ) -> FundamentalContext:
         """指定時刻のファンダメンタルコンテキストを取得
+
+        事前生成済みLLMコンテキストがあればそちらを使用。
+        ない場合はニュートラルなコンテキストを返す。
 
         Args:
             current_time: バックテスト現在時刻（UTC）
@@ -120,8 +265,24 @@ class BacktestFundamentalProvider:
         Returns:
             FundamentalContext: ファンダメンタルコンテキスト
         """
+        # LLMコンテキストの取得（bisectで O(log n)）
+        llm_ctx = self._get_llm_context(current_time, symbol)
+
+        # 経済イベントがない場合はLLMコンテキストだけ返す
         if not self._events:
-            return FundamentalContext.neutral()
+            return FundamentalContext(
+                macro_bias_score=llm_ctx["macro_bias_score"],
+                macro_bias_summary=llm_ctx["macro_bias_summary"],
+                post_event_bias_score=llm_ctx[
+                    "post_event_bias_score"
+                ],
+                post_event_summary=llm_ctx[
+                    "post_event_summary"
+                ],
+                sentiment_score=llm_ctx["sentiment_score"],
+                upcoming_events=[],
+                has_high_impact_within_30min=False,
+            )
 
         # シンボル関連イベントにフィルタリング
         symbol_events = self._normalizer.filter_by_symbol(
@@ -145,19 +306,50 @@ class BacktestFundamentalProvider:
         # 30分以内の高インパクト指標チェック
         high_impact_soon = any(
             ev.impact == ImpactLevel.HIGH
-            and 0 <= ev.minutes_until(current_time) <= self._guard_minutes
+            and 0 <= ev.minutes_until(current_time)
+            <= self._guard_minutes
             for ev in upcoming
         )
 
         return FundamentalContext(
-            macro_bias_score=0.0,
-            macro_bias_summary="バックテスト（マクロバイアスなし）",
-            post_event_bias_score=0.0,
-            post_event_summary="バックテスト（指標後バイアスなし）",
-            sentiment_score=0.0,
+            macro_bias_score=llm_ctx["macro_bias_score"],
+            macro_bias_summary=llm_ctx["macro_bias_summary"],
+            post_event_bias_score=llm_ctx[
+                "post_event_bias_score"
+            ],
+            post_event_summary=llm_ctx["post_event_summary"],
+            sentiment_score=llm_ctx["sentiment_score"],
             upcoming_events=upcoming_dicts,
             has_high_impact_within_30min=high_impact_soon,
         )
+
+    def _get_llm_context(
+        self, current_time: datetime, symbol: str
+    ) -> dict:
+        """指定時刻のLLMコンテキストをbisectで取得
+
+        直前の月次コンテキストを O(log n) で探索。
+
+        Args:
+            current_time: バックテスト現在時刻
+            symbol: トレード対象シンボル
+
+        Returns:
+            dict: LLMコンテキストスコア辞書
+        """
+        ts_list = self._llm_ts.get(symbol)
+        data_list = self._llm_data.get(symbol)
+        if not ts_list or not data_list:
+            return _DEFAULT_LLM_CONTEXT.copy()
+
+        current_ts = current_time.timestamp()
+        # bisect_right で current_ts より大きい最初のインデックス
+        idx = bisect.bisect_right(ts_list, current_ts) - 1
+        if idx < 0:
+            return _DEFAULT_LLM_CONTEXT.copy()
+
+        # .copy() でイミュータブル保証（外部による変更防止）
+        return data_list[idx].copy()
 
     def _parse_row(
         self, row: dict, fetched_at: datetime
@@ -210,7 +402,9 @@ class BacktestFundamentalProvider:
                 return None
 
         return EconomicEvent(
-            event_id=row.get("event_id", f"bt_{hash(event_name)}"),
+            event_id=row.get(
+                "event_id", f"bt_{hash(event_name)}"
+            ),
             event_time=event_time,
             currency=currency,
             event_name=event_name,
