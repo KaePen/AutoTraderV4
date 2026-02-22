@@ -591,8 +591,32 @@ class RichEventListener(EventListener):
                 f"[yellow]インジケータ計算[/yellow] "
                 f"[dim]{event.label}[/dim]"
             )
-            desc_plain = f"  インジケータ計算: {event.label} ({event.current}/{event.total})"
+            desc_plain = (
+                f"  インジケータ計算: {event.label}"
+                f" ({event.current}/{event.total})"
+            )
+            if self._is_tty and self._progress:
+                if self._prep_task_id is None:
+                    self._prep_task_id = self._progress.add_task(
+                        desc_tty,
+                        total=event.total,
+                        completed=event.current,
+                    )
+                else:
+                    self._progress.update(
+                        self._prep_task_id,
+                        total=event.total,
+                        completed=event.current,
+                        description=desc_tty,
+                    )
+                if event.current >= event.total:
+                    self._progress.remove_task(self._prep_task_id)
+                    self._prep_task_id = None
+            else:
+                print(desc_plain, flush=True)
+
         elif event.phase == "year_parallel":
+            # 年完了数を表示（開始時は不確定スピナーのまま）
             if event.current == 0:
                 desc_tty = "[cyan]年バックテスト並列実行中...[/cyan]"
             else:
@@ -601,33 +625,60 @@ class RichEventListener(EventListener):
                     f"[dim]{event.label}完了[/dim]"
                 )
             desc_plain = f"  並列処理: {event.current}/{event.total}年完了"
-        else:
-            return
-
-        if self._is_tty and self._progress:
-            if self._prep_task_id is None:
-                # タスク未作成の場合のみ新規作成
-                self._prep_task_id = self._progress.add_task(
-                    desc_tty,
-                    total=event.total,
-                    completed=event.current,
-                )
+            if self._is_tty and self._progress:
+                if self._prep_task_id is None:
+                    self._prep_task_id = self._progress.add_task(
+                        desc_tty,
+                        total=None,  # 不確定モード（スピナー）で開始
+                        completed=0,
+                    )
+                elif event.current == 0:
+                    # 開始時：不確定モードを維持
+                    self._progress.update(
+                        self._prep_task_id,
+                        total=None,
+                        description=desc_tty,
+                    )
+                else:
+                    # 最初の年完了時から確定モードへ切り替え
+                    self._progress.update(
+                        self._prep_task_id,
+                        total=event.total,
+                        completed=event.current,
+                        description=desc_tty,
+                    )
             else:
-                # BACKTEST_START で作成済みの「準備中...」タスクを更新
-                # （total=None → 確定値に変更し、進捗を反映）
-                self._progress.update(
-                    self._prep_task_id,
-                    total=event.total,
-                    completed=event.current,
-                    description=desc_tty,
-                )
-            # tf_loadingフェーズのみ完了時に削除
-            # year_parallelはBACKTEST_ENDまで残して結果表示中の空白を防ぐ
-            if event.current >= event.total and event.phase == "tf_loading":
-                self._progress.remove_task(self._prep_task_id)
-                self._prep_task_id = None
-        else:
-            print(desc_plain, flush=True)
+                print(desc_plain, flush=True)
+
+        elif event.phase == "year_rows":
+            # 全年合算の行レベル進捗（並列実行中のリアルタイム進捗）
+            pct = (
+                event.current / event.total * 100
+                if event.total > 0 else 0
+            )
+            desc_tty = (
+                f"[cyan]年バックテスト並列実行中...[/cyan] "
+                f"[dim]{event.current:,}/{event.total:,}足"
+                f" ({pct:.0f}%)[/dim]"
+            )
+            desc_plain = (
+                f"  並列処理中: {event.current:,}/{event.total:,}足"
+                f" ({pct:.0f}%)"
+            )
+            if self._is_tty and self._progress:
+                if self._prep_task_id is not None:
+                    self._progress.update(
+                        self._prep_task_id,
+                        total=event.total,
+                        completed=event.current,
+                        description=desc_tty,
+                    )
+            else:
+                # 10%刻みで出力
+                pct_10 = int(pct // 10) * 10
+                if pct_10 > self._last_progress_pct:
+                    self._last_progress_pct = pct_10
+                    print(desc_plain, flush=True)
 
     def _handle_event_fallback(self, event: BacktestEvent) -> None:
         """richなしでのイベント処理"""

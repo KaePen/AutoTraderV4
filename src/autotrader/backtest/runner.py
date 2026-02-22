@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import logging
 import os
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
@@ -317,6 +318,50 @@ class BacktestRunner:
         )
         df["is_bullish_div"] = div_df["is_bullish_div"]
         df["is_bearish_div"] = div_df["is_bearish_div"]
+
+        return df
+
+    def _calculate_indicators_cached(
+        self, df: pd.DataFrame, cache_key: str
+    ) -> pd.DataFrame:
+        """インジケータをキャッシュ付きで計算
+
+        初回計算後は .indicator_cache/ にparquet保存し、
+        次回以降はキャッシュから読み込んで再計算を省略する。
+
+        Args:
+            df: OHLCVデータ
+            cache_key: キャッシュ識別キー
+                （例: "M1_1708600000000_12345678"）
+
+        Returns:
+            pd.DataFrame: インジケータ付きデータ
+        """
+        cache_dir = self.data_dir / ".indicator_cache"
+        cache_path = cache_dir / f"{cache_key}.parquet"
+
+        if cache_path.exists():
+            try:
+                cached = pd.read_parquet(cache_path)
+                logger.info(
+                    "インジケータキャッシュ使用: %s", cache_key
+                )
+                return cached
+            except Exception as e:
+                logger.warning(
+                    "キャッシュ読み込み失敗（再計算）: %s", e
+                )
+
+        df = self._calculate_indicators(df)
+
+        cache_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            df.to_parquet(cache_path, index=False)
+            logger.info(
+                "インジケータキャッシュ保存: %s", cache_key
+            )
+        except Exception as e:
+            logger.warning("キャッシュ保存失敗: %s", e)
 
         return df
 
@@ -853,7 +898,31 @@ class BacktestRunner:
             max_workers = min(len(years), os.cpu_count() or 4)
             _total_years = len(years)
             _completed_count = 0
-            # 並列開始を即座に通知（最初の年完了まで空白が出ないように）
+
+            # 行レベル進捗の共有カウンター（スレッドセーフ）
+            _row_done: dict[int, int] = {}
+            _row_total_map: dict[int, int] = {}
+            _row_lock = threading.Lock()
+
+            def _make_row_cb(
+                year: int,
+            ) -> Callable[[int, int], None]:
+                """年ごとの行進捗コールバックを生成"""
+                def _cb(done: int, total: int) -> None:
+                    with _row_lock:
+                        _row_done[year] = done
+                        _row_total_map[year] = total
+                        all_done = sum(_row_done.values())
+                        all_total = sum(
+                            _row_total_map.values()
+                        )
+                    if all_total > 0:
+                        self._emitter.emit_init_progress(
+                            "year_rows", "", all_done, all_total
+                        )
+                return _cb
+
+            # 並列開始を即座に通知（スピナー表示）
             self._emitter.emit_init_progress(
                 "year_parallel", "", 0, _total_years
             )
@@ -873,6 +942,7 @@ class BacktestRunner:
                         period_start=period_start,
                         period_end=period_end,
                         emitter=BacktestEventEmitter(),  # リスナーなし
+                        row_progress_callback=_make_row_cb(year),
                     ): year
                     for year in years
                 }
@@ -995,7 +1065,16 @@ class BacktestRunner:
                 tf_path = sorted(tf_files)[0]
                 df = loader.load_csv(tf_path)
                 if df is not None:
-                    df = self._calculate_indicators(df)
+                    # キャッシュキー: TF名＋ファイルのmtime＋サイズ
+                    stat = tf_path.stat()
+                    cache_key = (
+                        f"{tf}"
+                        f"_{int(stat.st_mtime * 1000)}"
+                        f"_{stat.st_size}"
+                    )
+                    df = self._calculate_indicators_cached(
+                        df, cache_key
+                    )
                     data[tf] = df
                     # インスタンス変数にも保存
                     attr = _tf_attr_map.get(tf)
@@ -1161,6 +1240,9 @@ class BacktestRunner:
         period_start: datetime | None = None,
         period_end: datetime | None = None,
         emitter: "BacktestEventEmitter | None" = None,
+        row_progress_callback: (
+            "Callable[[int, int], None] | None"
+        ) = None,
     ) -> dict[str, Any] | None:
         """統合ボットで1年分のバックテスト実行（self-contained）
 
@@ -1179,6 +1261,9 @@ class BacktestRunner:
             period_start: 日単位の開始日時（Noneで年始）
             period_end: 日単位の終了日時・exclusive（Noneで年末）
             emitter: イベントエミッター（Noneの場合は self._emitter）
+            row_progress_callback: 行レベル進捗コールバック
+                (completed_rows, total_rows) → None。
+                並列実行時にUIへリアルタイム進捗を通知する。
 
         Returns:
             年別結果（monthly_results フィールドを含む）
@@ -1708,11 +1793,18 @@ class BacktestRunner:
                     elapsed=elapsed,
                     message=f"{year}年処理中 ({tf.value})",
                 )
+                # 並列実行時：行レベル進捗をメインスレッドへ通知
+                if row_progress_callback is not None:
+                    row_progress_callback(idx, total_rows)
 
                 # キャンセルチェック
                 if self._check_cancel_requested():
                     _emitter.emit_backtest_end({"cancelled": True})
                     return None
+
+        # ループ完了を100%として通知
+        if row_progress_callback is not None:
+            row_progress_callback(total_rows, total_rows)
 
         # 強制決済
         if last_candle:
