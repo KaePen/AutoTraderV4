@@ -9,7 +9,6 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime, timezone, timedelta
 from uuid import uuid4
-from typing import Any
 
 from loguru import logger
 
@@ -30,15 +29,28 @@ _IMPACT_MAP: dict[str, ImpactLevel] = {
 
 # ForexFactory URL
 _FF_URL = "https://www.forexfactory.com/calendar"
+_FF_HOME = "https://www.forexfactory.com/"
 
-# リクエストヘッダー（ブロック回避）
+# リクエストヘッダー（ブラウザ偽装）
 _HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
         "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/120.0.0.0 Safari/537.36"
+        "Chrome/122.0.0.0 Safari/537.36"
     ),
-    "Accept-Language": "ja-JP,ja;q=0.9,en-US;q=0.8",
+    "Accept": (
+        "text/html,application/xhtml+xml,application/xml;"
+        "q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8"
+    ),
+    "Accept-Language": "ja-JP,ja;q=0.9,en-US;q=0.8,en;q=0.7",
+    "Accept-Encoding": "gzip, deflate, br",
+    "Connection": "keep-alive",
+    "Upgrade-Insecure-Requests": "1",
+    "Sec-Fetch-Dest": "document",
+    "Sec-Fetch-Mode": "navigate",
+    "Sec-Fetch-Site": "same-origin",
+    "Sec-Fetch-User": "?1",
+    "Cache-Control": "max-age=0",
 }
 
 
@@ -102,21 +114,25 @@ class ForexFactoryClient:
             return []
 
         try:
-            import httpx
-            from bs4 import BeautifulSoup
-        except ImportError as e:
+            from curl_cffi import requests as cffi_requests
+            from bs4 import BeautifulSoup  # noqa: F401
+        except ImportError:
             logger.warning(
-                "[ForexFactory] httpx/beautifulsoup4未インストール。"
-                "スキップします"
+                "[ForexFactory] curl-cffi/beautifulsoup4未インストール。"
+                "スキップします: pip install curl-cffi beautifulsoup4 lxml"
             )
             return []
 
         fetched_at = datetime.now(timezone.utc)
         try:
-            with httpx.Client(timeout=self._timeout) as client:
-                resp = client.get(_FF_URL, headers=_HEADERS)
-                resp.raise_for_status()
-                html = resp.text
+            session = cffi_requests.Session(impersonate="chrome110")
+            resp = session.get(
+                _FF_URL,
+                headers=_HEADERS,
+                timeout=self._timeout,
+            )
+            resp.raise_for_status()
+            html = resp.text
 
             events = self._parse_html(html, fetched_at, currencies)
             self._last_fetch = fetched_at
@@ -149,6 +165,7 @@ class ForexFactoryClient:
         html: str,
         fetched_at: datetime,
         currencies: list[str] | None,
+        year: int | None = None,
     ) -> list[EconomicEvent]:
         """HTMLをパースして経済イベントリストを生成
 
@@ -156,6 +173,7 @@ class ForexFactoryClient:
             html: ForexFactory HTMLコンテンツ
             fetched_at: 取得時刻
             currencies: フィルタリング対象通貨
+            year: 対象年（Noneの場合は現在年を使用）
 
         Returns:
             list[EconomicEvent]: パース済みイベントリスト
@@ -172,15 +190,21 @@ class ForexFactoryClient:
         rows = soup.select("tr.calendar__row")
         current_date: datetime | None = None
         now = datetime.now(timezone.utc)
+        # 年が指定されていない場合は現在年を使用
+        target_year = year if year is not None else now.year
 
         for row in rows:
             try:
-                # 日付行かどうか確認
-                date_cell = row.select_one("td.calendar__cell.calendar__date")
+                # 日付セルを確認（存在する場合はcurrent_dateを更新）
+                # ※同一行にイベントが含まれる場合があるため continue しない
+                date_cell = row.select_one(
+                    "td.calendar__cell.calendar__date"
+                )
                 if date_cell and date_cell.get_text(strip=True):
                     date_str = date_cell.get_text(strip=True)
-                    current_date = self._parse_date(date_str, now)
-                    continue
+                    current_date = self._parse_date(
+                        date_str, now, target_year
+                    )
 
                 if current_date is None:
                     continue
@@ -259,27 +283,45 @@ class ForexFactoryClient:
 
         return events
 
-    def _parse_date(self, date_str: str, now: datetime) -> datetime:
+    def _parse_date(
+        self,
+        date_str: str,
+        now: datetime,
+        year: int | None = None,
+    ) -> datetime:
         """日付文字列をdatetimeに変換
 
+        ForexFactoryは "Mon Jan 1" または "MonJan 1"（スペースなし）
+        のいずれかのフォーマットで日付を返す。月名を直接抽出して対応。
+
         Args:
-            date_str: 日付文字列（例: "Mon Feb 21"）
-            now: 現在時刻
+            date_str: 日付文字列（例: "MonJan 1" or "Mon Jan 1"）
+            now: 現在時刻（フォールバック用）
+            year: 使用する年（Noneの場合は現在年）
 
         Returns:
             datetime: パース済み日付（UTC）
         """
-        # ForexFactoryはESTで表示（UTC-5）
         import re
-        # 年がない場合は現在年を補完
-        current_year = now.year
+        # ForexFactoryはESTで表示（UTC-5）
+        target_year = year if year is not None else now.year
         try:
-            # "Mon Feb 21" → "Feb 21 2026"
-            clean = re.sub(r'^[A-Za-z]+\s+', '', date_str)
-            parsed = datetime.strptime(
-                f"{clean} {current_year}", "%b %d %Y"
+            # 月名（Jan〜Dec）と日数を直接抽出
+            # "MonJan 1"（スペースなし）と "Mon Jan 1" 両方に対応
+            match = re.search(
+                r"(Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)"
+                r"\s*(\d{1,2})",
+                date_str,
+                re.IGNORECASE,
             )
-            # EST → UTC (UTC+5)
+            if not match:
+                return now
+            month_str = match.group(1).capitalize()
+            day_str = match.group(2)
+            parsed = datetime.strptime(
+                f"{month_str} {day_str} {target_year}", "%b %d %Y"
+            )
+            # EST → UTC (+5)
             return parsed.replace(
                 tzinfo=timezone.utc
             ) + timedelta(hours=5)
@@ -330,6 +372,12 @@ class ForexFactoryClient:
     def _parse_impact(self, impact_cell) -> ImpactLevel:
         """インパクトセルをImpactLevelに変換
 
+        ForexFactoryのインパクトは内部 span の icon クラスで判定:
+        - icon--ff-impact-red  → HIGH（赤）
+        - icon--ff-impact-ora  → MEDIUM（オレンジ）
+        - icon--ff-impact-yel  → LOW（黄）
+        - icon--ff-impact-gra  → LOW（グレー/非経済）
+
         Args:
             impact_cell: BeautifulSoupのインパクトセル
 
@@ -339,16 +387,26 @@ class ForexFactoryClient:
         if not impact_cell:
             return ImpactLevel.LOW
 
-        # クラス名からインパクトを判定
-        classes = impact_cell.get("class", [])
-        for cls in classes:
+        # span のクラス名からインパクトを判定
+        span = impact_cell.find("span")
+        if span:
+            classes = span.get("class", [])
+            for cls in classes:
+                cls_lower = cls.lower()
+                if "red" in cls_lower:
+                    return ImpactLevel.HIGH
+                if "ora" in cls_lower:
+                    return ImpactLevel.MEDIUM
+                if "yel" in cls_lower or "low" in cls_lower:
+                    return ImpactLevel.LOW
+
+        # フォールバック: td 自身のクラスを確認（旧フォーマット対応）
+        for cls in impact_cell.get("class", []):
             cls_lower = cls.lower()
             if "high" in cls_lower:
                 return ImpactLevel.HIGH
             if "medium" in cls_lower or "med" in cls_lower:
                 return ImpactLevel.MEDIUM
-            if "low" in cls_lower:
-                return ImpactLevel.LOW
 
         return ImpactLevel.LOW
 
@@ -360,7 +418,7 @@ class ForexFactoryClient:
         """指定年の経済イベントを週ごとにスクレイピング
 
         ?week=jan01.YYYY 形式で全52週を取得。
-        各週の間に1秒のウェイトを挟みサーバー負荷を軽減する。
+        各週の間に1.5秒のウェイトを挟みサーバー負荷を軽減する。
 
         Args:
             year: 対象年
@@ -370,11 +428,12 @@ class ForexFactoryClient:
             list[EconomicEvent]: 年間全イベント（重複排除済み）
         """
         try:
-            import httpx
             import time
+            from curl_cffi import requests as cffi_requests
         except ImportError:
             logger.warning(
-                "[ForexFactory] httpx未インストール。スキップします"
+                "[ForexFactory] curl-cffi未インストール。スキップします: "
+                "pip install curl-cffi"
             )
             return []
 
@@ -393,50 +452,71 @@ class ForexFactoryClient:
         current = start
         week_count = 0
 
-        # httpx.Clientはセッション全体で1つ使い回す（接続再利用）
-        with httpx.Client(timeout=self._timeout) as client:
-            while current.year == year and week_count < 53:
-                mon = month_abbr[current.month - 1]
-                day = f"{current.day:02d}"
-                week_param = f"{mon}{day}.{year}"
-                url = f"{_FF_URL}?week={week_param}"
+        # curl-cffiセッション（Chrome110 TLSフィンガープリントでCloudflare回避）
+        session = cffi_requests.Session(impersonate="chrome110")
 
-                try:
-                    resp = client.get(url, headers=_HEADERS)
-                    resp.raise_for_status()
-                    html = resp.text
+        # トップページにアクセスしてCookieを確立
+        try:
+            init_resp = session.get(
+                _FF_HOME,
+                headers=_HEADERS,
+                timeout=self._timeout,
+            )
+            logger.debug(
+                f"[ForexFactory] セッション初期化: "
+                f"status={init_resp.status_code}"
+            )
+            time.sleep(2.0)
+        except Exception as e:
+            logger.warning(
+                f"[ForexFactory] セッション初期化失敗: {e}"
+            )
 
-                    events = self._parse_html(
-                        html, fetched_at, currencies
+        week_headers = {**_HEADERS, "Referer": _FF_URL}
+
+        while current.year == year and week_count < 53:
+            mon = month_abbr[current.month - 1]
+            day = f"{current.day:02d}"
+            week_param = f"{mon}{day}.{year}"
+            url = f"{_FF_URL}?week={week_param}"
+
+            try:
+                resp = session.get(
+                    url,
+                    headers=week_headers,
+                    timeout=self._timeout,
+                )
+                resp.raise_for_status()
+                events = self._parse_html(
+                    resp.text, fetched_at, currencies, year
+                )
+
+                new_count = 0
+                for ev in events:
+                    dedup_key = (
+                        ev.event_time.isoformat(),
+                        ev.currency,
+                        ev.event_name,
                     )
+                    if dedup_key not in seen_keys:
+                        seen_keys.add(dedup_key)
+                        all_events.append(ev)
+                        new_count += 1
 
-                    # (event_time, currency, event_name) で重複排除
-                    new_count = 0
-                    for ev in events:
-                        dedup_key = (
-                            ev.event_time.isoformat(),
-                            ev.currency,
-                            ev.event_name,
-                        )
-                        if dedup_key not in seen_keys:
-                            seen_keys.add(dedup_key)
-                            all_events.append(ev)
-                            new_count += 1
+                logger.debug(
+                    f"[ForexFactory] {week_param}: "
+                    f"{len(events)}件取得 (新規{new_count}件)"
+                )
 
-                    logger.debug(
-                        f"[ForexFactory] {week_param}: "
-                        f"{len(events)}件取得 (新規{new_count}件)"
-                    )
+            except Exception as e:
+                logger.warning(
+                    f"[ForexFactory] {week_param} 取得エラー: {e}"
+                )
 
-                except Exception as e:
-                    logger.warning(
-                        f"[ForexFactory] {week_param} 取得エラー: {e}"
-                    )
-
-                # 次の週へ
-                current += timedelta(weeks=1)
-                week_count += 1
-                time.sleep(1.0)
+            # 次の週へ（1.5秒ウェイト）
+            current += timedelta(weeks=1)
+            week_count += 1
+            time.sleep(1.5)
 
         # _last_fetch を更新してレートリミットと整合性を保つ
         self._last_fetch = datetime.now(timezone.utc)
