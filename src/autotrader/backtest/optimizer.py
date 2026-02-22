@@ -22,6 +22,9 @@ from autotrader.config import DEFAULT_SCORING, DEFAULT_TRADING_PARAMS
 from autotrader.config.trading_params import get_preset
 from autotrader.core.entities import Candle, Signal
 from autotrader.core.enums import ExitReason, SignalType, Timeframe
+from autotrader.decision.unified.position_manager import (
+    PositionManagerConfig,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -48,6 +51,11 @@ class OptimizeConfig:
     cooldown_bars: int = 4
     mtf_bonus: int = 2
     volume: float = 0.5
+    # トレーリングストップ設定（最適化グリッドで明示指定）
+    use_position_manager: bool = False
+    trailing_start_r: float = 2.0
+    trailing_atr_multiplier: float = 2.0
+    breakeven_at_1r: bool = True
 
 
 @dataclass
@@ -469,6 +477,20 @@ def run_backtest_period(
     preset = get_preset(symbol)
     # pip_unit: JPY建て=0.01、非JPY建て=0.0001
     pip_unit = 0.01 if symbol.endswith("JPY") else 0.0001
+
+    # トレーリングストップ（PositionManager）設定
+    # OptimizeConfig の値を優先（最適化グリッドでの明示指定）
+    pm_config = None
+    use_pm = config.use_position_manager
+    if use_pm:
+        pm_config = PositionManagerConfig(
+            trailing_start_r=config.trailing_start_r,
+            trailing_atr_multiplier=config.trailing_atr_multiplier,
+            breakeven_at_1r=config.breakeven_at_1r,
+            spread_pips=preset.spread_pips,
+            slippage_pips=preset.slippage_pips,
+        )
+
     simulator = TradeSimulator(
         config=SimulatorConfig(
             initial_balance=initial_balance,
@@ -477,6 +499,8 @@ def run_backtest_period(
             pip_unit=pip_unit,
             max_positions=1,
             default_volume=config.volume,
+            use_position_manager=use_pm,
+            pm_config=pm_config,
         )
     )
 

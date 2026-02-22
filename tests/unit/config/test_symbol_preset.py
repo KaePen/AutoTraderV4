@@ -313,3 +313,134 @@ class TestBacktestConfigFromPresetOverrides:
         config = BacktestConfig.from_preset("USDJPY", spread_pips=0.5)
         # spread_pips は上書き、pip_value はプリセット値
         assert config.pip_value == preset.pip_value
+
+
+# ---------------------------------------------------------------------------
+# トレーリングストップ設定テスト
+# ---------------------------------------------------------------------------
+
+class TestTrailingStopDefaults:
+    """トレーリングストップフィールドのデフォルト値"""
+
+    def test_use_position_manager_default_false(self):
+        """デフォルトで use_position_manager=False"""
+        preset = SymbolPreset()
+        assert preset.use_position_manager is False
+
+    def test_trailing_start_r_default(self):
+        """trailing_start_r デフォルト値 2.0"""
+        preset = SymbolPreset()
+        assert preset.trailing_start_r == 2.0
+
+    def test_trailing_atr_multiplier_default(self):
+        """trailing_atr_multiplier デフォルト値 2.0"""
+        preset = SymbolPreset()
+        assert preset.trailing_atr_multiplier == 2.0
+
+    def test_breakeven_at_1r_default_true(self):
+        """デフォルトで breakeven_at_1r=True"""
+        preset = SymbolPreset()
+        assert preset.breakeven_at_1r is True
+
+
+class TestTrailingStopYamlLoad:
+    """YAMLからトレーリングストップ設定が読み込まれる"""
+
+    def test_gbpusd_use_position_manager_true(self):
+        """GBPUSD は use_position_manager=True"""
+        preset = get_preset("GBPUSD")
+        assert preset.use_position_manager is True
+
+    def test_gbpusd_trailing_start_r(self):
+        """GBPUSD の trailing_start_r=1.5"""
+        preset = get_preset("GBPUSD")
+        assert preset.trailing_start_r == 1.5
+
+    def test_gbpusd_trailing_atr_multiplier(self):
+        """GBPUSD の trailing_atr_multiplier=2.0"""
+        preset = get_preset("GBPUSD")
+        assert preset.trailing_atr_multiplier == 2.0
+
+    def test_gbpusd_breakeven_at_1r(self):
+        """GBPUSD の breakeven_at_1r=True"""
+        preset = get_preset("GBPUSD")
+        assert preset.breakeven_at_1r is True
+
+    def test_usdjpy_use_position_manager_from_defaults(self):
+        """USDJPY は defaults の use_position_manager=False"""
+        preset = get_preset("USDJPY")
+        assert preset.use_position_manager is False
+
+    def test_custom_yaml_trailing_fields(self, tmp_path: Path):
+        """カスタムYAMLからトレーリング設定が読まれる"""
+        content = textwrap.dedent("""
+            defaults:
+              use_position_manager: false
+              trailing_start_r: 2.0
+              trailing_atr_multiplier: 2.0
+              breakeven_at_1r: true
+            symbols:
+              TRAILPAIR:
+                use_position_manager: true
+                trailing_start_r: 1.0
+                trailing_atr_multiplier: 1.5
+                breakeven_at_1r: false
+        """).strip()
+        path = tmp_path / "trail.yaml"
+        path.write_text(content, encoding="utf-8")
+        preset = get_preset("TRAILPAIR", path=path)
+        assert preset.use_position_manager is True
+        assert preset.trailing_start_r == 1.0
+        assert preset.trailing_atr_multiplier == 1.5
+        assert preset.breakeven_at_1r is False
+
+
+class TestToPmConfig:
+    """to_pm_config() メソッドのテスト"""
+
+    def test_returns_position_manager_config(self):
+        """PositionManagerConfig インスタンスを返す"""
+        from autotrader.decision.unified.position_manager import (
+            PositionManagerConfig,
+        )
+
+        preset = SymbolPreset(
+            use_position_manager=True,
+            trailing_start_r=1.5,
+            trailing_atr_multiplier=2.5,
+            breakeven_at_1r=True,
+            spread_pips=1.5,
+            slippage_pips=0.5,
+        )
+        pm_cfg = preset.to_pm_config()
+        assert isinstance(pm_cfg, PositionManagerConfig)
+
+    def test_trailing_start_r_matches(self):
+        """trailing_start_r が一致"""
+        preset = SymbolPreset(trailing_start_r=1.5)
+        pm_cfg = preset.to_pm_config()
+        assert pm_cfg.trailing_start_r == 1.5
+
+    def test_trailing_atr_multiplier_matches(self):
+        """trailing_atr_multiplier が一致"""
+        preset = SymbolPreset(trailing_atr_multiplier=3.0)
+        pm_cfg = preset.to_pm_config()
+        assert pm_cfg.trailing_atr_multiplier == 3.0
+
+    def test_breakeven_at_1r_matches(self):
+        """breakeven_at_1r が一致"""
+        preset = SymbolPreset(breakeven_at_1r=False)
+        pm_cfg = preset.to_pm_config()
+        assert pm_cfg.breakeven_at_1r is False
+
+    def test_spread_pips_matches(self):
+        """spread_pips が PM設定に引き継がれる"""
+        preset = SymbolPreset(spread_pips=2.0)
+        pm_cfg = preset.to_pm_config()
+        assert pm_cfg.spread_pips == 2.0
+
+    def test_slippage_pips_matches(self):
+        """slippage_pips が PM設定に引き継がれる"""
+        preset = SymbolPreset(slippage_pips=0.8)
+        pm_cfg = preset.to_pm_config()
+        assert pm_cfg.slippage_pips == 0.8
