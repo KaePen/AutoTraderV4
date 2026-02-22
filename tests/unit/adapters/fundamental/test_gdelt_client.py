@@ -239,6 +239,83 @@ class TestGDELTDocClientFetchNewsWeek:
         )
         assert items == []
 
+    @patch(
+        "autotrader.adapters.fundamental.gdelt_client"
+        "._requests_module"
+    )
+    def test_空レスポンスは空リスト(
+        self, mock_requests: MagicMock
+    ) -> None:
+        """空のレスポンスボディ（2015年以前等）は空リスト"""
+        mock_response = MagicMock()
+        mock_response.status_code = 200
+        mock_response.text = ""
+        mock_requests.get.return_value = mock_response
+
+        start = datetime(2024, 1, 1, tzinfo=timezone.utc)
+        end = datetime(2024, 1, 8, tzinfo=timezone.utc)
+        items = self.client.fetch_news_week(
+            ["USD"], start, end
+        )
+        assert items == []
+
+    @patch("time.sleep")
+    @patch(
+        "autotrader.adapters.fundamental.gdelt_client"
+        "._requests_module"
+    )
+    def test_429後リトライして成功(
+        self,
+        mock_requests: MagicMock,
+        mock_sleep: MagicMock,
+    ) -> None:
+        """429の後にリトライして正常データを取得"""
+        resp_429 = MagicMock()
+        resp_429.status_code = 429
+
+        resp_ok = MagicMock()
+        resp_ok.status_code = 200
+        resp_ok.text = '{"articles": []}'
+        resp_ok.json.return_value = {"articles": []}
+
+        mock_requests.get.side_effect = [resp_429, resp_ok]
+
+        start = datetime(2024, 1, 1, tzinfo=timezone.utc)
+        end = datetime(2024, 1, 8, tzinfo=timezone.utc)
+        items = self.client.fetch_news_week(
+            ["USD"], start, end
+        )
+
+        assert items == []
+        # 2回リクエストしたこと、1回スリープしたこと
+        assert mock_requests.get.call_count == 2
+        mock_sleep.assert_called_once()
+
+    @patch("time.sleep")
+    @patch(
+        "autotrader.adapters.fundamental.gdelt_client"
+        "._requests_module"
+    )
+    def test_429を3回繰り返したら空リスト(
+        self,
+        mock_requests: MagicMock,
+        mock_sleep: MagicMock,
+    ) -> None:
+        """429が MAX_RETRIES 回続いたら空リストを返す"""
+        resp_429 = MagicMock()
+        resp_429.status_code = 429
+        mock_requests.get.return_value = resp_429
+
+        start = datetime(2024, 1, 1, tzinfo=timezone.utc)
+        end = datetime(2024, 1, 8, tzinfo=timezone.utc)
+        items = self.client.fetch_news_week(
+            ["USD"], start, end
+        )
+
+        assert items == []
+        assert mock_requests.get.call_count == 3
+        assert mock_sleep.call_count == 3
+
     def test_requests未インストール時は空リスト(self) -> None:
         """_requests_module が None の場合は空リストを返す"""
         import autotrader.adapters.fundamental.gdelt_client as m
