@@ -663,3 +663,313 @@ class FileEventListener(EventListener):
             CSVファイルの絶対パス
         """
         return self.trades_file.absolute()
+
+    def merge_worker_data(
+        self,
+        trade_rows: list[dict],
+        stats: dict[str, dict[str, dict[str, float]]],
+    ) -> None:
+        """ワーカープロセスのトレードデータをマージ
+
+        ProcessPoolExecutor ワーカーが収集したトレード行と
+        統計データをメインプロセスのリスナーにマージする。
+
+        Args:
+            trade_rows: ワーカー収集トレード行リスト
+            stats: ワーカー収集統計辞書
+                   (exit/mode/regime/cross の各キーを持つ)
+        """
+        self._trade_rows.extend(trade_rows)
+        stat_map = {
+            "exit": self._exit_stats,
+            "mode": self._mode_stats,
+            "regime": self._regime_stats,
+            "cross": self._cross_stats,
+        }
+        for stat_key, stat_dict in stats.items():
+            target = stat_map.get(stat_key)
+            if target is None:
+                continue
+            for key, entry in stat_dict.items():
+                self._merge_stat_entry(
+                    target, key, entry
+                )
+
+    def _merge_stat_entry(
+        self,
+        stats: dict[str, dict[str, float]],
+        key: str,
+        entry: dict[str, float],
+    ) -> None:
+        """統計エントリーをマージ
+
+        Args:
+            stats: 対象統計辞書
+            key: カテゴリキー
+            entry: マージするエントリー
+        """
+        if key not in stats:
+            stats[key] = {
+                "trades": 0, "wins": 0,
+                "total_pnl": 0.0,
+            }
+        stats[key]["trades"] += entry.get("trades", 0)
+        stats[key]["wins"] += entry.get("wins", 0)
+        stats[key]["total_pnl"] += entry.get(
+            "total_pnl", 0.0
+        )
+
+    def sort_trade_rows(self) -> None:
+        """トレード行を時系列順にソート"""
+        self._trade_rows.sort(
+            key=lambda r: r.get("entry_time", "")
+        )
+
+
+class TradeRowCollector(EventListener):
+    """ワーカープロセス用トレードデータ収集リスナー
+
+    ProcessPoolExecutor のサブプロセスで動作し、
+    POSITION_CLOSED イベントからトレード行と統計を収集する。
+    メインプロセスへの返却のため pickle 可能な設計。
+
+    Attributes:
+        _trade_rows: 収集したトレード行データ
+        _exit_stats: Exit理由別統計
+        _mode_stats: 戦略モード別統計
+        _regime_stats: レジーム別統計
+        _cross_stats: Exit×Regime×Modeクロス集計
+    """
+
+    def __init__(self) -> None:
+        """初期化"""
+        self._trade_rows: list[dict] = []
+        self._exit_stats: dict[str, dict[str, float]] = {}
+        self._mode_stats: dict[str, dict[str, float]] = {}
+        self._regime_stats: dict[str, dict[str, float]] = {}
+        self._cross_stats: dict[str, dict[str, float]] = {}
+
+    def _update_stats(
+        self,
+        stats: dict[str, dict[str, float]],
+        key: str,
+        pnl: float,
+    ) -> None:
+        """カテゴリ統計を更新
+
+        Args:
+            stats: 統計辞書
+            key: カテゴリキー
+            pnl: 損益
+        """
+        if not key:
+            key = "UNKNOWN"
+        if key not in stats:
+            stats[key] = {
+                "trades": 0, "wins": 0,
+                "total_pnl": 0.0,
+            }
+        stats[key]["trades"] += 1
+        if pnl > 0:
+            stats[key]["wins"] += 1
+        stats[key]["total_pnl"] += pnl
+
+    def on_event(self, event: BacktestEvent) -> None:
+        """イベント処理（POSITION_CLOSEDのみ収集）
+
+        Args:
+            event: バックテストイベント
+        """
+        if event.event_type != EventType.POSITION_CLOSED:
+            return
+        if not isinstance(event, TradeEvent):
+            return
+        self._collect(event)
+
+    def _collect(self, event: TradeEvent) -> None:
+        """トレードデータを収集
+
+        Args:
+            event: トレードイベント
+        """
+        pnl = event.profit_loss if event.profit_loss else 0
+        exit_reason = event.exit_reason or "UNKNOWN"
+        mode = event.trading_mode or ""
+        regime = event.market_regime or ""
+
+        self._update_stats(
+            self._exit_stats, exit_reason, pnl
+        )
+        self._update_stats(self._mode_stats, mode, pnl)
+        self._update_stats(
+            self._regime_stats, regime, pnl
+        )
+        cross_key = f"{exit_reason}|{regime}|{mode}"
+        self._update_stats(
+            self._cross_stats, cross_key, pnl
+        )
+
+        # CSV行構築
+        def _fmt(dt: datetime) -> str:
+            return dt.strftime("%Y-%m-%d %H:%M:%S")
+
+        row: dict[str, object] = {
+            "trade_id": event.trade_id,
+            "direction": event.direction,
+            "entry_time": (
+                _fmt(event.opened_at)
+                if event.opened_at else ""
+            ),
+            "exit_time": _fmt(event.timestamp),
+            "holding_minutes": (
+                f"{event.holding_minutes:.0f}"
+            ),
+            "entry_price": f"{event.entry_price:.5f}",
+            "exit_price": (
+                f"{event.exit_price:.5f}"
+                if event.exit_price else ""
+            ),
+            "trigger_price": (
+                f"{event.trigger_price:.5f}"
+                if event.trigger_price else ""
+            ),
+            "fill_price": (
+                f"{event.fill_price:.5f}"
+                if event.fill_price else ""
+            ),
+            "pips": f"{event.pips:.1f}",
+            "profit_loss": f"{pnl:.0f}",
+            "exit_reason": exit_reason,
+            "regime": regime,
+            "mode": mode,
+            "strategy_id": event.strategy_id or "",
+        }
+
+        sig_data = event.data.get("signal_data", {})
+        breakdowns = sig_data.get("score_breakdowns", {})
+        confidence = sig_data.get(
+            "confidence",
+            event.data.get("confidence", 0.0),
+        )
+        consensus_score = sig_data.get(
+            "consensus_score", 0.0
+        )
+        sl_pips = sig_data.get("sl_pips", 0.0)
+        tp_pips = sig_data.get("tp_pips", 0.0)
+        rationale = sig_data.get("rationale", "")
+
+        row["confidence"] = f"{confidence:.3f}"
+        row["consensus_score"] = (
+            f"{consensus_score:.2f}"
+            if consensus_score is not None else ""
+        )
+        row["sl_pips"] = f"{sl_pips:.1f}"
+        row["tp_pips"] = f"{tp_pips:.1f}"
+        row["rationale"] = rationale
+
+        primary_tf = sig_data.get("primary_tf", "")
+        bd = breakdowns.get(primary_tf, {})
+        if not bd and breakdowns:
+            bd = next(iter(breakdowns.values()), {})
+
+        row["score_trend"] = (
+            f"{bd.get('trend', 0):.1f}"
+        )
+        row["score_adx"] = f"{bd.get('adx', 0):.1f}"
+        row["score_rsi"] = f"{bd.get('rsi', 0):.1f}"
+        row["score_macd_slope"] = (
+            f"{bd.get('macd_slope', 0):.1f}"
+        )
+        row["score_divergence"] = (
+            f"{bd.get('divergence', 0):.1f}"
+        )
+        row["score_ema_cross"] = (
+            f"{bd.get('ema_cross', 0):.1f}"
+        )
+        row["score_stochastic"] = (
+            f"{bd.get('stochastic', 0):.1f}"
+        )
+        row["score_htf"] = f"{bd.get('htf', 0):.1f}"
+
+        row["mfe_pips"] = f"{event.mfe_pips:.1f}"
+        row["mae_pips"] = f"{event.mae_pips:.1f}"
+
+        row["entry_spread_pips"] = (
+            f"{event.entry_spread_pips:.2f}"
+        )
+        row["exit_spread_pips"] = (
+            f"{event.exit_spread_pips:.2f}"
+        )
+        row["slippage_pips"] = (
+            f"{event.slippage_pips:.2f}"
+        )
+        row["commission"] = f"{event.commission:.0f}"
+
+        row["entry_atr"] = f"{event.entry_atr:.5f}"
+        row["entry_adx"] = f"{event.entry_adx:.1f}"
+        row["entry_bb_width"] = (
+            f"{event.entry_bb_width:.5f}"
+        )
+
+        row["equity_before"] = (
+            f"{event.equity_before:.0f}"
+        )
+        row["equity_after"] = (
+            f"{event.equity_after:.0f}"
+        )
+        row["dd_pct_at_entry"] = (
+            f"{event.dd_pct_at_entry:.2f}"
+        )
+        row["consecutive_losses"] = (
+            str(event.consecutive_losses)
+        )
+        row["risk_per_trade_pct"] = (
+            f"{event.risk_per_trade_pct:.3f}"
+        )
+        row["lot"] = f"{event.lot:.2f}"
+
+        row["parent_trade_id"] = (
+            event.parent_trade_id or ""
+        )
+        row["position_id"] = (
+            event.position_id or ""
+        )
+        row["entry_threshold"] = (
+            f"{event.entry_threshold:.2f}"
+        )
+        row["htf_alignment"] = (
+            f"{event.htf_alignment:.3f}"
+        )
+        row["penalty_total"] = (
+            f"{event.penalty_total:.3f}"
+        )
+        row["penalty_breakdown"] = (
+            json.dumps(event.penalty_breakdown)
+            if event.penalty_breakdown else "{}"
+        )
+        row["trend_strength"] = (
+            f"{event.trend_strength:.3f}"
+        )
+        row["mfe_r"] = f"{event.mfe_r:.2f}"
+        row["mae_r"] = f"{event.mae_r:.2f}"
+        row["time_to_mfe_minutes"] = (
+            f"{event.time_to_mfe_minutes:.0f}"
+        )
+        row["session"] = event.session
+
+        self._trade_rows.append(row)
+
+    def get_stats(
+        self,
+    ) -> dict[str, dict[str, dict[str, float]]]:
+        """収集した統計データを返す
+
+        Returns:
+            統計データの辞書（exit/mode/regime/cross）
+        """
+        return {
+            "exit": self._exit_stats,
+            "mode": self._mode_stats,
+            "regime": self._regime_stats,
+            "cross": self._cross_stats,
+        }
