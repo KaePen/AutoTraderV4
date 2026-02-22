@@ -19,6 +19,7 @@ from autotrader.backtest.data_loader import DataLoader
 from autotrader.backtest.metrics import MetricsCalculator
 from autotrader.backtest.simulator import SimulatorConfig, TradeSimulator
 from autotrader.config import DEFAULT_SCORING, DEFAULT_TRADING_PARAMS
+from autotrader.config.trading_params import get_preset
 from autotrader.core.entities import Candle, Signal
 from autotrader.core.enums import ExitReason, SignalType, Timeframe
 
@@ -464,11 +465,16 @@ def run_backtest_period(
     generator = OptimizedGenerator(config)
     generator.set_higher_tf_data(h4_df)
 
+    # シンボル別プリセット取得（GBPUSDなどの非JPYペア対応）
+    preset = get_preset(symbol)
+    # pip_unit: JPY建て=0.01、非JPY建て=0.0001
+    pip_unit = 0.01 if symbol.endswith("JPY") else 0.0001
     simulator = TradeSimulator(
         config=SimulatorConfig(
             initial_balance=initial_balance,
-            spread_pips=DEFAULT_TRADING_PARAMS.spread_pips,
-            pip_value=DEFAULT_TRADING_PARAMS.pip_value,
+            spread_pips=preset.spread_pips,
+            pip_value=preset.pip_value,
+            pip_unit=pip_unit,
             max_positions=1,
             default_volume=config.volume,
         )
@@ -584,12 +590,40 @@ def get_default_param_grid() -> list[OptimizeConfig]:
     ]
 
 
+def _run_single_config(
+    args: tuple,
+) -> tuple[int, dict, dict]:
+    """単一パラメータ設定のバックテスト（並列実行用）
+
+    Args:
+        args: (idx, config, df, h4_df, train_years,
+               valid_years, symbol)
+
+    Returns:
+        (idx, train_result, valid_result) のタプル
+    """
+    (
+        idx, config, df, h4_df,
+        train_years, valid_years, symbol,
+    ) = args
+    train = run_backtest_period(
+        df, h4_df,
+        train_years[0], train_years[1], config, symbol,
+    )
+    valid = run_backtest_period(
+        df, h4_df,
+        valid_years[0], valid_years[1], config, symbol,
+    )
+    return idx, train, valid
+
+
 def run_optimization(
     data_dir: str = "data",
     symbol: str = "USDJPY",
     train_years: tuple[int, int] = (2010, 2019),
     valid_years: tuple[int, int] = (2020, 2025),
     param_grid: list[OptimizeConfig] | None = None,
+    max_workers: int = 1,
 ) -> list[OptimizeResult]:
     """パラメータ最適化を実行
 
@@ -637,6 +671,8 @@ def run_optimization(
     results: list[OptimizeResult] = []
 
     print("\n最適化実行中...")
+    if max_workers > 1:
+        print(f"  並列実行: {max_workers}コア / {len(param_grid)}設定")
     header = (
         f"{'#':<4} {'min_sig':<8} {'ADX':<6} "
         f"{'RSI':<10} {'SL/TP':<10} {'CD':<4} | "
@@ -652,19 +688,43 @@ def run_optimization(
     print(sub_header)
     print("-" * 120)
 
-    for i, config in enumerate(param_grid):
-        # 訓練期間
-        train_result = run_backtest_period(
-            df, h4_df,
-            train_years[0], train_years[1],
-            config,
-        )
-        # 検証期間
-        valid_result = run_backtest_period(
-            df, h4_df,
-            valid_years[0], valid_years[1],
-            config,
-        )
+    # 並列or逐次で各パラメータを評価
+    raw_results: list[tuple[int, dict, dict]] = []
+
+    if max_workers > 1:
+        import concurrent.futures
+
+        task_args = [
+            (
+                i, cfg, df, h4_df,
+                train_years, valid_years, symbol,
+            )
+            for i, cfg in enumerate(param_grid)
+        ]
+        with concurrent.futures.ProcessPoolExecutor(
+            max_workers=max_workers
+        ) as executor:
+            for res in executor.map(
+                _run_single_config, task_args
+            ):
+                raw_results.append(res)
+        raw_results.sort(key=lambda x: x[0])
+    else:
+        for i, cfg in enumerate(param_grid):
+            tr = run_backtest_period(
+                df, h4_df,
+                train_years[0], train_years[1],
+                cfg, symbol,
+            )
+            vr = run_backtest_period(
+                df, h4_df,
+                valid_years[0], valid_years[1],
+                cfg, symbol,
+            )
+            raw_results.append((i, tr, vr))
+
+    for i, train_result, valid_result in raw_results:
+        config = param_grid[i]
 
         # スコア計算
         score = 0.0
@@ -695,10 +755,10 @@ def run_optimization(
             f"{config.cooldown_bars:<4} | "
             f"{train_result['win_rate']:>7.1f}% "
             f"{train_result['pf']:>7.2f} "
-            f"¥{train_result['net_profit']:>+12,.0f} | "
+            f"${train_result['net_profit']:>+12,.0f} | "
             f"{valid_result['win_rate']:>7.1f}% "
             f"{valid_result['pf']:>7.2f} "
-            f"¥{valid_result['net_profit']:>+12,.0f}"
+            f"${valid_result['net_profit']:>+12,.0f}"
         )
 
     # スコア降順ソート
@@ -722,7 +782,7 @@ def run_optimization(
         print(
             f"     検証: 勝率{v['win_rate']:.1f}%, "
             f"PF={v['pf']:.2f}, "
-            f"利益¥{v['net_profit']:+,.0f}, "
+            f"利益${v['net_profit']:+,.0f}, "
             f"最大DD={v['max_dd']:.2f}%"
         )
         print()
