@@ -322,46 +322,99 @@ class BacktestRunner:
         return df
 
     def _calculate_indicators_cached(
-        self, df: pd.DataFrame, cache_key: str
+        self,
+        df: pd.DataFrame,
+        cache_key: str,
+        needed_years: list[int] | None = None,
     ) -> pd.DataFrame:
-        """インジケータをキャッシュ付きで計算
+        """インジケータをキャッシュ付きで計算（年別分割保存）
 
-        初回計算後は .indicator_cache/ にparquet保存し、
-        次回以降はキャッシュから読み込んで再計算を省略する。
+        全CSVデータでインジケータを計算し、年別parquetに分割保存する。
+        ウォームアップは全期間計算によって自動的に処理される。
+        2回目以降は必要な年のparquetだけを読み込むため高速。
+
+        キャッシュ構造:
+            .indicator_cache/{cache_key}/
+                2009.parquet
+                2010.parquet
+                ...
 
         Args:
-            df: OHLCVデータ
+            df: OHLCVデータ（全期間）
             cache_key: キャッシュ識別キー
                 （例: "M1_1708600000000_12345678"）
+            needed_years: 必要な年のリスト。
+                Noneの場合は全期間を計算・返却する。
+                指定した場合、不足年のみ再計算してキャッシュに追記。
 
         Returns:
-            pd.DataFrame: インジケータ付きデータ
+            pd.DataFrame: インジケータ付きデータ。
+                needed_years指定時は該当年のみ、
+                それ以外は全期間を返す。
         """
-        cache_dir = self.data_dir / ".indicator_cache"
-        cache_path = cache_dir / f"{cache_key}.parquet"
+        _log = logging.getLogger(__name__)
+        cache_dir = self.data_dir / ".indicator_cache" / cache_key
 
-        if cache_path.exists():
-            try:
-                cached = pd.read_parquet(cache_path)
-                logger.info(
-                    "インジケータキャッシュ使用: %s", cache_key
+        # キャッシュヒット確認
+        if cache_dir.is_dir():
+            cached_years = {
+                int(p.stem)
+                for p in cache_dir.glob("*.parquet")
+                if p.stem.isdigit()
+            }
+            if cached_years:
+                years_needed = (
+                    set(needed_years)
+                    if needed_years is not None
+                    else cached_years
                 )
-                return cached
-            except Exception as e:
-                logger.warning(
-                    "キャッシュ読み込み失敗（再計算）: %s", e
-                )
+                missing = years_needed - cached_years
+                if not missing:
+                    years_to_load = sorted(years_needed)
+                    try:
+                        dfs = [
+                            pd.read_parquet(
+                                cache_dir / f"{y}.parquet"
+                            )
+                            for y in years_to_load
+                        ]
+                        _log.info(
+                            "年別キャッシュ使用: %s [%s]",
+                            cache_key,
+                            ", ".join(
+                                str(y) for y in years_to_load
+                            ),
+                        )
+                        return pd.concat(dfs, ignore_index=True)
+                    except Exception as e:
+                        _log.warning(
+                            "キャッシュ読み込み失敗（再計算）: %s", e
+                        )
 
+        # インジケータ計算（全期間・ウォームアップ込み）
+        _log.info("インジケータ計算（全期間）: %s", cache_key)
         df = self._calculate_indicators(df)
 
+        # 年別に分割してparquet保存
         cache_dir.mkdir(parents=True, exist_ok=True)
-        try:
-            df.to_parquet(cache_path, index=False)
-            logger.info(
-                "インジケータキャッシュ保存: %s", cache_key
-            )
-        except Exception as e:
-            logger.warning("キャッシュ保存失敗: %s", e)
+        time_years = pd.to_datetime(df["time"]).dt.year
+        for year in time_years.unique():
+            year_path = cache_dir / f"{year}.parquet"
+            try:
+                year_df = df[time_years == year]
+                year_df.to_parquet(year_path, index=False)
+                _log.debug(
+                    "年別キャッシュ保存: %s/%d", cache_key, year
+                )
+            except Exception as e:
+                _log.warning(
+                    "キャッシュ保存失敗 %d: %s", year, e
+                )
+
+        # 必要年のみ返す
+        if needed_years is not None:
+            mask = time_years.isin(set(needed_years))
+            return df[mask].reset_index(drop=True)
 
         return df
 
@@ -858,9 +911,13 @@ class BacktestRunner:
                 "tf_loading", tf, current, total
             )
 
+        # バックテスト対象年リスト（キャッシュの絞り込みに使用）
+        needed_years = list(range(start_year, end_year + 1))
+
         market_data = self._load_all_timeframes(
             include_m1=_needs_short_tf,
             on_tf_loaded=_on_tf_loaded if not use_parallel_tf else None,
+            needed_years=needed_years,
         )
 
         # 並列マルチTFモードの場合（旧方式・後方互換）
@@ -1017,18 +1074,27 @@ class BacktestRunner:
         self,
         include_m1: bool = False,
         on_tf_loaded: "Callable[[str, int, int], None] | None" = None,
+        needed_years: list[int] | None = None,
     ) -> dict[str, pd.DataFrame]:
         """全時間足データをロード
+
+        needed_years が指定された場合、キャッシュが揃っている年は
+        CSVを再読み込みせずparquetから高速ロードする。
+        ウォームアップは初回の全期間計算時に処理済みのため問題なし。
 
         Args:
             include_m1: M1/M5データを含める（メモリ使用量増加）。
                 UNIVERSALモードでは自動的にTrueになる。
             on_tf_loaded: TFロード完了コールバック(tf名, 完了数, 全数)。
                 インジケータ計算後に呼ばれ、UIへの進捗通知に使用。
+            needed_years: バックテストに必要な年のリスト。
+                指定時は該当年のデータのみを返し、メモリを節約する。
+                Noneの場合は全期間を返す（後方互換性）。
 
         Returns:
             dict[str, pd.DataFrame]: 時間足別データフレーム
         """
+        _log = logging.getLogger(__name__)
         loader = DataLoader(self.data_dir)
         data = {}
 
@@ -1063,18 +1129,66 @@ class BacktestRunner:
 
             if tf_files:
                 tf_path = sorted(tf_files)[0]
-                df = loader.load_csv(tf_path)
-                if df is not None:
-                    # キャッシュキー: TF名＋ファイルのmtime＋サイズ
-                    stat = tf_path.stat()
-                    cache_key = (
-                        f"{tf}"
-                        f"_{int(stat.st_mtime * 1000)}"
-                        f"_{stat.st_size}"
-                    )
-                    df = self._calculate_indicators_cached(
-                        df, cache_key
-                    )
+                # キャッシュキー: TF名＋ファイルのmtime＋サイズ
+                stat = tf_path.stat()
+                cache_key = (
+                    f"{tf}"
+                    f"_{int(stat.st_mtime * 1000)}"
+                    f"_{stat.st_size}"
+                )
+
+                # 年別キャッシュが揃っているか事前確認
+                # → 揃っていれば CSV 読み込みをスキップ可能
+                cache_dir = (
+                    self.data_dir / ".indicator_cache" / cache_key
+                )
+                _can_skip_csv = False
+                if needed_years is not None and cache_dir.is_dir():
+                    cached_years = {
+                        int(p.stem)
+                        for p in cache_dir.glob("*.parquet")
+                        if p.stem.isdigit()
+                    }
+                    if set(needed_years).issubset(cached_years):
+                        _can_skip_csv = True
+
+                if _can_skip_csv:
+                    # CSV読み込み不要: 年別parquetを直接ロード
+                    try:
+                        years_to_load = sorted(needed_years)
+                        _dfs = [
+                            pd.read_parquet(
+                                cache_dir / f"{y}.parquet"
+                            )
+                            for y in years_to_load
+                        ]
+                        df = pd.concat(_dfs, ignore_index=True)
+                        _log.info(
+                            "年別キャッシュ使用（CSV省略）: %s [%s]",
+                            cache_key,
+                            ", ".join(
+                                str(y) for y in years_to_load
+                            ),
+                        )
+                    except Exception as e:
+                        _log.warning(
+                            "キャッシュ読み込み失敗: %s"
+                            "（CSV再読み込み）",
+                            e,
+                        )
+                        df = loader.load_csv(tf_path)
+                        if df is not None:
+                            df = self._calculate_indicators_cached(
+                                df, cache_key, needed_years
+                            )
+                else:
+                    df = loader.load_csv(tf_path)
+                    if df is not None:
+                        df = self._calculate_indicators_cached(
+                            df, cache_key, needed_years
+                        )
+
+                if df is not None and not df.empty:
                     data[tf] = df
                     # インスタンス変数にも保存
                     attr = _tf_attr_map.get(tf)
