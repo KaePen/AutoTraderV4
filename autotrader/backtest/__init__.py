@@ -107,14 +107,6 @@ from autotrader.backtest.diagnostics import (
     run_diagnostics,
     run_debug_signal,
 )
-from autotrader.backtest.optimizer import (
-    OptimizeConfig,
-    OptimizeResult,
-    OptimizedGenerator,
-    run_optimization,
-    run_backtest_period,
-    get_default_param_grid,
-)
 
 __all__ = [
     # 統一設定クラス（新規）
@@ -209,11 +201,4 @@ __all__ = [
     "SignalDebugger",
     "run_diagnostics",
     "run_debug_signal",
-    # 最適化（新規）
-    "OptimizeConfig",
-    "OptimizeResult",
-    "OptimizedGenerator",
-    "run_optimization",
-    "run_backtest_period",
-    "get_default_param_grid",
 ]
