@@ -779,6 +779,7 @@ def run_single_backtest(args: argparse.Namespace):
         BacktestServiceConfig,
     )
     from autotrader.backtest.events import RichEventListener
+    from autotrader.config.trading_params import get_preset as _get_preset
 
     from datetime import datetime as _dt, timedelta as _td
 
@@ -799,6 +800,9 @@ def run_single_backtest(args: argparse.Namespace):
     # 短い時間足オプション（--no-short-tfが指定されていなければTrue）
     use_short_tf = not args.no_short_tf
 
+    # シンボルプリセットからデフォルト値取得
+    _preset = _get_preset(args.symbol)
+
     config = BacktestServiceConfig(
         start_year=start_year,
         end_year=end_year,
@@ -808,11 +812,13 @@ def run_single_backtest(args: argparse.Namespace):
         symbol=args.symbol,
         timeframe=args.timeframe,
         max_positions=args.max_positions,
+        spread_pips=_preset.spread_pips,
+        slippage_pips=_preset.slippage_pips,
         verbose=False,
         use_short_timeframe=use_short_tf,
         enable_scalping=args.enable_scalping,
     )
-    # spread/slippage上書き
+    # spread/slippage上書き（--spread/--slippage の明示指定を優先）
     if args.spread is not None:
         config.spread_pips = args.spread
     if args.slippage is not None:
@@ -1123,6 +1129,7 @@ def run_quick(args: argparse.Namespace):
         TradeSimulator,
     )
     from autotrader.config import DEFAULT_TRADING_PARAMS
+    from autotrader.config.trading_params import get_preset as _get_preset
     from autotrader.core.entities import Candle, Signal
     from autotrader.core.enums import (
         ExitReason,
@@ -1184,10 +1191,11 @@ def run_quick(args: argparse.Namespace):
     bot.set_market_data(market_data)
 
     initial_balance = args.initial_balance
+    _preset = _get_preset(args.symbol)
     sim_config = SimulatorConfig(
         initial_balance=initial_balance,
-        spread_pips=DEFAULT_TRADING_PARAMS.spread_pips,
-        pip_value=DEFAULT_TRADING_PARAMS.pip_value,
+        spread_pips=_preset.spread_pips,
+        pip_value=_preset.pip_value,
         max_positions=1,
         default_volume=args.volume,
     )
