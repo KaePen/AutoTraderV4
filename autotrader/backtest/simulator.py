@@ -11,6 +11,7 @@ from typing import Any
 from uuid import uuid4
 
 from autotrader.config import DEFAULT_TRADING_PARAMS
+from autotrader.config.trading_params import SymbolPreset, get_preset
 from autotrader.core.entities import Signal, Trade, Position, Candle
 from autotrader.core.enums import SignalType, ExitReason, TradingStrategyMode
 from autotrader.decision.unified.position_manager import (
@@ -81,6 +82,41 @@ class SimulatorConfig:
             "off_hours": 2.5,
         }
     )
+
+    @classmethod
+    def from_preset(
+        cls,
+        symbol: str,
+        *,
+        initial_balance: float = 1_000_000.0,
+        default_volume: float = 0.1,
+    ) -> SimulatorConfig:
+        """SymbolPreset からシミュレーター設定を生成.
+
+        Args:
+            symbol: 通貨ペア名（例: "USDJPY"）
+            initial_balance: 初期残高
+            default_volume: デフォルトロット数
+
+        Returns:
+            SimulatorConfig: プリセットベースの設定
+        """
+        p = get_preset(symbol)
+        pip_unit = 0.01 if "JPY" in symbol else 0.0001
+        return cls(
+            initial_balance=initial_balance,
+            spread_pips=p.spread_pips,
+            pip_value=p.pip_value,
+            max_positions=p.max_positions,
+            default_volume=default_volume,
+            slippage_pips=p.slippage_pips,
+            pip_unit=pip_unit,
+            commission_per_lot=p.commission_per_lot,
+            bonus_max_positions=p.bonus_max_positions,
+            bonus_score_threshold=p.bonus_score_threshold,
+            use_position_manager=p.use_position_manager,
+            pm_config=p.to_pm_config() if p.use_position_manager else None,
+        )
 
 
 @dataclass

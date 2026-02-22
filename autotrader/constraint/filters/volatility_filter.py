@@ -6,23 +6,13 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from autotrader.constraint.filters.filter_result import FilterResult
+
 
 import numpy as np
 import pandas as pd
 
 
-@dataclass
-class FilterResult:
-    """フィルター結果
-
-    Attributes:
-        skip: スキップするかどうか
-        reason: スキップ理由（スキップしない場合は空文字）
-    """
-
-    skip: bool
-    reason: str = ""
 
 
 class VolatilityFilter:

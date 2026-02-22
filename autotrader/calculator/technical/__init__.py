@@ -17,10 +17,14 @@ from autotrader.calculator.technical.volatility import VolatilityIndicators
 from autotrader.calculator.technical.price_structure import (
     PriceStructureIndicators,
 )
+from autotrader.calculator.technical.batch import (
+    TechnicalIndicatorBatch,
+)
 
 __all__ = [
     "TrendIndicators",
     "MomentumIndicators",
     "VolatilityIndicators",
     "PriceStructureIndicators",
+    "TechnicalIndicatorBatch",
 ]

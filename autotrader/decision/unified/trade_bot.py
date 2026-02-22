@@ -402,7 +402,7 @@ class UnifiedTradeBot:
         can_trade, reason = self.risk_manager.can_trade(py_time)
         if not can_trade:
             if self._flow_analyzer:
-                from autotrader.backtest.trade_flow_analyzer import (
+                from autotrader.core.diagnostics import (
                     SignalStepRecord,
                 )
                 self._flow_analyzer.collect(SignalStepRecord(
@@ -473,7 +473,7 @@ class UnifiedTradeBot:
 
         if consensus.direction == SignalType.HOLD:
             if self._flow_analyzer:
-                from autotrader.backtest.trade_flow_analyzer import (
+                from autotrader.core.diagnostics import (
                     SignalStepRecord,
                 )
                 tf_detail = {}
@@ -565,7 +565,7 @@ class UnifiedTradeBot:
                 current_time, consensus.direction,
             ):
                 if self._flow_analyzer:
-                    from autotrader.backtest.trade_flow_analyzer import (
+                    from autotrader.core.diagnostics import (
                         SignalStepRecord,
                     )
                     self._flow_analyzer.collect(SignalStepRecord(
@@ -740,7 +740,7 @@ class UnifiedTradeBot:
         primary_signal = tf_signals.get(plan.primary_tf)
         if primary_signal is None:
             if self._flow_analyzer:
-                from autotrader.backtest.trade_flow_analyzer import (
+                from autotrader.core.diagnostics import (
                     SignalStepRecord,
                 )
                 self._flow_analyzer.collect(SignalStepRecord(
@@ -801,7 +801,7 @@ class UnifiedTradeBot:
 
         # フロー分析: シグナル発生記録
         if self._flow_analyzer:
-            from autotrader.backtest.trade_flow_analyzer import (
+            from autotrader.core.diagnostics import (
                 SignalStepRecord,
             )
             self._flow_analyzer.collect(SignalStepRecord(

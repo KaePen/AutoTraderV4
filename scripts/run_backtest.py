@@ -103,9 +103,6 @@ def parse_args() -> argparse.Namespace:
   # シグナルデバッグ
   uv run python scripts/run_backtest.py --debug-signal "2023-03-15 10:30"
 
-  # パラメータ最適化
-  uv run python scripts/run_backtest.py --optimize
-
   # 高速並列バックテスト
   uv run python scripts/run_backtest.py --fast --years 2023
 
@@ -209,11 +206,6 @@ def parse_args() -> argparse.Namespace:
         default=None,
         metavar="TIME",
         help="特定時刻のシグナルデバッグ（例: '2023-03-15 10:30'）",
-    )
-    parser.add_argument(
-        "--optimize",
-        action="store_true",
-        help="パラメータ最適化を実行",
     )
     parser.add_argument(
         "--fast",
@@ -1054,19 +1046,6 @@ def run_debug_signal_mode(args: argparse.Namespace):
     )
 
 
-def run_optimize(args: argparse.Namespace):
-    """パラメータ最適化実行"""
-    from autotrader.backtest.optimizer import run_optimization
-
-    start_year, end_year = parse_years(args.years)
-    # 訓練期間=指定期間、検証期間=その後2年
-    run_optimization(
-        data_dir=args.data_dir,
-        symbol=args.symbol,
-        train_years=(start_year, end_year),
-        valid_years=(end_year + 1, end_year + 3),
-    )
-
 
 def run_fast(args: argparse.Namespace):
     """高速並列バックテスト実行"""
@@ -1336,8 +1315,6 @@ def main():
             run_diagnose(args)
         elif args.debug_signal:
             run_debug_signal_mode(args)
-        elif args.optimize:
-            run_optimize(args)
         elif args.fast:
             run_fast(args)
         elif args.quick:

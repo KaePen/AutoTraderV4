@@ -1,49 +1,29 @@
-"""バックテストフィルターマネージャー
+"""フィルターマネージャー
 
 複数のフィルターを統合管理し、LLMフィルターをシミュレート。
 """
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
 import pandas as pd
 
-from autotrader.backtest.filters.event_filter import (
-    EventFilter,
-    FilterResult as EventFilterResult,
+from autotrader.constraint.filters.event_filter import EventFilter
+from autotrader.constraint.filters.filter_result import (
+    ManagerFilterResult as FilterResult,
 )
-from autotrader.backtest.filters.volatility_filter import (
-    VolatilityFilter,
-    FilterResult as VolatilityFilterResult,
-)
-from autotrader.backtest.filters.session_filter import (
+from autotrader.constraint.filters.session_filter import (
     SessionFilter,
-    FilterResult as SessionFilterResult,
+)
+from autotrader.constraint.filters.volatility_filter import (
+    VolatilityFilter,
 )
 
 
-@dataclass
-class FilterResult:
-    """統合フィルター結果
-
-    Attributes:
-        skip: スキップするかどうか
-        reason: スキップ理由
-        filter_name: 発動したフィルター名
-        confidence_adjustment: 確度調整値（-1.0 ~ 0.0）
-    """
-
-    skip: bool
-    reason: str = ""
-    filter_name: str = ""
-    confidence_adjustment: float = 0.0
-
-
-class BacktestFilterManager:
-    """バックテストフィルターマネージャー
+class FilterManager:
+    """フィルターマネージャー
 
     複数のフィルターを統合し、LLMによるエントリーフィルターを
     ルールベースでシミュレートする。
@@ -130,21 +110,11 @@ class BacktestFilterManager:
         symbol: str,
         df_history: pd.DataFrame | None,
     ) -> FilterResult:
-        """個別フィルターを適用
-
-        Args:
-            filter_name: フィルター名
-            filter_instance: フィルターインスタンス
-            timestamp: 時刻
-            row: データ行
-            symbol: 通貨ペア
-            df_history: 履歴データ
-
-        Returns:
-            FilterResult: フィルター結果
-        """
+        """個別フィルターを適用"""
         if filter_name == "event":
-            result = filter_instance.should_skip(timestamp, symbol)
+            result = filter_instance.should_skip(
+                timestamp, symbol
+            )
             if result.skip:
                 return FilterResult(
                     skip=True,
@@ -154,7 +124,9 @@ class BacktestFilterManager:
                 )
 
         elif filter_name == "volatility":
-            result = filter_instance.should_skip(row, df_history)
+            result = filter_instance.should_skip(
+                row, df_history
+            )
             if result.skip:
                 return FilterResult(
                     skip=True,
@@ -176,11 +148,7 @@ class BacktestFilterManager:
         return FilterResult(skip=False)
 
     def get_filter_stats(self) -> dict[str, int]:
-        """フィルター統計を取得
-
-        Returns:
-            dict[str, int]: フィルター名ごとのスキップ数
-        """
+        """フィルター統計を取得"""
         return {name: 0 for name, _ in self.filters}
 
     def adjust_confidence(
@@ -191,36 +159,35 @@ class BacktestFilterManager:
         symbol: str = "USDJPY",
         df_history: pd.DataFrame | None = None,
     ) -> float:
-        """確度を調整（スキップせずに減点のみ）
-
-        フィルター条件に近い場合、スキップはしないが確度を下げる。
-
-        Args:
-            base_confidence: 元の確度
-            timestamp: トレード時刻
-            row: データ行
-            symbol: 通貨ペア
-            df_history: 履歴データ
-
-        Returns:
-            float: 調整後の確度（0.0 ~ 1.0）
-        """
+        """確度を調整（スキップせずに減点のみ）"""
         adjustment = 0.0
 
-        # セッションフィルター（Kill Zone外でも完全スキップしない設定用）
         for filter_name, filter_instance in self.filters:
-            if filter_name == "session" and hasattr(filter_instance, "is_kill_zone"):
-                if not filter_instance.is_kill_zone(timestamp):
-                    adjustment -= 0.1  # Kill Zone外は確度減
+            if filter_name == "session" and hasattr(
+                filter_instance, "is_kill_zone"
+            ):
+                if not filter_instance.is_kill_zone(
+                    timestamp
+                ):
+                    adjustment -= 0.1
 
-        # ボラティリティチェック
         for filter_name, filter_instance in self.filters:
             if filter_name == "volatility":
-                regime = filter_instance.calculate_atr_regime(row, df_history)
+                regime = (
+                    filter_instance.calculate_atr_regime(
+                        row, df_history
+                    )
+                )
                 if regime == "extreme":
                     adjustment -= 0.2
                 elif regime == "high":
                     adjustment -= 0.1
 
-        adjusted = max(0.0, min(1.0, base_confidence + adjustment))
+        adjusted = max(
+            0.0, min(1.0, base_confidence + adjustment)
+        )
         return adjusted
+
+
+# 後方互換エイリアス
+BacktestFilterManager = FilterManager
