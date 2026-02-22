@@ -5,8 +5,9 @@ DOC API v2 を使い、FX関連ニュースを取得する。
 
 API制約:
   - 最大250件/リクエスト
-  - レートリミット: 1.5秒/リクエスト推奨
+  - レートリミット: 1.5秒/リクエスト推奨（429時は自動バックオフ）
   - 期間指定: YYYYMMDDHHMMSS 形式
+  - データカバレッジ: 2015年以降が安定（2014年以前は件数僅少）
 """
 
 from __future__ import annotations
@@ -34,6 +35,12 @@ _GDELT_API_URL = (
 
 # レートリミット（秒）
 _REQUEST_INTERVAL_SEC = 1.5
+
+# 429 バックオフ秒数（attempt × この値）
+_RATE_LIMIT_BACKOFF_SEC = 30.0
+
+# 429 発生時の最大リトライ回数
+_MAX_RETRIES = 3
 
 # 1リクエストあたりの最大件数
 _MAX_RECORDS = 250
@@ -105,35 +112,82 @@ class GDELTDocClient:
             "sort": "DateDesc",
         }
 
-        self._wait_rate_limit()
+        for attempt in range(_MAX_RETRIES):
+            self._wait_rate_limit()
 
-        try:
-            resp = _requests_module.get(
-                _GDELT_API_URL,
-                params=params,
-                timeout=self._timeout,
+            # HTTP リクエスト
+            try:
+                resp = _requests_module.get(
+                    _GDELT_API_URL,
+                    params=params,
+                    timeout=self._timeout,
+                )
+            except Exception as e:
+                logger.warning(
+                    f"[GDELT] 接続エラー "
+                    f"({start_str}〜{end_str}): {e}"
+                )
+                return []
+
+            # 429: バックオフして再試行
+            if resp.status_code == 429:
+                wait = _RATE_LIMIT_BACKOFF_SEC * (attempt + 1)
+                logger.warning(
+                    f"[GDELT] 429 Too Many Requests, "
+                    f"{wait:.0f}秒待機後リトライ "
+                    f"({attempt + 1}/{_MAX_RETRIES})"
+                )
+                time.sleep(wait)
+                continue
+
+            # その他HTTPエラー
+            try:
+                resp.raise_for_status()
+            except Exception as e:
+                logger.warning(
+                    f"[GDELT] HTTPエラー "
+                    f"({start_str}〜{end_str}): {e}"
+                )
+                return []
+
+            # 空レスポンス: 2015年以前など対象期間にデータなし
+            text = resp.text.strip()
+            if not text:
+                logger.debug(
+                    f"[GDELT] データなし "
+                    f"({start_str}〜{end_str})"
+                )
+                return []
+
+            # JSON パース
+            try:
+                data = resp.json()
+            except Exception as e:
+                logger.debug(
+                    f"[GDELT] JSONパース失敗 "
+                    f"({start_str}〜{end_str}): {e}"
+                )
+                return []
+
+            articles = data.get("articles") or []
+            items = []
+            for article in articles:
+                item = self._parse_article(article, currencies)
+                if item:
+                    items.append(item)
+
+            logger.debug(
+                f"[GDELT] {start_str}〜{end_str}: "
+                f"{len(items)}件取得"
             )
-            resp.raise_for_status()
-            data = resp.json()
-        except Exception as e:
-            logger.warning(
-                f"[GDELT] リクエスト失敗 "
-                f"({start_str}〜{end_str}): {e}"
-            )
-            return []
+            return items
 
-        articles = data.get("articles") or []
-        items = []
-        for article in articles:
-            item = self._parse_article(article, currencies)
-            if item:
-                items.append(item)
-
-        logger.debug(
-            f"[GDELT] {start_str}〜{end_str}: "
-            f"{len(items)}件取得"
+        # 全リトライ失敗
+        logger.warning(
+            f"[GDELT] {_MAX_RETRIES}回リトライ後スキップ "
+            f"({start_str}〜{end_str})"
         )
-        return items
+        return []
 
     def fetch_news_year(
         self,
