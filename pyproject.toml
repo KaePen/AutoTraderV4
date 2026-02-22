@@ -64,6 +64,9 @@ live = [
 gdelt = [
     "requests>=2.31.0",
 ]
+bigquery = [
+    "google-cloud-bigquery>=3.17.0",
+]
 
 [tool.hatch.build.targets.wheel]
 packages = ["autotrader"]

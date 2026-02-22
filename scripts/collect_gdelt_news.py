@@ -1,24 +1,25 @@
 """GDELT ニュース一括収集スクリプト
 
-GDELT DOC API v2 を使ってFX関連ニュースを年次・通貨別に
-一括収集し、CSV形式で保存する。
+GDELT DOC API v2 または Google BigQuery を使って
+FX関連ニュースを年次・通貨別に一括収集し、CSV形式で保存する。
 
 前提:
+  # REST API モード（デフォルト）
   pip install requests
 
+  # BigQuery モード（レートリミットなし・推奨）
+  pip install google-cloud-bigquery
+  export GOOGLE_APPLICATION_CREDENTIALS=/path/to/key.json
+
 使用方法:
-  # 2024年のUSD/JPY関連ニュースを収集
+  # BigQuery モード（推奨）
+  python scripts/collect_gdelt_news.py \\
+      --source bq --project your-project-id \\
+      --years 2015-2025 --currencies USD,JPY,EUR,GBP,AUD
+
+  # REST API モード
   python scripts/collect_gdelt_news.py \\
       --year 2024 --currencies USD,JPY
-
-  # 2010-2025年の全主要通貨を収集
-  python scripts/collect_gdelt_news.py \\
-      --years 2010-2025 --currencies USD,JPY,EUR,GBP,AUD
-
-  # 出力先を指定
-  python scripts/collect_gdelt_news.py \\
-      --year 2024 --currencies USD,JPY \\
-      --output data/fundamental/
 
 出力先: data/fundamental/news_YYYY.csv（年ごと）
 """
@@ -35,6 +36,9 @@ sys.path.insert(0, str(_ROOT))
 
 from loguru import logger
 
+from autotrader.adapters.fundamental.gdelt_bq_client import (
+    GDELTBigQueryClient,
+)
 from autotrader.adapters.fundamental.gdelt_client import (
     GDELTDocClient,
 )
@@ -104,6 +108,18 @@ def parse_args() -> argparse.Namespace:
         help="APIリクエスト間隔（秒）",
     )
     parser.add_argument(
+        "--source",
+        choices=["rest", "bq"],
+        default="rest",
+        help="データソース: rest=REST API（デフォルト）, bq=BigQuery",
+    )
+    parser.add_argument(
+        "--project",
+        type=str,
+        default=None,
+        help="BigQueryプロジェクトID（--source bq 時に必須）",
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="実際にAPIを呼び出さずに処理件数を確認",
@@ -170,11 +186,24 @@ def main() -> int:
     output_dir = Path(args.output)
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    # BigQueryモード時の検証
+    if args.source == "bq" and not args.project:
+        logger.error(
+            "--source bq 時は --project が必要です\n"
+            "例: --source bq --project your-project-id"
+        )
+        return 1
+
+    source_label = (
+        f"BigQuery (project={args.project})"
+        if args.source == "bq"
+        else f"REST API (interval={args.request_interval}s)"
+    )
     logger.info(
+        f"データソース: {source_label}\n"
         f"対象通貨: {currencies}\n"
         f"対象年: {years[0]}〜{years[-1]} ({len(years)}年)\n"
-        f"出力ディレクトリ: {output_dir}\n"
-        f"APIリクエスト間隔: {args.request_interval}秒"
+        f"出力ディレクトリ: {output_dir}"
     )
 
     if args.dry_run:
@@ -184,17 +213,24 @@ def main() -> int:
                 "✓ 既存" if out_path.exists()
                 else "✗ 未存在"
             )
-            weeks = 52
             logger.info(
-                f"[DryRun] {year}: {out_path} {status} "
-                f"(約{weeks}リクエスト × "
-                f"{args.request_interval}秒)"
+                f"[DryRun] {year}: {out_path} {status}"
             )
         return 0
 
-    client = GDELTDocClient(
-        request_interval_sec=args.request_interval
-    )
+    # クライアント生成
+    if args.source == "bq":
+        try:
+            client = GDELTBigQueryClient(
+                project_id=args.project
+            )
+        except ImportError as e:
+            logger.error(str(e))
+            return 1
+    else:
+        client = GDELTDocClient(
+            request_interval_sec=args.request_interval
+        )
 
     error_count = 0
     success_count = 0
