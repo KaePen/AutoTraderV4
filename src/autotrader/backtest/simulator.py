@@ -10,8 +10,6 @@ from datetime import datetime
 from typing import Any
 from uuid import uuid4
 
-import pandas as pd
-
 from autotrader.config import DEFAULT_TRADING_PARAMS
 from autotrader.core.entities import Signal, Trade, Position, Candle
 from autotrader.core.enums import SignalType, ExitReason, TradingStrategyMode
@@ -33,15 +31,15 @@ class SimulatorConfig:
     Attributes:
         initial_balance: 初期残高
         spread_pips: スプレッド（pips）
-        pip_value: 1pipの価値（固定値。quote_jpy_seriesがある場合は動的計算）
-        max_positions: 最大ポジション数
+        pip_value: 1pipの価値
+        max_positions: 最大ポジション数（通常時）
         default_volume: デフォルトロット数
         slippage_pips: スリッページ（pips）
         commission_per_lot: ロット当たり手数料
         strategy_max_positions: 戦略別最大ポジション数
         pip_unit: 1pipの価格単位（JPY系=0.01、非JPY系=0.0001）
-        quote_jpy_series: クォート通貨/JPYの時系列レート（動的pip_value計算用）
-            Noneの場合は固定pip_valueを使用。インデックスはdatetime。
+        bonus_max_positions: 高品質シグナル時に追加するポジション数（0=無効）
+        bonus_score_threshold: bonus発動のconsensus_score閾値
     """
 
     initial_balance: float = 1_000_000.0
@@ -52,10 +50,6 @@ class SimulatorConfig:
         default_factory=lambda: DEFAULT_TRADING_PARAMS.pip_value
     )
     max_positions: int = 1
-    # 高品質シグナル時に追加する枠数（0=無効）
-    bonus_max_positions: int = 0
-    # bonus発動のconsensus_score閾値
-    bonus_score_threshold: float = 7.0
     default_volume: float = 0.1
     slippage_pips: float = field(
         default_factory=lambda: DEFAULT_TRADING_PARAMS.slippage_pips
@@ -66,11 +60,10 @@ class SimulatorConfig:
         default_factory=lambda: DEFAULT_TRADING_PARAMS.commission_per_lot
     )
     strategy_max_positions: dict[str, int] = field(default_factory=dict)
-    # クォート通貨/JPYの時系列レート（動的pip_value計算用）
-    # Noneの場合は固定pip_valueにフォールバック
-    quote_jpy_series: pd.Series | None = field(
-        default=None, compare=False, repr=False
-    )
+    # 品質ベース動的ポジション枠
+    # consensus_score が bonus_score_threshold 以上の時のみ追加枠を解放
+    bonus_max_positions: int = 0
+    bonus_score_threshold: float = 7.0
     # PositionManager統合（デフォルトOFF=ベースライン保持）
     use_position_manager: bool = False
     # PositionManagerConfig（外部から注入）
@@ -152,14 +145,7 @@ class TradeSimulator:
             self.config.slippage_pips * self._pip_unit
         )
         self._pip_value = self.config.pip_value
-        # 動的pip_value用シリーズ（asof参照用にソート済みを確保）
-        if self.config.quote_jpy_series is not None:
-            s = self.config.quote_jpy_series
-            if not s.index.is_monotonic_increasing:
-                s = s.sort_index()
-            self._quote_jpy_series: pd.Series | None = s
-        else:
-            self._quote_jpy_series = None
+        # bonus_max_positions が有効な場合は単一ポジション高速パスを無効化
         self._single_position = (
             self.config.max_positions == 1
             and self.config.bonus_max_positions == 0
@@ -231,28 +217,6 @@ class TradeSimulator:
     ) -> PositionEventLogger | None:
         """ポジションイベントロガーを取得"""
         return self._pos_event_logger
-
-    def _get_pip_value(self, time: datetime) -> float:
-        """時刻に対応するpip価値をJPYで取得
-
-        quote_jpy_seriesが設定されている場合は動的に計算。
-        計算式: pip_unit × 10,000 × quote/JPYレート
-        例(EURUSD): 0.0001 × 10,000 × USDJPY_close = USDJPY_close
-
-        Noneまたはレート取得失敗時は固定_pip_valueにフォールバック。
-
-        Args:
-            time: 参照時刻
-
-        Returns:
-            float: 1pip・0.1lotあたりのJPY価値
-        """
-        if self._quote_jpy_series is None:
-            return self._pip_value
-        rate = self._quote_jpy_series.asof(time)
-        if pd.isna(rate) or rate <= 0:
-            return self._pip_value
-        return self._pip_unit * 10_000.0 * float(rate)
 
     def reset(self) -> None:
         """状態をリセット"""
@@ -397,7 +361,7 @@ class TradeSimulator:
                             )
                             trades.append(trade)
 
-                # 品質ベース動的上限（bonus_max_positions>0かつ閾値超えで増枠）
+                # 品質ベース動的ポジション枠の計算
                 _eff_max = self.config.max_positions
                 if (
                     self.config.bonus_max_positions > 0
@@ -619,18 +583,12 @@ class TradeSimulator:
 
         # 損益計算（按分）
         if position.signal_type == SignalType.BUY:
-            profit_pips = (
-                (exit_price - position.entry_price)
-                / self._pip_unit
-            )
+            profit_pips = (exit_price - position.entry_price) * 100
         else:
-            profit_pips = (
-                (position.entry_price - exit_price)
-                / self._pip_unit
-            )
+            profit_pips = (position.entry_price - exit_price) * 100
 
         profit_loss = (
-            profit_pips * self._get_pip_value(candle.time) * close_volume
+            profit_pips * self._pip_value * close_volume
         )
         commission = self.config.commission_per_lot * close_volume
         profit_loss -= commission
@@ -800,11 +758,9 @@ class TradeSimulator:
         if signal.stop_loss and entry_price > 0:
             _sl_pips = abs(
                 entry_price - signal.stop_loss
-            ) / self._pip_unit
+            ) * 100
             _risk = (
-                _sl_pips
-                * self._get_pip_value(candle.time)
-                * volume
+                _sl_pips * self._pip_value * volume
             )
             if self.state.balance > 0:
                 _risk_pct = _risk / self.state.balance * 100
@@ -895,21 +851,11 @@ class TradeSimulator:
         """
         # 損益計算
         if position.signal_type == SignalType.BUY:
-            profit_pips = (
-                (exit_price - position.entry_price)
-                / self._pip_unit
-            )
+            profit_pips = (exit_price - position.entry_price) * 100
         else:
-            profit_pips = (
-                (position.entry_price - exit_price)
-                / self._pip_unit
-            )
+            profit_pips = (position.entry_price - exit_price) * 100
 
-        profit_loss = (
-            profit_pips
-            * self._get_pip_value(exit_time)
-            * position.volume
-        )
+        profit_loss = profit_pips * self._pip_value * position.volume
 
         # BREAKEVEN は損益0扱い
         if exit_reason == ExitReason.BREAKEVEN:
@@ -1149,20 +1095,14 @@ class TradeSimulator:
             return
 
         close_price = candle.close
-        pip_val = self._get_pip_value(candle.time)
+        pip_val = self._pip_value
         unrealized_pnl = 0.0
 
         for position in open_pos:
             if position.signal_type == SignalType.BUY:
-                pips = (
-                    (close_price - position.entry_price)
-                    / self._pip_unit
-                )
+                pips = (close_price - position.entry_price) * 100
             else:
-                pips = (
-                    (position.entry_price - close_price)
-                    / self._pip_unit
-                )
+                pips = (position.entry_price - close_price) * 100
             unrealized_pnl += pips * pip_val * position.volume
 
         self.state.equity = self.state.balance + unrealized_pnl
@@ -1184,7 +1124,7 @@ class TradeSimulator:
                 if position.stop_loss:
                     sl_pips = abs(
                         position.entry_price - position.stop_loss
-                    ) / self._pip_unit
+                    ) * 100
                 self._mfe_mae[pid] = {
                     "mfe": 0.0, "mae": 0.0,
                     "sl_pips": sl_pips,
@@ -1194,23 +1134,11 @@ class TradeSimulator:
 
             tracker = self._mfe_mae[pid]
             if position.signal_type == SignalType.BUY:
-                fav = (
-                    (candle.high - position.entry_price)
-                    / self._pip_unit
-                )
-                adv = (
-                    (candle.low - position.entry_price)
-                    / self._pip_unit
-                )
+                fav = (candle.high - position.entry_price) * 100
+                adv = (candle.low - position.entry_price) * 100
             else:
-                fav = (
-                    (position.entry_price - candle.low)
-                    / self._pip_unit
-                )
-                adv = (
-                    (position.entry_price - candle.high)
-                    / self._pip_unit
-                )
+                fav = (position.entry_price - candle.low) * 100
+                adv = (position.entry_price - candle.high) * 100
 
             if fav > tracker["mfe"]:
                 tracker["mfe"] = fav
@@ -1340,12 +1268,12 @@ class TradeSimulator:
 
         Args:
             strategy_id: 戦略ID（指定時は戦略別制限を適用）
-            signal_score: シグナルのconsensus_score（品質ベース増枠判定用）
+            signal_score: シグナルのconsensus_score（品質ボーナス枠判定用）
 
         Returns:
             ポジション開設可能ならTrue
         """
-        # 品質ベース動的上限（bonus_max_positions>0かつ閾値超えで増枠）
+        # 品質ベース動的ポジション枠の計算
         effective_max = self.config.max_positions
         if (
             self.config.bonus_max_positions > 0
@@ -1353,6 +1281,7 @@ class TradeSimulator:
             and signal_score >= self.config.bonus_score_threshold
         ):
             effective_max += self.config.bonus_max_positions
+
         # 全体のポジション数制限
         if len(self.state.open_positions) >= effective_max:
             return False
