@@ -1,8 +1,9 @@
 ■バックテスト
 1) 主要7通貨（まずはここ）
-EURUSD / USDJPY / GBPUSD / USDCHF / USDCAD / AUDUSD / NZDUSD
-2) 追加で強いクロス（ボット向き）
+EURUSD / USDJPY / GBPUSD / USDCHF / USDCAD / AUDUSD / NZDUSD / 
 EURJPY / GBPJPY / AUDJPY / CADJPY / CHFJPY
+
+2) 追加で強いクロス（ボット向き）
 EURGBP / EURNZD / EURAUD（好みで）
 
 .venv/Scripts/python.exe scripts/run_backtest.py --years 2010-2025 --verbose
@@ -17,21 +18,8 @@ python scripts\pr_watcher.py
 ■Supabaseパスワード
 cUr5rHyklWdpdbOb
 
+
 ■課題箇所
-  設定: BacktestConfig.max_positions + bonus_max_positions                                                    
-  場所: runner.py                                                                                             
-  用途: バックテスト用（PR #151で実装）        
-  ────────────────────────────────────────
-  設定: Settings.max_position_count
-  場所: settings.py + hard_guard.py
-  用途: ライブトレード用ハードガード（現在デフォルト=3）
-
-  HardGuard は position_count >= max_position_count
-  でトレードをブロックする固定閾値チェックのみで、品質ベースの動的増枠ロジックは持っていません。
-
-  ---
-  settings.py の max_position_count
-  を選択されたのは、ライブトレードにも品質ベース動的枠を適用したいというご意向でしょうか？
-
-  もしそうであれば、HardGuard に bonus_max_position_count と bonus_score_threshold
-  を追加する必要があります。バックテストと同様のアプローチで実装できます。
+EURUSDペアの最適化を実施してください。調整に利用してよい期間は2018-2020年の間のとして、それ以外の期間は 
+フィッティングしてはいけません。目標は定めません。利用可能なリソースは9コアまでとします。（バックテスト  
+スクリプトで3×3年分の想定です。)  
