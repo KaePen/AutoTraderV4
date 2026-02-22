@@ -12,6 +12,9 @@
       --symbol USDJPY --year 2024
 
   python scripts/generate_fundamental_llm.py \\
+      --symbol USDJPY --year 2020 2021 2022
+
+  python scripts/generate_fundamental_llm.py \\
       --symbol USDJPY --years 2010-2025
 
   python scripts/generate_fundamental_llm.py \\
@@ -78,7 +81,10 @@ def parse_args() -> argparse.Namespace:
   # USDJPY 2024年を生成
   python scripts/generate_fundamental_llm.py --symbol USDJPY --year 2024
 
-  # USDJPY 2010-2025年を生成（上書きなし）
+  # USDJPY 複数年を指定（スペース区切り）
+  python scripts/generate_fundamental_llm.py --symbol USDJPY --year 2020 2021 2022
+
+  # USDJPY 2010-2025年を連続で生成
   python scripts/generate_fundamental_llm.py --symbol USDJPY --years 2010-2025
 
   # 複数シンボル・モデル指定
@@ -97,7 +103,12 @@ def parse_args() -> argparse.Namespace:
     group.add_argument(
         "--year",
         type=int,
-        help="単一年指定（例: 2024）",
+        nargs="+",
+        metavar="YEAR",
+        help=(
+            "年指定（1つまたは複数スペース区切り）: "
+            "2024 / 2020 2021 2022"
+        ),
     )
     group.add_argument(
         "--years",
@@ -307,7 +318,7 @@ def main() -> int:
 
     # 年リストを構築
     if args.year:
-        years = [args.year]
+        years = args.year  # nargs="+" なので既にリスト
     else:
         try:
             years = parse_year_range(args.years)
