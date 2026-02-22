@@ -10,10 +10,7 @@ from typing import Any
 
 import pandas as pd
 
-# 後方互換: IndicatorCalculator は calculator/technical/batch に移動
-from autotrader.calculator.technical.batch import (
-    TechnicalIndicatorBatch as IndicatorCalculator,
-)
+from autotrader.calculator.technical.batch import TechnicalIndicatorBatch
 
 
 class MultiTimeframeDataLoader:
@@ -26,7 +23,7 @@ class MultiTimeframeDataLoader:
         self,
         data_dir: str | Path,
         symbol: str = "USDJPY",
-        indicator_calculator: IndicatorCalculator | None = None,
+        indicator_calculator: TechnicalIndicatorBatch | None = None,
     ):
         """初期化
 
@@ -40,7 +37,7 @@ class MultiTimeframeDataLoader:
         self._data_dir = Path(data_dir)
         self._symbol = symbol
         self._loader = DataLoader(data_dir)
-        self._calculator = indicator_calculator or IndicatorCalculator()
+        self._calculator = indicator_calculator or TechnicalIndicatorBatch()
 
     def load_timeframes(
         self,

@@ -8,10 +8,7 @@ from __future__ import annotations
 
 from collections import defaultdict
 
-# 後方互換: SignalStepRecord は core.diagnostics に移動
-from autotrader.core.diagnostics import SignalStepRecord
-
-__all__ = ["SignalStepRecord", "TradeFlowAnalyzer"]
+__all__ = ["TradeFlowAnalyzer"]
 
 
 class TradeFlowAnalyzer:

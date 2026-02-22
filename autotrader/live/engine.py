@@ -38,9 +38,7 @@ from autotrader.decision.unified.signal_consolidator import (
     ConsolidatedSignal,
 )
 from autotrader.live.tick_entry_optimizer import TickEntryOptimizer
-from autotrader.calculator.technical.batch import (
-    TechnicalIndicatorBatch as IndicatorCalculator,
-)
+from autotrader.calculator.technical.batch import TechnicalIndicatorBatch
 
 logger = logging.getLogger(__name__)
 
@@ -869,7 +867,7 @@ class LiveTradingEngine:
         Returns:
             dict[str, pd.DataFrame]: 指標付きデータ
         """
-        calc = IndicatorCalculator()
+        calc = TechnicalIndicatorBatch()
         result: dict[str, pd.DataFrame] = {}
         for tf, df in data.items():
             try:

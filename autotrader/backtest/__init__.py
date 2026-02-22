@@ -12,7 +12,6 @@ from autotrader.backtest.config import (
 )
 from autotrader.backtest.data_loader import DataLoader
 from autotrader.backtest.indicators import (
-    IndicatorCalculator,
     MultiTimeframeDataLoader,
 )
 from autotrader.backtest.formatters import (
@@ -118,7 +117,6 @@ __all__ = [
     "ParallelBacktestConfig",
     # データ処理
     "DataLoader",
-    "IndicatorCalculator",
     "MultiTimeframeDataLoader",
     # フォーマッタ
     "ResultFormatter",
