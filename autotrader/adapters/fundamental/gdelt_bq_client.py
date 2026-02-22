@@ -33,8 +33,10 @@ try:
 except ImportError:
     _bigquery_module = None  # type: ignore[assignment]
 
-# GDELT GKG v2 BigQuery テーブル
-_GKG_TABLE = "gdelt-bq.gdeltv2.gkg"
+# GDELT GKG v2 BigQuery ワイルドカードテーブルベース名
+# 実際のテーブルは gdelt-bq.gdeltv2.gkg20150101000000 のような
+# 15分単位シャードテーブルとして格納されている
+_GKG_TABLE_BASE = "gdelt-bq.gdeltv2.gkg"
 
 # FX関連テーマ（GDELT GKG V2Themes）
 _FX_THEMES_PATTERN = (
@@ -140,9 +142,9 @@ class GDELTBigQueryClient:
     ) -> str:
         """BigQuery SQLクエリを構築
 
-        DATE カラム（INTEGER: YYYYMMDDHHMMSS）で年フィルタ。
-        GKG テーブルは _PARTITIONDATE に対応していないため
-        DATE 列を直接使用する。
+        ワイルドカードテーブル `gkg{year}*` を使用することで
+        指定年のシャードテーブルのみをスキャンし高速化する。
+        GKG テーブルは15分単位のシャードテーブル群として格納。
 
         Args:
             currencies: 対象通貨コードリスト
@@ -173,9 +175,9 @@ class GDELTBigQueryClient:
         else:
             where_cond = theme_cond
 
-        # DATE は INTEGER 型: YYYYMMDDHHMMSS
-        date_start = f"{year}0101000000"
-        date_end = f"{year}1231235959"
+        # ワイルドカードで該当年のシャードテーブルのみスキャン
+        # 例: gdelt-bq.gdeltv2.gkg2015*
+        wildcard_table = f"{_GKG_TABLE_BASE}{year}*"
 
         return f"""
         SELECT
@@ -185,11 +187,9 @@ class GDELTBigQueryClient:
           V2Tone,
           V2Themes,
           V2Organizations
-        FROM `{_GKG_TABLE}`
+        FROM `{wildcard_table}`
         WHERE
-          DATE >= {date_start}
-          AND DATE <= {date_end}
-          AND {where_cond}
+          {where_cond}
           AND DocumentIdentifier IS NOT NULL
           AND DocumentIdentifier != ''
         LIMIT {self._max_results}
