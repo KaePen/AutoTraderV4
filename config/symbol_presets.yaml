@@ -18,6 +18,11 @@ defaults:
   max_lot_per_trade: 2.0
   max_total_exposure_lot: 5.0
   equity_floor_pct: 0.30
+  # トレーリングストップ設定（デフォルトOFF）
+  use_position_manager: false
+  trailing_start_r: 2.0
+  trailing_atr_multiplier: 2.0
+  breakeven_at_1r: true
 
 # ------------------------------------------------------------------
 # USD ペア（quote currency = USD: pip_value ≈ $10/lot）
@@ -44,6 +49,11 @@ symbols:
     bonus_score_threshold: 7.0
     base_risk_pct: 0.02
     max_lot_per_trade: 2.0
+    # トレーリングストップ有効化
+    use_position_manager: true
+    trailing_start_r: 1.5
+    trailing_atr_multiplier: 2.0
+    breakeven_at_1r: true
 
   AUDUSD:
     pip_value: 10.0        # AUD/USD 1pip=$10/lot

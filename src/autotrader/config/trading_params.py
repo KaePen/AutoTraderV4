@@ -5,7 +5,12 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from autotrader.decision.unified.position_manager import (
+        PositionManagerConfig,
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -64,6 +69,10 @@ class SymbolPreset:
         max_lot_per_trade: トレードあたり最大ロット
         max_total_exposure_lot: 合計エクスポージャー上限ロット
         equity_floor_pct: 資産フロア割合
+        use_position_manager: PositionManager有効化フラグ
+        trailing_start_r: トレーリング開始R値
+        trailing_atr_multiplier: ATRトレーリング倍率
+        breakeven_at_1r: 1R到達時に建値移動するか
     """
 
     symbol: str = "USDJPY"
@@ -82,6 +91,29 @@ class SymbolPreset:
     max_lot_per_trade: float = 2.0
     max_total_exposure_lot: float = 5.0
     equity_floor_pct: float = 0.30
+    # トレーリングストップ設定
+    use_position_manager: bool = False
+    trailing_start_r: float = 2.0
+    trailing_atr_multiplier: float = 2.0
+    breakeven_at_1r: bool = True
+
+    def to_pm_config(self) -> PositionManagerConfig:
+        """PositionManagerConfig を生成.
+
+        Returns:
+            PositionManagerConfig: PM設定
+        """
+        from autotrader.decision.unified.position_manager import (  # noqa: PLC0415
+            PositionManagerConfig,
+        )
+
+        return PositionManagerConfig(
+            trailing_start_r=self.trailing_start_r,
+            trailing_atr_multiplier=self.trailing_atr_multiplier,
+            breakeven_at_1r=self.breakeven_at_1r,
+            spread_pips=self.spread_pips,
+            slippage_pips=self.slippage_pips,
+        )
 
     def to_trading_params(self) -> TradingParams:
         """TradingParams に変換（後方互換）.
