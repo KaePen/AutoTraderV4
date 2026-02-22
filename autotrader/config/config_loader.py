@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 # プロジェクトルートの config/ ディレクトリ
 _DEFAULT_CONFIG_DIR = (
-    Path(__file__).resolve().parent.parent.parent.parent / "config"
+    Path(__file__).resolve().parent.parent.parent / "config"
 )
 
 

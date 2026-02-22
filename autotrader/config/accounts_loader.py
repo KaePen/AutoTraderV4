@@ -10,7 +10,7 @@ import yaml
 logger = logging.getLogger(__name__)
 
 _DEFAULT_CONFIG_DIR = (
-    Path(__file__).resolve().parent.parent.parent.parent / "config"
+    Path(__file__).resolve().parent.parent.parent / "config"
 )
 _ACCOUNTS_FILE = "accounts.yaml"
 

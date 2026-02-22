@@ -1083,7 +1083,7 @@ class BacktestRunner:
                     if yr is not None:
                         yearly_results.append(yr)
             else:
-                # worktree対応: 現在ロード中のrunner.pyのsrcディレクトリ
+                # worktree対応: autotraderパッケージを含むプロジェクトルート
                 _src_dir = str(
                     Path(__file__).resolve().parent.parent.parent
                 )

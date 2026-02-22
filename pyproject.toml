@@ -66,13 +66,13 @@ gdelt = [
 ]
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/autotrader"]
+packages = ["autotrader"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-pythonpath = ["src"]
+pythonpath = ["."]
 asyncio_mode = "auto"
-addopts = "-v --cov=src/autotrader --cov-report=term-missing"
+addopts = "-v --cov=autotrader --cov-report=term-missing"
 
 [tool.ruff]
 line-length = 79

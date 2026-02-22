@@ -17,7 +17,7 @@ class TestCandleEvent:
 
     def test_candle_event_creation(self) -> None:
         """CandleEventが正しく作成される"""
-        from src.autotrader.backtest.events import CandleEvent
+        from autotrader.backtest.events import CandleEvent
 
         event = CandleEvent(
             timestamp=datetime(2024, 1, 1, 10, 0),
@@ -40,7 +40,7 @@ class TestCandleEvent:
 
     def test_candle_event_comparison_same_timestamp(self) -> None:
         """同時刻イベントは長期足が優先される"""
-        from src.autotrader.backtest.events import CandleEvent
+        from autotrader.backtest.events import CandleEvent
 
         m15_event = CandleEvent(
             timestamp=datetime(2024, 1, 1, 10, 0),
@@ -63,7 +63,7 @@ class TestCandleEvent:
 
     def test_candle_event_comparison_different_timestamp(self) -> None:
         """異なる時刻は時刻順"""
-        from src.autotrader.backtest.events import CandleEvent
+        from autotrader.backtest.events import CandleEvent
 
         earlier = CandleEvent(
             timestamp=datetime(2024, 1, 1, 9, 0),
@@ -89,7 +89,7 @@ class TestTimelineEventQueue:
 
     def test_timeline_event_queue_sorting(self) -> None:
         """イベントが時系列順にソートされる"""
-        from src.autotrader.backtest.events import TimelineEventQueue
+        from autotrader.backtest.events import TimelineEventQueue
 
         # テスト用データ作成
         m15_data = pd.DataFrame({
@@ -133,7 +133,7 @@ class TestTimelineEventQueue:
 
     def test_timeline_event_queue_empty_data(self) -> None:
         """空データでも正常動作"""
-        from src.autotrader.backtest.events import TimelineEventQueue
+        from autotrader.backtest.events import TimelineEventQueue
 
         queue = TimelineEventQueue({})
         assert len(queue) == 0
@@ -147,7 +147,7 @@ class TestEvaluationResult:
 
     def test_evaluation_result_creation(self) -> None:
         """EvaluationResultが正しく作成される"""
-        from src.autotrader.backtest.parallel import EvaluationResult
+        from autotrader.backtest.parallel import EvaluationResult
 
         result = EvaluationResult(
             timeframe="H1",
@@ -170,7 +170,7 @@ class TestEvaluateTimeframeSignal:
 
     def test_evaluate_buy_signal(self) -> None:
         """買いシグナルが生成される"""
-        from src.autotrader.backtest.parallel import (
+        from autotrader.backtest.parallel import (
             evaluate_timeframe_signal,
             EvaluatorParams,
         )
@@ -206,7 +206,7 @@ class TestEvaluateTimeframeSignal:
 
     def test_evaluate_sell_signal(self) -> None:
         """売りシグナルが生成される"""
-        from src.autotrader.backtest.parallel import (
+        from autotrader.backtest.parallel import (
             evaluate_timeframe_signal,
             EvaluatorParams,
         )
@@ -242,7 +242,7 @@ class TestEvaluateTimeframeSignal:
 
     def test_evaluate_hold_signal(self) -> None:
         """HOLDシグナルが生成される（条件不十分）"""
-        from src.autotrader.backtest.parallel import (
+        from autotrader.backtest.parallel import (
             evaluate_timeframe_signal,
             EvaluatorParams,
         )
@@ -278,8 +278,8 @@ class TestParallelSignalEvaluator:
 
     def test_evaluator_sequential(self) -> None:
         """シーケンシャル評価が動作する"""
-        from src.autotrader.backtest.parallel import ParallelSignalEvaluator
-        from src.autotrader.backtest.events import CandleEvent
+        from autotrader.backtest.parallel import ParallelSignalEvaluator
+        from autotrader.backtest.events import CandleEvent
 
         evaluator = ParallelSignalEvaluator(max_workers=2)
 
@@ -311,8 +311,8 @@ class TestParallelSignalEvaluator:
 
     def test_evaluator_batch_single(self) -> None:
         """単一イベントバッチが動作する"""
-        from src.autotrader.backtest.parallel import ParallelSignalEvaluator
-        from src.autotrader.backtest.events import CandleEvent
+        from autotrader.backtest.parallel import ParallelSignalEvaluator
+        from autotrader.backtest.events import CandleEvent
 
         evaluator = ParallelSignalEvaluator(max_workers=2)
 
@@ -334,7 +334,7 @@ class TestParallelSignalEvaluator:
 
     def test_evaluator_htf_trend_tracking(self) -> None:
         """上位足トレンドが追跡される"""
-        from src.autotrader.backtest.parallel import ParallelSignalEvaluator
+        from autotrader.backtest.parallel import ParallelSignalEvaluator
 
         evaluator = ParallelSignalEvaluator()
 
@@ -355,7 +355,7 @@ class TestParallelBacktestConfig:
 
     def test_default_config(self) -> None:
         """デフォルト設定が正しい"""
-        from src.autotrader.backtest.config import ParallelBacktestConfig
+        from autotrader.backtest.config import ParallelBacktestConfig
 
         config = ParallelBacktestConfig()
 
@@ -367,7 +367,7 @@ class TestParallelBacktestConfig:
 
     def test_custom_config(self) -> None:
         """カスタム設定が適用される"""
-        from src.autotrader.backtest.config import ParallelBacktestConfig
+        from autotrader.backtest.config import ParallelBacktestConfig
 
         config = ParallelBacktestConfig(
             enable_parallel_tf=False,
@@ -385,7 +385,7 @@ class TestParallelEngineConfig:
 
     def test_default_config(self) -> None:
         """デフォルト設定が正しい"""
-        from src.autotrader.backtest.engine import ParallelEngineConfig
+        from autotrader.backtest.engine import ParallelEngineConfig
 
         config = ParallelEngineConfig()
 
