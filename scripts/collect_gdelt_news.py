@@ -1,25 +1,33 @@
 """GDELT ニュース一括収集スクリプト
 
-GDELT DOC API v2 または Google BigQuery を使って
+GDELT DOC API v2、Google BigQuery、または GKG 日次 CSV から
 FX関連ニュースを年次・通貨別に一括収集し、CSV形式で保存する。
 
 前提:
-  # REST API モード（デフォルト）
+  # GKG 日次CSV モード（完全無料・推奨）
   pip install requests
 
-  # BigQuery モード（レートリミットなし・推奨）
+  # REST API モード
+  pip install requests
+
+  # BigQuery モード
   pip install google-cloud-bigquery
   export GOOGLE_APPLICATION_CREDENTIALS=/path/to/key.json
 
 使用方法:
-  # BigQuery モード（推奨）
+  # GKG 日次CSV モード（完全無料・2013-04-01以降）
   python scripts/collect_gdelt_news.py \\
-      --source bq --project your-project-id \\
-      --years 2015-2025 --currencies USD,JPY,EUR,GBP,AUD
+      --source gkg \\
+      --years 2022-2024 --currencies USD,JPY,EUR,GBP,AUD,NZD,CHF,CAD
 
   # REST API モード
   python scripts/collect_gdelt_news.py \\
       --year 2024 --currencies USD,JPY
+
+  # BigQuery モード
+  python scripts/collect_gdelt_news.py \\
+      --source bq --project your-project-id \\
+      --years 2015-2025 --currencies USD,JPY,EUR,GBP,AUD
 
 出力先: data/fundamental/news_YYYY.csv（年ごと）
 """
@@ -41,6 +49,9 @@ from autotrader.adapters.fundamental.gdelt_bq_client import (
 )
 from autotrader.adapters.fundamental.gdelt_client import (
     GDELTDocClient,
+)
+from autotrader.adapters.fundamental.gdelt_gkg_downloader import (
+    GDELTGKGDownloader,
 )
 from autotrader.adapters.fundamental.news_csv_writer import (
     read_news_csv,
@@ -65,13 +76,14 @@ def parse_args() -> argparse.Namespace:
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 例:
-  # 2024年のUSD/JPY関連ニュースを収集
+  # GKG日次CSV（完全無料・推奨）
   python scripts/collect_gdelt_news.py \\
-      --year 2024 --currencies USD,JPY
+      --source gkg --years 2022-2024 \\
+      --currencies USD,JPY,EUR,GBP,AUD,NZD,CHF,CAD
 
-  # 2010-2025年を収集
+  # 2024年のみ収集
   python scripts/collect_gdelt_news.py \\
-      --years 2010-2025 --currencies USD,JPY,EUR,GBP,AUD
+      --source gkg --year 2024 --currencies USD,JPY
         """,
     )
     group = parser.add_mutually_exclusive_group(required=True)
@@ -109,9 +121,13 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--source",
-        choices=["rest", "bq"],
-        default="rest",
-        help="データソース: rest=REST API（デフォルト）, bq=BigQuery",
+        choices=["rest", "bq", "gkg"],
+        default="gkg",
+        help=(
+            "データソース: "
+            "gkg=GKG日次CSV（完全無料・デフォルト）, "
+            "rest=REST API, bq=BigQuery"
+        ),
     )
     parser.add_argument(
         "--project",
@@ -194,11 +210,16 @@ def main() -> int:
         )
         return 1
 
-    source_label = (
-        f"BigQuery (project={args.project})"
-        if args.source == "bq"
-        else f"REST API (interval={args.request_interval}s)"
-    )
+    if args.source == "bq":
+        source_label = f"BigQuery (project={args.project})"
+    elif args.source == "gkg":
+        source_label = (
+            f"GKG日次CSV (interval={args.request_interval}s)"
+        )
+    else:
+        source_label = (
+            f"REST API (interval={args.request_interval}s)"
+        )
     logger.info(
         f"データソース: {source_label}\n"
         f"対象通貨: {currencies}\n"
@@ -223,6 +244,14 @@ def main() -> int:
         try:
             client = GDELTBigQueryClient(
                 project_id=args.project
+            )
+        except ImportError as e:
+            logger.error(str(e))
+            return 1
+    elif args.source == "gkg":
+        try:
+            client = GDELTGKGDownloader(
+                request_interval_sec=args.request_interval
             )
         except ImportError as e:
             logger.error(str(e))
