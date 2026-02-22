@@ -52,6 +52,10 @@ class SimulatorConfig:
         default_factory=lambda: DEFAULT_TRADING_PARAMS.pip_value
     )
     max_positions: int = 1
+    # 高品質シグナル時に追加する枠数（0=無効）
+    bonus_max_positions: int = 0
+    # bonus発動のconsensus_score閾値
+    bonus_score_threshold: float = 7.5
     default_volume: float = 0.1
     slippage_pips: float = field(
         default_factory=lambda: DEFAULT_TRADING_PARAMS.slippage_pips
@@ -156,7 +160,10 @@ class TradeSimulator:
             self._quote_jpy_series: pd.Series | None = s
         else:
             self._quote_jpy_series = None
-        self._single_position = self.config.max_positions == 1
+        self._single_position = (
+            self.config.max_positions == 1
+            and self.config.bonus_max_positions == 0
+        )
         # 日次PnL: 前回記録日キャッシュ（strftime回避）
         self._last_pnl_date: int = -1
         # PositionManager統合
@@ -390,7 +397,16 @@ class TradeSimulator:
                             )
                             trades.append(trade)
 
-                if len(state.open_positions) < self.config.max_positions:
+                # 品質ベース動的上限（bonus_max_positions>0かつ閾値超えで増枠）
+                _eff_max = self.config.max_positions
+                if (
+                    self.config.bonus_max_positions > 0
+                    and signal.consensus_score is not None
+                    and signal.consensus_score
+                    >= self.config.bonus_score_threshold
+                ):
+                    _eff_max += self.config.bonus_max_positions
+                if len(state.open_positions) < _eff_max:
                     position = self._open_position(signal, candle)
                     if position:
                         state.open_positions.append(position)
@@ -1318,17 +1334,27 @@ class TradeSimulator:
     def can_open_position(
         self,
         strategy_id: str | None = None,
+        signal_score: float | None = None,
     ) -> bool:
         """ポジションを開設可能かチェック
 
         Args:
             strategy_id: 戦略ID（指定時は戦略別制限を適用）
+            signal_score: シグナルのconsensus_score（品質ベース増枠判定用）
 
         Returns:
             ポジション開設可能ならTrue
         """
+        # 品質ベース動的上限（bonus_max_positions>0かつ閾値超えで増枠）
+        effective_max = self.config.max_positions
+        if (
+            self.config.bonus_max_positions > 0
+            and signal_score is not None
+            and signal_score >= self.config.bonus_score_threshold
+        ):
+            effective_max += self.config.bonus_max_positions
         # 全体のポジション数制限
-        if len(self.state.open_positions) >= self.config.max_positions:
+        if len(self.state.open_positions) >= effective_max:
             return False
 
         # 戦略別制限がある場合
