@@ -171,6 +171,10 @@ class BacktestConfig:
     initial_balance: float = 1_000_000.0
     volume: float | None = None  # None時は戦略デフォルト
     max_positions: int = 1
+    # 高品質シグナル時に追加する枠数（0=無効）
+    bonus_max_positions: int = 0
+    # bonus発動のconsensus_score閾値
+    bonus_score_threshold: float = 7.5
     spread_pips: float = field(
         default_factory=lambda: DEFAULT_TRADING_PARAMS.spread_pips
     )
@@ -642,6 +646,8 @@ class BacktestRunner:
             spread_pips=self.config.spread_pips,
             pip_value=_calc_pip_value(self.config.symbol),
             max_positions=self.config.max_positions,
+            bonus_max_positions=self.config.bonus_max_positions,
+            bonus_score_threshold=self.config.bonus_score_threshold,
             default_volume=volume,
             pip_unit=_pip_unit,
             quote_jpy_series=_quote_jpy,
@@ -1081,6 +1087,8 @@ class BacktestRunner:
             slippage_pips=self.config.slippage_pips,
             pip_value=_calc_pip_value(self.config.symbol),
             max_positions=self.config.max_positions,
+            bonus_max_positions=self.config.bonus_max_positions,
+            bonus_score_threshold=self.config.bonus_score_threshold,
             default_volume=self.config.volume or 1.0,
             use_position_manager=bot_config.use_position_manager,
             pm_config=pm_config,
