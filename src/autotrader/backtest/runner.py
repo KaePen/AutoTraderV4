@@ -521,12 +521,18 @@ class BacktestRunner:
         volume = volume or 1.0
 
         # シミュレーター設定
+        _pip_unit = (
+            0.01
+            if "JPY" in self.config.symbol.upper()
+            else 0.0001
+        )
         sim_config = SimulatorConfig(
             initial_balance=self.config.initial_balance,
             spread_pips=self.config.spread_pips,
             pip_value=self.config.pip_value,
             max_positions=self.config.max_positions,
             default_volume=volume,
+            pip_unit=_pip_unit,
         )
 
         # 年別・月別結果を収集
@@ -946,6 +952,11 @@ class BacktestRunner:
             multi_mode_controller.set_market_data(market_data)
 
         # シミュレーター設定
+        _pip_unit = (
+            0.01
+            if "JPY" in self.config.symbol.upper()
+            else 0.0001
+        )
         sim_config = SimulatorConfig(
             initial_balance=self.config.initial_balance,
             spread_pips=self.config.spread_pips,
@@ -956,6 +967,7 @@ class BacktestRunner:
             use_position_manager=bot_config.use_position_manager,
             pm_config=pm_config,
             use_dynamic_lot=bot_config.use_dynamic_lot,
+            pip_unit=_pip_unit,
         )
 
         if len(years) > 1 and not sequential:
