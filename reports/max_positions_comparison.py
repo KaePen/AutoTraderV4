@@ -31,7 +31,30 @@ from autotrader.decision.unified import UnifiedBotConfig
 from autotrader.decision.unified.position_manager import PositionManagerConfig
 
 # ===== デフォルト設定 =====
-DATA_DIR = str(Path(__file__).parent.parent / "data")
+def _find_data_dir() -> str:
+    """git rootを基準にdataディレクトリを解決する。"""
+    import subprocess as _sp
+    try:
+        _root = _sp.check_output(
+            ["git", "rev-parse", "--show-toplevel"],
+            cwd=str(Path(__file__).parent),
+            text=True,
+        ).strip()
+        _path = Path(_root) / "data"
+        if _path.exists() and (_path / "USDJPY").exists():
+            return str(_path)
+    except Exception:
+        pass
+    _candidate = Path(__file__).resolve().parent
+    for _ in range(6):
+        _data = _candidate / "data"
+        if _data.exists() and (_data / "USDJPY").exists():
+            return str(_data)
+        _candidate = _candidate.parent
+    return "data"
+
+
+DATA_DIR = _find_data_dir()
 START_YEAR = 2022
 END_YEAR = 2024
 INITIAL_BALANCE = 1_000_000.0
