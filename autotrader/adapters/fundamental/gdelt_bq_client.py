@@ -140,8 +140,9 @@ class GDELTBigQueryClient:
     ) -> str:
         """BigQuery SQLクエリを構築
 
-        パーティションフィルタ(_PARTITIONDATE)で
-        スキャン量を最小化する。
+        DATE カラム（INTEGER: YYYYMMDDHHMMSS）で年フィルタ。
+        GKG テーブルは _PARTITIONDATE に対応していないため
+        DATE 列を直接使用する。
 
         Args:
             currencies: 対象通貨コードリスト
@@ -172,6 +173,10 @@ class GDELTBigQueryClient:
         else:
             where_cond = theme_cond
 
+        # DATE は INTEGER 型: YYYYMMDDHHMMSS
+        date_start = f"{year}0101000000"
+        date_end = f"{year}1231235959"
+
         return f"""
         SELECT
           DATE,
@@ -182,8 +187,8 @@ class GDELTBigQueryClient:
           V2Organizations
         FROM `{_GKG_TABLE}`
         WHERE
-          _PARTITIONDATE BETWEEN '{year}-01-01'
-            AND '{year}-12-31'
+          DATE >= {date_start}
+          AND DATE <= {date_end}
           AND {where_cond}
           AND DocumentIdentifier IS NOT NULL
           AND DocumentIdentifier != ''
