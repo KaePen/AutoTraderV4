@@ -102,8 +102,9 @@ class SymbolPreset:
 
 
 # プリセットキャッシュ
+# parents[3] = プロジェクトルート（src/autotrader/config/ から3階層上）
 _DEFAULT_PRESET_PATH = (
-    Path(__file__).resolve().parents[4] / "config" / "symbol_presets.yaml"
+    Path(__file__).resolve().parents[3] / "config" / "symbol_presets.yaml"
 )
 _preset_cache: dict[str, SymbolPreset] = {}
 _presets_loaded: bool = False
