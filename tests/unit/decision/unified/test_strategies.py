@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
 
 from autotrader.core.enums import MarketRegime
 from autotrader.decision.unified.strategies import (

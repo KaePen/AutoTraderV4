@@ -5,7 +5,6 @@ from __future__ import annotations
 from datetime import datetime
 
 import pandas as pd
-import pytest
 
 from autotrader.core.enums import SignalType
 from autotrader.decision.unified import (

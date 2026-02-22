@@ -9,7 +9,6 @@ from __future__ import annotations
 from autotrader.constraint.filters.filter_result import FilterResult
 
 
-import numpy as np
 import pandas as pd
 
 

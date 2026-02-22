@@ -17,13 +17,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 
-import numpy as np
 import pandas as pd
 
 from autotrader.calculator.market_structure.swing_analyzer import (
     SwingAnalyzer,
     SwingPoint,
-    SwingType,
 )
 
 
@@ -185,7 +183,6 @@ class StructureAnalyzer:
                 ] = -1
 
             # BOS/CHoCH検出
-            current_close = df["close"].iloc[bar_idx]
             current_high = df["high"].iloc[bar_idx]
             current_low = df["low"].iloc[bar_idx]
 

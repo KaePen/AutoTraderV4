@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import pandas as pd
-import pytest
 
 from autotrader.core.enums import MarketRegime
 from autotrader.calculator.features.regime_detector import (

@@ -7,13 +7,12 @@ import json
 import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
 from autotrader.adapters.fundamental.llm_context_generator import (
     LLMContextGenerator,
-    _SYMBOL_CURRENCIES,
 )
 from autotrader.adapters.fundamental.schemas import (
     EconomicEvent,

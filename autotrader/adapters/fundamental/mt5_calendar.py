@@ -8,14 +8,12 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime, timezone, timedelta
-from uuid import uuid4
 
 from loguru import logger
 
 from autotrader.adapters.fundamental.schemas import (
     EconomicEvent,
     EventSource,
-    ImpactLevel,
 )
 from autotrader.adapters.fundamental.normalizer import (
     EconomicEventNormalizer,

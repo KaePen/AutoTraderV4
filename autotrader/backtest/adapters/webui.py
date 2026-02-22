@@ -6,7 +6,6 @@ FastAPIリクエストから ExecutorConfig への変換と、
 
 from __future__ import annotations
 
-from dataclasses import asdict
 from typing import Any
 
 from autotrader.backtest.executor import ExecutorConfig, ExecutorResult

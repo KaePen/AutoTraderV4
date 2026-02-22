@@ -16,7 +16,6 @@ from autotrader.core.entities import Signal
 from autotrader.core.enums import SignalType, Timeframe
 from autotrader.live.tick_entry_config import TickEntryConfig
 from autotrader.live.tick_entry_optimizer import (
-    EntryConditionResult,
     OptimizerState,
     TickBuffer,
     TickEntryOptimizer,

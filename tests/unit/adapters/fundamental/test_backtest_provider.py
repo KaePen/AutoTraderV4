@@ -12,7 +12,6 @@ import pytest
 from autotrader.adapters.fundamental.backtest_provider import (
     BacktestFundamentalProvider,
 )
-from autotrader.adapters.fundamental.schemas import ImpactLevel
 
 
 def make_csv(rows: list[dict]) -> Path:

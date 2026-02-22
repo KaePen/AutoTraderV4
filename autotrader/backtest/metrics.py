@@ -6,13 +6,12 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
 from typing import Any
 
 import numpy as np
 
 from autotrader.core.entities import Trade
-from autotrader.core.enums import ExitReason, SignalType
+from autotrader.core.enums import ExitReason
 
 
 @dataclass

@@ -12,7 +12,6 @@ from pathlib import Path
 import pandas as pd
 
 from autotrader.backtest.data_loader import DataLoader
-from autotrader.backtest.metrics import MetricsCalculator
 from autotrader.backtest.simulator import SimulatorConfig, TradeSimulator
 from autotrader.config import DEFAULT_TRADING_PARAMS
 from autotrader.core.entities import Candle

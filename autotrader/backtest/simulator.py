@@ -11,7 +11,7 @@ from typing import Any
 from uuid import uuid4
 
 from autotrader.config import DEFAULT_TRADING_PARAMS
-from autotrader.config.trading_params import SymbolPreset, get_preset
+from autotrader.config.trading_params import get_preset
 from autotrader.core.entities import Signal, Trade, Position, Candle
 from autotrader.core.enums import SignalType, ExitReason, TradingStrategyMode
 from autotrader.decision.unified.position_manager import (

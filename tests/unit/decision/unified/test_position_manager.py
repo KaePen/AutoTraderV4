@@ -9,7 +9,6 @@ import pytest
 from autotrader.core.enums import ExitReason, SignalType, TradingStrategyMode
 from autotrader.decision.unified.mode_selector import TradingPlan
 from autotrader.decision.unified.position_manager import (
-    ManagedPosition,
     ManagementAction,
     ManagementActionType,
     PositionManager,

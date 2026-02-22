@@ -5,7 +5,6 @@ copy_ticks_fromメソッドのモックテスト。
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -13,9 +12,6 @@ from autotrader.adapters.mt5.config import MT5Config
 from autotrader.adapters.mt5.connection import (
     MT5ConnectionManager,
     MT5Transport,
-)
-from autotrader.adapters.mt5.exceptions import (
-    MT5ConnectionError,
 )
 
 

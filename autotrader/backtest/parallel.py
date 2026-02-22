@@ -8,12 +8,9 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from ..config import DEFAULT_SCORING, DEFAULT_TF_SCORING
-from ..core.enums import Timeframe, SignalType
 
 if TYPE_CHECKING:
-    from datetime import datetime
 
-    import pandas as pd
 
     from .events import CandleEvent
 

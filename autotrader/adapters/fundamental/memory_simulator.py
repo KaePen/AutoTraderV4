@@ -7,12 +7,9 @@ FundamentalMemoryの代替実装。
 from __future__ import annotations
 
 from datetime import datetime, timezone, timedelta
-from uuid import uuid4
 
-from loguru import logger
 
 from autotrader.adapters.fundamental.schemas import (
-    EconomicEvent,
     FundamentalContext,
     ImpactLevel,
 )

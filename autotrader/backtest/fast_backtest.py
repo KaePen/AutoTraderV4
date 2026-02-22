@@ -19,17 +19,15 @@ from typing import TYPE_CHECKING, Any
 
 import pandas as pd
 
-from autotrader.backtest.metrics import MetricsCalculator
 from autotrader.backtest.simulator import (
     SimulatorConfig,
-    SimulatorState,
     TradeSimulator,
 )
-from autotrader.core.entities import Candle, Signal, Trade
-from autotrader.core.enums import ExitReason, SignalType, Timeframe
+from autotrader.core.entities import Signal, Trade
+from autotrader.core.enums import SignalType, Timeframe
 
 if TYPE_CHECKING:
-    from autotrader.decision.unified import UnifiedTradeBot
+    pass
 
 logger = logging.getLogger(__name__)
 
@@ -154,12 +152,7 @@ def _process_chunk_worker(
     import time
 
     from autotrader.backtest.candle_arrays import CandleArrays
-    from autotrader.backtest.simulator import (
-        SimulatorConfig,
-        TradeSimulator,
-    )
-    from autotrader.core.entities import Candle, Signal
-    from autotrader.core.enums import ExitReason, SignalType, Timeframe
+    from autotrader.core.enums import Timeframe
     from autotrader.decision.unified import UnifiedTradeBot
 
     start_time = time.time()

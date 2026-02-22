@@ -6,7 +6,7 @@ MockDataProvider/TradeExecutorでのエンジンテスト。
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock
 
 import pandas as pd
 import pytest
@@ -17,7 +17,6 @@ from autotrader.core.enums import SignalType
 from autotrader.core.interfaces.position_sizing import SizingResult
 from autotrader.decision.unified.position_manager import (
     ManagementAction,
-    ManagementActionType,
 )
 from autotrader.decision.unified.signal_consolidator import (
     ConsolidatedSignal,

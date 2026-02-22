@@ -24,7 +24,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 # プロジェクトルートをパスに追加
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from autotrader.backtest.runner import BacktestConfig, BacktestResult, BacktestRunner
 from autotrader.decision.unified import UnifiedBotConfig

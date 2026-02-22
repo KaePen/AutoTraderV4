@@ -11,8 +11,6 @@ from autotrader.backtest.events import (
     BacktestEvent,
     EventListener,
     EventType,
-    MetricsEvent,
-    ProgressEvent,
     SignalEvent,
     TradeEvent,
 )

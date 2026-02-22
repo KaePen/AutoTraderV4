@@ -44,9 +44,6 @@ class CLIAdapter:
         # マルチモードオプション
         use_multi_mode = getattr(args, "multi_mode", False)
 
-        # UNIVERSALモードオプション
-        use_universal_mode = getattr(args, "universal", False)
-
         # ファンダメンタルオプション
         fundamental_enabled = getattr(args, "fundamental", False)
         fundamental_csv = getattr(args, "fundamental_csv", None)

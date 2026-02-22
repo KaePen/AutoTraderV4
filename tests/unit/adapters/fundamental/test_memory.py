@@ -4,17 +4,14 @@ from __future__ import annotations
 
 from contextlib import contextmanager
 from datetime import datetime, timezone, timedelta
-from unittest.mock import MagicMock
 
 import pytest
 from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker, Session
+from sqlalchemy.orm import sessionmaker
 
 from autotrader.adapters.database.models import Base
 from autotrader.adapters.fundamental.memory import (
     FundamentalMemoryService,
-    MEMORY_TYPE_MACRO_BIAS,
-    MEMORY_TYPE_POST_EVENT_BIAS,
 )
 from autotrader.adapters.fundamental.schemas import (
     EconomicEvent,

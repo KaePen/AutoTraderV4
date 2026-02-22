@@ -9,7 +9,7 @@ import pandas as pd
 
 from autotrader.core.enums import SignalType
 
-from .config import EvaluatorConfig, StrengthConfig
+from .config import EvaluatorConfig
 from .strength_calculator import IndicatorStrength, IndicatorStrengthCalculator
 
 if TYPE_CHECKING:

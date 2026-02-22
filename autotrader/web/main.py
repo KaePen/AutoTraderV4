@@ -50,7 +50,6 @@ def _create_live_engine():
         LiveTradingEngine: エンジンインスタンス
     """
     from autotrader.adapters.mt5.config import MT5Config
-    from autotrader.config.config_loader import ConfigLoader
     from autotrader.live.config import LiveTradingConfig
     from autotrader.live.engine import LiveTradingEngine
     from autotrader.web.services.settings_service import (

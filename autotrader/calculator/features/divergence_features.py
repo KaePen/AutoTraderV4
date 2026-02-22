@@ -7,7 +7,6 @@ from __future__ import annotations
 
 from enum import Enum
 
-import numpy as np
 import pandas as pd
 
 
@@ -97,8 +96,6 @@ class DivergenceDetector:
 
         price_highs = self.find_swing_highs(close)
         price_lows = self.find_swing_lows(close)
-        rsi_highs = self.find_swing_highs(rsi)
-        rsi_lows = self.find_swing_lows(rsi)
 
         # スイングポイントのインデックスを取得
         high_indices = close.index[price_highs].tolist()
