@@ -76,8 +76,6 @@ class BacktestConfig:
         max_positions: 最大ポジション数
         default_volume: デフォルトロット
         data_dir: データディレクトリ
-        cache_dir: キャッシュディレクトリ
-        use_cache: キャッシュ使用
         min_confidence: 最小確度
         stop_loss_pips: デフォルトSL（pips）
         take_profit_pips: デフォルトTP（pips）
@@ -97,8 +95,6 @@ class BacktestConfig:
     max_positions: int = 1
     default_volume: float = 0.1
     data_dir: str = "data/raw"
-    cache_dir: str = "data/cache"
-    use_cache: bool = True
     min_confidence: float = 0.6
     stop_loss_pips: float = field(
         default_factory=lambda: DEFAULT_TRADING_PARAMS.default_sl_pips
@@ -186,12 +182,9 @@ class BacktestEngine:
         # コンポーネント初期化
         self.data_loader = DataLoader(
             data_dir=config.data_dir,
-            cache_dir=config.cache_dir,
         )
 
-        self.precompute = PrecomputeEngine(
-            cache_dir=config.cache_dir,
-        )
+        self.precompute = PrecomputeEngine()
 
         self.hard_guard = HardGuard(
             config=hard_guard_config or HardGuardConfig()
@@ -245,12 +238,11 @@ class BacktestEngine:
 
         # データ読み込み
         logger.info("データ読み込み中...")
-        df = self.data_loader.load(
+        df = self.data_loader._load_raw_data(
             symbol=self.config.symbol,
             timeframe=self.config.timeframe,
             start_date=self.config.start_date,
             end_date=self.config.end_date,
-            use_cache=self.config.use_cache,
         )
 
         if df.empty:
@@ -265,7 +257,7 @@ class BacktestEngine:
             df=df,
             symbol=self.config.symbol,
             timeframe=self.config.timeframe,
-            use_cache=self.config.use_cache,
+            use_cache=False,
         )
 
         # シミュレーション実行

@@ -8,7 +8,6 @@ from __future__ import annotations
 import logging
 from datetime import datetime
 from pathlib import Path
-from typing import Any
 
 import pandas as pd
 import polars as pl
@@ -26,111 +25,18 @@ class DataLoader:
 
     Attributes:
         data_dir: データディレクトリパス
-        cache_dir: キャッシュディレクトリパス
     """
 
     def __init__(
         self,
         data_dir: str | Path = "data/raw",
-        cache_dir: str | Path = "data/cache",
     ) -> None:
         """初期化
 
         Args:
             data_dir: データディレクトリパス
-            cache_dir: キャッシュディレクトリパス
         """
         self.data_dir = Path(data_dir)
-        self.cache_dir = Path(cache_dir)
-        self.cache_dir.mkdir(parents=True, exist_ok=True)
-
-    def load(
-        self,
-        symbol: str,
-        timeframe: Timeframe,
-        start_date: datetime,
-        end_date: datetime,
-        use_cache: bool = True,
-    ) -> pd.DataFrame:
-        """OHLCVデータを読み込み
-
-        Args:
-            symbol: シンボル
-            timeframe: 時間足
-            start_date: 開始日時
-            end_date: 終了日時
-            use_cache: キャッシュ使用フラグ
-
-        Returns:
-            pd.DataFrame: OHLCVデータ
-
-        Raises:
-            FileNotFoundError: データファイルが見つからない
-        """
-        cache_path = self._get_cache_path(
-            symbol, timeframe, start_date, end_date
-        )
-
-        # キャッシュから読み込み
-        if use_cache and cache_path.exists():
-            return self._load_from_cache(cache_path)
-
-        # 生データから読み込み
-        df = self._load_raw_data(symbol, timeframe, start_date, end_date)
-
-        # キャッシュに保存
-        if use_cache:
-            self._save_to_cache(df, cache_path)
-
-        return df
-
-    def load_chunked(
-        self,
-        symbol: str,
-        timeframe: Timeframe,
-        start_date: datetime,
-        end_date: datetime,
-        chunk_months: int = 1,
-    ) -> list[pd.DataFrame]:
-        """チャンク分割でデータを読み込み
-
-        大規模データをメモリ効率良く処理するため、
-        月単位でチャンク分割して読み込む。
-
-        Args:
-            symbol: シンボル
-            timeframe: 時間足
-            start_date: 開始日時
-            end_date: 終了日時
-            chunk_months: チャンク月数
-
-        Returns:
-            list[pd.DataFrame]: チャンク分割されたデータフレームリスト
-        """
-        chunks = []
-        current_start = start_date
-
-        while current_start < end_date:
-            # 次のチャンク終了日を計算
-            chunk_end = self._add_months(current_start, chunk_months)
-            if chunk_end > end_date:
-                chunk_end = end_date
-
-            # チャンクを読み込み
-            chunk_df = self.load(
-                symbol=symbol,
-                timeframe=timeframe,
-                start_date=current_start,
-                end_date=chunk_end,
-                use_cache=True,
-            )
-
-            if not chunk_df.empty:
-                chunks.append(chunk_df)
-
-            current_start = chunk_end
-
-        return chunks
 
     def _load_raw_data(
         self,
@@ -297,67 +203,6 @@ class DataLoader:
                 column_mapping[col] = "volume"
 
         return df.rename(column_mapping)
-
-    def _get_cache_path(
-        self,
-        symbol: str,
-        timeframe: Timeframe,
-        start_date: datetime,
-        end_date: datetime,
-    ) -> Path:
-        """キャッシュファイルパスを取得
-
-        Args:
-            symbol: シンボル
-            timeframe: 時間足
-            start_date: 開始日時
-            end_date: 終了日時
-
-        Returns:
-            Path: キャッシュファイルパス
-        """
-        start_str = start_date.strftime("%Y%m%d")
-        end_str = end_date.strftime("%Y%m%d")
-        filename = f"{symbol}_{timeframe.value}_{start_str}_{end_str}.parquet"
-        return self.cache_dir / filename
-
-    def _load_from_cache(self, cache_path: Path) -> pd.DataFrame:
-        """キャッシュから読み込み
-
-        Args:
-            cache_path: キャッシュファイルパス
-
-        Returns:
-            pd.DataFrame: OHLCVデータ
-        """
-        df = pl.read_parquet(cache_path)
-        return df.to_pandas()
-
-    def _save_to_cache(self, df: pd.DataFrame, cache_path: Path) -> None:
-        """キャッシュに保存
-
-        Args:
-            df: データフレーム
-            cache_path: キャッシュファイルパス
-        """
-        pl_df = pl.from_pandas(df)
-        pl_df.write_parquet(cache_path)
-
-    def _add_months(self, dt: datetime, months: int) -> datetime:
-        """月を加算
-
-        Args:
-            dt: 基準日時
-            months: 加算月数
-
-        Returns:
-            datetime: 加算後の日時
-        """
-        month = dt.month - 1 + months
-        year = dt.year + month // 12
-        month = month % 12 + 1
-        day = min(dt.day, 28)  # 安全のため28日を最大に
-        return datetime(year, month, day, dt.hour, dt.minute, dt.second)
 
     def get_available_range(
         self,

@@ -133,7 +133,6 @@ class Settings(BaseSettings):
         symbol: 対象通貨ペア
         database_url: データベースURL
         data_dir: データディレクトリ
-        cache_dir: キャッシュディレクトリ
         ollama_host: Ollamaホスト
         ollama_model: Ollamaモデル
         max_daily_loss_pct: 日次最大損失率（%）
@@ -158,7 +157,6 @@ class Settings(BaseSettings):
 
     # ディレクトリ
     data_dir: Path = Path("data")
-    cache_dir: Path = Path("data/cache")
 
     # Ollama
     ollama_host: str = "http://localhost:11434"
