@@ -55,7 +55,7 @@ class SimulatorConfig:
     # 高品質シグナル時に追加する枠数（0=無効）
     bonus_max_positions: int = 0
     # bonus発動のconsensus_score閾値
-    bonus_score_threshold: float = 7.5
+    bonus_score_threshold: float = 7.0
     default_volume: float = 0.1
     slippage_pips: float = field(
         default_factory=lambda: DEFAULT_TRADING_PARAMS.slippage_pips
