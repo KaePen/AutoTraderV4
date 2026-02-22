@@ -115,7 +115,7 @@ class BacktestRunner:
 
     def __init__(
         self,
-        data_dir: str | Path = "data/csv",
+        data_dir: str | Path = "data",
         config: BacktestConfig | None = None,
         verbose: bool = True,
         log_to_file: bool = True,
@@ -124,14 +124,17 @@ class BacktestRunner:
         """初期化
 
         Args:
-            data_dir: データディレクトリ
+            data_dir: データ基底ディレクトリ（通貨ペアサブディレクトリの親）
             config: バックテスト設定
             verbose: 詳細ログ出力
             log_to_file: ファイルログ出力
             log_dir: ログ出力先ディレクトリ
         """
-        self.data_dir = Path(data_dir)
         self.config = config or BacktestConfig()
+        # 通貨ペア別サブディレクトリに解決
+        # 例: data/USDJPY/ (data_dir="data", symbol="USDJPY")
+        _base = Path(data_dir)
+        self.data_dir = _base / self.config.symbol
         self._h1_df: pd.DataFrame | None = None
         self._h4_df: pd.DataFrame | None = None
         self._h8_df: pd.DataFrame | None = None
@@ -1117,14 +1120,15 @@ class BacktestRunner:
             "H8": "_h8_df",
         }
 
+        symbol = self.config.symbol
         for i, tf in enumerate(timeframes_to_load):
             # ワイルドカードでファイル検索
-            pattern = f"USDJPY_{tf}_*.csv"
+            pattern = f"{symbol}_{tf}_*.csv"
             tf_files = list(self.data_dir.glob(pattern))
 
             if not tf_files:
                 # ワイルドカードなしも試行（後方互換性）
-                tf_path = self.data_dir / f"USDJPY_{tf}.csv"
+                tf_path = self.data_dir / f"{symbol}_{tf}.csv"
                 tf_files = [tf_path] if tf_path.exists() else []
 
             if tf_files:

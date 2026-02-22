@@ -456,8 +456,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--data-dir",
         type=str,
-        default="data/csv",
-        help="データディレクトリ（デフォルト: data/csv）",
+        default="data",
+        help=(
+            "データ基底ディレクトリ（デフォルト: data）。"
+            "通貨ペアサブディレクトリ（data/{symbol}/）が"
+            "自動的に使用される。"
+        ),
     )
     parser.add_argument(
         "-v", "--verbose",
@@ -1036,7 +1040,8 @@ def run_fast(args: argparse.Namespace):
     end_date = dt(end_year + 1, 1, 1)
     base_tf = Timeframe(args.timeframe)
 
-    data_dir = Path(args.data_dir)
+    # 通貨ペア別サブディレクトリに解決
+    data_dir = Path(args.data_dir) / args.symbol
     timeframes_map = {
         "M1": "M1", "M5": "M5", "M15": "M15",
         "H1": "H1", "H4": "H4",
@@ -1130,7 +1135,8 @@ def run_quick(args: argparse.Namespace):
     )
 
     start_year, _ = parse_years(args.years)
-    data_dir = Path(args.data_dir)
+    # 通貨ペア別サブディレクトリに解決
+    data_dir = Path(args.data_dir) / args.symbol
 
     # データ読み込み
     print(f"=== 軽量バックテスト {start_year}年 ===")

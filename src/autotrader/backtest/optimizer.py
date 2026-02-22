@@ -585,7 +585,7 @@ def get_default_param_grid() -> list[OptimizeConfig]:
 
 
 def run_optimization(
-    data_dir: str = "data/csv",
+    data_dir: str = "data",
     symbol: str = "USDJPY",
     train_years: tuple[int, int] = (2010, 2019),
     valid_years: tuple[int, int] = (2020, 2025),
@@ -594,7 +594,7 @@ def run_optimization(
     """パラメータ最適化を実行
 
     Args:
-        data_dir: データディレクトリ
+        data_dir: データ基底ディレクトリ（通貨ペアサブディレクトリの親）
         symbol: 通貨ペア
         train_years: 訓練期間 (開始年, 終了年)
         valid_years: 検証期間 (開始年, 終了年)
@@ -607,7 +607,8 @@ def run_optimization(
     print("AutoTraderV4 戦略最適化（過剰フィッティング防止）")
     print("=" * 80)
 
-    data_path = Path(data_dir)
+    # 通貨ペア別サブディレクトリに解決
+    data_path = Path(data_dir) / symbol
     h1_files = list(data_path.glob(f"{symbol}_H1_*.csv"))
     h4_files = list(data_path.glob(f"{symbol}_H4_*.csv"))
 
