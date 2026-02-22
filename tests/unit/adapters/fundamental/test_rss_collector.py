@@ -277,13 +277,13 @@ class TestRSSCollectorAsync:
             items1 = await collector._fetch_all_feeds()
             for item in items1:
                 if item.news_id not in collector._seen_ids:
-                    collector._seen_ids.add(item.news_id)
+                    collector._seen_ids[item.news_id] = None
                     await callback(item)
 
             items2 = await collector._fetch_all_feeds()
             for item in items2:
                 if item.news_id not in collector._seen_ids:
-                    collector._seen_ids.add(item.news_id)
+                    collector._seen_ids[item.news_id] = None
                     await callback(item)
 
             # 2回目は同じIDなのでコールバックされない

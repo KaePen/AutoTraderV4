@@ -7,9 +7,9 @@ Ollamaを使ってリアルタイムで分析し、
 
 from __future__ import annotations
 
+import asyncio
 import json
 import re
-import time
 from datetime import datetime, timedelta, timezone
 
 from loguru import logger
@@ -60,6 +60,8 @@ class NewsLLMAnalyzer:
 
         # symbol → (score, expires_at) のキャッシュ
         self._cache: dict[str, tuple[float, datetime]] = {}
+        # ollama.Client の遅延初期化（初回呼び出しで生成）
+        self._client: object | None = None
 
     async def analyze(
         self,
@@ -81,8 +83,7 @@ class NewsLLMAnalyzer:
             return self.get_current_sentiment(symbol)
 
         try:
-            import asyncio
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             score = await loop.run_in_executor(
                 None,
                 self._call_ollama_sync,
@@ -150,9 +151,14 @@ class NewsLLMAnalyzer:
                 "pip install ollama"
             )
 
+        # 遅延初期化: 初回呼び出し時のみ Client を生成
+        if self._client is None:
+            self._client = _ollama_module.Client(
+                host=self._host
+            )
+
         prompt = self._build_prompt(news_items, symbol)
-        client = _ollama_module.Client(host=self._host)
-        response = client.chat(
+        response = self._client.chat(
             model=self._model,
             messages=[{"role": "user", "content": prompt}],
             format="json",
