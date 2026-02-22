@@ -876,6 +876,7 @@ class BacktestRunner:
         enable_scalping: bool = False,
         pm_config: "PositionManagerConfig | None" = None,
         fundamental_csv: str | None = None,
+        fundamental_csv_list: list[str] | None = None,
         fundamental_guard_minutes: int = 30,
         period_start: datetime | None = None,
         period_end: datetime | None = None,
@@ -897,6 +898,7 @@ class BacktestRunner:
             enable_scalping: スキャルピングモード有効化（M1/M5からエントリー可能）
             pm_config: PositionManager設定（外部注入）
             fundamental_csv: 経済イベントCSVパス（Noneで無効）
+            fundamental_csv_list: 複数の経済イベントCSVパスリスト
             fundamental_guard_minutes: 重要指標前の停止分数
             period_start: 日単位の開始日時（Noneで年始）
             period_end: 日単位の終了日時・exclusive（Noneで年末）
@@ -911,8 +913,15 @@ class BacktestRunner:
             self.load_data()
 
         # ファンダメンタルプロバイダー初期化
+        # fundamental_csv_list を優先し、次に fundamental_csv を使用
         fundamental_provider = None
-        if fundamental_csv:
+        _csv_paths: list[str] = []
+        if fundamental_csv_list:
+            _csv_paths = fundamental_csv_list
+        elif fundamental_csv:
+            _csv_paths = [fundamental_csv]
+
+        if _csv_paths:
             try:
                 from autotrader.adapters.fundamental.backtest_provider import (
                     BacktestFundamentalProvider,
@@ -920,10 +929,13 @@ class BacktestRunner:
                 fundamental_provider = BacktestFundamentalProvider(
                     event_guard_minutes=fundamental_guard_minutes
                 )
-                count = fundamental_provider.load_csv(fundamental_csv)
+                total_count = 0
+                for _csv in _csv_paths:
+                    count = fundamental_provider.load_csv(_csv)
+                    total_count += count
                 logger.info(
                     f"[Fundamental] バックテスト用CSV読込: "
-                    f"{count}件"
+                    f"{total_count}件 ({len(_csv_paths)}ファイル)"
                 )
             except Exception as e:
                 logger.warning(

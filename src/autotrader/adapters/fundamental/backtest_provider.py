@@ -6,6 +6,7 @@ CSVファイルから過去の経済イベントを読み込み、
 
 from __future__ import annotations
 
+import bisect
 import csv
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
@@ -27,6 +28,27 @@ _CSV_COLUMNS = [
     "event_id", "event_time", "currency", "event_name",
     "impact", "actual", "forecast", "previous",
 ]
+
+# シンボル→通貨ペア（先行・後続）のマッピング
+_SYMBOL_CURRENCIES: dict[str, tuple[str, str]] = {
+    "USDJPY": ("USD", "JPY"),
+    "EURUSD": ("EUR", "USD"),
+    "GBPUSD": ("GBP", "USD"),
+    "AUDUSD": ("AUD", "USD"),
+    "NZDUSD": ("NZD", "USD"),
+    "USDCHF": ("USD", "CHF"),
+    "USDCAD": ("USD", "CAD"),
+    "EURJPY": ("EUR", "JPY"),
+    "GBPJPY": ("GBP", "JPY"),
+    "AUDJPY": ("AUD", "JPY"),
+    "CADJPY": ("CAD", "JPY"),
+    "CHFJPY": ("CHF", "JPY"),
+    "EURGBP": ("EUR", "GBP"),
+    "GBPCHF": ("GBP", "CHF"),
+}
+
+# 高インパクト指標のバイアス乗数
+_HIGH_IMPACT_MULTIPLIER = 3.0
 
 
 class BacktestFundamentalProvider:
@@ -89,11 +111,12 @@ class BacktestFundamentalProvider:
                         )
                         continue
 
-            # 重複排除してマージ
+            # 重複排除してマージし、時刻順ソート（bisect検索用）
             self._events.extend(loaded)
             self._events = self._normalizer.deduplicate(
                 self._events
             )
+            self._events.sort(key=lambda e: e.event_time)
             self._loaded_files.append(str(path))
 
             logger.info(
@@ -149,15 +172,148 @@ class BacktestFundamentalProvider:
             for ev in upcoming
         )
 
+        # 直前24時間の発表済みイベントからマクロバイアスを計算
+        released_24h = self._get_released_events(
+            symbol_events, current_time, hours=24
+        )
+        macro_bias, macro_summary = self._estimate_bias_from_events(
+            released_24h, symbol
+        )
+
+        # 直前4時間の発表済みイベントから指標後バイアスを計算
+        released_4h = self._get_released_events(
+            symbol_events, current_time, hours=4
+        )
+        post_bias, post_summary = self._estimate_bias_from_events(
+            released_4h, symbol
+        )
+
         return FundamentalContext(
-            macro_bias_score=0.0,
-            macro_bias_summary="バックテスト（マクロバイアスなし）",
-            post_event_bias_score=0.0,
-            post_event_summary="バックテスト（指標後バイアスなし）",
+            macro_bias_score=macro_bias,
+            macro_bias_summary=macro_summary,
+            post_event_bias_score=post_bias,
+            post_event_summary=post_summary,
             sentiment_score=0.0,
             upcoming_events=upcoming_dicts,
             has_high_impact_within_30min=high_impact_soon,
         )
+
+    def _get_released_events(
+        self,
+        events: list[EconomicEvent],
+        current_time: datetime,
+        hours: int,
+    ) -> list[EconomicEvent]:
+        """指定時間内の発表済みイベントを取得
+
+        イベントリストは event_time 昇順ソート済みを前提として
+        bisect による O(log n) 検索を使用する。
+
+        Args:
+            events: 時刻昇順ソート済みイベントリスト
+            current_time: 現在時刻（UTC）
+            hours: 過去何時間を対象とするか
+
+        Returns:
+            list[EconomicEvent]: 発表済みイベントリスト
+        """
+        if not events:
+            return []
+        cutoff = current_time - timedelta(hours=hours)
+        # bisect で検索範囲を絞る
+        times = [ev.event_time for ev in events]
+        lo = bisect.bisect_left(times, cutoff)
+        hi = bisect.bisect_left(times, current_time)
+        return [
+            ev for ev in events[lo:hi]
+            if ev.actual is not None
+        ]
+
+    def _estimate_bias_from_events(
+        self,
+        released_events: list[EconomicEvent],
+        symbol: str,
+    ) -> tuple[float, str]:
+        """発表済みイベントからバイアスを計算
+
+        surprise_magnitude（実績/予測乖離）から
+        symbol の通貨方向バイアスを計算する。
+
+        実績 > 予測 → 発表通貨にポジティブバイアス（先行通貨なら+、後続通貨なら-）
+        実績 < 予測 → 発表通貨にネガティブバイアス
+        高インパクト指標は乗数3倍で適用。
+        バイアスは -1.0〜+1.0 にクリップ。
+
+        Args:
+            released_events: 発表済みイベントリスト
+            symbol: 対象シンボル
+
+        Returns:
+            tuple[float, str]: (bias_score, summary_text)
+        """
+        if not released_events:
+            return 0.0, "発表済み指標なし"
+
+        # シンボル→通貨ペア取得
+        sym_upper = symbol.upper()
+        base_cur, quote_cur = _SYMBOL_CURRENCIES.get(
+            sym_upper, (sym_upper[:3], sym_upper[3:])
+        )
+
+        total_bias = 0.0
+        event_summaries: list[str] = []
+
+        for ev in released_events:
+            if ev.actual is None:
+                continue
+            if ev.forecast is None:
+                # 予測なしの場合は前回値を参照
+                if ev.previous is None:
+                    continue
+                reference = ev.previous
+            else:
+                reference = ev.forecast
+
+            if reference == 0.0:
+                continue
+
+            # サプライズ幅（実績 - 予測）の正規化
+            surprise = (ev.actual - reference) / abs(reference)
+
+            # インパクト乗数
+            multiplier = (
+                _HIGH_IMPACT_MULTIPLIER
+                if ev.impact == ImpactLevel.HIGH
+                else 1.0
+            )
+
+            # 通貨方向でバイアス符号を決定
+            if ev.currency == base_cur:
+                # 先行通貨の強さ → ペアにとってポジティブ
+                bias = surprise * multiplier
+            elif ev.currency == quote_cur:
+                # 後続通貨の強さ → ペアにとってネガティブ
+                bias = -surprise * multiplier
+            else:
+                continue
+
+            total_bias += bias
+            direction = "↑" if bias > 0 else "↓"
+            event_summaries.append(
+                f"{ev.currency}/{ev.event_name}{direction}"
+            )
+
+        # -1.0〜+1.0 にクリップ
+        clipped = max(-1.0, min(1.0, total_bias))
+
+        if event_summaries:
+            summary = f"バイアス{clipped:+.2f}: " + ", ".join(
+                event_summaries[:3]
+            )
+        else:
+            summary = "バイアス計算対象指標なし"
+
+        return clipped, summary
 
     def _parse_row(
         self, row: dict, fetched_at: datetime
