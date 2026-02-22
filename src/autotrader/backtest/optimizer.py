@@ -48,6 +48,15 @@ class OptimizeConfig:
     cooldown_bars: int = 4
     mtf_bonus: int = 2
     volume: float = 0.5
+    # v3拡張: 勝率向上フィルター
+    require_trend_align: bool = False
+    bb_filter: bool = False
+    stoch_confirm: bool = False
+    macd_hist_filter: bool = False
+    # v3.5拡張: シグナル品質フィルター
+    di_direction_filter: bool = False
+    atr_expansion_filter: bool = False
+    atr_expansion_threshold: float = 1.0
 
 
 @dataclass
@@ -240,6 +249,91 @@ class OptimizedGenerator:
         min_signals = self.config.min_signals
         signal_margin = 1
 
+        # --- v3フィルター ---
+        # MTFトレンド一致必須
+        if self.config.require_trend_align:
+            if higher_trend is None:
+                return None
+            if buy_signals > sell_signals:
+                if higher_trend != "up":
+                    return None
+            elif sell_signals > buy_signals:
+                if higher_trend != "down":
+                    return None
+
+        # ボリンジャーバンドフィルター（過熱排除）
+        if self.config.bb_filter:
+            bb_pct = row.get("bb_pct")
+            if bb_pct is not None and not pd.isna(bb_pct):
+                if buy_signals > sell_signals:
+                    # 買い: BB上端の極度過熱を排除
+                    if bb_pct > 0.85:
+                        return None
+                elif sell_signals > buy_signals:
+                    # 売り: BB下端の極度過売を排除
+                    if bb_pct < 0.15:
+                        return None
+
+        # ストキャスティクス確認（極端ゾーン排除）
+        if self.config.stoch_confirm:
+            stoch_k = row.get("stoch_k")
+            if (
+                stoch_k is not None
+                and not pd.isna(stoch_k)
+            ):
+                if buy_signals > sell_signals:
+                    # 買い: 超過買い圏は避ける
+                    if stoch_k > 80:
+                        return None
+                elif sell_signals > buy_signals:
+                    # 売り: 超過売り圏は避ける
+                    if stoch_k < 20:
+                        return None
+
+        # MACDヒストグラム方向一致
+        if self.config.macd_hist_filter:
+            macd_hist = row.get("macd_hist")
+            if (
+                macd_hist is not None
+                and not pd.isna(macd_hist)
+            ):
+                if buy_signals > sell_signals:
+                    if macd_hist < 0:
+                        return None
+                elif sell_signals > buy_signals:
+                    if macd_hist > 0:
+                        return None
+        # --- v3.5フィルター ---
+        # +DI/-DI 方向一致フィルター
+        if self.config.di_direction_filter:
+            plus_di = row.get("plus_di")
+            minus_di = row.get("minus_di")
+            if (
+                plus_di is not None
+                and minus_di is not None
+                and not pd.isna(plus_di)
+                and not pd.isna(minus_di)
+            ):
+                if buy_signals > sell_signals:
+                    if plus_di <= minus_di:
+                        return None
+                elif sell_signals > buy_signals:
+                    if minus_di <= plus_di:
+                        return None
+
+        # ATR拡大フィルター（トレンド発生中のみ）
+        if self.config.atr_expansion_filter:
+            atr_ratio = row.get("atr_ratio")
+            if (
+                atr_ratio is not None
+                and not pd.isna(atr_ratio)
+            ):
+                thr = self.config.atr_expansion_threshold
+                if atr_ratio < thr:
+                    return None
+
+        # --- v3フィルターここまで ---
+
         if (
             buy_signals >= min_signals
             and buy_signals > sell_signals + signal_margin
@@ -357,6 +451,42 @@ def _calculate_indicators(df: pd.DataFrame) -> pd.DataFrame:
             c for c in adx.columns if c.startswith("ADX")
         ][0]
         df["adx"] = adx[adx_col]
+        # +DI / -DI (v3.5)
+        dmp_cols = [
+            c for c in adx.columns if "DMP" in c
+        ]
+        dmn_cols = [
+            c for c in adx.columns if "DMN" in c
+        ]
+        if dmp_cols:
+            df["plus_di"] = adx[dmp_cols[0]]
+        if dmn_cols:
+            df["minus_di"] = adx[dmn_cols[0]]
+
+    # ATR拡大指標 (v3.5): 現在ATR / 50期間平均ATR
+    if "atr_14" in df.columns:
+        df["atr_ratio"] = (
+            df["atr_14"] / df["atr_14"].rolling(50).mean()
+        )
+
+    # ボリンジャーバンド (v3)
+    bb = ta.bbands(df["close"], length=20, std=2.0)
+    if bb is not None:
+        bb_cols = bb.columns.tolist()
+        lower = [c for c in bb_cols if "BBL" in c][0]
+        mid = [c for c in bb_cols if "BBM" in c][0]
+        upper = [c for c in bb_cols if "BBU" in c][0]
+        df["bb_lower"] = bb[lower]
+        df["bb_mid"] = bb[mid]
+        df["bb_upper"] = bb[upper]
+        band_w = df["bb_upper"] - df["bb_lower"]
+        df["bb_pct"] = (
+            (df["close"] - df["bb_lower"]) / band_w
+        ).clip(0, 1)
+
+    # MACDヒストグラム (v3)
+    if "macd" in df.columns and "macd_signal" in df.columns:
+        df["macd_hist"] = df["macd"] - df["macd_signal"]
 
     return df
 

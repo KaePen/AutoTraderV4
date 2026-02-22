@@ -1,0 +1,329 @@
+"""GBPUSD v3.5b プロービング: ATR閾値変動+極限フィルタリング
+
+ATR拡大閾値の最適値を探り、極限的フィルター組み合わせでPF最大化。
+
+操作方法:
+    cd /d/Projects/AutoTraderV4/tmp/feat_gbpusd-opt-v3
+    python reports/gbpusd_probe_v35b.py --workers 9
+"""
+
+from __future__ import annotations
+
+import argparse
+import io
+import os
+import sys
+from pathlib import Path
+
+if sys.platform == "win32":
+    sys.stdout = io.TextIOWrapper(
+        sys.stdout.buffer, encoding="utf-8", errors="replace",
+    )
+    sys.stderr = io.TextIOWrapper(
+        sys.stderr.buffer, encoding="utf-8", errors="replace",
+    )
+    os.environ.setdefault("PYTHONIOENCODING", "utf-8")
+
+_SCRIPT_DIR = Path(__file__).resolve().parents[1]
+_SRC_DIR = _SCRIPT_DIR / "src"
+if _SRC_DIR.exists():
+    sys.path.insert(0, str(_SRC_DIR))
+
+if (_SCRIPT_DIR / "data").exists():
+    _DATA_ROOT = _SCRIPT_DIR
+elif (_SCRIPT_DIR.parents[1] / "data").exists():
+    _DATA_ROOT = _SCRIPT_DIR.parents[1]
+else:
+    _DATA_ROOT = _SCRIPT_DIR
+
+SYMBOL = "GBPUSD"
+TRAIN_YEARS = (2018, 2020)
+VALID_YEARS = (2021, 2023)
+DATA_DIR = str(_DATA_ROOT / "data")
+
+
+def build_probe_grid():
+    """v3.5b プローブ設定
+
+    Returns:
+        list[tuple[str, OptimizeConfig]]: (ラベル, 設定)
+    """
+    from autotrader.backtest.optimizer import OptimizeConfig
+
+    TA = True
+
+    return [
+        # --- ATR閾値スイープ（SL3/TP1.5 base） ---
+        ("ATR1.0 SL3/TP1.5", OptimizeConfig(
+            min_signals=3, adx_threshold=22,
+            rsi_oversold=33, rsi_overbought=67,
+            sl_atr_mult=3.0, tp_atr_mult=1.5,
+            cooldown_bars=4, mtf_bonus=2,
+            require_trend_align=TA,
+            atr_expansion_filter=True,
+            atr_expansion_threshold=1.0,
+            volume=1.0,
+        )),
+        ("ATR1.1 SL3/TP1.5", OptimizeConfig(
+            min_signals=3, adx_threshold=22,
+            rsi_oversold=33, rsi_overbought=67,
+            sl_atr_mult=3.0, tp_atr_mult=1.5,
+            cooldown_bars=4, mtf_bonus=2,
+            require_trend_align=TA,
+            atr_expansion_filter=True,
+            atr_expansion_threshold=1.1,
+            volume=1.0,
+        )),
+        ("ATR1.2 SL3/TP1.5", OptimizeConfig(
+            min_signals=3, adx_threshold=22,
+            rsi_oversold=33, rsi_overbought=67,
+            sl_atr_mult=3.0, tp_atr_mult=1.5,
+            cooldown_bars=4, mtf_bonus=2,
+            require_trend_align=TA,
+            atr_expansion_filter=True,
+            atr_expansion_threshold=1.2,
+            volume=1.0,
+        )),
+        ("ATR1.3 SL3/TP1.5", OptimizeConfig(
+            min_signals=3, adx_threshold=22,
+            rsi_oversold=33, rsi_overbought=67,
+            sl_atr_mult=3.0, tp_atr_mult=1.5,
+            cooldown_bars=4, mtf_bonus=2,
+            require_trend_align=TA,
+            atr_expansion_filter=True,
+            atr_expansion_threshold=1.3,
+            volume=1.0,
+        )),
+        ("ATR1.5 SL3/TP1.5", OptimizeConfig(
+            min_signals=3, adx_threshold=22,
+            rsi_oversold=33, rsi_overbought=67,
+            sl_atr_mult=3.0, tp_atr_mult=1.5,
+            cooldown_bars=4, mtf_bonus=2,
+            require_trend_align=TA,
+            atr_expansion_filter=True,
+            atr_expansion_threshold=1.5,
+            volume=1.0,
+        )),
+        # --- ATR閾値スイープ（SL2/TP2 base） ---
+        ("ATR1.0 SL2/TP2", OptimizeConfig(
+            min_signals=3, adx_threshold=22,
+            rsi_oversold=33, rsi_overbought=67,
+            sl_atr_mult=2.0, tp_atr_mult=2.0,
+            cooldown_bars=4, mtf_bonus=2,
+            require_trend_align=TA,
+            atr_expansion_filter=True,
+            atr_expansion_threshold=1.0,
+            volume=1.0,
+        )),
+        ("ATR1.2 SL2/TP2", OptimizeConfig(
+            min_signals=3, adx_threshold=22,
+            rsi_oversold=33, rsi_overbought=67,
+            sl_atr_mult=2.0, tp_atr_mult=2.0,
+            cooldown_bars=4, mtf_bonus=2,
+            require_trend_align=TA,
+            atr_expansion_filter=True,
+            atr_expansion_threshold=1.2,
+            volume=1.0,
+        )),
+        ("ATR1.5 SL2/TP2", OptimizeConfig(
+            min_signals=3, adx_threshold=22,
+            rsi_oversold=33, rsi_overbought=67,
+            sl_atr_mult=2.0, tp_atr_mult=2.0,
+            cooldown_bars=4, mtf_bonus=2,
+            require_trend_align=TA,
+            atr_expansion_filter=True,
+            atr_expansion_threshold=1.5,
+            volume=1.0,
+        )),
+        # --- 極限フィルタ: ALL ON + ATR厳格 ---
+        ("ALL ATR1.2 SL3/TP1.5", OptimizeConfig(
+            min_signals=3, adx_threshold=22,
+            rsi_oversold=33, rsi_overbought=67,
+            sl_atr_mult=3.0, tp_atr_mult=1.5,
+            cooldown_bars=4, mtf_bonus=2,
+            require_trend_align=TA,
+            bb_filter=True, stoch_confirm=True,
+            macd_hist_filter=True,
+            di_direction_filter=True,
+            atr_expansion_filter=True,
+            atr_expansion_threshold=1.2,
+            volume=1.0,
+        )),
+        ("ALL ATR1.0 SL2/TP2", OptimizeConfig(
+            min_signals=3, adx_threshold=22,
+            rsi_oversold=33, rsi_overbought=67,
+            sl_atr_mult=2.0, tp_atr_mult=2.0,
+            cooldown_bars=4, mtf_bonus=2,
+            require_trend_align=TA,
+            bb_filter=True, stoch_confirm=True,
+            macd_hist_filter=True,
+            di_direction_filter=True,
+            atr_expansion_filter=True,
+            atr_expansion_threshold=1.0,
+            volume=1.0,
+        )),
+        # --- 高min_signals + ALL filters ---
+        ("ALL min5 ADX30 SL2/TP2", OptimizeConfig(
+            min_signals=5, adx_threshold=30,
+            rsi_oversold=28, rsi_overbought=72,
+            sl_atr_mult=2.0, tp_atr_mult=2.0,
+            cooldown_bars=6, mtf_bonus=4,
+            require_trend_align=TA,
+            di_direction_filter=True,
+            atr_expansion_filter=True,
+            atr_expansion_threshold=1.0,
+            volume=1.0,
+        )),
+        ("ALL min5 ADX30 SL2/TP3", OptimizeConfig(
+            min_signals=5, adx_threshold=30,
+            rsi_oversold=28, rsi_overbought=72,
+            sl_atr_mult=2.0, tp_atr_mult=3.0,
+            cooldown_bars=6, mtf_bonus=4,
+            require_trend_align=TA,
+            di_direction_filter=True,
+            atr_expansion_filter=True,
+            atr_expansion_threshold=1.0,
+            volume=1.0,
+        )),
+        # --- ATR拡大 + SL/TP有利比率 ---
+        ("ATR1.2 SL1.5/TP2", OptimizeConfig(
+            min_signals=3, adx_threshold=22,
+            rsi_oversold=33, rsi_overbought=67,
+            sl_atr_mult=1.5, tp_atr_mult=2.0,
+            cooldown_bars=4, mtf_bonus=2,
+            require_trend_align=TA,
+            atr_expansion_filter=True,
+            atr_expansion_threshold=1.2,
+            volume=1.0,
+        )),
+        ("ATR1.2 SL1.5/TP2.5", OptimizeConfig(
+            min_signals=3, adx_threshold=22,
+            rsi_oversold=33, rsi_overbought=67,
+            sl_atr_mult=1.5, tp_atr_mult=2.5,
+            cooldown_bars=4, mtf_bonus=2,
+            require_trend_align=TA,
+            atr_expansion_filter=True,
+            atr_expansion_threshold=1.2,
+            volume=1.0,
+        )),
+        ("ATR1.2 SL1.5/TP3", OptimizeConfig(
+            min_signals=3, adx_threshold=22,
+            rsi_oversold=33, rsi_overbought=67,
+            sl_atr_mult=1.5, tp_atr_mult=3.0,
+            cooldown_bars=4, mtf_bonus=2,
+            require_trend_align=TA,
+            atr_expansion_filter=True,
+            atr_expansion_threshold=1.2,
+            volume=1.0,
+        )),
+        # --- ATR1.2 + DI + 有利比率 ---
+        ("DI+ATR1.2 SL1.5/TP2.5", OptimizeConfig(
+            min_signals=3, adx_threshold=22,
+            rsi_oversold=33, rsi_overbought=67,
+            sl_atr_mult=1.5, tp_atr_mult=2.5,
+            cooldown_bars=4, mtf_bonus=2,
+            require_trend_align=TA,
+            di_direction_filter=True,
+            atr_expansion_filter=True,
+            atr_expansion_threshold=1.2,
+            volume=1.0,
+        )),
+    ]
+
+
+def main() -> None:
+    """エントリポイント"""
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--workers", type=int, default=9,
+    )
+    args = parser.parse_args()
+
+    from autotrader.backtest.optimizer import (
+        _calculate_indicators,
+        _load_mt5_csv,
+        _run_single_config,
+    )
+    import concurrent.futures
+
+    probes = build_probe_grid()
+    configs = [c for _, c in probes]
+    labels = [l for l, _ in probes]
+
+    print(
+        f"GBPUSD v3.5b プローブ"
+        f" ({len(probes)}設定, {args.workers}コア)"
+    )
+
+    data_path = Path(DATA_DIR) / SYMBOL
+    h1_f = list(data_path.glob(f"{SYMBOL}_H1_*.csv"))
+    h4_f = list(data_path.glob(f"{SYMBOL}_H4_*.csv"))
+    if not h1_f or not h4_f:
+        print(f"データなし: {data_path}")
+        sys.exit(1)
+
+    print("データ読み込み...")
+    df = _load_mt5_csv(h1_f[0])
+    df = _calculate_indicators(df)
+    h4 = _load_mt5_csv(h4_f[0])
+    h4 = _calculate_indicators(h4)
+    print(f"  H1: {len(df):,}  H4: {len(h4):,}\n")
+
+    task_args = [
+        (
+            i, c, df, h4,
+            TRAIN_YEARS, VALID_YEARS, SYMBOL,
+        )
+        for i, c in enumerate(configs)
+    ]
+
+    results = [None] * len(probes)
+    with concurrent.futures.ProcessPoolExecutor(
+        max_workers=args.workers,
+    ) as ex:
+        for res in ex.map(_run_single_config, task_args):
+            idx, tr, vr = res
+            results[idx] = (tr, vr)
+            lbl = labels[idx]
+            mark = "*" if vr["win_rate"] >= 70 else " "
+            pfmark = "!" if vr["pf"] >= 1.3 else " "
+            print(
+                f"  [{idx+1:2d}/{len(probes)}]"
+                f"{mark}{pfmark}"
+                f" {lbl:<30}"
+                f" T:{tr['trades']:>4}"
+                f" {tr['win_rate']:>5.1f}%"
+                f" PF{tr['pf']:.2f}"
+                f"  V:{vr['trades']:>4}"
+                f" {vr['win_rate']:>5.1f}%"
+                f" PF{vr['pf']:.2f}"
+                f" ${vr['net_profit']:>+6.0f}"
+            )
+
+    print("\n" + "=" * 90)
+    print("結果サマリ（検証PF降順）")
+    print("=" * 90)
+    ranked = sorted(
+        range(len(probes)),
+        key=lambda i: results[i][1]["pf"]
+        if results[i] else 0,
+        reverse=True,
+    )
+    for r, i in enumerate(ranked, 1):
+        tr, vr = results[i]
+        lbl = labels[i]
+        print(
+            f"#{r:2d} {lbl:<30}"
+            f" T:{tr['win_rate']:>5.1f}%"
+            f" PF{tr['pf']:.2f}"
+            f"  V:{vr['win_rate']:>5.1f}%"
+            f" PF{vr['pf']:.2f}"
+            f" ${vr['net_profit']:>+6.0f}"
+            f"  ({vr['trades']}trades)"
+        )
+
+
+if __name__ == "__main__":
+    import multiprocessing
+    multiprocessing.freeze_support()
+    main()
