@@ -43,6 +43,7 @@ from autotrader.calculator.features.divergence_features import (
     DivergenceDetector,
 )
 from autotrader.config import DEFAULT_TRADING_PARAMS
+from autotrader.config.trading_params import get_preset
 from autotrader.core.entities import Candle, Signal
 from autotrader.core.enums import (
     ExitReason,
@@ -88,6 +89,39 @@ class BacktestConfig:
     pip_value: float = field(
         default_factory=lambda: DEFAULT_TRADING_PARAMS.pip_value
     )
+
+    @classmethod
+    def from_preset(
+        cls,
+        symbol: str,
+        preset_path: Path | None = None,
+        **overrides: Any,
+    ) -> "BacktestConfig":
+        """シンボルプリセットから BacktestConfig を生成.
+
+        プリセット値をデフォルトとして使用し、
+        overrides で任意フィールドを上書きできる。
+
+        Args:
+            symbol: 通貨ペア名
+            preset_path: YAMLファイルパス（None時はデフォルトパス）
+            **overrides: 上書きするフィールド
+
+        Returns:
+            BacktestConfig: プリセット値で初期化した設定
+        """
+        preset = get_preset(symbol, preset_path)
+        kwargs: dict[str, Any] = {
+            "symbol": symbol,
+            "spread_pips": preset.spread_pips,
+            "slippage_pips": preset.slippage_pips,
+            "pip_value": preset.pip_value,
+            "max_positions": preset.max_positions,
+            "bonus_max_positions": preset.bonus_max_positions,
+            "bonus_score_threshold": preset.bonus_score_threshold,
+        }
+        kwargs.update(overrides)
+        return cls(**kwargs)
 
 
 @dataclass

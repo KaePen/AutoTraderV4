@@ -1,6 +1,9 @@
 # ライブトレード用設定（本番環境）
 # バックテストはCLI引数で別管理
 
+# 対象通貨ペア（プリセット自動適用）
+symbol: USDJPY
+
 bot_config:
   # 最大同時ポジション数
   max_positions: 3

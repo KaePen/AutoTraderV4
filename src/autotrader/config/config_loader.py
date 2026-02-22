@@ -8,6 +8,7 @@ from pathlib import Path
 
 import yaml
 
+from autotrader.config.trading_params import get_preset
 from autotrader.decision.unified.config import UnifiedBotConfig
 from autotrader.decision.unified.position_manager import (
     PositionManagerConfig,
@@ -105,8 +106,30 @@ class ConfigLoader:
         with open(path, encoding="utf-8") as f:
             raw = yaml.safe_load(f) or {}
 
-        bot_data = raw.get("bot_config", {}) or {}
-        pm_data = raw.get("pm_config", {}) or {}
+        # シンボルプリセット取得（symbol キーがあれば適用）
+        symbol = raw.get("symbol", "USDJPY")
+        preset = get_preset(symbol)
+
+        # プリセット値をデフォルトとして使用（YAML 明示値で上書き）
+        preset_bot_defaults = {
+            "base_risk_pct": preset.base_risk_pct,
+            "max_lot_per_trade": preset.max_lot_per_trade,
+            "max_total_exposure_lot": preset.max_total_exposure_lot,
+            "equity_floor_pct": preset.equity_floor_pct,
+        }
+        preset_pm_defaults = {
+            "spread_pips": preset.spread_pips,
+            "slippage_pips": preset.slippage_pips,
+        }
+
+        bot_data = {
+            **preset_bot_defaults,
+            **(raw.get("bot_config", {}) or {}),
+        }
+        pm_data = {
+            **preset_pm_defaults,
+            **(raw.get("pm_config", {}) or {}),
+        }
 
         bot_kwargs = _convert_tuple_fields(
             _filter_fields(bot_data, UnifiedBotConfig),

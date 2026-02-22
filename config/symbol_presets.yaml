@@ -1,0 +1,66 @@
+# 通貨ペア別取引パラメータプリセット
+# defaults: 全シンボル共通フォールバック
+# symbols[X]: 個別シンボル設定（defaultsを上書き）
+
+defaults:
+  pip_value: 100.0
+  spread_pips: 1.5
+  slippage_pips: 0.5
+  default_sl_pips: 20.0
+  default_tp_pips: 40.0
+  min_lot: 0.01
+  max_lot: 10.0
+  commission_per_lot: 0.0
+  max_positions: 2
+  bonus_max_positions: 1
+  bonus_score_threshold: 7.0
+  base_risk_pct: 0.02
+  max_lot_per_trade: 2.0
+  max_total_exposure_lot: 5.0
+  equity_floor_pct: 0.30
+
+symbols:
+  USDJPY:
+    pip_value: 100.0
+    spread_pips: 1.5
+    slippage_pips: 0.5
+    default_sl_pips: 20.0
+    default_tp_pips: 40.0
+    max_positions: 2
+    bonus_score_threshold: 7.0
+    base_risk_pct: 0.02
+    max_lot_per_trade: 2.0
+
+  EURUSD:
+    pip_value: 10.0
+    spread_pips: 1.0
+    slippage_pips: 0.3
+    default_sl_pips: 15.0
+    default_tp_pips: 30.0
+    max_positions: 2
+    bonus_score_threshold: 7.0
+    base_risk_pct: 0.02
+    max_lot_per_trade: 2.0
+
+  GBPJPY:
+    pip_value: 100.0
+    spread_pips: 3.0
+    slippage_pips: 1.0
+    default_sl_pips: 30.0
+    default_tp_pips: 60.0
+    max_positions: 1
+    bonus_max_positions: 1
+    bonus_score_threshold: 8.0
+    base_risk_pct: 0.015
+    max_lot_per_trade: 1.0
+
+  EURJPY:
+    pip_value: 100.0
+    spread_pips: 2.0
+    slippage_pips: 0.7
+    default_sl_pips: 25.0
+    default_tp_pips: 50.0
+    max_positions: 2
+    bonus_score_threshold: 7.5
+    base_risk_pct: 0.02
+    max_lot_per_trade: 1.5

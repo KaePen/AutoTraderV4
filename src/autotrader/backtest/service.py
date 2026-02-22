@@ -6,11 +6,13 @@ WebUIとスクリプトの両方から使用可能な共通バックテスト実
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Callable
+from pathlib import Path
+from typing import Any, Callable
 
 from autotrader.backtest.runner import BacktestRunner, BacktestConfig, BacktestResult
 from autotrader.backtest.events import BacktestEventEmitter
 from autotrader.config import DEFAULT_TRADING_PARAMS
+from autotrader.config.trading_params import get_preset
 
 
 @dataclass
@@ -49,6 +51,35 @@ class BacktestServiceConfig:
     use_short_timeframe: bool = True
     use_parallel_tf: bool = False
     enable_scalping: bool = False
+
+    @classmethod
+    def from_preset(
+        cls,
+        symbol: str,
+        preset_path: Path | None = None,
+        **overrides: Any,
+    ) -> "BacktestServiceConfig":
+        """シンボルプリセットから BacktestServiceConfig を生成.
+
+        プリセット値をデフォルトとして使用し、
+        overrides で任意フィールドを上書きできる。
+
+        Args:
+            symbol: 通貨ペア名
+            preset_path: YAMLファイルパス（None時はデフォルトパス）
+            **overrides: 上書きするフィールド
+
+        Returns:
+            BacktestServiceConfig: プリセット値で初期化した設定
+        """
+        preset = get_preset(symbol, preset_path)
+        kwargs: dict[str, Any] = {
+            "symbol": symbol,
+            "spread_pips": preset.spread_pips,
+            "slippage_pips": preset.slippage_pips,
+        }
+        kwargs.update(overrides)
+        return cls(**kwargs)
 
 
 def create_bot_config():
