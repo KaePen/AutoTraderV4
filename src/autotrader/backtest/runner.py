@@ -74,8 +74,10 @@ class BacktestConfig:
     timeframe: str = "H1"
     initial_balance: float = 1_000_000.0
     volume: float | None = None  # None時は戦略デフォルト
-    max_positions: int = 1
-    bonus_max_positions: int = 0
+    max_positions: int = 2
+    # 高品質シグナル時に追加する枠数（0=無効）
+    bonus_max_positions: int = 1
+    # bonus発動のconsensus_score閾値
     bonus_score_threshold: float = 7.0
     spread_pips: float = field(
         default_factory=lambda: DEFAULT_TRADING_PARAMS.spread_pips

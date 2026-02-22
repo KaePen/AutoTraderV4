@@ -1,9 +1,37 @@
 ■バックテスト
+1) 主要7通貨（まずはここ）
+EURUSD / USDJPY / GBPUSD / USDCHF / USDCAD / AUDUSD / NZDUSD
+2) 追加で強いクロス（ボット向き）
+EURJPY / GBPJPY / AUDJPY / CADJPY / CHFJPY
+EURGBP / EURNZD / EURAUD（好みで）
+
 .venv/Scripts/python.exe scripts/run_backtest.py --years 2010-2025 --verbose
+.venv/Scripts/python.exe scripts/run_backtest.py --years 2010-2025 --symbol USDCHF --verbose
 
 ■WebUI起動
-.venv\Scripts\python -m uvicorn autotrader.web.main:app --host 0.0.0.0 --port 8000
-.venv\Scripts\python -m autotrader.web
+.venv\Scripts\python -m autotrader.web --host 0.0.0.0 --port 8000
+
+■PR自動承認
+python scripts\pr_watcher.py
 
 ■Supabaseパスワード
 cUr5rHyklWdpdbOb
+
+■課題箇所
+  設定: BacktestConfig.max_positions + bonus_max_positions                                                    
+  場所: runner.py                                                                                             
+  用途: バックテスト用（PR #151で実装）        
+  ────────────────────────────────────────
+  設定: Settings.max_position_count
+  場所: settings.py + hard_guard.py
+  用途: ライブトレード用ハードガード（現在デフォルト=3）
+
+  HardGuard は position_count >= max_position_count
+  でトレードをブロックする固定閾値チェックのみで、品質ベースの動的増枠ロジックは持っていません。
+
+  ---
+  settings.py の max_position_count
+  を選択されたのは、ライブトレードにも品質ベース動的枠を適用したいというご意向でしょうか？
+
+  もしそうであれば、HardGuard に bonus_max_position_count と bonus_score_threshold
+  を追加する必要があります。バックテストと同様のアプローチで実装できます。

@@ -1,0 +1,7 @@
+=== インポート診断 ===
+sys.path[0]: D:\Projects\AutoTraderV4\src
+sys.path[1]: D:\Projects\AutoTraderV4\tmp\feat_quality-based-max-positions\src
+BacktestConfig file: autotrader.backtest.runner
+bonus_max_positions exists: False
+bonus config ERROR: BacktestConfig.__init__() got an unexpected keyword argument 'bonus_max_positions'
+=== DONE ===
