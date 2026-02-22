@@ -167,6 +167,9 @@ class UnifiedBotConfig:
     demo_max_daily_trades: int = 5
     # デモモード時のコンセンサス閾値（大幅低下で活発にシグナル発火）
     demo_consensus_threshold: float = 1.5
+    # 品質ベース動的ポジション枠（バックテストと同一ロジック）
+    bonus_max_positions: int = 0
+    bonus_score_threshold: float = 7.0
 
     def get_evaluator_config(self, timeframe: str) -> EvaluatorConfig:
         """時間足別評価器設定を取得
