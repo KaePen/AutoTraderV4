@@ -37,6 +37,7 @@ class SimulatorConfig:
         slippage_pips: スリッページ（pips）
         commission_per_lot: ロット当たり手数料
         strategy_max_positions: 戦略別最大ポジション数
+        pip_unit: 1pipの価格単位（JPY系=0.01、非JPY系=0.0001）
     """
 
     initial_balance: float = 1_000_000.0
@@ -51,6 +52,8 @@ class SimulatorConfig:
     slippage_pips: float = field(
         default_factory=lambda: DEFAULT_TRADING_PARAMS.slippage_pips
     )
+    # 1pipの価格単位（JPY系=0.01、非JPY系=0.0001）
+    pip_unit: float = 0.01
     commission_per_lot: float = field(
         default_factory=lambda: DEFAULT_TRADING_PARAMS.commission_per_lot
     )
@@ -127,9 +130,14 @@ class TradeSimulator:
             peak_equity=self.config.initial_balance,
         )
         # ホットパス用事前計算キャッシュ
-        self._spread_price = self.config.spread_pips * 0.01
+        self._pip_unit = self.config.pip_unit
+        self._spread_price = (
+            self.config.spread_pips * self._pip_unit
+        )
         self._half_spread = self._spread_price / 2
-        self._slippage_price = self.config.slippage_pips * 0.01
+        self._slippage_price = (
+            self.config.slippage_pips * self._pip_unit
+        )
         self._pip_value = self.config.pip_value
         self._single_position = self.config.max_positions == 1
         # 日次PnL: 前回記録日キャッシュ（strftime回避）
@@ -1005,14 +1013,14 @@ class TradeSimulator:
         else:
             fill = trigger_price + slip
 
-        # ガード: 異常値検出
-        if fill < 50.0:
+        # ガード: 異常値検出（非JPY系通貨ペアも含む正値チェック）
+        if fill <= 0.0:
             raise ValueError(
                 f"異常な決済価格: fill={fill:.5f}, "
                 f"trigger={trigger_price:.5f}, "
                 f"reason={exit_reason.value}"
             )
-        pips = abs(fill - trigger_price) * 100
+        pips = abs(fill - trigger_price) / self._pip_unit
         if pips > 500:
             raise ValueError(
                 f"異常なスリッページ: {pips:.1f}pips, "
@@ -1035,7 +1043,7 @@ class TradeSimulator:
 
         hour = candle.time.hour
         spread_pips = self._hourly_spread[hour]
-        return spread_pips * 0.01
+        return spread_pips * self._pip_unit
 
     def _is_opposite_signal(
         self,
