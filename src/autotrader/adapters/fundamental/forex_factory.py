@@ -352,6 +352,87 @@ class ForexFactoryClient:
 
         return ImpactLevel.LOW
 
+    def fetch_historical_year(
+        self,
+        year: int,
+        currencies: list[str] | None = None,
+    ) -> list[EconomicEvent]:
+        """指定年の経済イベントを週ごとにスクレイピング
+
+        ?week=jan01.YYYY 形式で全52週を取得。
+        各週の間に1秒のウェイトを挟みサーバー負荷を軽減する。
+
+        Args:
+            year: 対象年
+            currencies: 対象通貨リスト（Noneで全通貨）
+
+        Returns:
+            list[EconomicEvent]: 年間全イベント（重複排除済み）
+        """
+        try:
+            import httpx
+            from bs4 import BeautifulSoup
+            import time
+        except ImportError:
+            logger.warning(
+                "[ForexFactory] httpx/beautifulsoup4未インストール。"
+                "スキップします"
+            )
+            return []
+
+        all_events: list[EconomicEvent] = []
+        seen_ids: set[str] = set()
+        fetched_at = datetime.now(timezone.utc)
+
+        # 1月1日から52週分を生成
+        start = datetime(year, 1, 1, tzinfo=timezone.utc)
+        month_abbr = [
+            "jan", "feb", "mar", "apr", "may", "jun",
+            "jul", "aug", "sep", "oct", "nov", "dec",
+        ]
+
+        current = start
+        week_count = 0
+        while current.year == year and week_count < 53:
+            mon = month_abbr[current.month - 1]
+            day = f"{current.day:02d}"
+            week_param = f"{mon}{day}.{year}"
+            url = f"{_FF_URL}?week={week_param}"
+
+            try:
+                with httpx.Client(timeout=self._timeout) as client:
+                    resp = client.get(url, headers=_HEADERS)
+                    resp.raise_for_status()
+                    html = resp.text
+
+                events = self._parse_html(html, fetched_at, currencies)
+
+                # event_id重複排除
+                for ev in events:
+                    if ev.event_id not in seen_ids:
+                        seen_ids.add(ev.event_id)
+                        all_events.append(ev)
+
+                logger.debug(
+                    f"[ForexFactory] {week_param}: "
+                    f"{len(events)}件取得"
+                )
+
+            except Exception as e:
+                logger.warning(
+                    f"[ForexFactory] {week_param} 取得エラー: {e}"
+                )
+
+            # 次の週へ
+            current += timedelta(weeks=1)
+            week_count += 1
+            time.sleep(1.0)
+
+        logger.info(
+            f"[ForexFactory] {year}年: {len(all_events)}件取得完了"
+        )
+        return all_events
+
     def _parse_value(self, cell) -> float | None:
         """数値セルをfloatに変換
 

@@ -468,6 +468,27 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="詳細出力",
     )
+    # ファンダメンタルデータ
+    parser.add_argument(
+        "--fundamental",
+        action="store_true",
+        help=(
+            "経済イベントCSVを自動読み込み。"
+            "--fundamental-dir 配下の events_YYYY.csv を使用。"
+        ),
+    )
+    parser.add_argument(
+        "--fundamental-dir",
+        type=str,
+        default="data/fundamental",
+        help="経済イベントCSVディレクトリ（デフォルト: data/fundamental）",
+    )
+    parser.add_argument(
+        "--fundamental-guard",
+        type=int,
+        default=30,
+        help="重要指標前の取引停止分数（デフォルト: 30）",
+    )
 
     return parser.parse_args()
 
@@ -940,6 +961,23 @@ def run_single_backtest(args: argparse.Namespace):
         disable_tp_after_partial=not args.keep_tp_after_partial,
     )
 
+    # ファンダメンタルCSVリスト構築
+    _fundamental_csvs: list[str] | None = None
+    if getattr(args, "fundamental", False):
+        from pathlib import Path as _Path
+        _fund_dir = _Path(args.fundamental_dir)
+        _fundamental_csvs = []
+        for _yr in range(start_year, end_year + 1):
+            _csv = _fund_dir / f"events_{_yr}.csv"
+            if _csv.exists():
+                _fundamental_csvs.append(str(_csv))
+        if not _fundamental_csvs:
+            print(
+                f"[Fundamental] 警告: {args.fundamental_dir} に"
+                f"events_YYYY.csv が見つかりません"
+            )
+            _fundamental_csvs = None
+
     result = runner.run_unified(
         start_year,
         end_year,
@@ -950,6 +988,10 @@ def run_single_backtest(args: argparse.Namespace):
         period_start=period_start,
         period_end=period_end,
         sequential=args.sequential,
+        fundamental_csv_list=_fundamental_csvs,
+        fundamental_guard_minutes=getattr(
+            args, "fundamental_guard", 30
+        ),
     )
 
     print_results(result)
