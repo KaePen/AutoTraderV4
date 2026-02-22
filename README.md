@@ -88,7 +88,7 @@ LOG_LEVEL=INFO
 
 ### 戦略パラメータ
 
-`src/autotrader/config/settings.py`で戦略パラメータを調整可能：
+`autotrader/config/settings.py`で戦略パラメータを調整可能：
 
 ```python
 @dataclass(frozen=True)
@@ -238,7 +238,7 @@ trades = simulator.process_candle(candle, signal)
 ## アーキテクチャ
 
 ```
-src/autotrader/
+autotrader/
 ├── backtest/           # バックテストエンジン
 │   ├── fast_backtest.py   # 並列バックテスト
 │   ├── simulator.py       # トレードシミュレーター
@@ -286,13 +286,13 @@ uv run pytest tests/unit/test_calculator.py -v
 
 ```bash
 # リンター
-uv run ruff check src/
+uv run ruff check autotrader/
 
 # フォーマッター
-uv run ruff format src/
+uv run ruff format autotrader/
 
 # 型チェック
-uv run mypy src/autotrader/
+uv run mypy autotrader/
 ```
 
 ### 設定ファイル

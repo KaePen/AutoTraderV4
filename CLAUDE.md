@@ -43,7 +43,7 @@ git -C /d/Projects/AutoTraderV4 branch -d "$BRANCH"
 ## プロジェクト構造
 
 ```
-src/autotrader/
+autotrader/
 ├── backtest/
 │   ├── simulator.py      # TradeSimulator, SimulatorConfig
 │   ├── runner.py         # BacktestRunner, BacktestConfig
@@ -72,7 +72,7 @@ tmp/                      # git worktrees（一時的）
 
 - Python 3.12.2 (.venv/Scripts/ - Windows)
 - テスト: `python -m pytest tests/ -x -q`
-- カバレッジ: `python -m pytest tests/ --cov=src/autotrader --cov-report=term-missing -q`
+- カバレッジ: `python -m pytest tests/ --cov=autotrader --cov-report=term-missing -q`
 - PR 作成後 `scripts/pr_watcher.py` が自動レビュー・マージ・ブランチ削除
 
 ## バックテストの注意点
