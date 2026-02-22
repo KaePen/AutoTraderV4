@@ -61,7 +61,7 @@ class GDELTDocClient:
         self,
         request_interval_sec: float = _REQUEST_INTERVAL_SEC,
         max_records: int = _MAX_RECORDS,
-        timeout_sec: float = 30.0,
+        timeout_sec: float = 10.0,
     ) -> None:
         """初期化
 
