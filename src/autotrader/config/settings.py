@@ -166,7 +166,7 @@ class Settings(BaseSettings):
 
     # リスク管理
     max_daily_loss_pct: float = Field(default=5.0, ge=0.0, le=100.0)
-    max_position_count: int = Field(default=3, ge=1, le=10)
+    max_position_count: int = Field(default=2, ge=1, le=10)
     min_margin_ratio: float = Field(default=150.0, ge=100.0)
 
     # ログ
