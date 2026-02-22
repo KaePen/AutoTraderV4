@@ -23,6 +23,9 @@ class FundamentalConfig:
         fetch_interval_minutes: データ収集間隔（分）
         morning_update_utc_hour: 毎朝LLM市場観更新の時刻（UTC）
         event_guard_minutes: 重要指標前の取引停止分数
+        use_rss_news: RSSニュースポーリングを有効にするか
+        rss_poll_interval_minutes: RSSポーリング間隔（分）
+        rss_sentiment_ttl_hours: センチメントスコアのTTL（時間）
     """
 
     enabled: bool = False
@@ -31,6 +34,9 @@ class FundamentalConfig:
     fetch_interval_minutes: int = 60
     morning_update_utc_hour: int = 21  # UTC21時=日本時間6時
     event_guard_minutes: int = 30
+    use_rss_news: bool = False
+    rss_poll_interval_minutes: int = 5
+    rss_sentiment_ttl_hours: int = 4
 
 
 @dataclass(frozen=True)
