@@ -2,13 +2,17 @@
 
 ForexFactoryの経済カレンダーをHTMLスクレイピングで取得。
 レートリミット: 1日1〜2回のみ呼び出す。
+
+依存: pip install curl-cffi beautifulsoup4 lxml tzdata
 """
 
 from __future__ import annotations
 
 import asyncio
+import re
 from datetime import datetime, timezone, timedelta
 from uuid import uuid4
+from zoneinfo import ZoneInfo
 
 from loguru import logger
 
@@ -18,14 +22,8 @@ from autotrader.adapters.fundamental.schemas import (
     ImpactLevel,
 )
 
-# インパクト文字列→ImpactLevelマッピング
-_IMPACT_MAP: dict[str, ImpactLevel] = {
-    "high": ImpactLevel.HIGH,
-    "medium": ImpactLevel.MEDIUM,
-    "low": ImpactLevel.LOW,
-    "holiday": ImpactLevel.LOW,
-    "non-economic": ImpactLevel.LOW,
-}
+# ForexFactoryのタイムゾーン（EST/EDT 自動切替）
+_EASTERN_TZ = ZoneInfo("America/New_York")
 
 # ForexFactory URL
 _FF_URL = "https://www.forexfactory.com/calendar"
@@ -36,7 +34,7 @@ _HEADERS = {
     "User-Agent": (
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
         "AppleWebKit/537.36 (KHTML, like Gecko) "
-        "Chrome/122.0.0.0 Safari/537.36"
+        "Chrome/110.0.0.0 Safari/537.36"
     ),
     "Accept": (
         "text/html,application/xhtml+xml,application/xml;"
@@ -57,7 +55,8 @@ _HEADERS = {
 class ForexFactoryClient:
     """ForexFactoryスクレイパー
 
-    BeautifulSoup4を使用してForexFactoryの経済カレンダーを取得。
+    curl-cffi と BeautifulSoup4 を使用してForexFactoryの経済カレンダーを取得。
+    タイムゾーンは America/New_York（EST/EDT 自動切替）で処理。
     1日1〜2回のみ呼び出すこと（サーバー負荷配慮）。
 
     Args:
@@ -107,15 +106,16 @@ class ForexFactoryClient:
                 self._last_fetch + self._rate_limit
                 - datetime.now(timezone.utc)
             )
+            hours_left = int(remaining.total_seconds() // 3600)
             logger.info(
                 f"[ForexFactory] レートリミット中。"
-                f"あと{remaining.seconds // 3600}時間後に再取得可能"
+                f"あと{hours_left}時間後に再取得可能"
             )
             return []
 
         try:
             from curl_cffi import requests as cffi_requests
-            from bs4 import BeautifulSoup  # noqa: F401
+            from bs4 import BeautifulSoup  # noqa: F811
         except ImportError:
             logger.warning(
                 "[ForexFactory] curl-cffi/beautifulsoup4未インストール。"
@@ -125,14 +125,16 @@ class ForexFactoryClient:
 
         fetched_at = datetime.now(timezone.utc)
         try:
-            session = cffi_requests.Session(impersonate="chrome110")
-            resp = session.get(
-                _FF_URL,
-                headers=_HEADERS,
-                timeout=self._timeout,
-            )
-            resp.raise_for_status()
-            html = resp.text
+            with cffi_requests.Session(
+                impersonate="chrome110"
+            ) as session:
+                resp = session.get(
+                    _FF_URL,
+                    headers=_HEADERS,
+                    timeout=self._timeout,
+                )
+                resp.raise_for_status()
+                html = resp.text
 
             events = self._parse_html(html, fetched_at, currencies)
             self._last_fetch = fetched_at
@@ -190,8 +192,6 @@ class ForexFactoryClient:
         rows = soup.select("tr.calendar__row")
         current_date: datetime | None = None
         now = datetime.now(timezone.utc)
-        # 年が指定されていない場合は現在年を使用
-        target_year = year if year is not None else now.year
 
         for row in rows:
             try:
@@ -203,7 +203,7 @@ class ForexFactoryClient:
                 if date_cell and date_cell.get_text(strip=True):
                     date_str = date_cell.get_text(strip=True)
                     current_date = self._parse_date(
-                        date_str, now, target_year
+                        date_str, now, year
                     )
 
                 if current_date is None:
@@ -233,13 +233,17 @@ class ForexFactoryClient:
                 if not event_name:
                     continue
 
-                # 時刻
+                # 時刻（Eastern→UTC変換は _parse_time() 内で実施）
                 time_cell = row.select_one(
                     "td.calendar__cell.calendar__time"
                 )
-                event_time = self._parse_time(
-                    time_cell, current_date
-                ) if time_cell else current_date
+                if time_cell:
+                    event_time = self._parse_time(
+                        time_cell, current_date
+                    )
+                else:
+                    # 時刻なし: 日付のみ（Eastern midnight → UTC）
+                    event_time = current_date.astimezone(timezone.utc)
 
                 # インパクト
                 impact_cell = row.select_one(
@@ -289,10 +293,11 @@ class ForexFactoryClient:
         now: datetime,
         year: int | None = None,
     ) -> datetime:
-        """日付文字列をdatetimeに変換
+        """日付文字列をEasternタイムゾーン付きdatetimeに変換
 
         ForexFactoryは "Mon Jan 1" または "MonJan 1"（スペースなし）
         のいずれかのフォーマットで日付を返す。月名を直接抽出して対応。
+        DST（夏時間）は _EASTERN_TZ が自動的に処理する。
 
         Args:
             date_str: 日付文字列（例: "MonJan 1" or "Mon Jan 1"）
@@ -300,10 +305,8 @@ class ForexFactoryClient:
             year: 使用する年（Noneの場合は現在年）
 
         Returns:
-            datetime: パース済み日付（UTC）
+            datetime: Eastern時間のaware datetime（UTC変換前）
         """
-        import re
-        # ForexFactoryはESTで表示（UTC-5）
         target_year = year if year is not None else now.year
         try:
             # 月名（Jan〜Dec）と日数を直接抽出
@@ -315,42 +318,48 @@ class ForexFactoryClient:
                 re.IGNORECASE,
             )
             if not match:
+                logger.warning(
+                    f"[ForexFactory] 日付パース失敗: '{date_str}'"
+                )
                 return now
             month_str = match.group(1).capitalize()
             day_str = match.group(2)
-            parsed = datetime.strptime(
+            # midnight Eastern Time（DST自動適用）
+            naive = datetime.strptime(
                 f"{month_str} {day_str} {target_year}", "%b %d %Y"
             )
-            # EST → UTC (+5)
-            return parsed.replace(
-                tzinfo=timezone.utc
-            ) + timedelta(hours=5)
+            return naive.replace(tzinfo=_EASTERN_TZ)
         except ValueError:
+            logger.warning(
+                f"[ForexFactory] 日付パース失敗: '{date_str}'"
+            )
             return now
 
     def _parse_time(
         self, time_cell, current_date: datetime
     ) -> datetime:
-        """時刻セルをdatetimeに変換
+        """時刻セルをUTC datetimeに変換
+
+        current_date は Eastern-aware datetime（_parse_date の戻り値）。
+        時刻をEasternで設定後、UTCに変換する。
 
         Args:
             time_cell: BeautifulSoupの時刻セル
-            current_date: 基準日付
+            current_date: Eastern-aware基準日付
 
         Returns:
-            datetime: パース済み日時（UTC）
+            datetime: UTC aware datetime
         """
-        import re
         time_str = time_cell.get_text(strip=True) if time_cell else ""
         if not time_str or time_str.lower() == "all day":
-            return current_date
+            return current_date.astimezone(timezone.utc)
 
         try:
             match = re.match(
                 r'(\d{1,2}):(\d{2})(am|pm)', time_str.lower()
             )
             if not match:
-                return current_date
+                return current_date.astimezone(timezone.utc)
 
             hour = int(match.group(1))
             minute = int(match.group(2))
@@ -361,13 +370,13 @@ class ForexFactoryClient:
             elif ampm == "am" and hour == 12:
                 hour = 0
 
-            # EST → UTC (+5)
-            result = current_date.replace(
+            # Eastern時間で時刻を設定し、UTCに変換（DST自動適用）
+            eastern_dt = current_date.replace(
                 hour=hour, minute=minute, second=0, microsecond=0
-            ) + timedelta(hours=5)
-            return result
+            )
+            return eastern_dt.astimezone(timezone.utc)
         except (ValueError, AttributeError):
-            return current_date
+            return current_date.astimezone(timezone.utc)
 
     def _parse_impact(self, impact_cell) -> ImpactLevel:
         """インパクトセルをImpactLevelに変換
@@ -453,70 +462,70 @@ class ForexFactoryClient:
         week_count = 0
 
         # curl-cffiセッション（Chrome110 TLSフィンガープリントでCloudflare回避）
-        session = cffi_requests.Session(impersonate="chrome110")
-
-        # トップページにアクセスしてCookieを確立
-        try:
-            init_resp = session.get(
-                _FF_HOME,
-                headers=_HEADERS,
-                timeout=self._timeout,
-            )
-            logger.debug(
-                f"[ForexFactory] セッション初期化: "
-                f"status={init_resp.status_code}"
-            )
-            time.sleep(2.0)
-        except Exception as e:
-            logger.warning(
-                f"[ForexFactory] セッション初期化失敗: {e}"
-            )
-
-        week_headers = {**_HEADERS, "Referer": _FF_URL}
-
-        while current.year == year and week_count < 53:
-            mon = month_abbr[current.month - 1]
-            day = f"{current.day:02d}"
-            week_param = f"{mon}{day}.{year}"
-            url = f"{_FF_URL}?week={week_param}"
-
+        with cffi_requests.Session(impersonate="chrome110") as session:
+            # トップページにアクセスしてCookieを確立
             try:
-                resp = session.get(
-                    url,
-                    headers=week_headers,
+                init_resp = session.get(
+                    _FF_HOME,
+                    headers=_HEADERS,
                     timeout=self._timeout,
                 )
-                resp.raise_for_status()
-                events = self._parse_html(
-                    resp.text, fetched_at, currencies, year
-                )
-
-                new_count = 0
-                for ev in events:
-                    dedup_key = (
-                        ev.event_time.isoformat(),
-                        ev.currency,
-                        ev.event_name,
-                    )
-                    if dedup_key not in seen_keys:
-                        seen_keys.add(dedup_key)
-                        all_events.append(ev)
-                        new_count += 1
-
                 logger.debug(
-                    f"[ForexFactory] {week_param}: "
-                    f"{len(events)}件取得 (新規{new_count}件)"
+                    f"[ForexFactory] セッション初期化: "
+                    f"status={init_resp.status_code}"
                 )
-
+                time.sleep(2.0)
             except Exception as e:
                 logger.warning(
-                    f"[ForexFactory] {week_param} 取得エラー: {e}"
+                    f"[ForexFactory] セッション初期化失敗: {e}"
                 )
+                return []
 
-            # 次の週へ（1.5秒ウェイト）
-            current += timedelta(weeks=1)
-            week_count += 1
-            time.sleep(1.5)
+            week_headers = {**_HEADERS, "Referer": _FF_URL}
+
+            while current.year == year and week_count < 53:
+                mon = month_abbr[current.month - 1]
+                day = f"{current.day:02d}"
+                week_param = f"{mon}{day}.{year}"
+                url = f"{_FF_URL}?week={week_param}"
+
+                try:
+                    resp = session.get(
+                        url,
+                        headers=week_headers,
+                        timeout=self._timeout,
+                    )
+                    resp.raise_for_status()
+                    events = self._parse_html(
+                        resp.text, fetched_at, currencies, year
+                    )
+
+                    new_count = 0
+                    for ev in events:
+                        dedup_key = (
+                            ev.event_time.isoformat(),
+                            ev.currency,
+                            ev.event_name,
+                        )
+                        if dedup_key not in seen_keys:
+                            seen_keys.add(dedup_key)
+                            all_events.append(ev)
+                            new_count += 1
+
+                    logger.debug(
+                        f"[ForexFactory] {week_param}: "
+                        f"{len(events)}件取得 (新規{new_count}件)"
+                    )
+
+                except Exception as e:
+                    logger.warning(
+                        f"[ForexFactory] {week_param} 取得エラー: {e}"
+                    )
+
+                # 次の週へ（1.5秒ウェイト）
+                current += timedelta(weeks=1)
+                week_count += 1
+                time.sleep(1.5)
 
         # _last_fetch を更新してレートリミットと整合性を保つ
         self._last_fetch = datetime.now(timezone.utc)
@@ -535,7 +544,6 @@ class ForexFactoryClient:
         Returns:
             float | None: 変換済み数値（変換不可はNone）
         """
-        import re
         if not cell:
             return None
         text = cell.get_text(strip=True)

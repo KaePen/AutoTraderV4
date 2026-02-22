@@ -58,6 +58,12 @@ mt5 = [
 fast = [
     "numba>=0.59.0",
 ]
+scraping = [
+    "curl-cffi>=0.7.0",
+    "beautifulsoup4>=4.12.0",
+    "lxml>=5.0.0",
+    "tzdata>=2024.1",
+]
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/autotrader"]
