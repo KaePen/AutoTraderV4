@@ -54,6 +54,39 @@ from autotrader.decision.unified.position_manager import (
 )
 
 
+# クォート通貨別pip価値テーブル（JPY口座・0.1lot基準の近似値）
+# 計算式: pip_unit × 10,000 (units) × 換算レート
+_PIP_VALUE_BY_QUOTE: dict[str, float] = {
+    "JPY": 100.0,   # XXXJPY: 0.01×10,000=100JPY（正確値）
+    "USD": 150.0,   # XXXUSD: 0.0001×10,000×150JPY/USD
+    "EUR": 160.0,   # XXXEUR: ≈160JPY
+    "GBP": 190.0,   # XXXGBP: ≈190JPY
+    "AUD": 100.0,   # XXXAUD: ≈100JPY
+    "NZD": 90.0,    # XXXNZD: ≈90JPY
+    "CAD": 110.0,   # XXXCAD: ≈110JPY
+    "CHF": 165.0,   # XXXCHF: ≈165JPY
+}
+
+
+def _calc_pip_value(symbol: str) -> float:
+    """シンボルのクォート通貨からpip価値を概算
+
+    JPY口座・0.1ロット（10,000通貨）基準の1pipあたり価値（JPY）を
+    クォート通貨別テーブルから取得する。実際のレートは変動するため
+    近似値であることに注意。
+
+    Args:
+        symbol: 通貨ペア（例: EURUSD, USDJPY）
+
+    Returns:
+        float: 1pipあたりの概算価値（JPY）
+    """
+    if len(symbol) >= 6:
+        quote = symbol[-3:].upper()
+        return _PIP_VALUE_BY_QUOTE.get(quote, 100.0)
+    return 100.0
+
+
 @dataclass
 class BacktestConfig:
     """バックテスト設定
@@ -529,7 +562,7 @@ class BacktestRunner:
         sim_config = SimulatorConfig(
             initial_balance=self.config.initial_balance,
             spread_pips=self.config.spread_pips,
-            pip_value=self.config.pip_value,
+            pip_value=_calc_pip_value(self.config.symbol),
             max_positions=self.config.max_positions,
             default_volume=volume,
             pip_unit=_pip_unit,
@@ -961,7 +994,7 @@ class BacktestRunner:
             initial_balance=self.config.initial_balance,
             spread_pips=self.config.spread_pips,
             slippage_pips=self.config.slippage_pips,
-            pip_value=self.config.pip_value,
+            pip_value=_calc_pip_value(self.config.symbol),
             max_positions=self.config.max_positions,
             default_volume=self.config.volume or 1.0,
             use_position_manager=bot_config.use_position_manager,
@@ -1411,7 +1444,7 @@ class BacktestRunner:
                 symbol=self.config.symbol,
                 initial_balance=self.config.initial_balance,
                 spread_pips=self.config.spread_pips,
-                pip_value=self.config.pip_value,
+                pip_value=_calc_pip_value(self.config.symbol),
                 max_positions=self.config.max_positions,
                 default_volume=self.config.volume or 1.0,
                 min_confidence=bot_config.consolidator.confidence_threshold,

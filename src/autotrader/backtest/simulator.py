@@ -564,9 +564,15 @@ class TradeSimulator:
 
         # 損益計算（按分）
         if position.signal_type == SignalType.BUY:
-            profit_pips = (exit_price - position.entry_price) * 100
+            profit_pips = (
+                (exit_price - position.entry_price)
+                / self._pip_unit
+            )
         else:
-            profit_pips = (position.entry_price - exit_price) * 100
+            profit_pips = (
+                (position.entry_price - exit_price)
+                / self._pip_unit
+            )
 
         profit_loss = (
             profit_pips * self._pip_value * close_volume
@@ -832,9 +838,15 @@ class TradeSimulator:
         """
         # 損益計算
         if position.signal_type == SignalType.BUY:
-            profit_pips = (exit_price - position.entry_price) * 100
+            profit_pips = (
+                (exit_price - position.entry_price)
+                / self._pip_unit
+            )
         else:
-            profit_pips = (position.entry_price - exit_price) * 100
+            profit_pips = (
+                (position.entry_price - exit_price)
+                / self._pip_unit
+            )
 
         profit_loss = profit_pips * self._pip_value * position.volume
 
@@ -1081,9 +1093,15 @@ class TradeSimulator:
 
         for position in open_pos:
             if position.signal_type == SignalType.BUY:
-                pips = (close_price - position.entry_price) * 100
+                pips = (
+                    (close_price - position.entry_price)
+                    / self._pip_unit
+                )
             else:
-                pips = (position.entry_price - close_price) * 100
+                pips = (
+                    (position.entry_price - close_price)
+                    / self._pip_unit
+                )
             unrealized_pnl += pips * pip_val * position.volume
 
         self.state.equity = self.state.balance + unrealized_pnl
@@ -1105,7 +1123,7 @@ class TradeSimulator:
                 if position.stop_loss:
                     sl_pips = abs(
                         position.entry_price - position.stop_loss
-                    ) * 100
+                    ) / self._pip_unit
                 self._mfe_mae[pid] = {
                     "mfe": 0.0, "mae": 0.0,
                     "sl_pips": sl_pips,
@@ -1115,11 +1133,23 @@ class TradeSimulator:
 
             tracker = self._mfe_mae[pid]
             if position.signal_type == SignalType.BUY:
-                fav = (candle.high - position.entry_price) * 100
-                adv = (candle.low - position.entry_price) * 100
+                fav = (
+                    (candle.high - position.entry_price)
+                    / self._pip_unit
+                )
+                adv = (
+                    (candle.low - position.entry_price)
+                    / self._pip_unit
+                )
             else:
-                fav = (position.entry_price - candle.low) * 100
-                adv = (position.entry_price - candle.high) * 100
+                fav = (
+                    (position.entry_price - candle.low)
+                    / self._pip_unit
+                )
+                adv = (
+                    (position.entry_price - candle.high)
+                    / self._pip_unit
+                )
 
             if fav > tracker["mfe"]:
                 tracker["mfe"] = fav
