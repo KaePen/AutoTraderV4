@@ -25,7 +25,7 @@ _git_common_dir = subprocess.check_output(
 ).strip()
 # .git/ の親がメインリポジトリルート
 MAIN_ROOT = Path(_git_common_dir).parent
-sys.path.insert(0, str(MAIN_ROOT / "src"))
+sys.path.insert(0, str(MAIN_ROOT))
 
 from autotrader.backtest.optimizer import (  # noqa: E402
     OptimizeConfig,

@@ -12,7 +12,6 @@ import threading
 import time
 from concurrent.futures import (
     ProcessPoolExecutor,
-    ThreadPoolExecutor,
     as_completed,
 )
 from dataclasses import dataclass, field
@@ -1083,8 +1082,8 @@ class BacktestRunner:
                     if yr is not None:
                         yearly_results.append(yr)
             else:
-                # worktree対応: autotraderパッケージを含むプロジェクトルート
-                _src_dir = str(
+                # worktree対応: プロジェクトルート
+                _project_root = str(
                     Path(__file__).resolve().parent.parent.parent
                 )
 
@@ -1146,7 +1145,7 @@ class BacktestRunner:
                         max_workers=max_workers,
                         mp_context=_mp_ctx,
                         initializer=_worker_process_init,
-                        initargs=(_src_dir, _progress_q),
+                        initargs=(_project_root, _progress_q),
                     ) as executor:
                         futures = {
                             executor.submit(
@@ -2229,7 +2228,7 @@ _WORKER_PROGRESS_QUEUE: Any = None
 
 
 def _worker_process_init(
-    src_dir: str,
+    project_root: str,
     progress_queue: Any,
 ) -> None:
     """ProcessPoolワーカープロセス初期化
@@ -2238,14 +2237,14 @@ def _worker_process_init(
     各ワーカープロセスで一度だけ呼ばれる。
 
     Args:
-        src_dir: autotraderパッケージのsrcディレクトリパス
+        project_root: プロジェクトルートパス
         progress_queue: メインプロセスへの進捗通知キュー
     """
     import sys
 
     global _WORKER_PROGRESS_QUEUE
-    if src_dir not in sys.path:
-        sys.path.insert(0, src_dir)
+    if project_root not in sys.path:
+        sys.path.insert(0, project_root)
     _WORKER_PROGRESS_QUEUE = progress_queue
 
 

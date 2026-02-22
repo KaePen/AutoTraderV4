@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import pytest
 
 from autotrader.core.enums import SignalType, TradingStrategyMode
 from autotrader.decision.unified.mode_aware_consensus import (

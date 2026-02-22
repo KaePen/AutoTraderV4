@@ -38,8 +38,8 @@ if sys.platform == "win32":
 try:
     project_root = Path(__file__).parent.parent
 except NameError:
-    project_root = Path("/home/yamas/projects/AutoTraderV4")
-sys.path.insert(0, str(project_root / "src"))
+    project_root = Path("D:/Projects/AutoTraderV4")
+sys.path.insert(0, str(project_root))
 
 
 def setup_logging(verbose: bool = False) -> None:
@@ -1146,7 +1146,6 @@ def run_quick(args: argparse.Namespace):
         SimulatorConfig,
         TradeSimulator,
     )
-    from autotrader.config import DEFAULT_TRADING_PARAMS
     from autotrader.config.trading_params import get_preset as _get_preset
     from autotrader.core.entities import Candle, Signal
     from autotrader.core.enums import (

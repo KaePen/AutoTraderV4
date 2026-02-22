@@ -10,11 +10,9 @@ import asyncio
 from datetime import datetime, timezone, timedelta
 
 from loguru import logger
-from sqlalchemy.orm import Session
 
 from autotrader.adapters.fundamental.schemas import (
     EconomicEvent,
-    ImpactLevel,
 )
 from autotrader.adapters.fundamental.mt5_calendar import (
     MT5CalendarClient,

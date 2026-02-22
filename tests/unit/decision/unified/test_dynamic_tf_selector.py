@@ -2,11 +2,9 @@
 
 from __future__ import annotations
 
-import pytest
 
 from autotrader.core.enums import SignalType
 from autotrader.decision.unified.dynamic_tf_selector import (
-    DynamicTFResult,
     DynamicTFSelector,
 )
 

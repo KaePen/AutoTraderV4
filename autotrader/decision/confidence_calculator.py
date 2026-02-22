@@ -134,7 +134,6 @@ class ConfidenceCalculator:
             float: ボラティリティ調整値（-0.15から0.15）
         """
         vol_regime = indicators.get("volatility_regime")
-        normalized_atr = indicators.get("normalized_atr")
 
         if vol_regime is None:
             return 0.0

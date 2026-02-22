@@ -11,7 +11,6 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from datetime import datetime
-from pathlib import Path
 from typing import Any, Callable, Protocol, runtime_checkable
 import logging
 import time
@@ -1171,7 +1170,7 @@ class ParallelMultiTFBacktestEngine:
         Returns:
             UnifiedEngineResult: 実行結果
         """
-        from .events import TimelineEventQueue, CandleEvent
+        from .events import TimelineEventQueue
 
         start_time = time.time()
 

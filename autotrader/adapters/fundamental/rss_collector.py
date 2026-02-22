@@ -9,7 +9,6 @@ RSSフィードを非同期ポーリングして新着ニュースを収集す�
 from __future__ import annotations
 
 import asyncio
-import hashlib
 from collections import OrderedDict
 from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone

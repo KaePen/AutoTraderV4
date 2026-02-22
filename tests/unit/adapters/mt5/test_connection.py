@@ -5,7 +5,6 @@ MockTransportを使用した接続管理テスト。
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, patch
 
 import pytest
 

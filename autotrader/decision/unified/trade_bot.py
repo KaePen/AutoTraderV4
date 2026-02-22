@@ -11,7 +11,7 @@
 from __future__ import annotations
 
 import dataclasses
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import date, datetime, timedelta
 from typing import TYPE_CHECKING
 
@@ -40,7 +40,6 @@ from .timeframe_router import TimeframeRouter
 
 if TYPE_CHECKING:
     from autotrader.calculator.features.regime_detector import (
-        MarketRegimeDetector,
         RegimeResult,
     )
     from autotrader.core.entities import Candle

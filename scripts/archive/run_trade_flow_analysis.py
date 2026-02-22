@@ -21,8 +21,8 @@ from pathlib import Path
 try:
     project_root = Path(__file__).parent.parent
 except NameError:
-    project_root = Path("/home/yamas/projects/AutoTraderV4")
-sys.path.insert(0, str(project_root / "src"))
+    project_root = Path("D:/Projects/AutoTraderV4")
+sys.path.insert(0, str(project_root ))
 
 
 def parse_args() -> argparse.Namespace:
@@ -83,7 +83,6 @@ def main() -> None:
     import pandas as pd
 
     from autotrader.backtest.candle_arrays import CandleArrays
-    from autotrader.backtest.data_loader import DataLoader
     from autotrader.backtest.runner import BacktestConfig, BacktestRunner
     from autotrader.backtest.simulator import SimulatorConfig, TradeSimulator
     from autotrader.backtest.trade_flow_analyzer import TradeFlowAnalyzer

@@ -5,7 +5,6 @@ from __future__ import annotations
 from datetime import datetime, timezone, timedelta
 from uuid import uuid4
 
-import pytest
 
 from autotrader.adapters.fundamental.schemas import (
     EconomicEvent,

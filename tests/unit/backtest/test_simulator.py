@@ -11,7 +11,7 @@ from autotrader.backtest.simulator import (
     TradeSimulator,
     SimulatorConfig,
 )
-from autotrader.core.entities import Candle, Signal, Position
+from autotrader.core.entities import Candle, Signal
 from autotrader.core.enums import Timeframe, SignalType, ExitReason
 
 

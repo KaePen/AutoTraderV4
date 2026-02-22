@@ -6,7 +6,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum
 from typing import TYPE_CHECKING
 
@@ -239,7 +239,6 @@ class PartialCloseManager:
         Returns:
             PartialCloseAction | None: 部分決済アクション
         """
-        from autotrader.core.enums import SignalType
 
         if current_r < 1.0:
             return None

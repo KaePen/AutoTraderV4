@@ -7,7 +7,6 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime
-from functools import lru_cache
 from pathlib import Path
 
 import polars as pl

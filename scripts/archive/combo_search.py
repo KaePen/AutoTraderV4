@@ -14,12 +14,11 @@ from __future__ import annotations
 import sys
 import time
 from dataclasses import dataclass
-from itertools import product
 from pathlib import Path
 
 # プロジェクトルートをパスに追加
 project_root = Path(__file__).parent.parent
-sys.path.insert(0, str(project_root / "src"))
+sys.path.insert(0, str(project_root ))
 
 
 @dataclass

@@ -6,7 +6,6 @@ UNIVERSALモードで全TFセットを監視し、シグナルを評価する。
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
 from typing import TYPE_CHECKING
 
 import pandas as pd

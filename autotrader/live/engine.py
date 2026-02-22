@@ -1047,7 +1047,6 @@ class LiveTradingEngine:
         """
         from autotrader.decision.unified.mode_selector import (
             TradingModeSelector,
-            TradingPlan,
         )
         from autotrader.core.enums import TradingStrategyMode
 

@@ -9,12 +9,12 @@ from __future__ import annotations
 
 import sys
 from collections import defaultdict
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from statistics import mean, median, stdev
 
-sys.path.insert(0, str(Path(__file__).parent.parent / "src"))
+sys.path.insert(0, str(Path(__file__).parent.parent ))
 
 from autotrader.backtest.events import (
     BacktestEvent,

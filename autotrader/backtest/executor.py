@@ -9,12 +9,9 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass, field
 from datetime import datetime
-from pathlib import Path
 from typing import TYPE_CHECKING, Callable
 
-import pandas as pd
 
-from autotrader.backtest.config import UnifiedBacktestResult
 from autotrader.config import DEFAULT_TRADING_PARAMS
 
 if TYPE_CHECKING:

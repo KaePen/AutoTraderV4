@@ -4,9 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import datetime
-from unittest.mock import MagicMock
 
-import pytest
 
 from autotrader.core.enums import MarketRegime, TradingStrategyMode, SignalType
 
@@ -123,7 +121,6 @@ class TestModeAwareScoreConsensus:
         )
         from autotrader.decision.unified.mode_selector import (
             TradingModeSelector,
-            TradingPlan,
         )
 
         consensus = ModeAwareScoreConsensus()

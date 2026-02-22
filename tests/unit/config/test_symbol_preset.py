@@ -6,10 +6,8 @@ import textwrap
 from pathlib import Path
 
 import pytest
-import yaml
 
 from autotrader.config.trading_params import (
-    DEFAULT_TRADING_PARAMS,
     SymbolPreset,
     TradingParams,
     get_preset,

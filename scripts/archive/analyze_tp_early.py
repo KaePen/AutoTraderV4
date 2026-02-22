@@ -1,9 +1,7 @@
 """TP_EARLY比較分析スクリプト."""
 from __future__ import annotations
 
-import sys
 import pandas as pd
-import numpy as np
 
 NEW_CSV = "logs/backtest_log/trades_20260215_183531.csv"
 LEGACY_CSV = "logs/backtest_log/trades_20260215_183955.csv"

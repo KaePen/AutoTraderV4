@@ -2,9 +2,7 @@
 from __future__ import annotations
 
 import pandas as pd
-import numpy as np
 import sys
-from pathlib import Path
 
 
 def load_trades(csv_path: str) -> pd.DataFrame:

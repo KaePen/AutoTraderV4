@@ -13,7 +13,7 @@ from typing import Callable, Any, TYPE_CHECKING
 import pandas as pd
 
 if TYPE_CHECKING:
-    from autotrader.config.settings import StrategyConfig
+    pass
 
 
 @dataclass(frozen=True)
@@ -184,7 +184,6 @@ class WalkForwardValidator:
         window_days = self.config.window_months * 30
         step_days = self.config.step_months * 30
         is_days = int(window_days * self.config.is_ratio)
-        oos_days = window_days - is_days
 
         while current_start + timedelta(days=window_days) <= end_date:
             is_start = current_start

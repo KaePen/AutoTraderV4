@@ -5,7 +5,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
-from autotrader.core.entities import Position, Trade, Signal
+from autotrader.core.entities import Position, Signal
 
 
 @dataclass(frozen=True)

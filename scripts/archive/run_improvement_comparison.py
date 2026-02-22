@@ -19,8 +19,8 @@ from pathlib import Path
 try:
     project_root = Path(__file__).parent.parent
 except NameError:
-    project_root = Path("/home/yamas/projects/AutoTraderV4")
-sys.path.insert(0, str(project_root / "src"))
+    project_root = Path("D:/Projects/AutoTraderV4")
+sys.path.insert(0, str(project_root ))
 
 
 @dataclass

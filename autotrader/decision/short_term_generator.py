@@ -15,7 +15,7 @@ from autotrader.config.timeframe_preset import TimeframePreset
 from autotrader.core.enums import SignalType, Timeframe, TrendDirection
 
 if TYPE_CHECKING:
-    from autotrader.decision.signal_generator import SignalResult, SignalStrength
+    from autotrader.decision.signal_generator import SignalResult
 
 
 @dataclass(frozen=True)
@@ -109,11 +109,9 @@ class ShortTermNoiseFilter:
             )
 
         # ボラティリティ急増チェック
-        volatility_spike = False
         if prev_atr_pips is not None and prev_atr_pips > 0:
             atr_change = atr_pips / prev_atr_pips
             if atr_change > self.volatility_spike_threshold:
-                volatility_spike = True
                 return NoiseFilterResult(
                     passed=False,
                     reason=f"ボラ急増: {atr_change:.2f}x",
@@ -151,7 +149,6 @@ class ShortTermSignalGenerator:
         base_generator: "SignalGenerator",
         require_mtf_alignment: bool = True,
     ) -> None:
-        from autotrader.decision.signal_generator import SignalGenerator
 
         self.preset = preset
         self.base_generator = base_generator

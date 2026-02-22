@@ -22,7 +22,6 @@ from autotrader.adapters.mt5.converters import (
     mt5_position_to_entity,
     signal_to_mt5_request,
 )
-from autotrader.adapters.mt5.exceptions import MT5ExecutionError
 from autotrader.core.entities import Position, Signal
 from autotrader.core.enums import SignalType
 from autotrader.core.interfaces.trade_executor import (
