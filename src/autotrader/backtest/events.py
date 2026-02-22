@@ -436,6 +436,11 @@ class RichEventListener(EventListener):
                     style="green"
                 )
                 if self._progress:
+                    # プログレスバー起動中はautotraderのINFOログを抑制
+                    # （別Consoleからの書き込みでターミナル表示が崩れるため）
+                    logging.getLogger("autotrader").setLevel(
+                        logging.WARNING
+                    )
                     self._progress.start()
                     # 準備フェーズを即座に可視化（TFロード前の空白期間対策）
                     self._prep_task_id = self._progress.add_task(
@@ -460,6 +465,8 @@ class RichEventListener(EventListener):
                     self._progress.remove_task(self._prep_task_id)
                     self._prep_task_id = None
                 self._progress.stop()
+                # ロギングレベルを元に戻す
+                logging.getLogger("autotrader").setLevel(logging.INFO)
             cancelled = event.data.get("results", {}).get("cancelled", False)
             if cancelled:
                 if self._is_tty:
@@ -624,31 +631,20 @@ class RichEventListener(EventListener):
                 print(desc_plain, flush=True)
 
         elif event.phase == "year_parallel":
-            # 年完了数を表示（開始時は不確定スピナーのまま）
-            if event.current == 0:
-                desc_tty = "[cyan]年バックテスト並列実行中...[/cyan]"
-            else:
-                desc_tty = (
-                    f"[cyan]年バックテスト並列実行中[/cyan] "
-                    f"[dim]{event.label}完了[/dim]"
-                )
+            # 全体年完了バー（常に確定モードでパーセント表示）
+            desc_tty = (
+                f"[cyan]年並列:[/cyan] "
+                f"[dim]{event.current}/{event.total}年完了[/dim]"
+            )
             desc_plain = f"  並列処理: {event.current}/{event.total}年完了"
             if self._is_tty and self._progress:
                 if self._prep_task_id is None:
                     self._prep_task_id = self._progress.add_task(
                         desc_tty,
-                        total=None,  # 不確定モード（スピナー）で開始
-                        completed=0,
-                    )
-                elif event.current == 0:
-                    # 開始時：不確定モードを維持
-                    self._progress.update(
-                        self._prep_task_id,
-                        total=None,
-                        description=desc_tty,
+                        total=event.total,
+                        completed=event.current,
                     )
                 else:
-                    # 最初の年完了時から確定モードへ切り替え
                     self._progress.update(
                         self._prep_task_id,
                         total=event.total,
