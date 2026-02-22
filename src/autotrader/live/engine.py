@@ -77,7 +77,7 @@ class LiveTradingEngine:
         self._bot = UnifiedTradeBot(config.bot_config)
         self._pm = PositionManager()
         self._sizer = PositionSizer(
-            self._build_sizer_config(config.bot_config)
+            self._build_sizer_config(config.bot_config, config.symbol)
         )
         self._running = False
         self._task: asyncio.Task | None = None  # type: ignore[type-arg]
@@ -264,7 +264,7 @@ class LiveTradingEngine:
         # （デモ時は閾値を大幅に下げてシグナルを活発化）
         self._bot._init_new_components()
         self._sizer = PositionSizer(
-            self._build_sizer_config(new_config)
+            self._build_sizer_config(new_config, self._config.symbol)
         )
         logger.info(
             "BotConfig更新完了 demo_mode=%s", new_config.demo_mode
@@ -284,6 +284,7 @@ class LiveTradingEngine:
     @staticmethod
     def _build_sizer_config(
         bot_config: UnifiedBotConfig,
+        symbol: str = "",
     ) -> PositionSizerConfig:
         """UnifiedBotConfigからPositionSizerConfigを生成
 
@@ -292,11 +293,13 @@ class LiveTradingEngine:
 
         Args:
             bot_config: Bot設定
+            symbol: 通貨ペアシンボル（pip_value自動計算用）
 
         Returns:
             PositionSizerConfig: サイザー設定
         """
         return PositionSizerConfig(
+            symbol=symbol,
             base_risk_pct=bot_config.base_risk_pct,
             max_risk_pct_absolute=bot_config.max_risk_pct_absolute,
             max_lot_per_trade=bot_config.max_lot_per_trade,

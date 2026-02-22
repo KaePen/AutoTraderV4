@@ -15,14 +15,42 @@ from autotrader.core.interfaces.position_sizing import (
     SizingResult,
 )
 
+# クォート通貨別pip_value（1ロット=100,000通貨、JPY建て口座）
+_SIZER_PIP_VALUE_BY_QUOTE: dict[str, float] = {
+    "JPY": 1000.0,   # XXXJPY: 0.01×100,000=1000JPY（正確値）
+    "USD": 1500.0,   # XXXUSD: 0.0001×100,000×150JPY/USD（概算）
+    "EUR": 1600.0,   # XXXEUR: 0.0001×100,000×160JPY/EUR（概算）
+    "GBP": 1900.0,   # XXXGBP: 0.0001×100,000×190JPY/GBP（概算）
+    "AUD": 1000.0,   # XXXAUD: 0.0001×100,000×100JPY/AUD（概算）
+    "NZD": 900.0,    # XXXNZD: 0.0001×100,000×90JPY/NZD（概算）
+    "CAD": 1100.0,   # XXXCAD: 0.0001×100,000×110JPY/CAD（概算）
+    "CHF": 1650.0,   # XXXCHF: 0.0001×100,000×165JPY/CHF（概算）
+}
+
+
+def _sizer_pip_value(symbol: str) -> float:
+    """シンボルからポジションサイザー用pip_valueを計算
+
+    Args:
+        symbol: 通貨ペアシンボル（例: USDJPY, EURUSD）
+
+    Returns:
+        float: 1pip=1ロットあたりのJPY価値
+    """
+    if len(symbol) >= 6:
+        quote = symbol[-3:].upper()
+        return _SIZER_PIP_VALUE_BY_QUOTE.get(quote, 1000.0)
+    return 1000.0
+
 
 @dataclass(frozen=True)
 class PositionSizerConfig:
     """ポジションサイザー設定
 
     Attributes:
+        symbol: 通貨ペアシンボル（pip_value自動計算に使用）
         base_risk_pct: 基本リスク率（資金に対する%）
-        pip_value: 1pipあたりの価値（1ロットあたり）
+        pip_value: 1pipあたりの価値（0=シンボルから自動計算）
         min_lot: 最小ロット数
         max_lot: 最大ロット数（ブローカー上限）
         confidence_high_threshold: 高確度閾値
@@ -42,8 +70,9 @@ class PositionSizerConfig:
         max_same_direction_ratio: 同方向エクスポージャー比率上限
     """
 
+    symbol: str = ""              # 通貨ペアシンボル（pip_value自動計算用）
     base_risk_pct: float = 0.02  # 2%リスク
-    pip_value: float = 1000.0   # USDJPY: 1lot=100,000通貨、1pip=1000円
+    pip_value: float = 0.0       # 0=シンボルから自動計算
     min_lot: float = 0.01
     max_lot: float = 10.0
     confidence_high_threshold: float = 0.7
@@ -101,6 +130,12 @@ class PositionSizer(PositionSizerProtocol):
             config: サイザー設定（Noneの場合はデフォルト）
         """
         self.config = config or PositionSizerConfig()
+        # pip_value=0の場合はシンボルから自動計算
+        self._pip_value: float = (
+            self.config.pip_value
+            if self.config.pip_value > 0
+            else _sizer_pip_value(self.config.symbol)
+        )
 
     def calculate(self, context: SizingContext) -> SizingResult:
         """ロット数を計算
@@ -205,7 +240,7 @@ class PositionSizer(PositionSizerProtocol):
         effective_sl = (
             context.sl_pips + self.config.slippage_buffer_pips
         )
-        lot = risk_budget / (effective_sl * self.config.pip_value)
+        lot = risk_budget / (effective_sl * self._pip_value)
 
         # 静的1トレード上限ロット制限
         lot = min(lot, self.config.max_lot_per_trade)
@@ -213,7 +248,7 @@ class PositionSizer(PositionSizerProtocol):
         # リスクベース動的ロット上限
         max_lot_from_risk = (
             context.equity * self.config.max_risk_pct_absolute
-        ) / (effective_sl * self.config.pip_value)
+        ) / (effective_sl * self._pip_value)
         lot = min(lot, max_lot_from_risk)
 
         # 合計エクスポージャー制限
