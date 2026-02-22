@@ -23,3 +23,68 @@ cUr5rHyklWdpdbOb
 EURUSDペアの最適化を実施してください。調整に利用してよい期間は2018-2020年の間のとして、それ以外の期間は 
 フィッティングしてはいけません。目標は定めません。利用可能なリソースは9コアまでとします。（バックテスト  
 スクリプトで3×3年分の想定です。)  
+
+■指標準備
+ ---
+  Step 1: 経済指標データを収集する
+
+  # 複数年まとめて収集（2010〜2025年）
+  python scripts/collect_fundamental_data.py --years 2010-2025 --source ff
+
+  # MT5カレンダーから収集（MT5ターミナルが起動している必要あり）
+  python scripts/collect_fundamental_data.py --year 2010-2025 --source mt5
+
+  出力先: data/fundamental/events_2024.csv
+
+  event_id,event_time,currency,event_name,impact,actual,forecast,previous
+  ff_a1b2c3,2024-01-05T13:30:00+00:00,USD,Non-Farm Payrolls,high,216000,175000,199000
+
+  # ニュースの収集
+  python scripts/collect_gdelt_news.py --source gkg --years 2022-2024 --currencies USD,JPY,EUR,GBP,AUD,NZD,CHF,CAD
+
+  ---
+  Step 2: LLMでコンテキストを事前生成する
+
+  # Ollama起動確認
+  ollama list  # qwen3:14b が表示されればOK
+
+  # 処理量を事前確認（dry-run）
+  python scripts/generate_fundamental_llm.py --symbol USDJPY --years 2010-2025 --dry-run
+
+  # USDJPY 2010〜2025年を一括生成（約192回のLLM呼び出し）
+  python scripts/generate_fundamental_llm.py --symbol USDJPY --years 2010-2025
+
+  出力先: data/fundamental/llm_context_USDJPY_2024.csv
+  period_start,macro_bias_score,macro_bias_summary,post_event_bias_score,post_event_summary,sentiment_score   
+  2024-01-01T00:00:00+00:00,0.35,USD強気（NFP大幅上振れ）,0.20,NFP後の短期ドル高,0.25
+  2024-02-01T00:00:00+00:00,-0.10,BOJ政策修正への警戒,...
+
+  ---
+  Step 3: バックテストで使用する
+
+  # ファンダメンタルデータありでバックテスト実行
+  python scripts/run_backtest.py \
+      --symbol USDJPY \
+      --years 2024 \
+      --fundamental \
+      --no-parallel
+
+  バックテスト内では自動的に:
+  1. data/fundamental/events_2024.csv を読み込み
+  2. data/fundamental/llm_context_USDJPY_2024.csv を読み込み
+  3. 各時刻に対応したLLMバイアススコアを参照
+
+  ---
+  全体フロー
+
+  Step 1: collect_fundamental_data.py
+           ↓ events_YYYY.csv (生の指標データ)
+
+  Step 2: generate_fundamental_llm.py  ← Ollama (qwen3:14b, GPU)
+           ↓ llm_context_SYMBOL_YYYY.csv (月次バイアス分析)
+
+  Step 3: run_backtest.py --fundamental
+           → BacktestFundamentalProvider が自動参照
+           → FundamentalContext.macro_bias_score に反映
+
+

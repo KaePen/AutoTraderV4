@@ -27,6 +27,7 @@ venv/
 env/
 ENV/
 .venv
+.serena
 
 # テスト・カバレッジ
 .pytest_cache/
@@ -75,4 +76,4 @@ Thumbs.db
 *.swo
 *~
 .vscode/
-.idea/ 
+.idea/
