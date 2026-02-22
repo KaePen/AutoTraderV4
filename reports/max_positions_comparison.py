@@ -31,7 +31,7 @@ from autotrader.decision.unified import UnifiedBotConfig
 from autotrader.decision.unified.position_manager import PositionManagerConfig
 
 # ===== デフォルト設定 =====
-DATA_DIR = "data"
+DATA_DIR = str(Path(__file__).parent.parent / "data")
 START_YEAR = 2022
 END_YEAR = 2024
 INITIAL_BALANCE = 1_000_000.0
@@ -243,13 +243,13 @@ def print_comparison_table(
                 f"勝率{d_wr:+.1f}%"
             )
             if d_pct > 10 and d_dd < 5:
-                print(f"    → ✓ 推奨: DD増加軽微で大きな利益向上")
+                print(f"    -> [OK] 推奨: DD増加軽微で大きな利益向上")
             elif d_pct > 0 and d_dd < 10:
-                print(f"    → △ 検討可: 利益改善あるがDD増加に注意")
+                print(f"    -> [?] 検討可: 利益改善あるがDD増加に注意")
             elif d_pct <= 0:
-                print(f"    → ✗ 非推奨: 利益改善なし")
+                print(f"    -> [NG] 非推奨: 利益改善なし")
             else:
-                print(f"    → ✗ 非推奨: DD増加が大きい")
+                print(f"    -> [NG] 非推奨: DD増加が大きい")
 
 
 def save_report(

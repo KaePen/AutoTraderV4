@@ -36,7 +36,8 @@ from autotrader.decision.unified import UnifiedBotConfig
 from autotrader.decision.unified.position_manager import PositionManagerConfig
 
 # ===== デフォルト設定 =====
-DATA_DIR = "data"
+# スクリプトの場所から相対的にプロジェクトルートを特定
+DATA_DIR = str(Path(__file__).parent.parent / "data")
 START_YEAR = 2022
 END_YEAR = 2024
 INITIAL_BALANCE = 1_000_000.0
@@ -209,14 +210,14 @@ def _verdict(d_pct: float, d_dd: float) -> str:
         str: 評価文字列
     """
     if d_pct > 10 and d_dd < 5:
-        return "✓ 推奨: DD増加軽微で大きな利益向上"
+        return "[OK] 推奨: DD増加軽微で大きな利益向上"
     if d_pct > 5 and d_dd < 8:
-        return "△ 検討可: 利益改善あるがDD増加に注意"
+        return "[?]  検討可: 利益改善あるがDD増加に注意"
     if d_pct > 0 and d_dd < 12:
-        return "△ 要検討: 利益改善小さくDD増加大"
+        return "[?]  要検討: 利益改善小さくDD増加大"
     if d_pct <= 0:
-        return "✗ 非推奨: 利益改善なし"
-    return "✗ 非推奨: DD増加が許容範囲外"
+        return "[NG] 非推奨: 利益改善なし"
+    return "[NG] 非推奨: DD増加が許容範囲外"
 
 
 def print_comparison_table(
