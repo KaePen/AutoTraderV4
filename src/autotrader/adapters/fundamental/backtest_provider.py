@@ -16,14 +16,18 @@ from pathlib import Path
 
 from loguru import logger
 
+from autotrader.adapters.fundamental.news_csv_writer import (
+    read_news_csv,
+)
+from autotrader.adapters.fundamental.news_schemas import NewsItem
+from autotrader.adapters.fundamental.normalizer import (
+    EconomicEventNormalizer,
+)
 from autotrader.adapters.fundamental.schemas import (
     EconomicEvent,
     EventSource,
     FundamentalContext,
     ImpactLevel,
-)
-from autotrader.adapters.fundamental.normalizer import (
-    EconomicEventNormalizer,
 )
 
 # 経済イベントCSVカラム定義
@@ -109,6 +113,35 @@ class BacktestFundamentalProvider:
         # bisect用にUNIXタイムスタンプのソート済みリストを保持
         self._llm_ts: dict[str, list[float]] = {}
         self._llm_data: dict[str, list[dict]] = {}
+
+        # ニュースアイテム（published_at 昇順ソート）
+        self._news_items: list[NewsItem] = []
+
+    def load_news_csv(self, csv_path: str | Path) -> int:
+        """ニュースCSVを読み込み
+
+        `collect_gdelt_news.py` で生成した
+        `news_YYYY.csv` を読み込み、内部リストに追記する。
+
+        Args:
+            csv_path: ニュースCSVファイルパス
+
+        Returns:
+            int: 読み込んだニュース件数
+        """
+        path = Path(csv_path)
+        items = read_news_csv(path)
+        if not items:
+            return 0
+
+        # 追記してソート
+        self._news_items.extend(items)
+        self._news_items.sort(key=lambda n: n.published_at)
+        logger.info(
+            f"[BacktestFundamental] ニュース"
+            f"{len(items)}件読込: {path.name}"
+        )
+        return len(items)
 
     def load_csv(self, csv_path: str | Path) -> int:
         """CSVファイルから経済イベントを読み込み
