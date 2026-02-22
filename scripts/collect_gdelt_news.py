@@ -29,9 +29,9 @@ import argparse
 import sys
 from pathlib import Path
 
-# プロジェクトルートをパスに追加
+# プロジェクトルートをパスに追加（フラット構造対応）
 _ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(_ROOT / "src"))
+sys.path.insert(0, str(_ROOT))
 
 from loguru import logger
 
