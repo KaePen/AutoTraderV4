@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import asyncio
 import hashlib
+from collections import OrderedDict
 from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone
 from email.utils import parsedate_to_datetime
@@ -17,6 +18,7 @@ from email.utils import parsedate_to_datetime
 from loguru import logger
 
 from autotrader.adapters.fundamental.news_schemas import (
+    CURRENCY_KEYWORDS,
     NewsItem,
     NewsSource,
 )
@@ -48,39 +50,8 @@ RSS_FEEDS: dict[str, list[str]] = {
     ],
 }
 
-# 通貨キーワードマッピング（通貨検出用）
-_CURRENCY_KEYWORDS: dict[str, list[str]] = {
-    "USD": [
-        "federal reserve", "fed", "dollar", "fomc",
-        "us economy", "us gdp", "us inflation",
-    ],
-    "JPY": [
-        "bank of japan", "boj", "yen", "日銀",
-        "japan economy",
-    ],
-    "EUR": [
-        "ecb", "euro", "european central bank",
-        "eurozone",
-    ],
-    "GBP": [
-        "bank of england", "boe", "pound sterling",
-        "uk economy", "sterling",
-    ],
-    "AUD": [
-        "reserve bank of australia", "rba",
-        "australian dollar", "aud",
-    ],
-    "NZD": [
-        "reserve bank of new zealand", "rbnz",
-        "new zealand dollar", "nzd",
-    ],
-    "CHF": [
-        "swiss national bank", "snb", "swiss franc", "chf",
-    ],
-    "CAD": [
-        "bank of canada", "boc", "canadian dollar", "cad",
-    ],
-}
+# 重複排除バッファの上限（メモリリーク防止）
+_MAX_SEEN_IDS = 10_000
 
 
 class RSSCollector:
@@ -109,7 +80,8 @@ class RSSCollector:
         self._poll_interval = poll_interval
         self._running = False
         self._task: asyncio.Task | None = None  # type: ignore[type-arg]
-        self._seen_ids: set[str] = set()
+        # OrderedDict で上限付き重複排除（メモリリーク防止）
+        self._seen_ids: OrderedDict[str, None] = OrderedDict()
         self._feeds = self._build_feed_list()
 
     def _build_feed_list(self) -> list[str]:
@@ -175,7 +147,10 @@ class RSSCollector:
                 items = await self._fetch_all_feeds()
                 for item in items:
                     if item.news_id not in self._seen_ids:
-                        self._seen_ids.add(item.news_id)
+                        self._seen_ids[item.news_id] = None
+                        # 上限超過時は最古エントリを削除
+                        if len(self._seen_ids) > _MAX_SEEN_IDS:
+                            self._seen_ids.popitem(last=False)
                         try:
                             await callback(item)
                         except Exception as e:
@@ -196,7 +171,7 @@ class RSSCollector:
         Returns:
             list[NewsItem]: 取得したニュースアイテムリスト
         """
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         all_items: list[NewsItem] = []
 
         for feed_url in self._feeds:
@@ -231,10 +206,16 @@ class RSSCollector:
         try:
             feed = _feedparser_module.parse(feed_url)
         except Exception as e:
-            logger.debug(
+            logger.warning(
                 f"[RSSCollector] パースエラー {feed_url}: {e}"
             )
             return []
+
+        if feed.bozo:
+            logger.warning(
+                f"[RSSCollector] 不正フォーマットフィード "
+                f"{feed_url}: {feed.bozo_exception}"
+            )
 
         items: list[NewsItem] = []
         feed_name = (
@@ -357,9 +338,9 @@ def _extract_currencies(
 
     for currency in target_currencies:
         cur_upper = currency.upper()
-        keywords = _CURRENCY_KEYWORDS.get(cur_upper, [])
+        keywords = CURRENCY_KEYWORDS.get(cur_upper, [])
         if cur_upper.lower() in text_lower or any(
-            kw in text_lower for kw in keywords
+            kw.lower() in text_lower for kw in keywords
         ):
             if cur_upper not in found:
                 found.append(cur_upper)
