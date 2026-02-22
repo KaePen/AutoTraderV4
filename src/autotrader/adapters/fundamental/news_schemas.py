@@ -60,3 +60,44 @@ class NewsItem:
         """
         h = hashlib.md5(url.encode(), usedforsecurity=False)
         return f"{source_type.value}_{h.hexdigest()[:12]}"
+
+
+# 通貨キーワードマッピング（通貨検出用）
+# gdelt_client および rss_collector で共有する正規化済み辞書
+CURRENCY_KEYWORDS: dict[str, list[str]] = {
+    "USD": [
+        "Federal Reserve", "Fed rate", "Fed", "dollar",
+        "US economy", "FOMC", "US GDP",
+        "US inflation", "US jobs",
+    ],
+    "JPY": [
+        "Bank of Japan", "BOJ", "yen", "日銀",
+        "Japan economy", "BOJ policy",
+        "yen intervention",
+    ],
+    "EUR": [
+        "ECB", "euro", "European Central Bank",
+        "eurozone", "ECB rate", "EU economy",
+    ],
+    "GBP": [
+        "Bank of England", "BOE", "pound sterling",
+        "UK economy", "sterling", "BOE rate",
+    ],
+    "AUD": [
+        "Reserve Bank of Australia", "RBA",
+        "Australian dollar", "AUD",
+        "Australia economy",
+    ],
+    "NZD": [
+        "Reserve Bank of New Zealand", "RBNZ",
+        "New Zealand dollar", "NZD",
+    ],
+    "CHF": [
+        "Swiss National Bank", "SNB", "Swiss franc",
+        "CHF", "Switzerland economy",
+    ],
+    "CAD": [
+        "Bank of Canada", "BOC", "Canadian dollar",
+        "CAD", "Canada economy",
+    ],
+}

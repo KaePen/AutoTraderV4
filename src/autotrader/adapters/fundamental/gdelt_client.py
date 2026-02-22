@@ -17,6 +17,7 @@ from datetime import datetime, timedelta, timezone
 from loguru import logger
 
 from autotrader.adapters.fundamental.news_schemas import (
+    CURRENCY_KEYWORDS,
     NewsItem,
     NewsSource,
 )
@@ -30,42 +31,6 @@ except ImportError:
 _GDELT_API_URL = (
     "https://api.gdeltproject.org/api/v2/doc/doc"
 )
-
-# 通貨キーワードマッピング
-_CURRENCY_KEYWORDS: dict[str, list[str]] = {
-    "USD": [
-        "Federal Reserve", "Fed rate", "dollar", "US economy",
-        "FOMC", "US GDP", "US inflation", "US jobs",
-    ],
-    "JPY": [
-        "Bank of Japan", "BOJ", "yen", "日銀",
-        "Japan economy", "BOJ policy", "yen intervention",
-    ],
-    "EUR": [
-        "ECB", "euro", "European Central Bank",
-        "eurozone", "ECB rate", "EU economy",
-    ],
-    "GBP": [
-        "Bank of England", "BOE", "pound sterling",
-        "UK economy", "sterling", "BOE rate",
-    ],
-    "AUD": [
-        "Reserve Bank of Australia", "RBA", "Australian dollar",
-        "AUD", "Australia economy",
-    ],
-    "NZD": [
-        "Reserve Bank of New Zealand", "RBNZ",
-        "New Zealand dollar", "NZD",
-    ],
-    "CHF": [
-        "Swiss National Bank", "SNB", "Swiss franc",
-        "CHF", "Switzerland economy",
-    ],
-    "CAD": [
-        "Bank of Canada", "BOC", "Canadian dollar",
-        "CAD", "Canada economy",
-    ],
-}
 
 # レートリミット（秒）
 _REQUEST_INTERVAL_SEC = 1.5
@@ -232,7 +197,7 @@ class GDELTDocClient:
         """
         keywords: list[str] = []
         for currency in currencies:
-            kws = _CURRENCY_KEYWORDS.get(currency.upper(), [])
+            kws = CURRENCY_KEYWORDS.get(currency.upper(), [])
             keywords.extend(kws[:2])  # 各通貨から上位2キーワード
 
         if not keywords:
@@ -271,7 +236,8 @@ class GDELTDocClient:
             return None
 
         source_name = article.get("domain", "")
-        snippet = article.get("socialimage") or None
+        # GDELT DOC API v2 はテキストスニペットを返さないため None
+        snippet = None
 
         # タイトルから通貨を抽出
         currencies = _extract_currencies(
@@ -369,7 +335,7 @@ def _extract_currencies(
     for currency in target_currencies:
         cur_upper = currency.upper()
         # 通貨コードまたはキーワードで判定
-        keywords = _CURRENCY_KEYWORDS.get(cur_upper, [])
+        keywords = CURRENCY_KEYWORDS.get(cur_upper, [])
         if cur_upper in text_upper or any(
             kw.upper() in text_upper for kw in keywords
         ):
