@@ -54,104 +54,6 @@ from autotrader.decision.unified.position_manager import (
 )
 
 
-# クォート通貨別pip価値テーブル（JPY口座・0.1lot基準の近似値）
-# 計算式: pip_unit × 10,000 (units) × 換算レート
-_PIP_VALUE_BY_QUOTE: dict[str, float] = {
-    "JPY": 100.0,   # XXXJPY: 0.01×10,000=100JPY（正確値）
-    "USD": 150.0,   # XXXUSD: 0.0001×10,000×150JPY/USD
-    "EUR": 160.0,   # XXXEUR: ≈160JPY
-    "GBP": 190.0,   # XXXGBP: ≈190JPY
-    "AUD": 100.0,   # XXXAUD: ≈100JPY
-    "NZD": 90.0,    # XXXNZD: ≈90JPY
-    "CAD": 110.0,   # XXXCAD: ≈110JPY
-    "CHF": 165.0,   # XXXCHF: ≈165JPY
-}
-
-
-def _calc_pip_value(symbol: str) -> float:
-    """シンボルのクォート通貨からpip価値を概算
-
-    JPY口座・0.1ロット（10,000通貨）基準の1pipあたり価値（JPY）を
-    クォート通貨別テーブルから取得する。実際のレートは変動するため
-    近似値であることに注意。
-
-    Args:
-        symbol: 通貨ペア（例: EURUSD, USDJPY）
-
-    Returns:
-        float: 1pipあたりの概算価値（JPY）
-    """
-    if len(symbol) >= 6:
-        quote = symbol[-3:].upper()
-        return _PIP_VALUE_BY_QUOTE.get(quote, 100.0)
-    return 100.0
-
-
-def _load_quote_jpy_series(
-    data_dir_base: Path,
-    symbol: str,
-    start_dt: datetime,
-    end_dt: datetime,
-) -> "pd.Series | None":
-    """クォート通貨/JPYの時系列レートをH1データから読み込む
-
-    JPYクォートペアは換算不要のためNoneを返す。
-    データが存在しない場合もNoneを返す（固定値にフォールバック）。
-
-    計算式: pip_value = pip_unit × 10,000 × quote/JPYレート
-    例(EURUSD): 0.0001 × 10,000 × USDJPY_close = USDJPY_close
-
-    Args:
-        data_dir_base: データ基底ディレクトリ（通貨ペアの親ディレクトリ）
-        symbol: 対象通貨ペア（例: EURUSD）
-        start_dt: 読み込み開始日時
-        end_dt: 読み込み終了日時
-
-    Returns:
-        pd.Series | None: インデックス=datetime, 値=close価格のシリーズ
-    """
-    if len(symbol) < 6:
-        return None
-    quote = symbol[-3:].upper()
-    if quote == "JPY":
-        # JPYクォートは換算不要
-        return None
-
-    jpy_symbol = f"{quote}JPY"
-    jpy_dir = data_dir_base / jpy_symbol
-    if not jpy_dir.is_dir():
-        _log = logging.getLogger(__name__)
-        _log.warning(
-            "%s データなし: 固定pip_valueを使用 (%s)",
-            jpy_symbol, symbol,
-        )
-        return None
-
-    # H1データを優先（精度とファイルサイズのバランス）
-    h1_files = sorted(jpy_dir.glob(f"{jpy_symbol}_H1_*.csv"))
-    if not h1_files:
-        _log = logging.getLogger(__name__)
-        _log.warning(
-            "%s H1データなし: 固定pip_valueを使用", jpy_symbol,
-        )
-        return None
-
-    try:
-        df = DataLoader.load_mt5_csv(h1_files[0])
-        df = df[
-            (df["time"] >= start_dt) & (df["time"] <= end_dt)
-        ]
-        if df.empty:
-            return None
-        series = df.set_index("time")["close"]
-        series.index = pd.DatetimeIndex(series.index)
-        return series
-    except Exception as e:
-        _log = logging.getLogger(__name__)
-        _log.warning("%s 読み込みエラー: %s", jpy_symbol, e)
-        return None
-
-
 @dataclass
 class BacktestConfig:
     """バックテスト設定
@@ -161,9 +63,11 @@ class BacktestConfig:
         timeframe: 時間足
         initial_balance: 初期残高
         volume: 取引ボリューム
-        max_positions: 最大ポジション数
+        max_positions: 最大ポジション数（通常時）
         spread_pips: スプレッド（pips）
         pip_value: pip価値
+        bonus_max_positions: 高品質シグナル時に追加するポジション数（0=無効）
+        bonus_score_threshold: bonus発動のconsensus_score閾値
     """
 
     symbol: str = "USDJPY"
@@ -171,9 +75,7 @@ class BacktestConfig:
     initial_balance: float = 1_000_000.0
     volume: float | None = None  # None時は戦略デフォルト
     max_positions: int = 1
-    # 高品質シグナル時に追加する枠数（0=無効）
     bonus_max_positions: int = 0
-    # bonus発動のconsensus_score閾値
     bonus_score_threshold: float = 7.0
     spread_pips: float = field(
         default_factory=lambda: DEFAULT_TRADING_PARAMS.spread_pips
@@ -226,7 +128,7 @@ class BacktestRunner:
         config: BacktestConfig | None = None,
         verbose: bool = True,
         log_to_file: bool = True,
-        log_dir: str | Path | None = None,
+        log_dir: str | Path = "logs/backtest_log",
     ) -> None:
         """初期化
 
@@ -235,8 +137,7 @@ class BacktestRunner:
             config: バックテスト設定
             verbose: 詳細ログ出力
             log_to_file: ファイルログ出力
-            log_dir: ログ出力先ディレクトリ。Noneの場合は
-                ``logs/backtest_log/{symbol}/`` を自動設定する。
+            log_dir: ログ出力先ディレクトリ
         """
         self.config = config or BacktestConfig()
         # 通貨ペア別サブディレクトリに解決
@@ -261,14 +162,8 @@ class BacktestRunner:
         # ファイルログリスナー追加
         self._file_listener: FileEventListener | None = None
         if log_to_file:
-            # log_dir未指定時は通貨ペア別サブディレクトリを自動設定
-            _log_dir = (
-                Path(log_dir)
-                if log_dir is not None
-                else Path("logs/backtest_log") / self.config.symbol
-            )
             self._file_listener = FileEventListener(
-                log_dir=_log_dir, verbose=verbose
+                log_dir=log_dir, verbose=verbose
             )
             self._emitter.add_listener(self._file_listener)
 
@@ -635,22 +530,15 @@ class BacktestRunner:
             if "JPY" in self.config.symbol.upper()
             else 0.0001
         )
-        _start_dt = datetime(start_year, 1, 1)
-        _end_dt = datetime(end_year + 1, 1, 1)
-        _quote_jpy = _load_quote_jpy_series(
-            self.data_dir.parent, self.config.symbol,
-            _start_dt, _end_dt,
-        )
         sim_config = SimulatorConfig(
             initial_balance=self.config.initial_balance,
             spread_pips=self.config.spread_pips,
-            pip_value=_calc_pip_value(self.config.symbol),
+            pip_value=self.config.pip_value,
             max_positions=self.config.max_positions,
             bonus_max_positions=self.config.bonus_max_positions,
             bonus_score_threshold=self.config.bonus_score_threshold,
             default_volume=volume,
             pip_unit=_pip_unit,
-            quote_jpy_series=_quote_jpy,
         )
 
         # 年別・月別結果を収集
@@ -1075,17 +963,11 @@ class BacktestRunner:
             if "JPY" in self.config.symbol.upper()
             else 0.0001
         )
-        _start_dt = datetime(start_year, 1, 1)
-        _end_dt = datetime(end_year + 1, 1, 1)
-        _quote_jpy = _load_quote_jpy_series(
-            self.data_dir.parent, self.config.symbol,
-            _start_dt, _end_dt,
-        )
         sim_config = SimulatorConfig(
             initial_balance=self.config.initial_balance,
             spread_pips=self.config.spread_pips,
             slippage_pips=self.config.slippage_pips,
-            pip_value=_calc_pip_value(self.config.symbol),
+            pip_value=self.config.pip_value,
             max_positions=self.config.max_positions,
             bonus_max_positions=self.config.bonus_max_positions,
             bonus_score_threshold=self.config.bonus_score_threshold,
@@ -1094,7 +976,6 @@ class BacktestRunner:
             pm_config=pm_config,
             use_dynamic_lot=bot_config.use_dynamic_lot,
             pip_unit=_pip_unit,
-            quote_jpy_series=_quote_jpy,
         )
 
         if len(years) > 1 and not sequential:
@@ -1538,7 +1419,7 @@ class BacktestRunner:
                 symbol=self.config.symbol,
                 initial_balance=self.config.initial_balance,
                 spread_pips=self.config.spread_pips,
-                pip_value=_calc_pip_value(self.config.symbol),
+                pip_value=self.config.pip_value,
                 max_positions=self.config.max_positions,
                 default_volume=self.config.volume or 1.0,
                 min_confidence=bot_config.consolidator.confidence_threshold,
