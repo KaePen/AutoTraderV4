@@ -309,6 +309,30 @@ class LiveTradingEngine:
             slippage_buffer_pips=bot_config.slippage_buffer_pips,
         )
 
+    @staticmethod
+    def _get_pip_size(symbol: str) -> float:
+        """通貨ペアのpipサイズを返す（JPY系=0.01、その他=0.0001）
+
+        Args:
+            symbol: 通貨ペアシンボル
+
+        Returns:
+            float: pipサイズ
+        """
+        return 0.01 if "JPY" in symbol.upper() else 0.0001
+
+    @staticmethod
+    def _get_pip_value(symbol: str) -> float:
+        """通貨ペアの1lot/1pipあたりの価値を返す（JPY系=1000、その他=10）
+
+        Args:
+            symbol: 通貨ペアシンボル
+
+        Returns:
+            float: pip価値（円）
+        """
+        return 1000.0 if "JPY" in symbol.upper() else 10.0
+
     @property
     def signal_history(self) -> list[Signal]:
         """シグナル履歴"""
@@ -897,11 +921,21 @@ class LiveTradingEngine:
             self._config.symbol
         )
         cfg = self._bot.config
-        max_pos = (
+        base_max = (
             cfg.demo_max_positions
             if cfg.demo_mode
             else cfg.max_positions
         )
+        bonus = getattr(cfg, "bonus_max_positions", 0)
+        threshold = getattr(cfg, "bonus_score_threshold", 7.0)
+        if (
+            bonus > 0
+            and signal.consensus_score is not None
+            and signal.consensus_score >= threshold
+        ):
+            max_pos = base_max + bonus
+        else:
+            max_pos = base_max
         if len(positions) >= max_pos:
             logger.info(
                 "既存ポジション上限(%d)、エントリースキップ",
@@ -1028,10 +1062,7 @@ class LiveTradingEngine:
             entry_price = 0.0
 
         # signal.stop_loss/take_profitはpips値 → 価格レベルに変換
-        # USDJPY: pip_size=0.01, その他: pip_size=0.0001
-        pip_size = (
-            0.01 if "JPY" in signal.symbol.upper() else 0.0001
-        )
+        pip_size = self._get_pip_size(signal.symbol)
         sl_price = 0.0
         tp_price = 0.0
         if entry_price > 0:
@@ -1121,10 +1152,7 @@ class LiveTradingEngine:
                 )
             else:
                 entry_price = 0.0
-            pip_size = (
-                0.01 if "JPY" in signal.symbol.upper()
-                else 0.0001
-            )
+            pip_size = self._get_pip_size(signal.symbol)
             sl_price = None
             tp_price = None
             if entry_price > 0:
@@ -1248,10 +1276,7 @@ class LiveTradingEngine:
             pos = self._pm.get_position(str(ticket))
             pnl_pips = 0.0
             if pos and current_price > 0:
-                pip_size = (
-                    0.01 if "JPY" in self._config.symbol.upper()
-                    else 0.0001
-                )
+                pip_size = self._get_pip_size(self._config.symbol)
                 price_diff = (
                     current_price - pos.entry_price
                     if pos.direction == SignalType.BUY
@@ -1261,11 +1286,7 @@ class LiveTradingEngine:
                 # MT5から損益が取得できなかった場合、
                 # pnl_pipsとvolumeから概算（スプレッド・スワップ除く）
                 if profit_loss == 0.0 and abs(pnl_pips) > 0:
-                    pip_val = (
-                        1000.0
-                        if "JPY" in self._config.symbol.upper()
-                        else 10.0
-                    )
+                    pip_val = self._get_pip_value(self._config.symbol)
                     # ManagedPositionはremaining_volumeを使用
                     _vol = pos.remaining_volume
                     profit_loss = round(
@@ -1365,9 +1386,8 @@ class LiveTradingEngine:
             current_signal_type = self._last_signal.direction
 
         # pip計算係数（通貨ペア別）
-        is_jpy = "JPY" in self._config.symbol.upper()
-        pip_factor = 0.01 if is_jpy else 0.0001
-        pip_value = 1000.0 if is_jpy else 10.0
+        pip_factor = self._get_pip_size(self._config.symbol)
+        pip_value = self._get_pip_value(self._config.symbol)
 
         cache_list: list[dict] = []
         for position in positions:
