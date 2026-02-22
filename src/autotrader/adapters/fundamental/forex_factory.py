@@ -371,17 +371,16 @@ class ForexFactoryClient:
         """
         try:
             import httpx
-            from bs4 import BeautifulSoup
             import time
         except ImportError:
             logger.warning(
-                "[ForexFactory] httpx/beautifulsoup4未インストール。"
-                "スキップします"
+                "[ForexFactory] httpx未インストール。スキップします"
             )
             return []
 
         all_events: list[EconomicEvent] = []
-        seen_ids: set[str] = set()
+        # UUIDはランダムなので event_time+currency+name で重複排除
+        seen_keys: set[tuple[str, str, str]] = set()
         fetched_at = datetime.now(timezone.utc)
 
         # 1月1日から52週分を生成
@@ -393,40 +392,54 @@ class ForexFactoryClient:
 
         current = start
         week_count = 0
-        while current.year == year and week_count < 53:
-            mon = month_abbr[current.month - 1]
-            day = f"{current.day:02d}"
-            week_param = f"{mon}{day}.{year}"
-            url = f"{_FF_URL}?week={week_param}"
 
-            try:
-                with httpx.Client(timeout=self._timeout) as client:
+        # httpx.Clientはセッション全体で1つ使い回す（接続再利用）
+        with httpx.Client(timeout=self._timeout) as client:
+            while current.year == year and week_count < 53:
+                mon = month_abbr[current.month - 1]
+                day = f"{current.day:02d}"
+                week_param = f"{mon}{day}.{year}"
+                url = f"{_FF_URL}?week={week_param}"
+
+                try:
                     resp = client.get(url, headers=_HEADERS)
                     resp.raise_for_status()
                     html = resp.text
 
-                events = self._parse_html(html, fetched_at, currencies)
+                    events = self._parse_html(
+                        html, fetched_at, currencies
+                    )
 
-                # event_id重複排除
-                for ev in events:
-                    if ev.event_id not in seen_ids:
-                        seen_ids.add(ev.event_id)
-                        all_events.append(ev)
+                    # (event_time, currency, event_name) で重複排除
+                    new_count = 0
+                    for ev in events:
+                        dedup_key = (
+                            ev.event_time.isoformat(),
+                            ev.currency,
+                            ev.event_name,
+                        )
+                        if dedup_key not in seen_keys:
+                            seen_keys.add(dedup_key)
+                            all_events.append(ev)
+                            new_count += 1
 
-                logger.debug(
-                    f"[ForexFactory] {week_param}: "
-                    f"{len(events)}件取得"
-                )
+                    logger.debug(
+                        f"[ForexFactory] {week_param}: "
+                        f"{len(events)}件取得 (新規{new_count}件)"
+                    )
 
-            except Exception as e:
-                logger.warning(
-                    f"[ForexFactory] {week_param} 取得エラー: {e}"
-                )
+                except Exception as e:
+                    logger.warning(
+                        f"[ForexFactory] {week_param} 取得エラー: {e}"
+                    )
 
-            # 次の週へ
-            current += timedelta(weeks=1)
-            week_count += 1
-            time.sleep(1.0)
+                # 次の週へ
+                current += timedelta(weeks=1)
+                week_count += 1
+                time.sleep(1.0)
+
+        # _last_fetch を更新してレートリミットと整合性を保つ
+        self._last_fetch = datetime.now(timezone.utc)
 
         logger.info(
             f"[ForexFactory] {year}年: {len(all_events)}件取得完了"

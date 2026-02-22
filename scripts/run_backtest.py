@@ -963,18 +963,17 @@ def run_single_backtest(args: argparse.Namespace):
 
     # ファンダメンタルCSVリスト構築
     _fundamental_csvs: list[str] | None = None
-    if getattr(args, "fundamental", False):
-        from pathlib import Path as _Path
-        _fund_dir = _Path(args.fundamental_dir)
+    if args.fundamental:
+        _fund_dir = Path(args.fundamental_dir)
         _fundamental_csvs = []
         for _yr in range(start_year, end_year + 1):
             _csv = _fund_dir / f"events_{_yr}.csv"
             if _csv.exists():
                 _fundamental_csvs.append(str(_csv))
         if not _fundamental_csvs:
-            print(
-                f"[Fundamental] 警告: {args.fundamental_dir} に"
-                f"events_YYYY.csv が見つかりません"
+            logging.warning(
+                "[Fundamental] %s に events_YYYY.csv が見つかりません",
+                args.fundamental_dir,
             )
             _fundamental_csvs = None
 
@@ -989,9 +988,7 @@ def run_single_backtest(args: argparse.Namespace):
         period_end=period_end,
         sequential=args.sequential,
         fundamental_csv_list=_fundamental_csvs,
-        fundamental_guard_minutes=getattr(
-            args, "fundamental_guard", 30
-        ),
+        fundamental_guard_minutes=args.fundamental_guard,
     )
 
     print_results(result)

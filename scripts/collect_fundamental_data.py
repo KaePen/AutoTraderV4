@@ -227,7 +227,6 @@ def collect_mt5(
         return 0
 
     client = MT5CalendarClient()
-    from datetime import datetime, timezone
     start = datetime(year, 1, 1, tzinfo=timezone.utc)
     end = datetime(year, 12, 31, 23, 59, 59, tzinfo=timezone.utc)
 

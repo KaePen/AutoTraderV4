@@ -140,3 +140,151 @@ class TestBacktestFundamentalProvider:
             assert count == 1  # 正常な1件のみ
         finally:
             path.unlink(missing_ok=True)
+
+
+class TestEstimateBiasFromEvents:
+    """_estimate_bias_from_events のテスト"""
+
+    @pytest.fixture
+    def provider(self):
+        return BacktestFundamentalProvider(event_guard_minutes=30)
+
+    def _load_single_event(
+        self,
+        provider: BacktestFundamentalProvider,
+        currency: str,
+        impact: str,
+        actual: str,
+        forecast: str,
+        previous: str = "",
+        hours_ago: int = 1,
+    ) -> datetime:
+        """テスト用単一イベントを読み込み、current_timeを返す"""
+        now = datetime(2026, 2, 21, 12, 0, tzinfo=timezone.utc)
+        event_time = now - timedelta(hours=hours_ago)
+        rows = [{
+            "event_id": "test_001",
+            "event_time": event_time.isoformat(),
+            "currency": currency,
+            "event_name": "Test Event",
+            "impact": impact,
+            "actual": actual,
+            "forecast": forecast,
+            "previous": previous,
+        }]
+        path = make_csv(rows)
+        try:
+            provider.load_csv(path)
+        finally:
+            path.unlink(missing_ok=True)
+        return now
+
+    def test_positive_surprise_base_currency(self, provider):
+        """先行通貨の好結果はポジティブバイアスを返す（USDJPY: USD好結果→+）"""
+        now = self._load_single_event(
+            provider, "USD", "medium", "200", "100",
+        )
+        ctx = provider.get_context(now, "USDJPY")
+        assert ctx.macro_bias_score > 0.0
+
+    def test_negative_surprise_base_currency(self, provider):
+        """先行通貨の悪結果はネガティブバイアスを返す（USDJPY: USD悪結果→-）"""
+        now = self._load_single_event(
+            provider, "USD", "medium", "50", "100",
+        )
+        ctx = provider.get_context(now, "USDJPY")
+        assert ctx.macro_bias_score < 0.0
+
+    def test_positive_surprise_quote_currency(self, provider):
+        """後続通貨の好結果はネガティブバイアスを返す（USDJPY: JPY好結果→-）"""
+        now = self._load_single_event(
+            provider, "JPY", "medium", "200", "100",
+        )
+        ctx = provider.get_context(now, "USDJPY")
+        assert ctx.macro_bias_score < 0.0
+
+    def test_high_impact_multiplier(self, provider):
+        """高インパクト指標は同じサプライズで3倍のバイアス（クリップ前）"""
+        provider_low = BacktestFundamentalProvider()
+        provider_high = BacktestFundamentalProvider()
+
+        # actual=120, forecast=100 → surprise=0.2
+        # low: 0.2*1=0.2, high: 0.2*3=0.6（どちらもクリップされない）
+        now_low = self._load_single_event(
+            provider_low, "USD", "low", "120", "100",
+        )
+        now_high = self._load_single_event(
+            provider_high, "USD", "high", "120", "100",
+        )
+        ctx_low = provider_low.get_context(now_low, "USDJPY")
+        ctx_high = provider_high.get_context(now_high, "USDJPY")
+        # 高インパクトは低インパクトより大きいバイアス
+        assert ctx_high.macro_bias_score > ctx_low.macro_bias_score
+
+    def test_bias_clipped_to_minus_one(self, provider):
+        """バイアスは-1.0〜+1.0にクリップされる（下限）"""
+        # 非常に大きな負のサプライズ × 高インパクト
+        now = self._load_single_event(
+            provider, "JPY", "high", "1000", "1",
+        )
+        ctx = provider.get_context(now, "USDJPY")
+        assert ctx.macro_bias_score >= -1.0
+
+    def test_bias_clipped_to_plus_one(self, provider):
+        """バイアスは-1.0〜+1.0にクリップされる（上限）"""
+        now = self._load_single_event(
+            provider, "USD", "high", "1000", "1",
+        )
+        ctx = provider.get_context(now, "USDJPY")
+        assert ctx.macro_bias_score <= 1.0
+
+    def test_zero_forecast_skipped(self, provider):
+        """予測値0のイベントはゼロ除算を避けスキップされる"""
+        now = self._load_single_event(
+            provider, "USD", "high", "100", "0",
+        )
+        ctx = provider.get_context(now, "USDJPY")
+        assert ctx.macro_bias_score == 0.0
+
+    def test_no_forecast_uses_previous(self, provider):
+        """予測値なし・前回値ありの場合は前回値を参照"""
+        now = self._load_single_event(
+            provider, "USD", "medium", "200", "", previous="100",
+        )
+        ctx = provider.get_context(now, "USDJPY")
+        # 前回値100に対して実績200→ポジティブバイアス
+        assert ctx.macro_bias_score > 0.0
+
+    def test_no_forecast_no_previous_skipped(self, provider):
+        """予測値も前回値もないイベントはスキップ"""
+        now = self._load_single_event(
+            provider, "USD", "medium", "200", "", previous="",
+        )
+        ctx = provider.get_context(now, "USDJPY")
+        assert ctx.macro_bias_score == 0.0
+
+    def test_post_event_bias_4h_window(self, provider):
+        """post_event_bias_scoreは4時間以内の指標のみ参照"""
+        # 直前1時間のイベント → 両方のバイアスに影響
+        now = self._load_single_event(
+            provider, "USD", "medium", "200", "100", hours_ago=1,
+        )
+        ctx = provider.get_context(now, "USDJPY")
+        assert ctx.post_event_bias_score > 0.0
+
+    def test_event_older_than_24h_not_counted(self, provider):
+        """25時間前のイベントはマクロバイアスに含まれない"""
+        now = self._load_single_event(
+            provider, "USD", "high", "200", "100", hours_ago=25,
+        )
+        ctx = provider.get_context(now, "USDJPY")
+        assert ctx.macro_bias_score == 0.0
+
+    def test_unrelated_currency_skipped(self, provider):
+        """シンボルに無関係な通貨のイベントはバイアスに含まれない"""
+        now = self._load_single_event(
+            provider, "AUD", "high", "200", "100",
+        )
+        ctx = provider.get_context(now, "USDJPY")
+        # AUDはUSDJPYに無関係
+        assert ctx.macro_bias_score == 0.0

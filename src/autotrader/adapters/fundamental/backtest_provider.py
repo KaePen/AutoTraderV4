@@ -6,6 +6,7 @@ CSVファイルから過去の経済イベントを読み込み、
 
 from __future__ import annotations
 
+import bisect
 import csv
 from datetime import datetime, timezone, timedelta
 from pathlib import Path
@@ -110,11 +111,12 @@ class BacktestFundamentalProvider:
                         )
                         continue
 
-            # 重複排除してマージ
+            # 重複排除してマージし、時刻順ソート（bisect検索用）
             self._events.extend(loaded)
             self._events = self._normalizer.deduplicate(
                 self._events
             )
+            self._events.sort(key=lambda e: e.event_time)
             self._loaded_files.append(str(path))
 
             logger.info(
@@ -204,19 +206,27 @@ class BacktestFundamentalProvider:
     ) -> list[EconomicEvent]:
         """指定時間内の発表済みイベントを取得
 
+        イベントリストは event_time 昇順ソート済みを前提として
+        bisect による O(log n) 検索を使用する。
+
         Args:
-            events: 対象イベントリスト
+            events: 時刻昇順ソート済みイベントリスト
             current_time: 現在時刻（UTC）
             hours: 過去何時間を対象とするか
 
         Returns:
             list[EconomicEvent]: 発表済みイベントリスト
         """
+        if not events:
+            return []
         cutoff = current_time - timedelta(hours=hours)
+        # bisect で検索範囲を絞る
+        times = [ev.event_time for ev in events]
+        lo = bisect.bisect_left(times, cutoff)
+        hi = bisect.bisect_left(times, current_time)
         return [
-            ev for ev in events
-            if cutoff <= ev.event_time < current_time
-            and ev.actual is not None
+            ev for ev in events[lo:hi]
+            if ev.actual is not None
         ]
 
     def _estimate_bias_from_events(
