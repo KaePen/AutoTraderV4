@@ -960,26 +960,14 @@ class BacktestRunner:
             _completed_count = 0
 
             # 行レベル進捗の共有カウンター（スレッドセーフ）
-            _row_done: dict[int, int] = {}
-            _row_total_map: dict[int, int] = {}
-            _row_lock = threading.Lock()
-
             def _make_row_cb(
                 year: int,
             ) -> Callable[[int, int], None]:
-                """年ごとの行進捗コールバックを生成"""
+                """年ごとの行進捗コールバックを生成（年別バー用）"""
                 def _cb(done: int, total: int) -> None:
-                    with _row_lock:
-                        _row_done[year] = done
-                        _row_total_map[year] = total
-                        all_done = sum(_row_done.values())
-                        all_total = sum(
-                            _row_total_map.values()
-                        )
-                    if all_total > 0:
-                        self._emitter.emit_init_progress(
-                            "year_rows", "", all_done, all_total
-                        )
+                    self._emitter.emit_init_progress(
+                        "year_row_update", str(year), done, total
+                    )
                 return _cb
 
             # 並列開始を即座に通知（スピナー表示）
