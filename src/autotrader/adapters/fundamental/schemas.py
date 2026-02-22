@@ -24,6 +24,8 @@ class EventSource(str, Enum):
 
     MT5 = "MT5"
     FOREX_FACTORY = "forex_factory"
+    GDELT = "gdelt"
+    RSS = "rss"
 
 
 @dataclass(frozen=True)

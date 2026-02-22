@@ -23,6 +23,9 @@ except ImportError:
 
 from loguru import logger
 
+from autotrader.adapters.fundamental.news_schemas import (
+    NewsItem,
+)
 from autotrader.adapters.fundamental.schemas import (
     EconomicEvent,
     ImpactLevel,
@@ -101,6 +104,7 @@ class LLMContextGenerator:
         events: list[EconomicEvent],
         output_dir: str | Path = "data/fundamental",
         overwrite: bool = False,
+        news_items: list[NewsItem] | None = None,
     ) -> Path:
         """指定シンボル・年のLLMコンテキストCSVを生成
 
@@ -110,6 +114,8 @@ class LLMContextGenerator:
             events: 全経済イベントリスト
             output_dir: 出力ディレクトリ
             overwrite: 既存ファイルを上書きするか
+            news_items: ニュースアイテムリスト（任意）。
+                指定時はプロンプトに見出しを追加する。
 
         Returns:
             Path: 生成したCSVファイルのパス
@@ -143,6 +149,11 @@ class LLMContextGenerator:
         # 月ごとにグループ化
         monthly_events = self._group_by_month(relevant_events, year)
 
+        # ニュースを月ごとにグループ化
+        monthly_news = self._group_news_by_month(
+            news_items or [], year
+        )
+
         # 月次LLM分析実行
         output_dir_path = Path(output_dir)
         output_dir_path.mkdir(parents=True, exist_ok=True)
@@ -150,12 +161,14 @@ class LLMContextGenerator:
         rows: list[dict] = []
         for month in range(1, 13):
             month_events = monthly_events.get(month, [])
+            month_news = monthly_news.get(month, [])
             period_start = datetime(
                 year, month, 1, tzinfo=timezone.utc
             )
             logger.info(
                 f"[LLMContext] {symbol} {year}-{month:02d}: "
-                f"{len(month_events)}件を分析中..."
+                f"{len(month_events)}件 / ニュース"
+                f"{len(month_news)}件を分析中..."
             )
 
             result = self._analyze_month(
@@ -165,6 +178,7 @@ class LLMContextGenerator:
                 year=year,
                 month=month,
                 events=month_events,
+                news_items=month_news,
             )
             rows.append({
                 "period_start": period_start.isoformat(),
@@ -206,6 +220,27 @@ class LLMContextGenerator:
             result[ev.event_time.month].append(ev)
         return dict(result)
 
+    def _group_news_by_month(
+        self,
+        news_items: list[NewsItem],
+        year: int,
+    ) -> dict[int, list[NewsItem]]:
+        """ニュースアイテムを月ごとにグループ化
+
+        Args:
+            news_items: ニュースアイテムリスト
+            year: 対象年
+
+        Returns:
+            dict[int, list[NewsItem]]: 月→ニュースリスト
+        """
+        result: dict[int, list[NewsItem]] = defaultdict(list)
+        for item in news_items:
+            if item.published_at.year != year:
+                continue
+            result[item.published_at.month].append(item)
+        return dict(result)
+
     def _analyze_month(
         self,
         symbol: str,
@@ -214,6 +249,7 @@ class LLMContextGenerator:
         year: int,
         month: int,
         events: list[EconomicEvent],
+        news_items: list[NewsItem] | None = None,
     ) -> dict[str, float | str]:
         """1ヶ月分のイベントをLLMで分析
 
@@ -224,13 +260,14 @@ class LLMContextGenerator:
             year: 年
             month: 月
             events: そのシンボル関連の月次イベントリスト
+            news_items: 月次ニュースアイテムリスト（任意）
 
         Returns:
             dict: {macro_bias_score, macro_bias_summary,
                    post_event_bias_score, post_event_summary,
                    sentiment_score}
         """
-        if not events:
+        if not events and not news_items:
             return {
                 "macro_bias_score": 0.0,
                 "macro_bias_summary": "データなし（イベント0件）",
@@ -262,6 +299,7 @@ class LLMContextGenerator:
             month=month,
             released_events=released,
             recent_high_impact=recent_high,
+            news_items=news_items or [],
         )
 
         for attempt in range(self._max_retries):
@@ -304,6 +342,7 @@ class LLMContextGenerator:
         month: int,
         released_events: list[EconomicEvent],
         recent_high_impact: list[EconomicEvent],
+        news_items: list[NewsItem] | None = None,
     ) -> str:
         """LLM分析プロンプトを構築
 
@@ -315,12 +354,21 @@ class LLMContextGenerator:
             month: 月
             released_events: 発表済みイベントリスト
             recent_high_impact: 直近高インパクト指標
+            news_items: ニュースアイテムリスト（任意）
 
         Returns:
             str: LLMプロンプト
         """
         events_text = self._format_events(released_events)
         recent_text = self._format_events(recent_high_impact)
+
+        # ニュースセクションを構築（上位20件）
+        news_section = ""
+        if news_items:
+            news_section = (
+                "\n\n## ニュース見出し（上位20件）\n"
+                + self._format_news(news_items[:20])
+            )
 
         return f"""あなたはFXトレードのファンダメンタルアナリストです。
 以下の経済指標データに基づいて、{symbol}のマクロバイアスを分析してください。
@@ -333,7 +381,7 @@ class LLMContextGenerator:
 {events_text}
 
 ## 直近の高インパクト指標（最大3件）
-{recent_text}
+{recent_text}{news_section}
 
 ## 分析指示
 1. 各指標の実績vs予測の乖離（サプライズ）を評価
@@ -348,6 +396,29 @@ class LLMContextGenerator:
   "post_event_summary": "<短期バイアスの説明（日本語、50文字以内）>",
   "sentiment_score": <-1.0から+1.0（市場全体のセンチメント）>
 }}"""
+
+    def _format_news(self, news_items: list[NewsItem]) -> str:
+        """ニュースリストをプロンプト用テキストに変換
+
+        Args:
+            news_items: ニュースアイテムリスト
+
+        Returns:
+            str: フォーマット済みテキスト
+        """
+        if not news_items:
+            return "（なし）"
+
+        lines = []
+        for item in news_items:
+            date_str = item.published_at.strftime(
+                "%Y-%m-%dT%H:%M:%SZ"
+            )
+            lines.append(
+                f"- {date_str} | {item.source_name} | "
+                f"{item.title}"
+            )
+        return "\n".join(lines)
 
     def _format_events(
         self, events: list[EconomicEvent]

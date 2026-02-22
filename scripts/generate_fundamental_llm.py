@@ -43,6 +43,10 @@ from loguru import logger
 from autotrader.adapters.fundamental.llm_context_generator import (
     LLMContextGenerator,
 )
+from autotrader.adapters.fundamental.news_csv_writer import (
+    read_news_csv,
+)
+from autotrader.adapters.fundamental.news_schemas import NewsItem
 from autotrader.adapters.fundamental.schemas import (
     EconomicEvent,
     EventSource,
@@ -130,6 +134,14 @@ def parse_args() -> argparse.Namespace:
         type=float,
         default=0.1,
         help="LLM温度パラメータ",
+    )
+    parser.add_argument(
+        "--news-dir",
+        default=None,
+        help=(
+            "ニュースCSVディレクトリ（news_YYYY.csvを含む）。"
+            "指定するとプロンプトにニュース見出しを追加"
+        ),
     )
     parser.add_argument(
         "--dry-run",
@@ -306,13 +318,15 @@ def main() -> int:
     symbols = args.symbol
     input_dir = Path(args.input_dir)
     output_dir = Path(args.output_dir)
+    news_dir = Path(args.news_dir) if args.news_dir else None
 
     logger.info(
         f"対象シンボル: {symbols}\n"
         f"対象年: {years[0]}〜{years[-1]} ({len(years)}年)\n"
         f"モデル: {args.model}\n"
         f"入力ディレクトリ: {input_dir}\n"
-        f"出力ディレクトリ: {output_dir}"
+        f"出力ディレクトリ: {output_dir}\n"
+        f"ニュースディレクトリ: {news_dir or '（なし）'}"
     )
 
     # dry-run 処理件数確認
@@ -325,7 +339,17 @@ def main() -> int:
         for year in years:
             csv_path = input_dir / f"events_{year}.csv"
             status = "✓" if csv_path.exists() else "✗ 未存在"
-            logger.info(f"  {csv_path}: {status}")
+            news_path = (
+                news_dir / f"news_{year}.csv"
+                if news_dir else None
+            )
+            news_status = (
+                f" | ニュース: {'✓' if news_path and news_path.exists() else '✗'}"
+                if news_dir else ""
+            )
+            logger.info(
+                f"  {csv_path}: {status}{news_status}"
+            )
         return 0
 
     # Ollama接続確認
@@ -357,6 +381,22 @@ def main() -> int:
                 error_count += 1
                 continue
 
+            # ニュースCSVを読み込み（指定時のみ）
+            news_items: list[NewsItem] | None = None
+            if news_dir:
+                news_path = news_dir / f"news_{year}.csv"
+                if news_path.exists():
+                    news_items = read_news_csv(news_path)
+                    logger.info(
+                        f"[{symbol}/{year}] ニュース"
+                        f"{len(news_items)}件読込"
+                    )
+                else:
+                    logger.warning(
+                        f"[{symbol}/{year}] ニュースCSV"
+                        f"が見つかりません: {news_path}"
+                    )
+
             # LLMコンテキスト生成
             try:
                 output_path = generator.generate_for_symbol_year(
@@ -365,6 +405,7 @@ def main() -> int:
                     events=events,
                     output_dir=output_dir,
                     overwrite=args.overwrite,
+                    news_items=news_items,
                 )
                 logger.info(
                     f"[{symbol}/{year}] 完了: {output_path}"
