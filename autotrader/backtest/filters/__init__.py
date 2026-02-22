@@ -1,18 +1,23 @@
-"""バックテストフィルターモジュール
+"""バックテストフィルターモジュール（後方互換shim）
 
-LLMフィルターをシミュレートするルールベースフィルターを提供。
-- 経済イベントフィルター
-- ボラティリティフィルター
-- セッションフィルター（時間帯）
-- 統合フィルターマネージャー
+フィルターは constraint/filters/ に移動済み。
+このモジュールは後方互換のため再エクスポートする。
 """
 
 from __future__ import annotations
 
-from autotrader.backtest.filters.event_filter import EventFilter
-from autotrader.backtest.filters.volatility_filter import VolatilityFilter
-from autotrader.backtest.filters.session_filter import SessionFilter
-from autotrader.backtest.filters.filter_manager import BacktestFilterManager
+from autotrader.constraint.filters.event_filter import (
+    EventFilter,
+)
+from autotrader.constraint.filters.filter_manager import (
+    BacktestFilterManager,
+)
+from autotrader.constraint.filters.session_filter import (
+    SessionFilter,
+)
+from autotrader.constraint.filters.volatility_filter import (
+    VolatilityFilter,
+)
 
 __all__ = [
     "EventFilter",
