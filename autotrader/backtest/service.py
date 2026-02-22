@@ -51,6 +51,15 @@ class BacktestServiceConfig:
     use_short_timeframe: bool = True
     use_parallel_tf: bool = False
     enable_scalping: bool = False
+    commission_per_lot: float = field(
+        default_factory=lambda: DEFAULT_TRADING_PARAMS.commission_per_lot
+    )
+    use_session_spread: bool = False
+    bonus_max_positions: int = 0
+    bonus_score_threshold: float = 7.0
+    pip_value: float = field(
+        default_factory=lambda: DEFAULT_TRADING_PARAMS.pip_value
+    )
 
     @classmethod
     def from_preset(
@@ -112,6 +121,11 @@ def create_backtest_config(config: BacktestServiceConfig) -> BacktestConfig:
         max_positions=config.max_positions,
         spread_pips=config.spread_pips,
         slippage_pips=config.slippage_pips,
+        commission_per_lot=config.commission_per_lot,
+        use_session_spread=config.use_session_spread,
+        bonus_max_positions=config.bonus_max_positions,
+        bonus_score_threshold=config.bonus_score_threshold,
+        pip_value=config.pip_value,
     )
 
 
