@@ -1613,7 +1613,8 @@ const DashboardApp = {
             ? 'text-green-400'
             : 'text-red-400';
         return `<tr style="background:${rowBg}">
-        <td style="box-shadow:inset 3px 0 0 ${borderClr}" class="text-xs ${rowTextClr} whitespace-nowrap tabular-nums">${this.fmtDateTime(t.closed_at || t.opened_at)}</td>
+        <td style="box-shadow:inset 3px 0 0 ${borderClr}" class="text-xs ${rowTextClr} whitespace-nowrap tabular-nums">${t.opened_at ? this.fmtDateTime(t.opened_at) : '-'}</td>
+        <td class="text-xs ${rowTextClr} whitespace-nowrap tabular-nums">${t.closed_at ? this.fmtDateTime(t.closed_at) : '-'}</td>
         <td class="text-xs text-gray-300 whitespace-nowrap">${t.symbol || ''}</td>
         <td><span class="text-xs font-bold ${dirColor}">${t.signal_type}</span></td>
         <td class="text-xs ${rowTextClr} tabular-nums">${t.volume.toFixed(2)}</td>
@@ -1628,7 +1629,7 @@ const DashboardApp = {
     tableEl.innerHTML = `
       <table class="table">
         <thead class="sticky top-0 bg-gray-800 z-10">
-          <tr><th>日時</th><th>通貨</th><th>方向</th><th>Lot</th><th>Entry</th><th>Exit</th><th>ステータス</th><th class="text-right">損益</th></tr>
+          <tr><th>Entry日時</th><th>Exit日時</th><th>通貨</th><th>方向</th><th>Lot</th><th>Entry</th><th>Exit</th><th>ステータス</th><th class="text-right">損益</th></tr>
         </thead>
         <tbody>${rows}</tbody>
       </table>`;
