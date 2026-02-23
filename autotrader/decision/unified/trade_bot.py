@@ -256,8 +256,13 @@ class UnifiedTradeBot:
             slippage_buffer_pips=self.config.slippage_buffer_pips,
         ))
 
-        # ソフトガード
-        self.soft_guard = SoftGuard(SoftGuardConfig())
+        # ソフトガード（UnifiedBotConfigからペナルティ値を伝搬）
+        self.soft_guard = SoftGuard(SoftGuardConfig(
+            spread_penalty_rate=self.config.sg_spread_penalty_rate,
+            off_hours_penalty=self.config.sg_off_hours_penalty,
+            volatility_penalty=self.config.sg_volatility_penalty,
+            recent_loss_penalty=self.config.sg_recent_loss_penalty,
+        ))
 
         # 動的TF選択器（UNIVERSALモード用）
         from autotrader.decision.unified.dynamic_tf_selector import (

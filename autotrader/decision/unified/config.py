@@ -192,6 +192,11 @@ class UnifiedBotConfig:
     consensus_confirm_weight: float = 2.0
     consensus_manage_weight: float = 1.5
     consensus_other_weight: float = 1.0
+    # --- SoftGuardペナルティ ---
+    sg_spread_penalty_rate: float = 0.1
+    sg_off_hours_penalty: float = 0.15
+    sg_volatility_penalty: float = 0.1
+    sg_recent_loss_penalty: float = 0.2
 
     def get_evaluator_config(self, timeframe: str) -> EvaluatorConfig:
         """時間足別評価器設定を取得
