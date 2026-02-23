@@ -151,8 +151,9 @@ function toggleAutoTrade(enable) {
 }
 
 /** 直近tick分析状態取得 */
-function getAnalysis() {
-  return fetchApi('/signals/analysis');
+function getAnalysis(symbol) {
+  const q = symbol ? `?symbol=${encodeURIComponent(symbol)}` : '';
+  return fetchApi(`/signals/analysis${q}`);
 }
 
 /** シンボルごとの自動取引ON/OFF */

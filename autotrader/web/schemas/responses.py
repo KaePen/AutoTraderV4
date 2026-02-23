@@ -495,6 +495,7 @@ class AnalysisResponse(BaseModel):
     """分析状態レスポンス（直近tick結果）
 
     Attributes:
+        symbol: 分析対象の通貨ペア
         direction: シグナル方向（"HOLD"|"BUY"|"SELL"）
         confidence: 確度
         consensus_score: コンセンサススコア
@@ -513,6 +514,7 @@ class AnalysisResponse(BaseModel):
         demo_mode: デモモード状態
     """
 
+    symbol: str | None = None
     direction: str = "HOLD"
     confidence: float = 0.0
     consensus_score: float | None = None

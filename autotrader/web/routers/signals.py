@@ -48,30 +48,70 @@ def _signal_to_response(signal) -> SignalResponse:
 )
 async def get_analysis(
     request: Request,
+    symbol: str | None = Query(
+        default=None,
+        description="通貨ペア（省略時はエンジンのシンボル）",
+    ),
     engine=Depends(get_live_engine),
 ) -> ApiResponse[AnalysisResponse]:
     """直近tick分析状態を取得
 
     HOLDシグナルを含む全tickの分析結果（スコア・閾値・フィルター結果）を返す。
+    symbolパラメータ指定時、エンジンのシンボルと不一致なら
+    「エンジン未起動」レスポンスを返す。
 
     Args:
         request: FastAPIリクエスト
+        symbol: 通貨ペア（省略時はエンジンのシンボル）
         engine: LiveTradingEngine
 
     Returns:
         ApiResponse[AnalysisResponse]: 分析状態
     """
+    engine_symbol = (
+        engine._config.symbol if engine else None
+    )
+
+    # シンボル指定ありでエンジンのシンボルと不一致
+    if (
+        symbol
+        and engine
+        and engine_symbol
+        and symbol != engine_symbol
+    ):
+        return ApiResponse(
+            data=AnalysisResponse(
+                symbol=symbol,
+                rationale=(
+                    "この通貨ペアのエンジンは未起動です"
+                ),
+                engine_running=False,
+                mt5_connected=engine.connected,
+            )
+        )
+
     if engine is None or engine.last_analysis is None:
         running = engine.running if engine else False
         connected = engine.connected if engine else False
-        auto_trade = engine.enable_auto_trade if engine else False
+        auto_trade = (
+            engine.enable_auto_trade if engine else False
+        )
         return ApiResponse(
             data=AnalysisResponse(
-                rationale="分析待機中（データなし）" if running else "エンジン停止中",
+                symbol=engine_symbol,
+                rationale=(
+                    "分析待機中（データなし）"
+                    if running
+                    else "エンジン停止中"
+                ),
                 engine_running=running,
                 auto_trade_enabled=auto_trade,
                 mt5_connected=connected,
-                demo_mode=engine.demo_mode_enabled if engine else False,
+                demo_mode=(
+                    engine.demo_mode_enabled
+                    if engine
+                    else False
+                ),
             )
         )
 
@@ -86,6 +126,7 @@ async def get_analysis(
 
     return ApiResponse(
         data=AnalysisResponse(
+            symbol=engine_symbol,
             direction=cs.direction.value,
             confidence=cs.confidence,
             consensus_score=cs.consensus_score,
@@ -100,11 +141,14 @@ async def get_analysis(
             tf_scores=dict(cs.scores),
             tf_breakdowns={
                 k: dict(v)
-                for k, v in cs.tf_score_breakdowns.items()
+                for k, v
+                in cs.tf_score_breakdowns.items()
             },
             tf_directions=dict(cs.tf_directions),
             last_tick_time=(
-                tick_time.isoformat() if tick_time else None
+                tick_time.isoformat()
+                if tick_time
+                else None
             ),
             demo_mode=engine.demo_mode_enabled,
             engine_running=engine.running,

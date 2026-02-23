@@ -147,11 +147,13 @@ const DashboardApp = {
    * @param {Object} data - tick_updateペイロード
    */
   _applyTickUpdate(data) {
-    // 分析パネル
+    // 分析パネル（選択中シンボルの分析のみ反映）
     if (data.analysis) {
-      this.lastAnalysis = data.analysis;
-      this.renderAnalysis();
-      this.renderTradingControl();
+      if (!data.analysis.symbol || data.analysis.symbol === this.symbol) {
+        this.lastAnalysis = data.analysis;
+        this.renderAnalysis();
+        this.renderTradingControl();
+      }
     }
 
     // メトリクス（口座情報）
@@ -187,7 +189,7 @@ const DashboardApp = {
   /** 分析データ取得 */
   async fetchAnalysis() {
     try {
-      this.lastAnalysis = await getAnalysis();
+      this.lastAnalysis = await getAnalysis(this.symbol);
     } catch (e) {
       this.lastAnalysis = null;
     }
@@ -218,7 +220,21 @@ const DashboardApp = {
       posPanel.classList.add('lg:row-span-2');
     }
 
-    if (!a) return;
+    if (!a) {
+      // シンボル切替中（データなし）: UI要素をリセット
+      const dirBadge = document.getElementById('ap-direction-badge');
+      if (dirBadge) {
+        dirBadge.textContent = '--';
+        dirBadge.className = 'inline-flex items-center px-2 py-0.5 rounded text-xs font-bold bg-gray-700 text-gray-400';
+      }
+      const scoreText = document.getElementById('ap-score-text');
+      if (scoreText) scoreText.textContent = '--';
+      const scoreBar = document.getElementById('ap-score-bar');
+      if (scoreBar) scoreBar.style.width = '0%';
+      const tfEl = document.getElementById('ap-tf-scores');
+      if (tfEl) tfEl.innerHTML = '<p class="text-gray-500 text-xs text-center py-4">分析データなし</p>';
+      return;
+    }
 
     // 方向バッジ
     const dirBadge = document.getElementById('ap-direction-badge');
@@ -773,6 +789,10 @@ const DashboardApp = {
     // ドロップダウンを閉じる
     const list = document.getElementById('symbol-dropdown-list');
     if (list) list.classList.add('hidden');
+    // 前シンボルの分析データをクリアして再取得
+    this.lastAnalysis = null;
+    this.renderAnalysis();
+    this.fetchAnalysis();
     this.renderTradingControl();
     this.fetchAll();
     this.fetchIndicators();
