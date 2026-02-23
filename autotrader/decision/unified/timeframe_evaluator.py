@@ -7,6 +7,13 @@ from typing import TYPE_CHECKING
 
 import pandas as pd
 
+from autotrader.config.tf_params_registry import (
+    get_atr_multipliers,
+    get_default_tp_ratio,
+    get_normalized_min_score,
+    get_sl_multiplier,
+    get_structure_sl_mult,
+)
 from autotrader.core.enums import SignalType
 
 from .config import EvaluatorConfig
@@ -89,37 +96,21 @@ class TimeframeEvaluator:
     特定の時間足のデータを評価し、シグナルを生成する。
     """
 
-    # 時間足ごとのATR係数（長期足ほど広いSL/TP）
-    ATR_MULTIPLIERS: dict[str, tuple[float, float]] = {
-        "M1": (1.0, 1.5),
-        "M5": (1.2, 1.8),
-        "M15": (1.5, 2.0),
-        "H1": (2.0, 3.0),
-        "H4": (2.5, 4.0),
-        "D1": (3.0, 5.0),
-    }
-
     # 最大スコア（全指標満点）
     MAX_POSSIBLE_SCORE: float = 15.0
 
-    # 時間足ごとの最小スコア閾値（正規化比率）
-    # バランス型：取引数と勝率のバランス
-    NORMALIZED_MIN_SCORES: dict[str, float] = {
-        "M1": 0.10,   # 1.5点
-        "M5": 0.12,   # 1.8点
-        "M15": 0.14,  # 2.1点
-        "H1": 0.16,   # 2.4点
-        "H4": 0.18,   # 2.7点
-        "D1": 0.20,   # 3.0点
-    }
-
-    # 後方互換性のためのプロパティ
     @property
     def MIN_SCORES(self) -> dict[str, float]:
-        """時間足ごとの最小スコア閾値（絶対値）"""
+        """時間足ごとの最小スコア閾値（絶対値）
+
+        レジストリから補間付きで取得。
+        """
+        # 既知6TFの値をレジストリから取得
+        _known_tfs = ["M1", "M5", "M15", "H1", "H4", "D1"]
         return {
-            tf: ratio * self.MAX_POSSIBLE_SCORE
-            for tf, ratio in self.NORMALIZED_MIN_SCORES.items()
+            tf: get_normalized_min_score(tf)
+            * self.MAX_POSSIBLE_SCORE
+            for tf in _known_tfs
         }
 
     def __init__(
@@ -812,7 +803,10 @@ class TimeframeEvaluator:
         Returns:
             tuple[SignalType, float]: (方向, 確度)
         """
-        min_score = self.MIN_SCORES.get(self.timeframe, 5.0)
+        min_score = (
+            get_normalized_min_score(self.timeframe)
+            * self.MAX_POSSIBLE_SCORE
+        )
 
         # 最小スコア未満はHOLD
         if max(buy_score, sell_score) < min_score:
@@ -901,16 +895,8 @@ class TimeframeEvaluator:
         """
         atr = row.get("atr_14")
 
-        # SLマルチプライヤー（TF別ATR倍率）
-        sl_multipliers = {
-            "M1": 1.2,
-            "M5": 1.3,
-            "M15": 1.4,
-            "H1": 1.5,
-            "H4": 1.6,
-            "D1": 1.8,
-        }
-        sl_mult = sl_multipliers.get(self.timeframe, 1.4)
+        # SLマルチプライヤー（レジストリから補間付き取得）
+        sl_mult = get_sl_multiplier(self.timeframe)
 
         # ATRをpipsに変換
         if atr is not None and not pd.isna(atr):
@@ -924,12 +910,8 @@ class TimeframeEvaluator:
         # 最低/最大制限
         sl_pips = max(10.0, min(sl_pips, 50.0))
 
-        # TF別デフォルトTP/SL比率（戦略のtp_sl_ratio_rangeで最終補正）
-        _default_tp_ratios = {
-            "M1": 1.2, "M5": 1.3, "M15": 1.4,
-            "H1": 1.5, "H4": 1.6, "D1": 1.8,
-        }
-        tp_ratio = _default_tp_ratios.get(self.timeframe, 1.4)
+        # TF別デフォルトTP/SL比率（レジストリから補間付き取得）
+        tp_ratio = get_default_tp_ratio(self.timeframe)
         tp_pips = sl_pips * tp_ratio
 
         return sl_pips, tp_pips
@@ -977,15 +959,8 @@ class TimeframeEvaluator:
                 if 5.0 <= sl_distance <= 80.0:
                     return sl_distance
 
-        # フォールバック: ATRベース
-        sl_mult = {
-            "M1": 1.2,
-            "M5": 1.3,
-            "M15": 1.5,
-            "H1": 1.8,
-            "H4": 2.0,
-            "D1": 2.5,
-        }.get(self.timeframe, 1.5)
+        # フォールバック: ATRベース（レジストリから取得）
+        sl_mult = get_structure_sl_mult(self.timeframe)
 
         return atr_pips * sl_mult
 

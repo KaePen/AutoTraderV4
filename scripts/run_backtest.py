@@ -142,8 +142,24 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "-tf", "--timeframe",
         default="M15",
-        choices=["M1", "M5", "M15", "H1", "H4", "D1"],
+        choices=[
+            "M1", "M2", "M3", "M4", "M5", "M6", "M10", "M12",
+            "M15", "M20", "M30", "H1", "H2", "H3", "H4",
+            "H6", "H8", "H12", "D1",
+        ],
         help="基準時間足（デフォルト: M15）",
+    )
+    parser.add_argument(
+        "--timeframes",
+        type=str,
+        default=None,
+        help="使用TFリスト（カンマ区切り。例: M1,M5,M15,H1,H4,D1）",
+    )
+    parser.add_argument(
+        "--max-year-workers",
+        type=int,
+        default=5,
+        help="年並列の最大同時実行数（デフォルト: 5）",
     )
 
     # 資金設定
@@ -210,7 +226,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--fast",
         action="store_true",
-        help="高速並列バックテストを実行",
+        help=argparse.SUPPRESS,  # 非推奨: 通常モードで並列化済み
     )
     parser.add_argument(
         "--quick",
@@ -1010,6 +1026,14 @@ def run_single_backtest(args: argparse.Namespace):
         0.0 if args.no_range_day_score_premium
         else args.range_day_score_premium
     )
+    # --timeframes 解決チェーン:
+    # CLI > SymbolPreset.timeframes > デフォルト8TF
+    _tf_list = None
+    if args.timeframes:
+        _tf_list = [
+            t.strip() for t in args.timeframes.split(",") if t.strip()
+        ]
+
     bot_config = UnifiedBotConfig(
         range_day_bbw_threshold=args.range_day_bbw,
         range_day_score_premium=_score_prem,
@@ -1028,6 +1052,9 @@ def run_single_backtest(args: argparse.Namespace):
         bonus_max_positions=args.bonus_max_positions,
         bonus_score_threshold=args.bonus_score_threshold,
         enable_position_sizing=not args.no_position_sizing,
+        timeframes=_tf_list or [
+            "M1", "M5", "M15", "M30", "H1", "H4", "H8", "D1"
+        ],
     )
 
     # PositionManagerConfig構築
@@ -1099,6 +1126,7 @@ def run_single_backtest(args: argparse.Namespace):
         sequential=args.sequential,
         fundamental_csv_list=_fundamental_csvs,
         fundamental_guard_minutes=args.fundamental_guard,
+        max_year_workers=args.max_year_workers,
     )
 
     print_results(result)
@@ -1433,6 +1461,10 @@ def main():
         elif args.debug_signal:
             run_debug_signal_mode(args)
         elif args.fast:
+            logging.warning(
+                "[非推奨] --fast は廃止予定です。"
+                "通常モードで並列化済みのため、--fast なしで実行してください。"
+            )
             run_fast(args)
         elif args.quick:
             run_quick(args)

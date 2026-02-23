@@ -4,6 +4,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+from autotrader.config.tf_params_registry import (
+    get_tf_min_score,
+    get_tf_weight,
+)
+
 
 @dataclass(frozen=True)
 class ScoringConfig:
@@ -34,6 +39,8 @@ class ScoringConfig:
 class TimeframeScoring:
     """時間足別スコアリング設定.
 
+    既知6TFをデフォルトで保持し、任意TFはレジストリから補間取得。
+
     Attributes:
         min_scores: 時間足別の最小スコア閾値
         weights: 時間足別の重み
@@ -56,6 +63,18 @@ class TimeframeScoring:
         "H4": 2.0,
         "D1": 2.5,
     })
+
+    def get_min_score(self, tf: str) -> float:
+        """任意TFの最小スコア閾値を取得（補間付き）"""
+        if tf in self.min_scores:
+            return self.min_scores[tf]
+        return get_tf_min_score(tf)
+
+    def get_weight(self, tf: str) -> float:
+        """任意TFの重みを取得（補間付き）"""
+        if tf in self.weights:
+            return self.weights[tf]
+        return get_tf_weight(tf)
 
 
 # デフォルトインスタンス

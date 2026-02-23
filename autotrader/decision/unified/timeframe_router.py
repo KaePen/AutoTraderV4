@@ -8,6 +8,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 
+from autotrader.core.enums import Timeframe
 from autotrader.decision.unified.mode_selector import TradingPlan
 
 
@@ -97,11 +98,10 @@ def _tf_to_minutes(tf: str) -> int:
     Returns:
         int: 分単位
     """
-    mapping = {
-        "M1": 1, "M5": 5, "M15": 15, "M30": 30,
-        "H1": 60, "H4": 240, "H8": 480, "D1": 1440, "W1": 10080,
-    }
-    return mapping.get(tf, 60)
+    try:
+        return Timeframe(tf).minutes()
+    except ValueError:
+        return 60
 
 
 class TimeframeRouter:
@@ -110,8 +110,8 @@ class TimeframeRouter:
     TradingPlanに基づいて必要なTFセットを構築する。
     """
 
-    # 標準のTF階層
-    TF_HIERARCHY = ["M1", "M5", "M15", "M30", "H1", "H4", "H8", "D1", "W1"]
+    # Timeframe enumから全TF階層を動的生成
+    TF_HIERARCHY = [tf.value for tf in Timeframe]
 
     def __init__(self) -> None:
         """初期化"""

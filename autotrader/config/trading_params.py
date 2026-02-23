@@ -96,6 +96,8 @@ class SymbolPreset:
     trailing_start_r: float = 2.0
     trailing_atr_multiplier: float = 2.0
     breakeven_at_1r: bool = True
+    # 通貨ペア別TFリスト（NoneでデフォルトTF使用）
+    timeframes: list[str] | None = None
 
     def to_pm_config(self) -> PositionManagerConfig:
         """PositionManagerConfig を生成.

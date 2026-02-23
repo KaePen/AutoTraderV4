@@ -68,26 +68,24 @@ class TradingModeSelector:
     UNIVERSALモード固定で全TFを動的評価するプランを返す。
     """
 
-    # UNIVERSALプラン定義
-    UNIVERSAL_PLAN: dict[str, any] = {
-        "primary_tf": "M15",
-        "entry_tf": "M5",
-        "confirm_tfs": ["M1", "M5", "M15", "H1", "H4", "H8", "D1"],
-        "manage_tf": "M15",
-        "max_holding_bars": 32,  # デフォルト：8時間（動的変更可）
-        "tp_sl_ratio_range": (1.1, 1.4),  # デフォルト（動的変更可）
-    }
+    # UNIVERSALプラン定義（confirm_tfsは初期化時にconfig.timeframesで上書き）
+    _DEFAULT_CONFIRM_TFS = [
+        "M1", "M5", "M15", "H1", "H4", "H8", "D1",
+    ]
 
     def __init__(
         self,
         config: ModeSelectorConfig | None = None,
+        timeframes: list[str] | None = None,
     ) -> None:
         """初期化
 
         Args:
             config: モード選択設定（互換性のため残存）
+            timeframes: 使用TFリスト（confirm_tfs用）
         """
         self.config = config or ModeSelectorConfig()
+        self._confirm_tfs = timeframes or self._DEFAULT_CONFIRM_TFS
 
     def select(
         self,
@@ -115,14 +113,13 @@ class TradingModeSelector:
         Returns:
             TradingPlan: UNIVERSALトレーディングプラン
         """
-        plan_params = self.UNIVERSAL_PLAN
         return TradingPlan(
             mode=TradingStrategyMode.UNIVERSAL,
-            primary_tf=plan_params["primary_tf"],
-            entry_tf=plan_params["entry_tf"],
-            confirm_tfs=plan_params["confirm_tfs"],
-            manage_tf=plan_params["manage_tf"],
-            max_holding_bars=plan_params["max_holding_bars"],
-            tp_sl_ratio_range=plan_params["tp_sl_ratio_range"],
+            primary_tf="M15",
+            entry_tf="M5",
+            confirm_tfs=self._confirm_tfs,
+            manage_tf="M15",
+            max_holding_bars=32,
+            tp_sl_ratio_range=(1.1, 1.4),
             selection_reason="UNIVERSAL（動的TF選択）",
         )

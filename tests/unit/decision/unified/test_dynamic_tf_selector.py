@@ -76,7 +76,7 @@ class TestDynamicTFSelector:
         tf_signals = {"M5": MockSignal(SignalType.BUY, 0.9)}
         result = self.selector.select(tf_signals)
         assert result.selected_entry_tf == "M5"
-        assert result.selected_primary_tf == "M15"
+        assert result.selected_primary_tf == "M6"
 
     def test_all_hold_signals_returns_default(self) -> None:
         """全シグナルがHOLD時はデフォルトを返す"""

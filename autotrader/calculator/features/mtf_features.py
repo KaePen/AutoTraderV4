@@ -14,6 +14,7 @@ from autotrader.calculator.features.trend_features import (
     TrendDirection,
     TrendFeatures,
 )
+from autotrader.config.tf_params_registry import get_mtf_weight
 from autotrader.core.enums import Timeframe
 
 
@@ -69,15 +70,13 @@ class MTFFeatures:
         trend_features: トレンド特徴量計算インスタンス
     """
 
+    @staticmethod
+    def _build_tf_weights() -> dict[Timeframe, float]:
+        """レジストリから全TF重みを取得"""
+        return {tf: get_mtf_weight(tf.value) for tf in Timeframe}
+
     TIMEFRAME_WEIGHTS: dict[Timeframe, float] = {
-        Timeframe.M1: 0.1,
-        Timeframe.M5: 0.15,
-        Timeframe.M15: 0.2,
-        Timeframe.M30: 0.25,
-        Timeframe.H1: 0.4,
-        Timeframe.H4: 0.6,
-        Timeframe.D1: 0.8,
-        Timeframe.W1: 1.0,
+        tf: get_mtf_weight(tf.value) for tf in Timeframe
     }
 
     def __init__(
