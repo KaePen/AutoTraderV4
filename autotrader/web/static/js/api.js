@@ -101,9 +101,13 @@ function getIndicatorSeries(symbol, timeframe, limit) {
 }
 
 /** ローソク足取得 */
-function getCandles(symbol, timeframe, limit) {
+function getCandles(symbol, timeframe, limit, endTime) {
   limit = limit || 200;
-  return fetchApi(`/candles/${symbol}/${timeframe}?limit=${limit}`);
+  let url = `/candles/${symbol}/${timeframe}?limit=${limit}`;
+  if (endTime) {
+    url += `&end_time=${encodeURIComponent(endTime)}`;
+  }
+  return fetchApi(url);
 }
 
 /** 設定取得 */

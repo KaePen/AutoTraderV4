@@ -71,7 +71,7 @@ class CandleService:
         if start_time is not None:
             df = df.filter(pl.col("time") >= start_time)
         if end_time is not None:
-            df = df.filter(pl.col("time") <= end_time)
+            df = df.filter(pl.col("time") < end_time)
 
         # 最新からlimit件
         df = df.sort("time", descending=True).head(limit)

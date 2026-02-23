@@ -271,7 +271,11 @@ class MarketService:
         )
 
     def get_candles(
-        self, symbol: str, timeframe: Timeframe, limit: int
+        self,
+        symbol: str,
+        timeframe: Timeframe,
+        limit: int,
+        end_time: datetime | None = None,
     ) -> list[CandleResponse]:
         """ローソク足データを取得
 
@@ -279,6 +283,7 @@ class MarketService:
             symbol: 通貨ペア
             timeframe: 時間足
             limit: 取得本数
+            end_time: この時刻より前のデータを取得
 
         Returns:
             list[CandleResponse]: ローソク足一覧
@@ -287,4 +292,5 @@ class MarketService:
             symbol=symbol,
             timeframe=timeframe.value,
             limit=limit,
+            end_time=end_time,
         )
