@@ -20,7 +20,13 @@ from sqlalchemy.orm import DeclarativeBase
 
 
 class Base(DeclarativeBase):
-    """ベースモデル"""
+    """ベースモデル（Supabase/メインDB用）"""
+
+    pass
+
+
+class LocalBase(DeclarativeBase):
+    """ローカルDB用ベースモデル（SQLite専用）"""
 
     pass
 
@@ -252,3 +258,67 @@ class MarketMemoryRecord(Base):
                 if self.created_at else None
             ),
         }
+
+
+class PositionStateRecord(LocalBase):
+    """ポジション管理状態テーブル（ローカルSQLite）
+
+    PositionManagerの内部状態（追跡値・管理フラグ）を永続化。
+    MT5が保持しないメモリ上の管理状態のみを保存する。
+    """
+
+    __tablename__ = "position_management_state"
+
+    id = Column(
+        Integer, primary_key=True, autoincrement=True,
+    )
+    position_id = Column(
+        String(36), unique=True, nullable=False, index=True,
+    )
+
+    # 追跡値
+    highest_price = Column(
+        Float, nullable=False, default=0.0,
+    )
+    lowest_price = Column(
+        Float, nullable=False, default=0.0,
+    )
+    highest_r = Column(
+        Float, nullable=False, default=0.0,
+    )
+    bars_held = Column(
+        Integer, nullable=False, default=0,
+    )
+    trailing_activated = Column(
+        Boolean, nullable=False, default=False,
+    )
+
+    # 管理フラグ（7つ）
+    partial_closed_1r = Column(
+        Boolean, nullable=False, default=False,
+    )
+    partial_closed_2r = Column(
+        Boolean, nullable=False, default=False,
+    )
+    tp_disabled = Column(
+        Boolean, nullable=False, default=False,
+    )
+    early_be_applied = Column(
+        Boolean, nullable=False, default=False,
+    )
+    insurance_sl_applied = Column(
+        Boolean, nullable=False, default=False,
+    )
+    insurance_partial_applied = Column(
+        Boolean, nullable=False, default=False,
+    )
+    half_r_partial_applied = Column(
+        Boolean, nullable=False, default=False,
+    )
+
+    updated_at = Column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+        nullable=False,
+    )

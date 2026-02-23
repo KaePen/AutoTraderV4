@@ -312,7 +312,117 @@ class PositionManager:
         self._partial_closed_2r.discard(position_id)
         self._early_be_applied.discard(position_id)
         self._tp_disabled.discard(position_id)
+        self._insurance_sl_applied.discard(position_id)
+        self._insurance_partial_applied.discard(position_id)
         self._half_r_partial_applied.discard(position_id)
+
+    def export_state(
+        self, position_id: str,
+    ) -> dict | None:
+        """ポジション管理状態をdictにエクスポート
+
+        DB非依存。ManagedPositionの追跡値と全7フラグを
+        dictとして出力する。
+
+        Note:
+            current_sl, current_r, remaining_volumeは
+            永続化しない。MT5の最新値で再設定される。
+
+        Args:
+            position_id: ポジションID
+
+        Returns:
+            dict | None: 状態dict（未登録の場合None）
+        """
+        pos = self._positions.get(position_id)
+        if pos is None:
+            return None
+        return {
+            "position_id": position_id,
+            "highest_price": pos.highest_price,
+            "lowest_price": pos.lowest_price,
+            "highest_r": pos.highest_r,
+            "bars_held": pos.bars_held,
+            "trailing_activated": pos.trailing_activated,
+            "partial_closed_1r": (
+                position_id in self._partial_closed_1r
+            ),
+            "partial_closed_2r": (
+                position_id in self._partial_closed_2r
+            ),
+            "tp_disabled": (
+                position_id in self._tp_disabled
+            ),
+            "early_be_applied": (
+                position_id in self._early_be_applied
+            ),
+            "insurance_sl_applied": (
+                position_id in self._insurance_sl_applied
+            ),
+            "insurance_partial_applied": (
+                position_id
+                in self._insurance_partial_applied
+            ),
+            "half_r_partial_applied": (
+                position_id
+                in self._half_r_partial_applied
+            ),
+        }
+
+    def import_state(
+        self, position_id: str, state: dict,
+    ) -> None:
+        """管理状態をインポートして復元
+
+        DB非依存。dictの追跡値をManagedPositionに上書きし、
+        フラグsetに追加する。
+
+        Args:
+            position_id: ポジションID
+            state: export_state()で出力されたdict
+        """
+        pos = self._positions.get(position_id)
+        if pos is None:
+            return
+
+        # 追跡値の復元
+        pos.highest_price = state.get(
+            "highest_price", pos.highest_price
+        )
+        pos.lowest_price = state.get(
+            "lowest_price", pos.lowest_price
+        )
+        pos.highest_r = state.get(
+            "highest_r", pos.highest_r
+        )
+        pos.bars_held = state.get(
+            "bars_held", pos.bars_held
+        )
+        pos.trailing_activated = state.get(
+            "trailing_activated", pos.trailing_activated
+        )
+
+        # フラグの復元（対称的: True→add, False→discard）
+        _flag_map = {
+            "partial_closed_1r": self._partial_closed_1r,
+            "partial_closed_2r": self._partial_closed_2r,
+            "tp_disabled": self._tp_disabled,
+            "early_be_applied": self._early_be_applied,
+            "insurance_sl_applied": (
+                self._insurance_sl_applied
+            ),
+            "insurance_partial_applied": (
+                self._insurance_partial_applied
+            ),
+            "half_r_partial_applied": (
+                self._half_r_partial_applied
+            ),
+        }
+        for key, flag_set in _flag_map.items():
+            if state.get(key):
+                flag_set.add(position_id)
+            else:
+                flag_set.discard(position_id)
 
     def evaluate(
         self,

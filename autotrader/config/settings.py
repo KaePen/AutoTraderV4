@@ -154,6 +154,7 @@ class Settings(BaseSettings):
 
     # データベース
     database_url: str = "sqlite:///data/autotrader.db"
+    local_database_url: str = "sqlite:///data/local_state.db"
 
     # ディレクトリ
     data_dir: Path = Path("data")

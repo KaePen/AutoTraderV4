@@ -1162,6 +1162,8 @@ class LiveTradingEngine:
             volume=volume,
             plan=plan,
         )
+        # 新規登録時に管理状態をローカルDBに保存
+        self._save_position_state(str(ticket))
 
     def _write_entry_to_db(
         self,
@@ -1291,6 +1293,8 @@ class LiveTradingEngine:
         self._write_close_to_db(
             ticket, exit_price, exit_reason, profit_loss
         )
+        # ローカルDB管理状態を削除
+        self._delete_position_state(str(ticket))
 
     def _write_close_to_db(
         self,
@@ -1549,6 +1553,9 @@ class LiveTradingEngine:
                 await self._execute_action(
                     position, action, current_price
                 )
+
+                # 管理状態をローカルDBに保存（毎tick）
+                self._save_position_state(pos_id)
             except Exception as e:
                 logger.error(
                     "ポジション管理エラー(ticket=%d): %s",
@@ -1667,6 +1674,10 @@ class LiveTradingEngine:
                         _exit_reason_str,
                         _profit_loss,
                     )
+                # ローカルDB管理状態を削除
+                self._delete_position_state(
+                    str(position.ticket)
+                )
                 # DB記録後にPMからポジションを削除
                 self._pm.unregister_position(
                     str(position.ticket)
@@ -1678,6 +1689,7 @@ class LiveTradingEngine:
         エンジン起動時に呼び出される。
         DBから is_open=True のレコードを検索して
         _open_trades（ticket→trade_id）を復元する。
+        ローカルDBから管理状態（フラグ・追跡値）も復元する。
         """
         positions = await self._executor.get_open_positions_async(
             self._config.symbol
@@ -1690,6 +1702,9 @@ class LiveTradingEngine:
         self._restore_open_trades_from_db(
             [pos.ticket for pos in positions]
         )
+
+        # ローカルDBから管理状態を一括取得
+        saved_states = self._load_position_states()
 
         logger.info(
             "%d件のポジションを同期", len(positions)
@@ -1730,6 +1745,37 @@ class LiveTradingEngine:
                     pos.signal_type.value,
                     pos.volume,
                 )
+
+            # MT5最新値でSLとvolumeを補正
+            managed = self._pm.get_position(pos_id)
+            if managed is not None:
+                managed.current_sl = (
+                    pos.stop_loss or managed.current_sl
+                )
+                managed.remaining_volume = pos.volume
+
+                # ローカルDB管理状態の復元
+                if pos_id in saved_states:
+                    self._pm.import_state(
+                        pos_id, saved_states[pos_id]
+                    )
+                    logger.info(
+                        "管理状態復元: ticket=%s"
+                        " flags=%s",
+                        pos_id,
+                        {
+                            k: v
+                            for k, v
+                            in saved_states[pos_id].items()
+                            if isinstance(v, bool) and v
+                        },
+                    )
+
+        # MT5に存在しない陳腐化レコードを削除
+        active_ids = {
+            str(p.ticket) for p in positions
+        }
+        self._cleanup_stale_states(active_ids)
 
     def _restore_open_trades_from_db(
         self, tickets: list[int]
@@ -1773,6 +1819,145 @@ class LiveTradingEngine:
         except Exception as e:
             logger.warning(
                 "trade_id復元スキップ: %s", e
+            )
+
+    # ==== ポジション管理状態の永続化 ====
+
+    def _load_position_states(
+        self,
+    ) -> dict[str, dict]:
+        """ローカルDBから全管理状態を取得
+
+        Returns:
+            dict[str, dict]: position_id→状態dictの辞書
+        """
+        from autotrader.adapters.database.connection import (
+            get_local_session,
+        )
+        from autotrader.adapters.database.repositories import (
+            PositionStateRepository,
+        )
+        result: dict[str, dict] = {}
+        try:
+            with get_local_session() as session:
+                repo = PositionStateRepository(session)
+                for rec in repo.get_all():
+                    result[rec.position_id] = {
+                        "position_id": rec.position_id,
+                        "highest_price": rec.highest_price,
+                        "lowest_price": rec.lowest_price,
+                        "highest_r": rec.highest_r,
+                        "bars_held": rec.bars_held,
+                        "trailing_activated": (
+                            rec.trailing_activated
+                        ),
+                        "partial_closed_1r": (
+                            rec.partial_closed_1r
+                        ),
+                        "partial_closed_2r": (
+                            rec.partial_closed_2r
+                        ),
+                        "tp_disabled": rec.tp_disabled,
+                        "early_be_applied": (
+                            rec.early_be_applied
+                        ),
+                        "insurance_sl_applied": (
+                            rec.insurance_sl_applied
+                        ),
+                        "insurance_partial_applied": (
+                            rec.insurance_partial_applied
+                        ),
+                        "half_r_partial_applied": (
+                            rec.half_r_partial_applied
+                        ),
+                    }
+        except Exception as e:
+            logger.warning(
+                "管理状態ロードスキップ: %s", e
+            )
+        return result
+
+    def _save_position_state(
+        self, position_id: str,
+    ) -> None:
+        """ポジション管理状態をローカルDBに保存
+
+        Args:
+            position_id: ポジションID
+        """
+        from autotrader.adapters.database.connection import (
+            get_local_session,
+        )
+        from autotrader.adapters.database.repositories import (
+            PositionStateRepository,
+        )
+        state = self._pm.export_state(position_id)
+        if state is None:
+            return
+        try:
+            with get_local_session() as session:
+                repo = PositionStateRepository(session)
+                repo.upsert(state)
+        except Exception as e:
+            logger.warning(
+                "管理状態保存エラー(pos=%s): %s",
+                position_id, e,
+            )
+
+    def _delete_position_state(
+        self, position_id: str,
+    ) -> None:
+        """ポジション管理状態をローカルDBから削除
+
+        Args:
+            position_id: ポジションID
+        """
+        from autotrader.adapters.database.connection import (
+            get_local_session,
+        )
+        from autotrader.adapters.database.repositories import (
+            PositionStateRepository,
+        )
+        try:
+            with get_local_session() as session:
+                repo = PositionStateRepository(session)
+                repo.delete(position_id)
+        except Exception as e:
+            logger.warning(
+                "管理状態削除エラー(pos=%s): %s",
+                position_id, e,
+            )
+
+    def _cleanup_stale_states(
+        self, active_ids: set[str],
+    ) -> None:
+        """MT5に存在しない陳腐化レコードを削除
+
+        Args:
+            active_ids: 現在MT5で有効なポジションIDの集合
+        """
+        from autotrader.adapters.database.connection import (
+            get_local_session,
+        )
+        from autotrader.adapters.database.repositories import (
+            PositionStateRepository,
+        )
+        try:
+            with get_local_session() as session:
+                repo = PositionStateRepository(session)
+                stale_ids = [
+                    rec.position_id
+                    for rec in repo.get_all()
+                    if rec.position_id not in active_ids
+                ]
+                for pid in stale_ids:
+                    repo.delete(pid)
+                    logger.info(
+                        "陳腐化管理状態削除: %s", pid,
+                    )
+        except Exception as e:
+            logger.warning(
+                "陳腐化状態クリーンアップエラー: %s", e
             )
 
     # ==== ファンダメンタル統合メソッド ====

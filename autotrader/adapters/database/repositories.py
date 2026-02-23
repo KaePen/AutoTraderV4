@@ -13,6 +13,7 @@ from autotrader.adapters.database.models import (
     AuditLog,
     EconomicEventRecord,
     MarketMemoryRecord,
+    PositionStateRecord,
 )
 
 if TYPE_CHECKING:
@@ -351,3 +352,107 @@ class MarketMemoryRepository:
         )
         self.session.flush()
         return result
+
+
+class PositionStateRepository:
+    """ポジション管理状態リポジトリ（ローカルSQLite用）"""
+
+    def __init__(self, session: Session) -> None:
+        self.session = session
+
+    def upsert(self, state: dict) -> None:
+        """管理状態をINSERT or UPDATE
+
+        Args:
+            state: position_idを含む状態dict
+        """
+        pos_id = state["position_id"]
+        record = (
+            self.session.query(PositionStateRecord)
+            .filter(
+                PositionStateRecord.position_id == pos_id
+            )
+            .first()
+        )
+        if record is None:
+            record = PositionStateRecord(
+                position_id=pos_id,
+            )
+            self.session.add(record)
+
+        # 追跡値
+        record.highest_price = state.get(
+            "highest_price", 0.0
+        )
+        record.lowest_price = state.get(
+            "lowest_price", 0.0
+        )
+        record.highest_r = state.get("highest_r", 0.0)
+        record.bars_held = state.get("bars_held", 0)
+        record.trailing_activated = state.get(
+            "trailing_activated", False
+        )
+        # 管理フラグ
+        record.partial_closed_1r = state.get(
+            "partial_closed_1r", False
+        )
+        record.partial_closed_2r = state.get(
+            "partial_closed_2r", False
+        )
+        record.tp_disabled = state.get(
+            "tp_disabled", False
+        )
+        record.early_be_applied = state.get(
+            "early_be_applied", False
+        )
+        record.insurance_sl_applied = state.get(
+            "insurance_sl_applied", False
+        )
+        record.insurance_partial_applied = state.get(
+            "insurance_partial_applied", False
+        )
+        record.half_r_partial_applied = state.get(
+            "half_r_partial_applied", False
+        )
+        self.session.flush()
+
+    def get_by_position_id(
+        self, position_id: str,
+    ) -> PositionStateRecord | None:
+        """ポジションIDで管理状態を取得
+
+        Args:
+            position_id: ポジションID
+
+        Returns:
+            PositionStateRecord | None: レコード
+        """
+        return (
+            self.session.query(PositionStateRecord)
+            .filter(
+                PositionStateRecord.position_id
+                == position_id
+            )
+            .first()
+        )
+
+    def get_all(self) -> list[PositionStateRecord]:
+        """全管理状態を取得
+
+        Returns:
+            list[PositionStateRecord]: 全レコード
+        """
+        return (
+            self.session.query(PositionStateRecord).all()
+        )
+
+    def delete(self, position_id: str) -> None:
+        """管理状態を削除（ポジションクローズ時）
+
+        Args:
+            position_id: ポジションID
+        """
+        self.session.query(PositionStateRecord).filter(
+            PositionStateRecord.position_id == position_id
+        ).delete()
+        self.session.flush()

@@ -97,11 +97,13 @@ async def lifespan(app: FastAPI):
     try:
         from autotrader.adapters.database.connection import (
             init_db,
+            init_local_db,
         )
         from autotrader.config.settings import get_settings
         db_url = get_settings().database_url
         logger.info("DB初期化: %s", db_url.split("@")[-1] if "@" in db_url else db_url)
         init_db(db_url)
+        init_local_db()
         logger.info("DB初期化完了")
     except Exception as e:
         logger.error("DB初期化失敗（テーブルが存在しない可能性）: %s", e)
