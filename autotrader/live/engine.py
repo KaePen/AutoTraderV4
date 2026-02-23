@@ -1464,21 +1464,34 @@ class LiveTradingEngine:
             remaining_minutes = None
             max_hold_minutes = None
             if managed is not None:
-                from autotrader.config.tf_params_registry import (
-                    get_holding_minutes,
-                )
-                entry_tf = (
-                    getattr(managed.plan, "dynamic_entry_tf", None)
-                    or managed.plan.entry_tf
-                )
-                max_hold_minutes = get_holding_minutes(entry_tf)
-                elapsed = (
-                    datetime.now(timezone.utc)
-                    - managed.entry_time
-                ).total_seconds() / 60
-                remaining_minutes = max(
-                    0, int(max_hold_minutes - elapsed)
-                )
+                try:
+                    from autotrader.config.tf_params_registry import (
+                        get_holding_minutes,
+                    )
+                    dtf = getattr(
+                        managed.plan, "dynamic_entry_tf", None
+                    )
+                    etf = getattr(
+                        managed.plan, "entry_tf", None
+                    )
+                    entry_tf = (
+                        dtf if isinstance(dtf, str)
+                        else etf if isinstance(etf, str)
+                        else None
+                    )
+                    if entry_tf is not None:
+                        max_hold_minutes = get_holding_minutes(
+                            entry_tf
+                        )
+                        elapsed = (
+                            datetime.now(timezone.utc)
+                            - managed.entry_time
+                        ).total_seconds() / 60
+                        remaining_minutes = max(
+                            0, int(max_hold_minutes - elapsed)
+                        )
+                except Exception:
+                    pass
 
             cache_list.append({
                 "position_id": str(position.ticket),
