@@ -41,6 +41,15 @@ try:
 except ImportError:
     _curl_requests = None  # type: ignore[assignment]
 
+# Wayback Machine API
+_WAYBACK_API = (
+    "https://archive.org/wayback/available?url={url}"
+)
+# DataDome等でブロックされるドメイン（Waybackフォールバック対象）
+_WAYBACK_FALLBACK_DOMAINS = frozenset(
+    {"marketwatch.com"}
+)
+
 # デフォルト設定
 _DEFAULT_TIMEOUT = 15.0
 _DEFAULT_RATE_LIMIT = 2.0
@@ -323,15 +332,30 @@ class MarketWatchParser(ArticleParser):
         return True
 
     def extract_content(self, html: str) -> str | None:
-        """marketwatch.com の記事本文を抽出"""
+        """marketwatch.com の記事本文を抽出
+
+        Wayback Machine経由のHTMLにも対応。
+        CSS-in-JS構造のため section > p を優先使用。
+        """
         if _BeautifulSoup is None:
             return None
         soup = _BeautifulSoup(html, "lxml")
         for tag in soup.select(
             "script, style, .advertisement, aside, "
-            "nav, footer"
+            "nav, footer, header, "
+            "#wm-ipp-base, #wm-ipp-print"
         ):
             tag.decompose()
+        # section内の段落群（CSS-in-JS構造対応）
+        paragraphs: list[str] = []
+        for section in soup.find_all("section"):
+            for p in section.find_all("p"):
+                text = p.get_text(strip=True)
+                if len(text) > 30:
+                    paragraphs.append(text)
+        if paragraphs:
+            return "\n".join(paragraphs)
+        # 従来のセレクタ（直接取得成功時）
         body = (
             soup.select_one("div.article__body")
             or soup.select_one(
@@ -451,20 +475,43 @@ class ArticleFetcher:
         # レート制御
         self._wait_rate_limit(domain)
 
-        try:
-            html = self._fetch_html(
-                url, parser.needs_tls_fingerprint
-            )
-        except TimeoutError:
-            return ScrapeResult(
-                status="timeout",
-                error_msg=f"タイムアウト: {url}",
-            )
-        except Exception as e:
-            return ScrapeResult(
-                status="error",
-                error_msg=f"HTTP取得失敗: {e}",
-            )
+        html: str | None = None
+        # Waybackフォールバック対象ドメインは直接取得をスキップ
+        use_wayback = (
+            domain in _WAYBACK_FALLBACK_DOMAINS
+        )
+
+        if not use_wayback:
+            try:
+                html = self._fetch_html(
+                    url, parser.needs_tls_fingerprint
+                )
+            except TimeoutError:
+                return ScrapeResult(
+                    status="timeout",
+                    error_msg=f"タイムアウト: {url}",
+                )
+            except Exception as e:
+                # 直接取得失敗 → Waybackフォールバック試行
+                if domain in _WAYBACK_FALLBACK_DOMAINS:
+                    use_wayback = True
+                else:
+                    return ScrapeResult(
+                        status="error",
+                        error_msg=f"HTTP取得失敗: {e}",
+                    )
+
+        # Wayback Machine フォールバック
+        if use_wayback or not html:
+            try:
+                html = self._fetch_via_wayback(url)
+            except Exception as e:
+                return ScrapeResult(
+                    status="error",
+                    error_msg=(
+                        f"Wayback取得失敗: {e}"
+                    ),
+                )
 
         if not html:
             return ScrapeResult(
@@ -546,6 +593,57 @@ class ArticleFetcher:
         )
         response.raise_for_status()
         return response.text
+
+    def _fetch_via_wayback(self, url: str) -> str:
+        """Wayback Machine経由でHTMLを取得
+
+        DataDome等でブロックされるサイトのフォールバック。
+        archive.org APIでスナップショットURLを取得し、
+        アーカイブ版のHTMLを返す。
+
+        Args:
+            url: 元記事URL
+
+        Returns:
+            str: アーカイブ版HTMLテキスト
+
+        Raises:
+            RuntimeError: httpx未インストール
+            LookupError: スナップショットが存在しない
+        """
+        if _httpx is None:
+            raise RuntimeError(
+                "httpx が必要です: pip install httpx"
+            )
+        # Wayback Availability API
+        api_url = _WAYBACK_API.format(url=url)
+        resp = _httpx.get(
+            api_url,
+            timeout=self.timeout,
+            follow_redirects=True,
+        )
+        data = resp.json()
+        snapshots = data.get(
+            "archived_snapshots", {}
+        )
+        closest = snapshots.get("closest", {})
+        if not closest or not closest.get("available"):
+            raise LookupError(
+                f"Waybackスナップショットなし: {url}"
+            )
+
+        archive_url = closest["url"]
+        logger.debug(
+            f"[Scraper] Wayback使用: {archive_url}"
+        )
+        # アーカイブ版HTMLを取得
+        resp2 = _httpx.get(
+            archive_url,
+            timeout=self.timeout,
+            follow_redirects=True,
+        )
+        resp2.raise_for_status()
+        return resp2.text
 
     def _fetch_with_curl(self, url: str) -> str:
         """curl-cffiでHTML取得（TLSフィンガープリント付き）
