@@ -10,7 +10,7 @@ from __future__ import annotations
 import asyncio
 import json
 import re
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from loguru import logger
 
@@ -97,7 +97,7 @@ class NewsLLMAnalyzer:
             return self.get_current_sentiment(symbol)
 
         # キャッシュ更新
-        expires_at = datetime.now(timezone.utc) + self._ttl
+        expires_at = datetime.now(UTC) + self._ttl
         self._cache[symbol] = (score, expires_at)
         logger.info(
             f"[NewsLLM] {symbol} センチメント: "
@@ -121,7 +121,7 @@ class NewsLLMAnalyzer:
             return 0.0
 
         score, expires_at = cached
-        if datetime.now(timezone.utc) > expires_at:
+        if datetime.now(UTC) > expires_at:
             # TTL切れ
             del self._cache[symbol]
             return 0.0
@@ -185,12 +185,36 @@ class NewsLLMAnalyzer:
             f"- {item.title}"
             for item in news_items[:10]
         )
+
+        # 本文抜粋セクション（上位5件、各500文字、合計3000文字上限）
+        content_section = ""
+        content_items = [
+            item for item in news_items[:10]
+            if item.content
+        ][:5]
+        if content_items:
+            excerpts = []
+            total = 0
+            for item in content_items:
+                excerpt = (item.content or "")[:500]
+                if total + len(excerpt) > 3000:
+                    break
+                excerpts.append(
+                    f"### {item.title}\n{excerpt}"
+                )
+                total += len(excerpt)
+            if excerpts:
+                content_section = (
+                    "\n\n## 記事本文（抜粋）\n"
+                    + "\n\n".join(excerpts)
+                )
+
         return f"""あなたはFXトレーダーのアシスタントです。
 以下のニュース見出しを分析して、{symbol}に対する
 市場センチメントスコアを算出してください。
 
 ## ニュース見出し
-{headlines}
+{headlines}{content_section}
 
 ## 出力形式（JSONのみで回答）
 {{

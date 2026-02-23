@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import csv
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from loguru import logger
@@ -28,6 +28,7 @@ _NEWS_CSV_COLUMNS = [
     "currencies",
     "source_type",
     "snippet",
+    "content",
 ]
 
 
@@ -70,6 +71,7 @@ def write_news_csv(
                 ),
                 "source_type": item.source_type.value,
                 "snippet": item.snippet or "",
+                "content": item.content or "",
             })
 
     logger.info(
@@ -94,7 +96,7 @@ def read_news_csv(csv_path: Path) -> list[NewsItem]:
 
     items: list[NewsItem] = []
 
-    with open(csv_path, "r", encoding="utf-8") as f:
+    with open(csv_path, encoding="utf-8") as f:
         reader = csv.DictReader(f)
         for row in reader:
             try:
@@ -111,6 +113,64 @@ def read_news_csv(csv_path: Path) -> list[NewsItem]:
         f"[NewsCsv] {len(items)}件読込: {csv_path.name}"
     )
     return items
+
+
+def filter_news_csv(
+    input_path: Path,
+    output_path: Path,
+    allowed_sources: frozenset[str],
+) -> int:
+    """ニュースCSVをソースドメインでフィルタリング
+
+    ストリーミング処理でメモリ効率的にフィルタリングする。
+    NewsItemへの変換は行わず、生CSV行をそのまま書き出す。
+
+    Args:
+        input_path: 入力CSVパス
+        output_path: 出力CSVパス
+        allowed_sources: 許可するソースドメインのセット
+
+    Returns:
+        int: 書き出した行数
+    """
+    if not input_path.exists():
+        logger.warning(
+            f"[NewsCsv] 入力ファイルなし: {input_path}"
+        )
+        return 0
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    count = 0
+
+    with (
+        open(input_path, encoding="utf-8") as fin,
+        open(
+            output_path, "w", encoding="utf-8", newline=""
+        ) as fout,
+    ):
+        reader = csv.DictReader(fin)
+        # 入力CSVのヘッダーを尊重（旧CSV後方互換）
+        fieldnames = reader.fieldnames or _NEWS_CSV_COLUMNS
+        # content列がなければ追加
+        if "content" not in fieldnames:
+            fieldnames = list(fieldnames) + ["content"]
+        writer = csv.DictWriter(
+            fout, fieldnames=fieldnames
+        )
+        writer.writeheader()
+
+        for row in reader:
+            source = row.get("source_name", "")
+            if source in allowed_sources:
+                # 旧CSVにcontent列がない場合は空文字補完
+                row.setdefault("content", "")
+                writer.writerow(row)
+                count += 1
+
+    logger.info(
+        f"[NewsCsv] フィルタ完了: {count}件 → {output_path}"
+    )
+    return count
 
 
 def _parse_row(row: dict) -> NewsItem | None:
@@ -134,7 +194,7 @@ def _parse_row(row: dict) -> NewsItem | None:
         published_at = datetime.fromisoformat(published_str)
         if published_at.tzinfo is None:
             published_at = published_at.replace(
-                tzinfo=timezone.utc
+                tzinfo=UTC
             )
     except ValueError:
         return None
@@ -161,6 +221,7 @@ def _parse_row(row: dict) -> NewsItem | None:
         source_type = NewsSource.GDELT
 
     snippet = row.get("snippet") or None
+    content = row.get("content") or None
 
     return NewsItem(
         news_id=news_id,
@@ -171,4 +232,5 @@ def _parse_row(row: dict) -> NewsItem | None:
         currencies=currencies,
         source_type=source_type,
         snippet=snippet,
+        content=content,
     )

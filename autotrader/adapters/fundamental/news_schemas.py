@@ -34,6 +34,7 @@ class NewsItem:
         currencies: 関連通貨コードリスト（["USD", "JPY"] 等）
         source_type: データソース種別
         snippet: 本文冒頭200文字程度（任意）
+        content: 記事本文プレーンテキスト（最大5000文字、任意）
     """
 
     news_id: str
@@ -44,6 +45,7 @@ class NewsItem:
     currencies: list[str]
     source_type: NewsSource
     snippet: str | None = None
+    content: str | None = None
 
     @classmethod
     def make_id(
@@ -101,3 +103,15 @@ CURRENCY_KEYWORDS: dict[str, list[str]] = {
         "CAD", "Canada economy",
     ],
 }
+
+# リアルトレードでRSS取得可能なFX専門ニュースソース
+# ドメイン名で照合（source_name フィールド）
+FX_RSS_SOURCES: frozenset[str] = frozenset({
+    "fxstreet.com",
+    "forexlive.com",
+    "investing.com",
+    "cnbc.com",
+    "dailyfx.com",
+    "bbc.com",
+    "marketwatch.com",
+})

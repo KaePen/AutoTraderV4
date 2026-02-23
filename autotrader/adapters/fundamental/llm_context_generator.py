@@ -13,7 +13,7 @@ import json
 import re
 import time
 from collections import defaultdict
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 try:
@@ -163,7 +163,7 @@ class LLMContextGenerator:
             month_events = monthly_events.get(month, [])
             month_news = monthly_news.get(month, [])
             period_start = datetime(
-                year, month, 1, tzinfo=timezone.utc
+                year, month, 1, tzinfo=UTC
             )
             logger.info(
                 f"[LLMContext] {symbol} {year}-{month:02d}: "
@@ -362,11 +362,12 @@ class LLMContextGenerator:
         events_text = self._format_events(released_events)
         recent_text = self._format_events(recent_high_impact)
 
-        # ニュースセクションを構築（上位20件）
+        # ニュースセクションを構築（上位20件+本文抜粋）
         news_section = ""
         if news_items:
             news_section = (
-                "\n\n## ニュース見出し（上位20件）\n"
+                "\n\n## ニュース見出しと記事抜粋"
+                "（上位20件）\n"
                 + self._format_news(news_items[:20])
             )
 
@@ -414,10 +415,17 @@ class LLMContextGenerator:
             date_str = item.published_at.strftime(
                 "%Y-%m-%dT%H:%M:%SZ"
             )
-            lines.append(
+            line = (
                 f"- {date_str} | {item.source_name} | "
                 f"{item.title}"
             )
+            # 本文抜粋を追記（200文字まで）
+            if item.content:
+                summary = item.content[:200].replace(
+                    "\n", " "
+                )
+                line += f"\n  要約: {summary}..."
+            lines.append(line)
         return "\n".join(lines)
 
     def _format_events(

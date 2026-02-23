@@ -155,6 +155,14 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--news-prefix",
+        default="news",
+        help=(
+            "ニュースCSVファイル名のプレフィックス"
+            "（デフォルト: news → news_YYYY.csv）"
+        ),
+    )
+    parser.add_argument(
         "--dry-run",
         action="store_true",
         help="実際にLLMを呼び出さずに処理件数を確認",
@@ -330,6 +338,7 @@ def main() -> int:
     input_dir = Path(args.input_dir)
     output_dir = Path(args.output_dir)
     news_dir = Path(args.news_dir) if args.news_dir else None
+    news_prefix = args.news_prefix
 
     logger.info(
         f"対象シンボル: {symbols}\n"
@@ -351,7 +360,7 @@ def main() -> int:
             csv_path = input_dir / f"events_{year}.csv"
             status = "✓" if csv_path.exists() else "✗ 未存在"
             news_path = (
-                news_dir / f"news_{year}.csv"
+                news_dir / f"{news_prefix}_{year}.csv"
                 if news_dir else None
             )
             news_status = (
@@ -395,7 +404,7 @@ def main() -> int:
             # ニュースCSVを読み込み（指定時のみ）
             news_items: list[NewsItem] | None = None
             if news_dir:
-                news_path = news_dir / f"news_{year}.csv"
+                news_path = news_dir / f"{news_prefix}_{year}.csv"
                 if news_path.exists():
                     news_items = read_news_csv(news_path)
                     logger.info(
