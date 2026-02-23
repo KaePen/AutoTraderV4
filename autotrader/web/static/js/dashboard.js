@@ -12,6 +12,9 @@ const DashboardApp = {
   indicatorTf: localStorage.getItem('indicator_tf') || 'M15',
   isLoading: true,
   tradeHistoryExpanded: true,
+  // トレード履歴フィルター
+  tradeFilterSymbol: null,   // null = 全通貨ペア
+  tradeFilterDays: null,     // null = 全期間
   pollInterval: null,
   indicatorInterval: null,
   signalWs: null,
@@ -811,8 +814,8 @@ const DashboardApp = {
     const [dash, pos, tr, summary] = await Promise.allSettled([
       getDashboard(),
       getPositions(null),
-      getTrades(this.symbol, 20),
-      getTradeSummary(this.symbol, 30),
+      getTrades(null, 100),
+      getTradeSummary(null, 30),
     ]);
     if (dash.status === 'fulfilled') this.dashboard = dash.value;
     if (pos.status === 'fulfilled') this.positions = pos.value;
@@ -829,8 +832,8 @@ const DashboardApp = {
     const [dash, pos, tr, summary] = await Promise.allSettled([
       getDashboard(),
       getPositions(null),
-      getTrades(this.symbol, 20),
-      getTradeSummary(this.symbol, 30),
+      getTrades(null, 100),
+      getTradeSummary(null, 30),
     ]);
     if (dash.status === 'fulfilled') this.dashboard = dash.value;
     if (pos.status === 'fulfilled') this.positions = pos.value;
@@ -1415,14 +1418,102 @@ const DashboardApp = {
       </div>`;
   },
 
+  /** トレード履歴フィルター適用 */
+  _getFilteredTrades() {
+    let filtered = this.trades;
+    // 通貨ペアフィルター
+    if (this.tradeFilterSymbol) {
+      filtered = filtered.filter(
+        (t) => t.symbol === this.tradeFilterSymbol
+      );
+    }
+    // 期間フィルター
+    if (this.tradeFilterDays) {
+      const cutoff = Date.now() - this.tradeFilterDays * 86400000;
+      filtered = filtered.filter((t) => {
+        const ts = new Date(t.closed_at || t.opened_at).getTime();
+        return ts >= cutoff;
+      });
+    }
+    return filtered;
+  },
+
+  /** トレード履歴フィルターUI描画 */
+  _renderTradeFilters() {
+    const container = document.getElementById('trade-filter-bar');
+    if (!container) return;
+
+    // 通貨ペア一覧を取得（トレードデータから動的生成）
+    const symbols = [
+      ...new Set(this.trades.map((t) => t.symbol).filter(Boolean)),
+    ].sort();
+
+    // 期間ボタン
+    const periods = [
+      { label: '1D', days: 1 },
+      { label: '7D', days: 7 },
+      { label: '30D', days: 30 },
+      { label: 'All', days: null },
+    ];
+    const periodBtns = periods
+      .map((p) => {
+        const active = this.tradeFilterDays === p.days;
+        const cls = active
+          ? 'bg-blue-600 text-white'
+          : 'bg-gray-700 text-gray-400 hover:bg-gray-600 hover:text-gray-200';
+        return `<button data-days="${p.days}" class="px-2 py-0.5 rounded text-[11px] font-medium transition-colors ${cls}">${p.label}</button>`;
+      })
+      .join('');
+
+    // 通貨ペアドロップダウン
+    const symOptions = symbols
+      .map(
+        (s) =>
+          `<option value="${s}" ${s === this.tradeFilterSymbol ? 'selected' : ''}>${s}</option>`
+      )
+      .join('');
+
+    container.innerHTML = `
+      <div class="flex items-center gap-2 flex-wrap">
+        <div class="flex gap-1">${periodBtns}</div>
+        <select id="trade-filter-symbol" class="bg-gray-700 text-gray-300 text-[11px] rounded px-2 py-0.5 border border-gray-600 focus:border-blue-500 focus:outline-none">
+          <option value="">全通貨</option>
+          ${symOptions}
+        </select>
+      </div>`;
+
+    // 期間ボタンイベント
+    container.querySelectorAll('button[data-days]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const v = btn.dataset.days;
+        this.tradeFilterDays = v === 'null' ? null : Number(v);
+        this.renderTradeHistory();
+      });
+    });
+    // 通貨ペアドロップダウンイベント
+    const sel = document.getElementById('trade-filter-symbol');
+    if (sel) {
+      sel.addEventListener('change', () => {
+        this.tradeFilterSymbol = sel.value || null;
+        this.renderTradeHistory();
+      });
+    }
+  },
+
   /** トレード履歴 */
   renderTradeHistory() {
     const tableEl = document.getElementById('trade-history-table');
     if (!tableEl) return;
 
-    // テーブル
-    if (this.trades.length === 0) {
-      tableEl.innerHTML = '<div class="flex items-center justify-center h-16 text-gray-500 text-sm">トレードなし</div>';
+    // フィルターUI描画
+    this._renderTradeFilters();
+
+    // フィルター適用
+    const filtered = this._getFilteredTrades();
+
+    if (filtered.length === 0) {
+      tableEl.innerHTML =
+        '<div class="flex items-center justify-center h-16 text-gray-500 text-sm">トレードなし</div>';
       return;
     }
 
@@ -1442,36 +1533,50 @@ const DashboardApp = {
       EXTERNAL_CLOSE: { l: 'EXT', c: 'bg-gray-700 text-gray-300 border-gray-500' },
     };
 
-    const rows = this.trades.map((t) => {
-      const isOpen = t.is_open === true;
-      const pnl = t.profit_loss || 0;
-      const isProfit = pnl >= 0;
-      const dirColor = t.signal_type === 'BUY' ? 'text-green-400' : 'text-red-400';
-      const pnlColor = isProfit ? 'text-green-400' : 'text-red-400';
+    const rows = filtered
+      .map((t) => {
+        const isOpen = t.is_open === true;
+        const pnl = t.profit_loss || 0;
+        const isProfit = pnl >= 0;
+        const dirColor =
+          t.signal_type === 'BUY' ? 'text-green-400' : 'text-red-400';
 
-      let reasonHtml;
-      if (isOpen) {
-        reasonHtml = '<span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border bg-blue-900/40 text-blue-300 border-blue-700/50">OPEN</span>';
-      } else {
-        const reason = t.exit_reason && exitReasonConfig[t.exit_reason];
-        reasonHtml = reason
-          ? `<span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border ${reason.c}">${reason.l}</span>`
-          : '';
-      }
+        let reasonHtml;
+        if (isOpen) {
+          reasonHtml =
+            '<span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border bg-blue-900/40 text-blue-300 border-blue-700/50">OPEN</span>';
+        } else {
+          const reason =
+            t.exit_reason && exitReasonConfig[t.exit_reason];
+          reasonHtml = reason
+            ? `<span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border ${reason.c}">${reason.l}</span>`
+            : '';
+        }
 
-      const pipsHtml = (!isOpen && t.profit_loss_pips !== null)
-        ? `<span class="text-gray-500 ml-1">(${t.profit_loss_pips.toFixed(1)}p)</span>` : '';
-      const pnlText = isOpen
-        ? '-'
-        : `${isProfit ? '+' : ''}${this.fmtCurrency(pnl)}${pipsHtml}`;
+        const pipsHtml =
+          !isOpen && t.profit_loss_pips !== null
+            ? `<span class="text-gray-500 ml-1">(${t.profit_loss_pips.toFixed(1)}p)</span>`
+            : '';
+        const pnlText = isOpen
+          ? '-'
+          : `${isProfit ? '+' : ''}${this.fmtCurrency(pnl)}${pipsHtml}`;
 
-      // 行全体を損益ベースで統一カラー
-      // OPEN=青、利益=緑、損失=赤
-      const rowBg = isOpen ? 'rgba(30,58,138,0.10)' : (isProfit ? 'rgba(20,83,45,0.07)' : 'rgba(127,29,29,0.07)');
-      const borderClr = isOpen ? 'rgba(96,165,250,0.5)' : (isProfit ? 'rgba(34,197,94,0.45)' : 'rgba(239,68,68,0.45)');
-      // 損益テキスト色も行カラーに統一
-      const rowTextClr = isOpen ? 'text-gray-400' : (isProfit ? 'text-green-400' : 'text-red-400');
-      return `<tr style="background:${rowBg}">
+        const rowBg = isOpen
+          ? 'rgba(30,58,138,0.10)'
+          : isProfit
+            ? 'rgba(20,83,45,0.07)'
+            : 'rgba(127,29,29,0.07)';
+        const borderClr = isOpen
+          ? 'rgba(96,165,250,0.5)'
+          : isProfit
+            ? 'rgba(34,197,94,0.45)'
+            : 'rgba(239,68,68,0.45)';
+        const rowTextClr = isOpen
+          ? 'text-gray-400'
+          : isProfit
+            ? 'text-green-400'
+            : 'text-red-400';
+        return `<tr style="background:${rowBg}">
         <td style="box-shadow:inset 3px 0 0 ${borderClr}" class="text-xs ${rowTextClr} whitespace-nowrap tabular-nums">${this.fmtDateTime(t.closed_at || t.opened_at)}</td>
         <td class="text-xs text-gray-300 whitespace-nowrap">${t.symbol || ''}</td>
         <td><span class="text-xs font-bold ${dirColor}">${t.signal_type}</span></td>
@@ -1481,7 +1586,8 @@ const DashboardApp = {
         <td>${reasonHtml}</td>
         <td class="text-right text-xs font-bold tabular-nums ${rowTextClr}">${pnlText}</td>
       </tr>`;
-    }).join('');
+      })
+      .join('');
 
     tableEl.innerHTML = `
       <table class="table">
