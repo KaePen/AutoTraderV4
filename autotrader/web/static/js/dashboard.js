@@ -419,19 +419,17 @@ const DashboardApp = {
         const barW = Math.min(100, sc * 100);
         const barColor = dir === 'BUY' ? 'bg-green-500/60' : dir === 'SELL' ? 'bg-red-500/60' : 'bg-gray-500/40';
 
-        // 内訳（影響度順にバー表示）
+        // 内訳（全指標を固定順で表示）
         const detail = bd[tf];
         let detailHtml = '';
         if (detail) {
-          const items = Object.entries(detail)
-            .filter(([, v]) => Math.abs(v) >= 0.1)
-            .sort((a, b) => Math.abs(b[1]) - Math.abs(a[1]));
-          // 最大の指標値でバー幅を正規化
-          const maxAbs = items.length > 0 ? Math.abs(items[0][1]) : 1;
-          detailHtml = items.slice(0, 4).map(([k, v]) => {
+          const indKeys = ['trend', 'adx', 'rsi', 'macd_slope', 'divergence', 'ema_cross', 'stochastic', 'htf'];
+          const items = indKeys.map(k => [k, detail[k] || 0]);
+          const maxAbs = Math.max(...items.map(([, v]) => Math.abs(v)), 0.1);
+          detailHtml = items.map(([k, v]) => {
             const c = v > 0 ? 'text-green-400' : v < 0 ? 'text-red-400' : 'text-gray-600';
             const bg = v > 0 ? 'bg-green-500/40' : 'bg-red-500/40';
-            const w = Math.round(Math.abs(v) / Math.max(maxAbs, 0.1) * 100);
+            const w = Math.round(Math.abs(v) / maxAbs * 100);
             const lbl = indLabel[k] || k.slice(0, 4).toUpperCase();
             return `<div class="flex items-center gap-1">
               <span class="text-[8px] text-gray-500 w-7 text-right flex-shrink-0">${lbl}</span>
