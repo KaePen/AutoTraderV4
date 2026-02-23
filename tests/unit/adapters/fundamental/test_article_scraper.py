@@ -95,6 +95,20 @@ _MARKETWATCH_HTML = """
 </body></html>
 """
 
+# Wayback Machine経由のMarketWatch HTML（CSS-in-JS構造）
+_MARKETWATCH_WAYBACK_HTML = """
+<html><body>
+<div id="wm-ipp-base">Wayback toolbar</div>
+<section class="ef4qpkp0 css-amd8da-Container">
+  <p>Inflation traders are positioning for CPI data.</p>
+  <p>The short-term shock description comes from Gang Hu.</p>
+</section>
+<div class="eh42cdm3">
+  <p>Author bio and disclaimer text here.</p>
+</div>
+</body></html>
+"""
+
 
 class TestCleanText:
     """_clean_text のテスト"""
@@ -299,6 +313,18 @@ class TestMarketWatchParser:
         """TLSフィンガープリント必須"""
         assert MarketWatchParser().needs_tls_fingerprint
 
+    def test_Wayback形式のHTMLから抽出(self) -> None:
+        """Wayback Machine経由のCSS-in-JS HTMLから抽出"""
+        parser = MarketWatchParser()
+        content = parser.extract_content(
+            _MARKETWATCH_WAYBACK_HTML
+        )
+        assert content is not None
+        assert "Inflation traders" in content
+        assert "Gang Hu" in content
+        # Waybackツールバーは除去される
+        assert "Wayback toolbar" not in content
+
 
 class TestArticleFetcher:
     """ArticleFetcher のテスト"""
@@ -433,3 +459,68 @@ class TestArticleFetcher:
             "fxstreet.com",
         )
         assert result.status == "error"
+
+    @patch(
+        "autotrader.adapters.fundamental"
+        ".article_scraper._httpx"
+    )
+    def test_Waybackフォールバック成功(
+        self, mock_httpx: MagicMock
+    ) -> None:
+        """MarketWatchはWayback Machine経由で取得"""
+        # Wayback API レスポンス
+        mock_api_resp = MagicMock()
+        mock_api_resp.json.return_value = {
+            "archived_snapshots": {
+                "closest": {
+                    "available": True,
+                    "url": "http://web.archive.org/web/"
+                    "20250101/https://www.market"
+                    "watch.com/story/test-123",
+                }
+            }
+        }
+        # アーカイブ版HTMLレスポンス
+        mock_html_resp = MagicMock()
+        mock_html_resp.text = _MARKETWATCH_WAYBACK_HTML
+        mock_html_resp.raise_for_status = MagicMock()
+
+        mock_httpx.get.side_effect = [
+            mock_api_resp,
+            mock_html_resp,
+        ]
+
+        fetcher = ArticleFetcher()
+        result = fetcher.fetch(
+            "https://www.marketwatch.com"
+            "/story/test-123",
+            "marketwatch.com",
+        )
+        assert result.status == "ok"
+        assert result.content is not None
+        assert "Inflation traders" in result.content
+        # Wayback APIとアーカイブURLの2回呼ばれる
+        assert mock_httpx.get.call_count == 2
+
+    @patch(
+        "autotrader.adapters.fundamental"
+        ".article_scraper._httpx"
+    )
+    def test_Waybackスナップショットなし(
+        self, mock_httpx: MagicMock
+    ) -> None:
+        """スナップショットがない場合はエラー"""
+        mock_resp = MagicMock()
+        mock_resp.json.return_value = {
+            "archived_snapshots": {}
+        }
+        mock_httpx.get.return_value = mock_resp
+
+        fetcher = ArticleFetcher()
+        result = fetcher.fetch(
+            "https://www.marketwatch.com"
+            "/story/no-snapshot",
+            "marketwatch.com",
+        )
+        assert result.status == "error"
+        assert "Wayback" in (result.error_msg or "")
