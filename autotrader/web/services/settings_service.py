@@ -154,8 +154,19 @@ class SettingsService:
                 trailing_atr_multiplier=(
                     pm.trailing_atr_multiplier
                 ),
+                time_exit_enabled=pm.time_exit_enabled,
                 spread_pips=pm.spread_pips,
                 slippage_pips=pm.slippage_pips,
+                early_breakeven_r=pm.early_breakeven_r,
+                early_breakeven_enabled=(
+                    pm.early_breakeven_enabled
+                ),
+                disable_tp_after_partial=(
+                    pm.disable_tp_after_partial
+                ),
+                signal_rev_close_ratio=(
+                    pm.signal_rev_close_ratio
+                ),
                 stagnation_exit_minutes=(
                     pm.stagnation_exit_minutes
                 ),
@@ -174,8 +185,38 @@ class SettingsService:
                 range_day_fast_be_minutes=(
                     pm.range_day_fast_be_minutes
                 ),
+                range_day_stagnation_enabled=(
+                    pm.range_day_stagnation_enabled
+                ),
+                range_day_stagnation_stage1_minutes=(
+                    pm.range_day_stagnation_stage1_minutes
+                ),
+                range_day_stagnation_stage1_min_mfe_r=(
+                    pm.range_day_stagnation_stage1_min_mfe_r
+                ),
+                range_day_stagnation_stage2_minutes=(
+                    pm.range_day_stagnation_stage2_minutes
+                ),
+                range_day_stagnation_stage2_min_mfe_r=(
+                    pm.range_day_stagnation_stage2_min_mfe_r
+                ),
+                early_partial_close_enabled=(
+                    pm.early_partial_close_enabled
+                ),
+                early_partial_close_ratio=(
+                    pm.early_partial_close_ratio
+                ),
                 range_day_insurance_enabled=(
                     pm.range_day_insurance_enabled
+                ),
+                range_day_insurance_max_minutes=(
+                    pm.range_day_insurance_max_minutes
+                ),
+                range_day_insurance_sl_offset_r=(
+                    pm.range_day_insurance_sl_offset_r
+                ),
+                range_day_insurance_partial_ratio=(
+                    pm.range_day_insurance_partial_ratio
                 ),
                 insurance_trigger_r=pm.insurance_trigger_r,
                 insurance_block_high_mfe_r=(
