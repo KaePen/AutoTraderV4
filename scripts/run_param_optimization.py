@@ -15,11 +15,11 @@ from __future__ import annotations
 import argparse
 import csv
 import hashlib
+import json
 import logging
 import random
 import sys
 import time
-from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 # プロジェクトルートをパスに追加
@@ -217,7 +217,6 @@ def load_top_n(csv_path: Path, n: int) -> list[dict]:
     Returns:
         list[dict]: Top Nのパラメータ辞書リスト
     """
-    import json
     rows = []
     with open(csv_path, encoding="utf-8", newline="") as f:
         reader = csv.DictReader(f)
@@ -257,7 +256,6 @@ def lhs_sample(
     """
     rng = random.Random(seed)
     param_names = list(param_ranges.keys())
-    n_params = len(param_names)
 
     # 各パラメータの区間割り当て
     intervals: dict[str, list] = {}
@@ -727,8 +725,6 @@ def run_stage(
         max_year_workers: 年単位並列ワーカー数
         dry_run: 実行せずにパラメータ一覧を表示
     """
-    import json
-
     cfg = STAGE_CONFIG[stage]
     output_path = Path(cfg["output"])
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -895,8 +891,6 @@ def generate_summary(data_dir: str) -> None:
     Args:
         data_dir: データディレクトリ
     """
-    import json
-
     summary_path = Path("reports/opt_summary.txt")
     oos_csv = Path(STAGE_CONFIG[5]["output"])
     is_csv = Path(STAGE_CONFIG[4]["output"])
