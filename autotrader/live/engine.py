@@ -615,6 +615,8 @@ class LiveTradingEngine:
                 "engine_running": self._running,
                 "auto_trade_enabled": self._enable_auto_trade,
                 "mt5_connected": self.connected,
+                "buy_score": cs.buy_score,
+                "sell_score": cs.sell_score,
             }
         else:
             analysis = {

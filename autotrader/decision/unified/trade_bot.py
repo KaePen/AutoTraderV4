@@ -877,6 +877,8 @@ class UnifiedTradeBot:
                 for r, v in sg_result.penalties.items()
             },
             trend_strength=regime_result.trend_strength,
+            buy_score=consensus.buy_score,
+            sell_score=consensus.sell_score,
             lot=lot,
         )
 
@@ -1134,6 +1136,8 @@ class UnifiedTradeBot:
                 if sg_result else {}
             ),
             trend_strength=regime_result.trend_strength,
+            buy_score=consensus.buy_score,
+            sell_score=consensus.sell_score,
         )
 
 

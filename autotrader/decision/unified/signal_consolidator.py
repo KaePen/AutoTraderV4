@@ -74,6 +74,9 @@ class ConsolidatedSignal:
         default_factory=dict
     )
     trend_strength: float = 0.0
+    # BUY/SELL方向別スコア（双方向バー表示用）
+    buy_score: float = 0.0
+    sell_score: float = 0.0
     # ポジションサイジング結果
     lot: float | None = None
 
