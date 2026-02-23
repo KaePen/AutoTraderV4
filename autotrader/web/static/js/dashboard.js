@@ -114,8 +114,11 @@ const DashboardApp = {
     // 高頻度: tick毎の価格更新 → チャートlastbar即時更新
     this.dashWs.on('price_update', (msg) => {
       this.wsActive = true;
-      const { bid } = msg.data;
-      if (bid > 0) ChartManager.updateLastBar(bid);
+      const { symbol, bid } = msg.data;
+      // 選択中シンボルのtickのみチャートに反映
+      if (bid > 0 && symbol === this.symbol) {
+        ChartManager.updateLastBar(bid);
+      }
     });
     // 1秒毎: フル処理完了 → 全UI一括更新
     this.dashWs.on('tick_update', (msg) => {
