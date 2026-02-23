@@ -497,8 +497,11 @@ class LiveTradingEngine:
         current_time = pd.Timestamp.now(tz="UTC")
         signal = self._bot.generate_signal(current_time)
 
-        # 全tickの分析結果を保存（HOLD含む）
-        self._last_analysis = signal
+        # 分析結果を保存
+        # クールダウン等で分析スキップ時（scores空）は前回の
+        # 表示データを保持し、UIの空表示を防止
+        if signal and signal.scores:
+            self._last_analysis = signal
         self._last_tick_time = datetime.now(timezone.utc)
 
         if signal and signal.direction != SignalType.HOLD:
