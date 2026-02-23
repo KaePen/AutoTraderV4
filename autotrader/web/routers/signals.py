@@ -4,7 +4,10 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, Query, Request
 
-from autotrader.web.dependencies import get_live_engine
+from autotrader.web.dependencies import (
+    get_engine_manager,
+    get_live_engine,
+)
 from autotrader.web.schemas import (
     ApiResponse,
     AnalysisResponse,
@@ -53,21 +56,27 @@ async def get_analysis(
         description="通貨ペア（省略時はエンジンのシンボル）",
     ),
     engine=Depends(get_live_engine),
+    mgr=Depends(get_engine_manager),
 ) -> ApiResponse[AnalysisResponse]:
     """直近tick分析状態を取得
 
-    HOLDシグナルを含む全tickの分析結果（スコア・閾値・フィルター結果）を返す。
-    symbolパラメータ指定時、エンジンのシンボルと不一致なら
-    「エンジン未起動」レスポンスを返す。
+    EngineManager経由でシンボル別エンジンから分析結果を取得。
 
     Args:
         request: FastAPIリクエスト
         symbol: 通貨ペア（省略時はエンジンのシンボル）
         engine: LiveTradingEngine
+        mgr: EngineManager
 
     Returns:
         ApiResponse[AnalysisResponse]: 分析状態
     """
+    # EngineManager経由でシンボル別エンジンを取得
+    if mgr and symbol:
+        target = mgr.get_engine(symbol)
+        if target:
+            engine = target
+
     engine_symbol = (
         engine._config.symbol if engine else None
     )
@@ -86,7 +95,8 @@ async def get_analysis(
                     "この通貨ペアのエンジンは未起動です"
                 ),
                 engine_running=False,
-                mt5_connected=engine.connected,
+                mt5_connected=engine.connected
+                if engine else False,
             )
         )
 

@@ -56,6 +56,7 @@ class SettingsService:
         _settings: アプリケーション設定
         _config_loader: YAML設定ローダー
         _engine: LiveTradingEngineへの参照
+        _engine_manager: EngineManagerへの参照
         _bot_config: 現在のBot設定
         _pm_config: 現在のPM設定
     """
@@ -81,6 +82,7 @@ class SettingsService:
         self._settings = settings
         self._config_loader = config_loader or ConfigLoader()
         self._engine = None
+        self._engine_manager = None
 
         # YAMLから初期設定読み込み
         self._bot_config, self._pm_config = (
@@ -96,6 +98,16 @@ class SettingsService:
             engine: LiveTradingEngineインスタンス
         """
         self._engine = engine
+
+    def set_engine_manager(self, mgr: object) -> None:
+        """EngineManagerの参照を設定
+
+        lifespan内でマネージャー初期化後に呼び出す。
+
+        Args:
+            mgr: EngineManagerインスタンス
+        """
+        self._engine_manager = mgr
 
     @property
     def bot_config(self) -> UnifiedBotConfig:
@@ -301,11 +313,31 @@ class SettingsService:
         """デモモード有効状態"""
         return self._bot_config.demo_mode
 
+    def _apply_to_all_engines(
+        self, bot_config: UnifiedBotConfig,
+        pm_config: PositionManagerConfig,
+    ) -> None:
+        """全エンジンにBot/PM設定を反映
+
+        Args:
+            bot_config: Bot設定
+            pm_config: PM設定
+        """
+        if self._engine_manager is not None:
+            for engine in (
+                self._engine_manager.engines.values()
+            ):
+                engine.update_bot_config(bot_config)
+                engine.update_pm_config(pm_config)
+        elif self._engine is not None:
+            self._engine.update_bot_config(bot_config)
+            self._engine.update_pm_config(pm_config)
+
     def enable_demo_mode(self) -> UnifiedBotConfig:
         """デモモードを有効化
 
         demo_trading.yamlの設定でBotConfigを差し替え。
-        エンジンにも即時反映する。
+        全エンジンにも即時反映する。
 
         Returns:
             UnifiedBotConfig: 更新後のBot設定
@@ -316,9 +348,7 @@ class SettingsService:
         self._bot_config = demo_bot
         self._pm_config = demo_pm
 
-        if self._engine is not None:
-            self._engine.update_bot_config(demo_bot)
-            self._engine.update_pm_config(demo_pm)
+        self._apply_to_all_engines(demo_bot, demo_pm)
 
         logger.info("デモモード有効化")
         return demo_bot
@@ -327,7 +357,7 @@ class SettingsService:
         """デモモードを無効化
 
         live_trading.yamlの設定でBotConfigを差し替え。
-        エンジンにも即時反映する。
+        全エンジンにも即時反映する。
 
         Returns:
             UnifiedBotConfig: 更新後のBot設定
@@ -338,9 +368,7 @@ class SettingsService:
         self._bot_config = live_bot
         self._pm_config = live_pm
 
-        if self._engine is not None:
-            self._engine.update_bot_config(live_bot)
-            self._engine.update_pm_config(live_pm)
+        self._apply_to_all_engines(live_bot, live_pm)
 
         logger.info("デモモード無効化（本番設定に戻す）")
         return live_bot
@@ -373,8 +401,13 @@ class SettingsService:
             new_pm = PositionManagerConfig(**pm_dict)
             self._pm_config = new_pm
 
-            # エンジンに反映
-            if self._engine is not None:
+            # 全エンジンに反映
+            if self._engine_manager is not None:
+                for engine in (
+                    self._engine_manager.engines.values()
+                ):
+                    engine.update_pm_config(new_pm)
+            elif self._engine is not None:
                 self._engine.update_pm_config(new_pm)
 
             # YAML永続化
@@ -402,8 +435,13 @@ class SettingsService:
             new_bot = UnifiedBotConfig(**bot_dict)
             self._bot_config = new_bot
 
-            # エンジンに反映
-            if self._engine is not None:
+            # 全エンジンに反映
+            if self._engine_manager is not None:
+                for engine in (
+                    self._engine_manager.engines.values()
+                ):
+                    engine.update_bot_config(new_bot)
+            elif self._engine is not None:
                 self._engine.update_bot_config(new_bot)
 
             # YAML永続化

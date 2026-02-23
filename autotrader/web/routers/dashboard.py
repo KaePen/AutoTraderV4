@@ -7,7 +7,11 @@ import logging
 from fastapi import APIRouter, Depends, Request
 from sqlalchemy.orm import Session
 
-from autotrader.web.dependencies import get_db, get_live_engine
+from autotrader.web.dependencies import (
+    get_db,
+    get_engine_manager,
+    get_live_engine,
+)
 from autotrader.web.schemas import ApiResponse, DashboardResponse
 from autotrader.web.schemas.responses import AccountInfoResponse
 from autotrader.web.services.market_service import MarketService
@@ -51,22 +55,42 @@ async def get_dashboard(
     request: Request,
     db: Session = Depends(get_db),
     engine=Depends(get_live_engine),
+    mgr=Depends(get_engine_manager),
 ) -> ApiResponse[DashboardResponse]:
     """ダッシュボード情報を取得
 
-    MT5接続中はリアル口座情報を使用し、
-    未接続時はMarketServiceのデフォルト値にフォールバック。
+    MT5口座は共通のため、EngineManager.account_info を使用。
 
     Args:
         request: FastAPIリクエスト
         db: DBセッション
         engine: LiveTradingEngine
+        mgr: EngineManager
 
     Returns:
         ApiResponse[DashboardResponse]: ダッシュボード情報
     """
-    # MT5ライブデータを優先
-    live_account = _account_from_engine(engine)
+    # EngineManager経由の口座情報を優先
+    acct_info = None
+    if mgr and mgr.connected:
+        acct_info = mgr.account_info
+    if acct_info:
+        live_account = AccountInfoResponse(
+            balance=acct_info.balance,
+            equity=acct_info.equity,
+            margin=acct_info.margin,
+            free_margin=acct_info.free_margin,
+            margin_level=acct_info.margin_level,
+            profit=acct_info.profit,
+            login=acct_info.login,
+            server=acct_info.server,
+            name=acct_info.name,
+            currency=acct_info.currency,
+            leverage=acct_info.leverage,
+        )
+    else:
+        # 後方互換
+        live_account = _account_from_engine(engine)
 
     service = MarketService(db)
     dashboard_data = service.get_dashboard(

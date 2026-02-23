@@ -11,7 +11,10 @@ import os
 from fastapi import APIRouter, Depends, Request
 
 from autotrader.config.accounts_loader import AccountsLoader
-from autotrader.web.dependencies import get_live_engine
+from autotrader.web.dependencies import (
+    get_engine_manager,
+    get_live_engine,
+)
 from autotrader.web.schemas import (
     AccountPresetRequest,
     ApiResponse,
@@ -57,16 +60,47 @@ def _account_to_response(acct) -> AccountInfoResponse:
 
 
 def _build_trading_mode_response(
-    engine,
+    engine=None,
+    mgr=None,
 ) -> ApiResponse[TradingModeResponse]:
-    """エンジンからTradingModeレスポンスを構築
+    """エンジン/マネージャーからTradingModeレスポンスを構築
 
     Args:
-        engine: LiveTradingEngine | None
+        engine: LiveTradingEngine | None（後方互換）
+        mgr: EngineManager | None
 
     Returns:
         ApiResponse[TradingModeResponse]: モード情報
     """
+    # EngineManager経由で集約
+    if mgr and mgr.engines:
+        # 任意エンジンから接続状態・デモモードを取得
+        first_engine = next(iter(mgr.engines.values()))
+        any_running = any(
+            e.running for e in mgr.engines.values()
+        )
+        any_auto = any(
+            e.enable_auto_trade
+            for e in mgr.engines.values()
+        )
+        return ApiResponse(
+            data=TradingModeResponse(
+                mode="live",
+                label="Live Trading",
+                connected=mgr.connected,
+                auto_trade=any_auto,
+                engine_running=any_running,
+                demo_mode=first_engine.demo_mode_enabled,
+                symbol_auto_trade=(
+                    mgr.symbol_auto_trade_states
+                ),
+                symbol_demo_mode=(
+                    mgr.symbol_demo_mode_states
+                ),
+            )
+        )
+
+    # 後方互換: 単一エンジン
     if engine:
         return ApiResponse(
             data=TradingModeResponse(
@@ -76,8 +110,12 @@ def _build_trading_mode_response(
                 auto_trade=engine.enable_auto_trade,
                 engine_running=engine.running,
                 demo_mode=engine.demo_mode_enabled,
-                symbol_auto_trade=engine.symbol_auto_trade_states,
-                symbol_demo_mode=engine.symbol_demo_mode_states,
+                symbol_auto_trade=(
+                    engine.symbol_auto_trade_states
+                ),
+                symbol_demo_mode=(
+                    engine.symbol_demo_mode_states
+                ),
             )
         )
     return ApiResponse(
@@ -95,17 +133,19 @@ def _build_trading_mode_response(
 async def get_trading_mode(
     request: Request,
     engine=Depends(get_live_engine),
+    mgr=Depends(get_engine_manager),
 ) -> ApiResponse[TradingModeResponse]:
     """現在のトレーディングモード取得
 
     Args:
         request: FastAPIリクエスト
         engine: LiveTradingEngine
+        mgr: EngineManager
 
     Returns:
         ApiResponse[TradingModeResponse]: モード情報
     """
-    return _build_trading_mode_response(engine)
+    return _build_trading_mode_response(engine, mgr)
 
 
 def _build_mt5_status_response(
@@ -163,18 +203,41 @@ async def get_mt5_status(
 async def connect_mt5(
     request: Request,
     engine=Depends(get_live_engine),
+    mgr=Depends(get_engine_manager),
 ) -> ApiResponse[MT5StatusResponse]:
     """MT5接続開始
 
-    エンジン未設定の場合はオンデマンドで作成する。
+    EngineManager経由で接続。未設定時はオンデマンド作成。
 
     Args:
         request: FastAPIリクエスト
         engine: LiveTradingEngine
+        mgr: EngineManager
 
     Returns:
         ApiResponse[MT5StatusResponse]: 接続結果
     """
+    # EngineManager経由
+    if mgr:
+        try:
+            await mgr.connect()
+            await mgr.start_all()
+            logger.info("MT5接続成功（API/Manager経由）")
+            engine = next(
+                iter(mgr.engines.values()), None
+            )
+            return _build_mt5_status_response(engine)
+        except Exception as e:
+            logger.error("MT5接続失敗: %s", e)
+            return ApiResponse(
+                success=False,
+                error=str(e),
+                data=MT5StatusResponse(
+                    connected=False
+                ),
+            )
+
+    # 後方互換
     if not engine:
         try:
             from autotrader.web.main import (
@@ -214,16 +277,30 @@ async def connect_mt5(
 async def disconnect_mt5(
     request: Request,
     engine=Depends(get_live_engine),
+    mgr=Depends(get_engine_manager),
 ) -> ApiResponse[MT5StatusResponse]:
     """MT5切断
 
     Args:
         request: FastAPIリクエスト
         engine: LiveTradingEngine
+        mgr: EngineManager
 
     Returns:
         ApiResponse[MT5StatusResponse]: 切断結果
     """
+    if mgr:
+        try:
+            await mgr.disconnect()
+            logger.info(
+                "MT5切断成功（API/Manager経由）"
+            )
+        except Exception as e:
+            logger.error("MT5切断エラー: %s", e)
+        return ApiResponse(
+            data=MT5StatusResponse(connected=False)
+        )
+
     if not engine:
         return ApiResponse(
             data=MT5StatusResponse(connected=False)
@@ -288,18 +365,66 @@ async def toggle_symbol_auto_trade(
     symbol: str,
     enable: bool = False,
     engine=Depends(get_live_engine),
+    mgr=Depends(get_engine_manager),
 ) -> ApiResponse[TradingModeResponse]:
     """シンボルごとの自動取引ON/OFF
+
+    EngineManager経由でシンボル別エンジンを取得。
+    エンジンがなければ自動追加する。
 
     Args:
         request: FastAPIリクエスト
         symbol: 通貨ペアシンボル
         enable: 有効化するか
-        engine: LiveTradingEngine
+        engine: LiveTradingEngine（後方互換）
+        mgr: EngineManager
 
     Returns:
         ApiResponse[TradingModeResponse]: 更新後のモード
     """
+    if mgr:
+        target = mgr.get_engine(symbol)
+
+        # エンジンがなければ自動追加
+        if target is None and enable:
+            from autotrader.web.main import (
+                build_engine_config,
+            )
+            config = build_engine_config(symbol)
+            target = await mgr.add_symbol(config)
+
+        if target is None:
+            return _build_trading_mode_response(
+                mgr=mgr
+            )
+
+        target.enable_auto_trade = enable
+        logger.info(
+            "シンボル自動取引: %s %s（API経由）",
+            symbol,
+            "ON" if enable else "OFF",
+        )
+
+        if enable:
+            await target.sync_positions_on_toggle()
+            if not target.running:
+                try:
+                    await target.start()
+                except Exception as e:
+                    logger.error(
+                        "エンジン起動失敗: %s", e
+                    )
+                    return ApiResponse(
+                        success=False,
+                        error=f"エンジン起動失敗: {e}",
+                        data=TradingModeResponse(),
+                    )
+        elif target.running:
+            target.reset_data_update_timer()
+
+        return _build_trading_mode_response(mgr=mgr)
+
+    # 後方互換: EngineManagerなし
     if not engine:
         return ApiResponse(
             success=False,
@@ -307,7 +432,6 @@ async def toggle_symbol_auto_trade(
             data=TradingModeResponse(),
         )
 
-    # シンボル変更有無を記録（change_symbol内でsync済み判定用）
     symbol_changed = (
         hasattr(engine, "active_symbol")
         and symbol != engine.active_symbol
@@ -319,18 +443,12 @@ async def toggle_symbol_auto_trade(
         "ON" if enable else "OFF",
     )
 
-    # ONトグル時にポジション同期を実行
-    # change_symbol内で既にsync済みなら二重実行を回避
     if enable and not symbol_changed:
         await engine.sync_positions_on_toggle()
 
-    # エンジン未起動時は自動起動
     if enable and not engine.running:
         try:
             await engine.start()
-            logger.info(
-                "エンジン自動起動（自動取引ON時）"
-            )
         except Exception as e:
             logger.error("エンジン起動失敗: %s", e)
             return ApiResponse(
@@ -397,22 +515,65 @@ async def toggle_symbol_demo_mode(
     symbol: str,
     enable: bool = False,
     engine=Depends(get_live_engine),
+    mgr=Depends(get_engine_manager),
 ) -> ApiResponse[TradingModeResponse]:
     """シンボルごとのデモモードON/OFF
-
-    bot設定（閾値・フィルター）をデモ/本番に切り替える。
-    自動取引の ON/OFF は別途 symbol-auto-trade で制御する。
-    エンジン未起動時は自動起動する。
 
     Args:
         request: FastAPIリクエスト
         symbol: 通貨ペアシンボル
         enable: デモモードを有効にするか
         engine: LiveTradingEngine
+        mgr: EngineManager
 
     Returns:
         ApiResponse[TradingModeResponse]: 更新後のモード
     """
+    from autotrader.web.services.settings_service import (
+        get_settings_service,
+    )
+    svc = get_settings_service()
+
+    # EngineManager経由
+    if mgr:
+        target = mgr.get_engine(symbol)
+        if target is None:
+            return ApiResponse(
+                success=False,
+                error=f"シンボル {symbol} のエンジンがありません",
+                data=TradingModeResponse(),
+            )
+
+        if enable:
+            svc.enable_demo_mode()
+        else:
+            svc.disable_demo_mode()
+
+        target.set_symbol_demo_mode(symbol, enable)
+
+        if not target.running:
+            try:
+                await target.start()
+            except Exception as e:
+                logger.error(
+                    "エンジン起動失敗: %s", e
+                )
+                return ApiResponse(
+                    success=False,
+                    error=f"エンジン起動失敗: {e}",
+                    data=TradingModeResponse(),
+                )
+        else:
+            target.reset_data_update_timer()
+
+        logger.info(
+            "シンボルデモモード: %s %s（API経由）",
+            symbol,
+            "ON" if enable else "OFF",
+        )
+        return _build_trading_mode_response(mgr=mgr)
+
+    # 後方互換
     if not engine:
         return ApiResponse(
             success=False,
@@ -420,28 +581,16 @@ async def toggle_symbol_demo_mode(
             data=TradingModeResponse(),
         )
 
-    from autotrader.web.services.settings_service import (
-        get_settings_service,
-    )
-    svc = get_settings_service()
-
-    # bot設定（閾値等）をデモ/本番設定に切り替え
-    # （update_bot_config内で市場データ引き継ぎ）
     if enable:
         svc.enable_demo_mode()
     else:
         svc.disable_demo_mode()
 
-    # シンボルのデモモードフラグを更新（UI表示用）
     engine.set_symbol_demo_mode(symbol, enable)
 
-    # エンジン未起動時は自動起動
     if not engine.running:
         try:
             await engine.start()
-            logger.info(
-                "エンジン自動起動（デモモード切替時）"
-            )
         except Exception as e:
             logger.error("エンジン起動失敗: %s", e)
             return ApiResponse(
@@ -450,18 +599,13 @@ async def toggle_symbol_demo_mode(
                 data=TradingModeResponse(),
             )
     else:
-        # 実行中の場合はデータ更新タイマーをリセット
         engine.reset_data_update_timer()
 
     logger.info(
-        "シンボルデモモード: %s %s（API経由）"
-        " running=%s demo=%s",
+        "シンボルデモモード: %s %s（API経由）",
         symbol,
         "ON" if enable else "OFF",
-        engine.running,
-        engine.demo_mode_enabled,
     )
-
     return _build_trading_mode_response(engine)
 
 
@@ -473,32 +617,49 @@ async def switch_account(
     request: Request,
     body: SwitchAccountRequest,
     engine=Depends(get_live_engine),
+    mgr=Depends(get_engine_manager),
 ) -> ApiResponse[MT5StatusResponse]:
     """MT5口座切替
 
-    現在のエンジンを停止し、新しい口座情報でエンジンを再作成。
+    旧マネージャー破棄→新マネージャー作成。
 
     Args:
         request: FastAPIリクエスト
         body: 口座切替リクエスト
         engine: LiveTradingEngine
+        mgr: EngineManager
 
     Returns:
         ApiResponse[MT5StatusResponse]: 新口座の接続結果
     """
-    # 既存エンジン停止
-    if engine and engine.running:
+    # 既存マネージャー/エンジン停止
+    if mgr:
+        try:
+            await mgr.disconnect()
+        except Exception as e:
+            logger.warning(
+                "既存マネージャー停止エラー: %s", e
+            )
+    elif engine and engine.running:
         try:
             await engine.stop()
-            logger.info("口座切替: 既存エンジン停止")
         except Exception as e:
-            logger.warning("既存エンジン停止エラー: %s", e)
+            logger.warning(
+                "既存エンジン停止エラー: %s", e
+            )
 
-    # 新エンジン作成
+    # 新マネージャー作成
     try:
         from autotrader.adapters.mt5.config import MT5Config
-        from autotrader.live.config import LiveTradingConfig
-        from autotrader.live.engine import LiveTradingEngine
+        from autotrader.live.engine_manager import (
+            EngineManager,
+        )
+        from autotrader.web.main import (
+            build_engine_config,
+        )
+        from autotrader.web.services.settings_service import (
+            get_settings_service,
+        )
 
         mt5_config = MT5Config(
             login=body.login,
@@ -508,18 +669,22 @@ async def switch_account(
                 "MT5_TERMINAL_PATH", ""
             ),
         )
-        live_config = LiveTradingConfig(
-            symbol=os.environ.get(
-                "AUTOTRADER_SYMBOL", "USDJPY"
-            ),
-            mt5_config=mt5_config,
-            enable_auto_trade=False,
-        )
-        engine = LiveTradingEngine(live_config)
-        request.app.state.live_engine = engine
+        new_mgr = EngineManager(mt5_config)
+        request.app.state.engine_manager = new_mgr
 
-        # 接続開始
-        await engine.start()
+        # 接続+デフォルトシンボル追加
+        await new_mgr.connect()
+        default_symbol = os.environ.get(
+            "AUTOTRADER_SYMBOL", "USDJPY"
+        )
+        config = build_engine_config(default_symbol)
+        new_engine = await new_mgr.add_symbol(config)
+        request.app.state.live_engine = new_engine
+
+        svc = get_settings_service()
+        svc.set_engine_manager(new_mgr)
+        svc.set_engine(new_engine)
+
         logger.info(
             "口座切替成功: login=%d server=%s",
             body.login,
@@ -533,7 +698,86 @@ async def switch_account(
             data=MT5StatusResponse(connected=False),
         )
 
-    return _build_mt5_status_response(engine)
+    return _build_mt5_status_response(new_engine)
+
+
+# ==== シンボル管理API ====
+
+
+@router.get("/symbols")
+async def get_symbols(
+    mgr=Depends(get_engine_manager),
+) -> ApiResponse[list[str]]:
+    """アクティブシンボル一覧取得
+
+    Args:
+        mgr: EngineManager
+
+    Returns:
+        ApiResponse[list[str]]: シンボル一覧
+    """
+    if not mgr:
+        return ApiResponse(data=[])
+    return ApiResponse(data=mgr.symbols)
+
+
+@router.post("/symbols/add")
+async def add_symbol(
+    request: Request,
+    symbol: str,
+    mgr=Depends(get_engine_manager),
+) -> ApiResponse[list[str]]:
+    """シンボルのエンジンを追加
+
+    Args:
+        request: FastAPIリクエスト
+        symbol: 通貨ペアシンボル
+        mgr: EngineManager
+
+    Returns:
+        ApiResponse[list[str]]: 更新後のシンボル一覧
+    """
+    if not mgr:
+        return ApiResponse(
+            success=False,
+            error="EngineManagerが設定されていません",
+            data=[],
+        )
+
+    from autotrader.web.main import build_engine_config
+
+    config = build_engine_config(symbol)
+    await mgr.add_symbol(config)
+    logger.info("シンボル追加: %s", symbol)
+    return ApiResponse(data=mgr.symbols)
+
+
+@router.post("/symbols/remove")
+async def remove_symbol(
+    request: Request,
+    symbol: str,
+    mgr=Depends(get_engine_manager),
+) -> ApiResponse[list[str]]:
+    """シンボルのエンジンを除去
+
+    Args:
+        request: FastAPIリクエスト
+        symbol: 通貨ペアシンボル
+        mgr: EngineManager
+
+    Returns:
+        ApiResponse[list[str]]: 更新後のシンボル一覧
+    """
+    if not mgr:
+        return ApiResponse(
+            success=False,
+            error="EngineManagerが設定されていません",
+            data=[],
+        )
+
+    await mgr.remove_symbol(symbol)
+    logger.info("シンボル除去: %s", symbol)
+    return ApiResponse(data=mgr.symbols)
 
 
 @router.get(

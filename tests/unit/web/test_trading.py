@@ -2,9 +2,38 @@
 
 from __future__ import annotations
 
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
+from autotrader.web.dependencies import (
+    get_db,
+    get_engine_manager,
+    get_live_engine,
+)
+from autotrader.web.routers import trading
+
+
+def _create_test_app_with_mgr(
+    mock_mgr=None, mock_engine=None,
+):
+    """EngineManager付きテストアプリ"""
+    app = FastAPI()
+    app.include_router(
+        trading.router, prefix="/api/v1"
+    )
+    app.dependency_overrides[get_db] = (
+        lambda: MagicMock()
+    )
+    app.dependency_overrides[get_engine_manager] = (
+        lambda: mock_mgr
+    )
+    app.dependency_overrides[get_live_engine] = (
+        lambda: mock_engine
+    )
+    return app
 
 
 class TestGetTradingMode:
@@ -127,6 +156,105 @@ class TestSwitchSymbol:
         )
         assert resp.status_code == 200
         assert resp.json()["success"] is False
+
+
+class TestSymbolManagement:
+    """シンボル管理APIテスト"""
+
+    def test_シンボル一覧_mgr未設定(
+        self, no_engine_client
+    ):
+        """EngineManagerなし時は空リスト"""
+        resp = no_engine_client.get(
+            "/api/v1/trading/symbols"
+        )
+        assert resp.status_code == 200
+        assert resp.json()["data"] == []
+
+    def test_シンボル一覧_mgr設定済(self):
+        """EngineManagerありで一覧取得"""
+        from autotrader.web.dependencies import (
+            get_engine_manager,
+        )
+
+        mock_mgr = MagicMock()
+        mock_mgr.symbols = ["USDJPY", "EURUSD"]
+
+        test_app = _create_test_app_with_mgr(mock_mgr)
+        with TestClient(test_app) as c:
+            resp = c.get("/api/v1/trading/symbols")
+            assert resp.status_code == 200
+            assert resp.json()["data"] == [
+                "USDJPY", "EURUSD"
+            ]
+
+    def test_シンボル追加(self):
+        """POST /symbols/add でシンボル追加"""
+        mock_mgr = MagicMock()
+        mock_mgr.symbols = ["USDJPY", "EURUSD"]
+        mock_mgr.add_symbol = AsyncMock()
+
+        test_app = _create_test_app_with_mgr(mock_mgr)
+        with TestClient(test_app) as c:
+            resp = c.post(
+                "/api/v1/trading/symbols/add"
+                "?symbol=EURUSD"
+            )
+            assert resp.status_code == 200
+            mock_mgr.add_symbol.assert_called_once()
+
+    def test_シンボル除去(self):
+        """POST /symbols/remove でシンボル除去"""
+        mock_mgr = MagicMock()
+        mock_mgr.symbols = ["USDJPY"]
+        mock_mgr.remove_symbol = AsyncMock()
+
+        test_app = _create_test_app_with_mgr(mock_mgr)
+        with TestClient(test_app) as c:
+            resp = c.post(
+                "/api/v1/trading/symbols/remove"
+                "?symbol=EURUSD"
+            )
+            assert resp.status_code == 200
+            mock_mgr.remove_symbol.assert_called_once_with(
+                "EURUSD"
+            )
+
+
+class TestSymbolAutoTradeMultiEngine:
+    """マルチエンジン対応 symbol-auto-trade テスト"""
+
+    def test_mgr経由でエンジン取得(self):
+        """EngineManager経由でシンボル別エンジンを取得"""
+        mock_engine = MagicMock()
+        mock_engine.enable_auto_trade = False
+        mock_engine.running = True
+        mock_engine.connected = True
+        mock_engine.demo_mode_enabled = False
+        mock_engine.sync_positions_on_toggle = AsyncMock()
+        mock_engine.reset_data_update_timer = MagicMock()
+
+        mock_mgr = MagicMock()
+        mock_mgr.engines = {"USDJPY": mock_engine}
+        mock_mgr.get_engine.return_value = mock_engine
+        mock_mgr.connected = True
+        mock_mgr.symbol_auto_trade_states = {
+            "USDJPY": True
+        }
+        mock_mgr.symbol_demo_mode_states = {}
+
+        test_app = _create_test_app_with_mgr(
+            mock_mgr, mock_engine
+        )
+        with TestClient(test_app) as c:
+            resp = c.post(
+                "/api/v1/trading/symbol-auto-trade"
+                "?symbol=USDJPY&enable=true"
+            )
+            assert resp.status_code == 200
+            mock_mgr.get_engine.assert_called_with(
+                "USDJPY"
+            )
 
 
 class TestAccountPresets:

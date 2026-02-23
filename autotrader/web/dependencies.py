@@ -53,8 +53,25 @@ def get_db() -> Generator[Session, None, None]:
         db.close()
 
 
+def get_engine_manager(request: Request):
+    """EngineManagerを取得
+
+    Args:
+        request: FastAPIリクエスト
+
+    Returns:
+        EngineManager | None: エンジンマネージャー
+    """
+    return getattr(
+        request.app.state, "engine_manager", None
+    )
+
+
 def get_live_engine(request: Request):
-    """LiveTradingEngineを取得
+    """LiveTradingEngineを取得（後方互換）
+
+    EngineManager経由で最初のエンジンを返す。
+    EngineManagerがなければ直接参照にフォールバック。
 
     Args:
         request: FastAPIリクエスト
@@ -62,7 +79,14 @@ def get_live_engine(request: Request):
     Returns:
         LiveTradingEngine | None: エンジン
     """
-    return getattr(request.app.state, "live_engine", None)
+    mgr = getattr(
+        request.app.state, "engine_manager", None
+    )
+    if mgr and mgr.engines:
+        return next(iter(mgr.engines.values()))
+    return getattr(
+        request.app.state, "live_engine", None
+    )
 
 
 def get_app_settings() -> Settings:

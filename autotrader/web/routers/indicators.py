@@ -11,7 +11,11 @@ from sqlalchemy.orm import Session
 import pandas as pd
 
 from autotrader.core.enums import Timeframe
-from autotrader.web.dependencies import get_db, get_live_engine
+from autotrader.web.dependencies import (
+    get_db,
+    get_engine_manager,
+    get_live_engine,
+)
 from autotrader.web.schemas import (
     ApiResponse,
     IndicatorResponse,
@@ -35,11 +39,11 @@ async def get_indicators(
     timeframe: Timeframe = Path(description="時間足"),
     db: Session = Depends(get_db),
     engine=Depends(get_live_engine),
+    mgr=Depends(get_engine_manager),
 ) -> ApiResponse[IndicatorResponse]:
     """指標スナップショットを取得
 
-    MT5接続中はエンジン計算済みデータから返却。
-    未接続時はMarketServiceのスタブにフォールバック。
+    EngineManager経由でシンボル別エンジンからデータ取得。
 
     Args:
         request: FastAPIリクエスト
@@ -47,10 +51,17 @@ async def get_indicators(
         timeframe: 時間足
         db: DBセッション
         engine: LiveTradingEngine
+        mgr: EngineManager
 
     Returns:
         ApiResponse[IndicatorResponse]: 指標情報
     """
+    # シンボル別エンジンを取得
+    if mgr:
+        target = mgr.get_engine(symbol)
+        if target:
+            engine = target
+
     if engine and engine.connected:
         try:
             raw = engine.get_indicators(timeframe.value)
@@ -99,11 +110,9 @@ async def get_indicator_series(
     ),
     db: Session = Depends(get_db),
     engine=Depends(get_live_engine),
+    mgr=Depends(get_engine_manager),
 ) -> ApiResponse[IndicatorSeriesResponse]:
     """チャートオーバーレイ用指標時系列を取得
-
-    EMA(12/26)・ボリンジャーバンド・RSIの時系列データを返す。
-    MT5接続中はライブデータから計算、未接続時は空レスポンス。
 
     Args:
         request: FastAPIリクエスト
@@ -112,10 +121,16 @@ async def get_indicator_series(
         limit: 取得本数
         db: DBセッション
         engine: LiveTradingEngine
+        mgr: EngineManager
 
     Returns:
         ApiResponse[IndicatorSeriesResponse]: 指標時系列
     """
+    # シンボル別エンジンを取得
+    if mgr:
+        target = mgr.get_engine(symbol)
+        if target:
+            engine = target
     if not (engine and engine.connected):
         return ApiResponse(data=IndicatorSeriesResponse())
 
