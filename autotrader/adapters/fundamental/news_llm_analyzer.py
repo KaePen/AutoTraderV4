@@ -91,17 +91,14 @@ class NewsLLMAnalyzer:
                 symbol,
             )
         except Exception as e:
-            logger.warning(
-                f"[NewsLLM] {symbol} 分析失敗: {e}"
-            )
+            logger.warning(f"[NewsLLM] {symbol} 分析失敗: {e}")
             return self.get_current_sentiment(symbol)
 
         # キャッシュ更新
         expires_at = datetime.now(UTC) + self._ttl
         self._cache[symbol] = (score, expires_at)
         logger.info(
-            f"[NewsLLM] {symbol} センチメント: "
-            f"{score:+.2f} (TTL: {self._ttl})"
+            f"[NewsLLM] {symbol} センチメント: {score:+.2f} (TTL: {self._ttl})"
         )
         return score
 
@@ -147,15 +144,12 @@ class NewsLLMAnalyzer:
         """
         if _ollama_module is None:
             raise RuntimeError(
-                "ollama パッケージが必要です: "
-                "pip install ollama"
+                "ollama パッケージが必要です: pip install ollama"
             )
 
         # 遅延初期化: 初回呼び出し時のみ Client を生成
         if self._client is None:
-            self._client = _ollama_module.Client(
-                host=self._host
-            )
+            self._client = _ollama_module.Client(host=self._host)
 
         prompt = self._build_prompt(news_items, symbol)
         response = self._client.chat(
@@ -181,17 +175,12 @@ class NewsLLMAnalyzer:
         Returns:
             str: LLMプロンプト
         """
-        headlines = "\n".join(
-            f"- {item.title}"
-            for item in news_items[:10]
-        )
+        top_items = news_items[:10]
+        headlines = "\n".join(f"- {item.title}" for item in top_items)
 
         # 本文抜粋セクション（上位5件、各500文字、合計3000文字上限）
         content_section = ""
-        content_items = [
-            item for item in news_items[:10]
-            if item.content
-        ][:5]
+        content_items = [item for item in top_items if item.content][:5]
         if content_items:
             excerpts = []
             total = 0
@@ -199,22 +188,29 @@ class NewsLLMAnalyzer:
                 excerpt = (item.content or "")[:500]
                 if total + len(excerpt) > 3000:
                     break
-                excerpts.append(
-                    f"### {item.title}\n{excerpt}"
-                )
+                excerpts.append(f"### {item.title}\n{excerpt}")
                 total += len(excerpt)
             if excerpts:
-                content_section = (
-                    "\n\n## 記事本文（抜粋）\n"
-                    + "\n\n".join(excerpts)
+                content_section = "\n\n## 記事本文（抜粋）\n" + "\n\n".join(
+                    excerpts
                 )
 
+        # タイトルのみ件数
+        title_only = sum(1 for item in top_items if not item.content)
+        title_note = ""
+        if title_only > 0:
+            title_note = (
+                f"\n※ {title_only}件は本文未取得のため"
+                "見出しのみ。見出しから判断してください。"
+            )
+
         return f"""あなたはFXトレーダーのアシスタントです。
-以下のニュース見出しを分析して、{symbol}に対する
+以下のニュース見出しと記事本文を分析して、{symbol}に対する
 市場センチメントスコアを算出してください。
+記事本文がないものは見出しのみで判断してください。
 
 ## ニュース見出し
-{headlines}{content_section}
+{headlines}{title_note}{content_section}
 
 ## 出力形式（JSONのみで回答）
 {{
@@ -253,9 +249,7 @@ class NewsLLMAnalyzer:
                 pass
 
         # { ... } の最初の出現を抽出
-        brace_match = re.search(
-            r"\{[^{}]*\}", content, re.DOTALL
-        )
+        brace_match = re.search(r"\{[^{}]*\}", content, re.DOTALL)
         if brace_match:
             try:
                 data = json.loads(brace_match.group(0))
@@ -264,7 +258,5 @@ class NewsLLMAnalyzer:
             except (json.JSONDecodeError, ValueError, TypeError):
                 pass
 
-        logger.warning(
-            f"[NewsLLM] スコアパース失敗: {content[:100]}"
-        )
+        logger.warning(f"[NewsLLM] スコアパース失敗: {content[:100]}")
         return 0.0

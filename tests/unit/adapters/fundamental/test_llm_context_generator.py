@@ -19,6 +19,10 @@ from autotrader.adapters.fundamental.schemas import (
     EventSource,
     ImpactLevel,
 )
+from autotrader.adapters.fundamental.news_schemas import (
+    NewsItem,
+    NewsSource,
+)
 from autotrader.config.llm_settings import OllamaSettings
 
 
@@ -322,6 +326,123 @@ class TestLLMContextGenerator:
                     events=sample_events,
                     output_dir=tmpdir,
                 )
+
+    def test_format_news_empty(self, generator):
+        """ニュースなしの場合は（なし）と返すこと"""
+        result = generator._format_news([])
+        assert result == "（なし）"
+
+    def test_format_news_title_only(self, generator):
+        """コンテンツなしの場合は[見出しのみ]が表示されること"""
+        items = [
+            NewsItem(
+                news_id="test_001",
+                published_at=datetime(
+                    2024, 1, 15, 10, 0,
+                    tzinfo=timezone.utc,
+                ),
+                title="Fed holds rates steady",
+                source_name="reuters.com",
+                source_url="https://reuters.com/1",
+                currencies=["USD"],
+                source_type=NewsSource.RSS,
+            ),
+        ]
+        result = generator._format_news(items)
+        assert "Fed holds rates steady" in result
+        assert "[見出しのみ]" in result
+        assert "要約:" not in result
+
+    def test_format_news_with_content(self, generator):
+        """コンテンツありの場合は要約が表示されること"""
+        items = [
+            NewsItem(
+                news_id="test_002",
+                published_at=datetime(
+                    2024, 1, 15, 10, 0,
+                    tzinfo=timezone.utc,
+                ),
+                title="Fed holds rates steady",
+                source_name="reuters.com",
+                source_url="https://reuters.com/2",
+                currencies=["USD"],
+                source_type=NewsSource.RSS,
+                content="The Federal Reserve decided"
+                " to hold interest rates.",
+            ),
+        ]
+        result = generator._format_news(items)
+        assert "要約:" in result
+        assert "[見出しのみ]" not in result
+
+    def test_format_news_mixed_content(self, generator):
+        """コンテンツ混在時の動作"""
+        items = [
+            NewsItem(
+                news_id="test_003",
+                published_at=datetime(
+                    2024, 1, 15, 10, 0,
+                    tzinfo=timezone.utc,
+                ),
+                title="Article with content",
+                source_name="reuters.com",
+                source_url="https://reuters.com/3",
+                currencies=["USD"],
+                source_type=NewsSource.RSS,
+                content="Full article body.",
+            ),
+            NewsItem(
+                news_id="test_004",
+                published_at=datetime(
+                    2024, 1, 15, 11, 0,
+                    tzinfo=timezone.utc,
+                ),
+                title="Article without content",
+                source_name="bbc.com",
+                source_url="https://bbc.com/4",
+                currencies=["GBP"],
+                source_type=NewsSource.RSS,
+            ),
+        ]
+        result = generator._format_news(items)
+        # コンテンツありは要約表示
+        assert "要約: Full article body." in result
+        # コンテンツなしは見出しのみ表示
+        assert "[見出しのみ]" in result
+
+    def test_build_prompt_includes_news_analysis_instruction(
+        self, generator, sample_events
+    ):
+        """分析指示にニュース分析が含まれること"""
+        news_items = [
+            NewsItem(
+                news_id="test_005",
+                published_at=datetime(
+                    2024, 1, 15, 10, 0,
+                    tzinfo=timezone.utc,
+                ),
+                title="Fed rate decision",
+                source_name="reuters.com",
+                source_url="https://reuters.com/5",
+                currencies=["USD"],
+                source_type=NewsSource.RSS,
+            ),
+        ]
+        jan_events = [
+            ev for ev in sample_events
+            if ev.event_time.month == 1
+        ]
+        prompt = generator._build_prompt(
+            symbol="USDJPY",
+            base_currency="USD",
+            quote_currency="JPY",
+            year=2024,
+            month=1,
+            released_events=jan_events,
+            recent_high_impact=jan_events[:1],
+            news_items=news_items,
+        )
+        assert "見出しから判断" in prompt
 
 
 class TestLLMContextInBacktestProvider:

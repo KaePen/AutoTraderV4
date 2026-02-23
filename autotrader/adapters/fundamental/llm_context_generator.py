@@ -123,9 +123,7 @@ class LLMContextGenerator:
         output_path = Path(output_dir) / f"llm_context_{symbol}_{year}.csv"
 
         if output_path.exists() and not overwrite:
-            logger.info(
-                f"[LLMContext] スキップ（既存）: {output_path}"
-            )
+            logger.info(f"[LLMContext] スキップ（既存）: {output_path}")
             return output_path
 
         currencies = _SYMBOL_CURRENCIES.get(symbol)
@@ -137,10 +135,7 @@ class LLMContextGenerator:
         base_currency, quote_currency = currencies
 
         # シンボル関連通貨のイベントのみ抽出
-        relevant_events = [
-            ev for ev in events
-            if ev.currency in currencies
-        ]
+        relevant_events = [ev for ev in events if ev.currency in currencies]
         logger.info(
             f"[LLMContext] {symbol}/{year}: "
             f"全{len(events)}件→{len(relevant_events)}件"
@@ -150,9 +145,7 @@ class LLMContextGenerator:
         monthly_events = self._group_by_month(relevant_events, year)
 
         # ニュースを月ごとにグループ化
-        monthly_news = self._group_news_by_month(
-            news_items or [], year
-        )
+        monthly_news = self._group_news_by_month(news_items or [], year)
 
         # 月次LLM分析実行
         output_dir_path = Path(output_dir)
@@ -162,9 +155,7 @@ class LLMContextGenerator:
         for month in range(1, 13):
             month_events = monthly_events.get(month, [])
             month_news = monthly_news.get(month, [])
-            period_start = datetime(
-                year, month, 1, tzinfo=UTC
-            )
+            period_start = datetime(year, month, 1, tzinfo=UTC)
             logger.info(
                 f"[LLMContext] {symbol} {year}-{month:02d}: "
                 f"{len(month_events)}件 / ニュース"
@@ -180,22 +171,20 @@ class LLMContextGenerator:
                 events=month_events,
                 news_items=month_news,
             )
-            rows.append({
-                "period_start": period_start.isoformat(),
-                **result,
-            })
+            rows.append(
+                {
+                    "period_start": period_start.isoformat(),
+                    **result,
+                }
+            )
 
         # CSV書き込み
-        with open(
-            output_path, "w", encoding="utf-8", newline=""
-        ) as f:
+        with open(output_path, "w", encoding="utf-8", newline="") as f:
             writer = csv.DictWriter(f, fieldnames=_LLM_CSV_COLUMNS)
             writer.writeheader()
             writer.writerows(rows)
 
-        logger.info(
-            f"[LLMContext] 完了: {output_path} ({len(rows)}ヶ月)"
-        )
+        logger.info(f"[LLMContext] 完了: {output_path} ({len(rows)}ヶ月)")
         return output_path
 
     def _group_by_month(
@@ -280,13 +269,12 @@ class LLMContextGenerator:
         sorted_events = sorted(events, key=lambda e: e.event_time)
 
         # 発表済みイベントのみ抽出（予実乖離分析のため）
-        released = [
-            ev for ev in sorted_events if ev.is_released
-        ]
+        released = [ev for ev in sorted_events if ev.is_released]
 
         # 直近の高インパクト指標（月末3件）
         high_impact = [
-            ev for ev in sorted_events
+            ev
+            for ev in sorted_events
             if ev.impact == ImpactLevel.HIGH and ev.is_released
         ]
         recent_high = high_impact[-3:] if high_impact else []
@@ -314,9 +302,7 @@ class LLMContextGenerator:
                     )
                     time.sleep(self._retry_delay)
                 else:
-                    logger.error(
-                        f"[LLMContext] LLM呼び出し失敗: {e}"
-                    )
+                    logger.error(f"[LLMContext] LLM呼び出し失敗: {e}")
                     return {
                         "macro_bias_score": 0.0,
                         "macro_bias_summary": f"分析失敗: {e}",
@@ -367,8 +353,7 @@ class LLMContextGenerator:
         if news_items:
             news_section = (
                 "\n\n## ニュース見出しと記事抜粋"
-                "（上位20件）\n"
-                + self._format_news(news_items[:20])
+                "（上位20件）\n" + self._format_news(news_items[:20])
             )
 
         return f"""あなたはFXトレードのファンダメンタルアナリストです。
@@ -387,7 +372,8 @@ class LLMContextGenerator:
 ## 分析指示
 1. 各指標の実績vs予測の乖離（サプライズ）を評価
 2. {base_currency}と{quote_currency}の相対的な強弱を判断
-3. 月全体のマクロトレンドを総合評価
+3. ニュース記事のセンチメントを評価（本文がないものは見出しから判断）
+4. 月全体のマクロトレンドを総合評価
 
 ## 出力形式（JSONのみで回答）
 {{
@@ -412,25 +398,18 @@ class LLMContextGenerator:
 
         lines = []
         for item in news_items:
-            date_str = item.published_at.strftime(
-                "%Y-%m-%dT%H:%M:%SZ"
-            )
-            line = (
-                f"- {date_str} | {item.source_name} | "
-                f"{item.title}"
-            )
+            date_str = item.published_at.strftime("%Y-%m-%dT%H:%M:%SZ")
+            line = f"- {date_str} | {item.source_name} | {item.title}"
             # 本文抜粋を追記（200文字まで）
             if item.content:
-                summary = item.content[:200].replace(
-                    "\n", " "
-                )
+                summary = item.content[:200].replace("\n", " ")
                 line += f"\n  要約: {summary}..."
+            else:
+                line += "\n  [見出しのみ]"
             lines.append(line)
         return "\n".join(lines)
 
-    def _format_events(
-        self, events: list[EconomicEvent]
-    ) -> str:
+    def _format_events(self, events: list[EconomicEvent]) -> str:
         """イベントリストをプロンプト用テキストに変換
 
         Args:
@@ -444,23 +423,14 @@ class LLMContextGenerator:
 
         lines = []
         for ev in events:
-            impact_label = _IMPACT_LABELS.get(
-                ev.impact, ev.impact.value
-            )
+            impact_label = _IMPACT_LABELS.get(ev.impact, ev.impact.value)
             date_str = ev.event_time.strftime("%m/%d %H:%M")
-            actual = (
-                f"{ev.actual:.2f}" if ev.actual is not None
-                else "未発表"
-            )
+            actual = f"{ev.actual:.2f}" if ev.actual is not None else "未発表"
             forecast = (
-                f"{ev.forecast:.2f}" if ev.forecast is not None
-                else "予測なし"
+                f"{ev.forecast:.2f}" if ev.forecast is not None else "予測なし"
             )
             surprise = ev.surprise_magnitude
-            surprise_str = (
-                f"{surprise:+.1%}" if surprise is not None
-                else ""
-            )
+            surprise_str = f"{surprise:+.1%}" if surprise is not None else ""
             lines.append(
                 f"- {date_str} [{impact_label}] "
                 f"{ev.currency} {ev.event_name}: "
@@ -469,9 +439,7 @@ class LLMContextGenerator:
             )
         return "\n".join(lines)
 
-    def _call_ollama(
-        self, prompt: str
-    ) -> dict[str, float | str]:
+    def _call_ollama(self, prompt: str) -> dict[str, float | str]:
         """OllamaでLLM推論を実行
 
         Args:
@@ -488,8 +456,7 @@ class LLMContextGenerator:
         """
         if _ollama_module is None:
             raise RuntimeError(
-                "ollama パッケージが必要です: "
-                "pip install ollama"
+                "ollama パッケージが必要です: pip install ollama"
             )
         client = _ollama_module.Client(host=self._settings.host)
         response = client.chat(
@@ -508,9 +475,7 @@ class LLMContextGenerator:
         content = response.message.content
         return self._parse_response(content)
 
-    def _parse_response(
-        self, content: str
-    ) -> dict[str, float | str]:
+    def _parse_response(self, content: str) -> dict[str, float | str]:
         """LLMレスポンスをパース
 
         JSONブロック抽出 → フォールバックとして正規表現を使用。
@@ -538,32 +503,22 @@ class LLMContextGenerator:
         )
         if json_match:
             try:
-                return self._build_result(
-                    json.loads(json_match.group(1))
-                )
+                return self._build_result(json.loads(json_match.group(1)))
             except json.JSONDecodeError:
                 pass
 
         # { ... } の最初の出現を抽出（非greedyで最小一致）
         # ネストしたJSONは想定しないためシンプルな非greedy正規表現を使用
-        brace_match = re.search(
-            r"\{[^{}]*\}", content, re.DOTALL
-        )
+        brace_match = re.search(r"\{[^{}]*\}", content, re.DOTALL)
         if brace_match:
             try:
-                return self._build_result(
-                    json.loads(brace_match.group(0))
-                )
+                return self._build_result(json.loads(brace_match.group(0)))
             except json.JSONDecodeError:
                 pass
 
-        raise ValueError(
-            f"JSON解析失敗\nコンテンツ: {content[:200]}"
-        )
+        raise ValueError(f"JSON解析失敗\nコンテンツ: {content[:200]}")
 
-    def _build_result(
-        self, data: dict
-    ) -> dict[str, float | str]:
+    def _build_result(self, data: dict) -> dict[str, float | str]:
         """パース済みdictからスコア辞書を構築
 
         Args:
@@ -572,30 +527,21 @@ class LLMContextGenerator:
         Returns:
             dict: スコアと要約のdictionary
         """
-        def _clip(
-            val: float | None, default: float = 0.0
-        ) -> float:
+
+        def _clip(val: float | None, default: float = 0.0) -> float:
             """値を[-1.0, 1.0]にクリップ"""
-            if val is None or not isinstance(
-                val, (int, float)
-            ):
+            if val is None or not isinstance(val, (int, float)):
                 return default
             return max(-1.0, min(1.0, float(val)))
 
         return {
-            "macro_bias_score": _clip(
-                data.get("macro_bias_score")
-            ),
-            "macro_bias_summary": str(
-                data.get("macro_bias_summary", "")
-            )[:200],
-            "post_event_bias_score": _clip(
-                data.get("post_event_bias_score")
-            ),
-            "post_event_summary": str(
-                data.get("post_event_summary", "")
-            )[:200],
-            "sentiment_score": _clip(
-                data.get("sentiment_score")
-            ),
+            "macro_bias_score": _clip(data.get("macro_bias_score")),
+            "macro_bias_summary": str(data.get("macro_bias_summary", ""))[
+                :200
+            ],
+            "post_event_bias_score": _clip(data.get("post_event_bias_score")),
+            "post_event_summary": str(data.get("post_event_summary", ""))[
+                :200
+            ],
+            "sentiment_score": _clip(data.get("sentiment_score")),
         }

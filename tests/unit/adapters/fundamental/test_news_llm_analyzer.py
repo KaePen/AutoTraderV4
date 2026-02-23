@@ -227,3 +227,59 @@ class TestNewsLLMAnalyzerBuildPrompt:
         # 11件目以降は除外
         assert "Federal Reserve holds rates steady 10" not in prompt
         assert "Federal Reserve holds rates steady 9" in prompt
+
+    def test_コンテンツなしはタイトルのみで分析指示(
+        self,
+    ) -> None:
+        """全件コンテンツなしでもタイトルのみ分析指示が出る"""
+        items = [_make_item(0), _make_item(1)]
+        prompt = self.analyzer._build_prompt(items, "USDJPY")
+        assert "見出しのみで判断" in prompt
+        assert "2件は本文未取得" in prompt
+        # 記事本文セクションは出ない
+        assert "## 記事本文" not in prompt
+
+    def test_コンテンツ混在時のプロンプト(self) -> None:
+        """コンテンツありなし混在時の動作"""
+        items = [_make_item(0), _make_item(1)]
+        # 1件目にコンテンツを設定
+        items[0] = NewsItem(
+            news_id="gdelt_000000000000",
+            published_at=datetime(
+                2024, 1, 1, tzinfo=timezone.utc
+            ),
+            title="Fed holds rates steady 0",
+            source_name="reuters.com",
+            source_url="https://reuters.com/0",
+            currencies=["USD", "JPY"],
+            source_type=NewsSource.GDELT,
+            content="Full article body text here.",
+        )
+        prompt = self.analyzer._build_prompt(items, "USDJPY")
+        # 本文セクションあり
+        assert "## 記事本文" in prompt
+        assert "Full article body text here." in prompt
+        # タイトルのみ注記
+        assert "1件は本文未取得" in prompt
+
+    def test_全件コンテンツありはタイトルのみ注記なし(
+        self,
+    ) -> None:
+        """全件コンテンツありの場合は注記が出ない"""
+        items = [
+            NewsItem(
+                news_id=f"gdelt_{i:012d}",
+                published_at=datetime(
+                    2024, 1, 1, tzinfo=timezone.utc
+                ),
+                title=f"News {i}",
+                source_name="reuters.com",
+                source_url=f"https://reuters.com/{i}",
+                currencies=["USD"],
+                source_type=NewsSource.GDELT,
+                content=f"Article body {i}.",
+            )
+            for i in range(3)
+        ]
+        prompt = self.analyzer._build_prompt(items, "USDJPY")
+        assert "本文未取得" not in prompt
