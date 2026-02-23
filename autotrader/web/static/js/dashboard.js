@@ -219,10 +219,6 @@ const DashboardApp = {
       dirBadge.className = 'inline-flex items-center px-2 py-0.5 rounded text-xs font-bold ' + (dirStyles[a.direction] || dirStyles.HOLD);
     }
 
-    // レジーム
-    const regime = document.getElementById('ap-regime');
-    if (regime) regime.textContent = a.regime || '--';
-
     // スコアバー（中央0基準・左SELL/右BUY）
     const score = a.consensus_score || 0;
     const threshold = a.entry_threshold || 1;
@@ -379,7 +375,7 @@ const DashboardApp = {
             <span class="text-red-400 font-bold">${sellCount} SELL</span>
             <span class="text-gray-500">|</span>
             <span class="text-gray-400">${holdCount} HOLD</span>
-            <span class="text-gray-600 ml-auto">${aligned.length}/${total} aligned</span>
+            <span class="text-gray-500 ml-auto">${a.regime || '--'}</span>
           </div>
           <div class="w-full h-1.5 rounded-full overflow-hidden flex">
             <div class="bg-green-500/70 h-full" style="width:${buyPct}%"></div>
