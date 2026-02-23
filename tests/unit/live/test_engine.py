@@ -6,7 +6,7 @@ MockDataProvider/TradeExecutorでのエンジンテスト。
 from __future__ import annotations
 
 from datetime import datetime, timezone
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pandas as pd
 import pytest
@@ -196,7 +196,10 @@ class TestLiveTradingEngine:
         )
 
         engine.enable_auto_trade = True
-        await engine._execute_entry(signal)
+        with patch.object(
+            engine, "_write_entry_to_db", return_value="test-id"
+        ):
+            await engine._execute_entry(signal)
 
         engine._executor.open_position_async.assert_called_once()
 
