@@ -52,6 +52,18 @@ def get_db() -> Generator[Session, None, None]:
         db.close()
 
 
+def get_live_engine(request):
+    """LiveTradingEngineを取得
+
+    Args:
+        request: FastAPIリクエスト
+
+    Returns:
+        LiveTradingEngine | None: エンジン
+    """
+    return getattr(request.app.state, "live_engine", None)
+
+
 def get_app_settings() -> Settings:
     """アプリケーション設定を取得
 

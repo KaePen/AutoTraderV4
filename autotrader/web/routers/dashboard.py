@@ -7,7 +7,7 @@ import logging
 from fastapi import APIRouter, Depends, Request
 from sqlalchemy.orm import Session
 
-from autotrader.web.dependencies import get_db
+from autotrader.web.dependencies import get_db, get_live_engine
 from autotrader.web.schemas import ApiResponse, DashboardResponse
 from autotrader.web.schemas.responses import AccountInfoResponse
 from autotrader.web.services.market_service import MarketService
@@ -17,16 +17,15 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-def _account_from_engine(request: Request) -> AccountInfoResponse | None:
+def _account_from_engine(engine) -> AccountInfoResponse | None:
     """エンジンからリアル口座情報を取得
 
     Args:
-        request: FastAPIリクエスト
+        engine: LiveTradingEngine
 
     Returns:
         AccountInfoResponse | None: 口座情報（未接続時None）
     """
-    engine = getattr(request.app.state, "live_engine", None)
     if not engine or not engine.connected:
         return None
     acct = engine.account_info
@@ -51,6 +50,7 @@ def _account_from_engine(request: Request) -> AccountInfoResponse | None:
 async def get_dashboard(
     request: Request,
     db: Session = Depends(get_db),
+    engine=Depends(get_live_engine),
 ) -> ApiResponse[DashboardResponse]:
     """ダッシュボード情報を取得
 
@@ -60,12 +60,13 @@ async def get_dashboard(
     Args:
         request: FastAPIリクエスト
         db: DBセッション
+        engine: LiveTradingEngine
 
     Returns:
         ApiResponse[DashboardResponse]: ダッシュボード情報
     """
     # MT5ライブデータを優先
-    live_account = _account_from_engine(request)
+    live_account = _account_from_engine(engine)
 
     service = MarketService(db)
     dashboard_data = service.get_dashboard(

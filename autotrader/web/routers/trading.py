@@ -8,9 +8,10 @@ from __future__ import annotations
 import logging
 import os
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, Depends, Request
 
 from autotrader.config.accounts_loader import AccountsLoader
+from autotrader.web.dependencies import get_live_engine
 from autotrader.web.schemas import (
     AccountPresetRequest,
     ApiResponse,
@@ -29,18 +30,6 @@ _accounts_loader = AccountsLoader()
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/trading")
-
-
-def _get_engine(request: Request):
-    """app.stateからエンジンを取得
-
-    Args:
-        request: FastAPIリクエスト
-
-    Returns:
-        LiveTradingEngine | None: エンジン
-    """
-    return getattr(request.app.state, "live_engine", None)
 
 
 def _account_to_response(acct) -> AccountInfoResponse:
@@ -73,16 +62,17 @@ def _account_to_response(acct) -> AccountInfoResponse:
 )
 async def get_trading_mode(
     request: Request,
+    engine=Depends(get_live_engine),
 ) -> ApiResponse[TradingModeResponse]:
     """現在のトレーディングモード取得
 
     Args:
         request: FastAPIリクエスト
+        engine: LiveTradingEngine
 
     Returns:
         ApiResponse[TradingModeResponse]: モード情報
     """
-    engine = _get_engine(request)
     if engine:
         return ApiResponse(
             data=TradingModeResponse(
@@ -110,16 +100,17 @@ async def get_trading_mode(
 )
 async def get_mt5_status(
     request: Request,
+    engine=Depends(get_live_engine),
 ) -> ApiResponse[MT5StatusResponse]:
     """MT5接続状態取得
 
     Args:
         request: FastAPIリクエスト
+        engine: LiveTradingEngine
 
     Returns:
         ApiResponse[MT5StatusResponse]: MT5状態
     """
-    engine = _get_engine(request)
     if not engine:
         return ApiResponse(
             data=MT5StatusResponse(connected=False)
@@ -132,7 +123,6 @@ async def get_mt5_status(
     return ApiResponse(
         data=MT5StatusResponse(
             connected=engine.connected,
-            transport=engine._config.mt5_config.transport,
             account=account,
         )
     )
@@ -144,6 +134,7 @@ async def get_mt5_status(
 )
 async def connect_mt5(
     request: Request,
+    engine=Depends(get_live_engine),
 ) -> ApiResponse[MT5StatusResponse]:
     """MT5接続開始
 
@@ -151,11 +142,11 @@ async def connect_mt5(
 
     Args:
         request: FastAPIリクエスト
+        engine: LiveTradingEngine
 
     Returns:
         ApiResponse[MT5StatusResponse]: 接続結果
     """
-    engine = _get_engine(request)
     if not engine:
         try:
             from autotrader.web.main import (
@@ -194,16 +185,17 @@ async def connect_mt5(
 )
 async def disconnect_mt5(
     request: Request,
+    engine=Depends(get_live_engine),
 ) -> ApiResponse[MT5StatusResponse]:
     """MT5切断
 
     Args:
         request: FastAPIリクエスト
+        engine: LiveTradingEngine
 
     Returns:
         ApiResponse[MT5StatusResponse]: 切断結果
     """
-    engine = _get_engine(request)
     if not engine:
         return ApiResponse(
             data=MT5StatusResponse(connected=False)
@@ -227,17 +219,18 @@ async def disconnect_mt5(
 async def toggle_auto_trade(
     request: Request,
     enable: bool = False,
+    engine=Depends(get_live_engine),
 ) -> ApiResponse[TradingModeResponse]:
     """自動取引ON/OFF
 
     Args:
         request: FastAPIリクエスト
         enable: 有効化するか
+        engine: LiveTradingEngine
 
     Returns:
         ApiResponse[TradingModeResponse]: 更新後のモード
     """
-    engine = _get_engine(request)
     if not engine:
         return ApiResponse(
             success=False,
@@ -262,6 +255,7 @@ async def toggle_symbol_auto_trade(
     request: Request,
     symbol: str,
     enable: bool = False,
+    engine=Depends(get_live_engine),
 ) -> ApiResponse[TradingModeResponse]:
     """シンボルごとの自動取引ON/OFF
 
@@ -269,11 +263,11 @@ async def toggle_symbol_auto_trade(
         request: FastAPIリクエスト
         symbol: 通貨ペアシンボル
         enable: 有効化するか
+        engine: LiveTradingEngine
 
     Returns:
         ApiResponse[TradingModeResponse]: 更新後のモード
     """
-    engine = _get_engine(request)
     if not engine:
         return ApiResponse(
             success=False,
@@ -316,6 +310,7 @@ async def toggle_symbol_demo_mode(
     request: Request,
     symbol: str,
     enable: bool = False,
+    engine=Depends(get_live_engine),
 ) -> ApiResponse[TradingModeResponse]:
     """シンボルごとのデモモードON/OFF
 
@@ -327,11 +322,11 @@ async def toggle_symbol_demo_mode(
         request: FastAPIリクエスト
         symbol: 通貨ペアシンボル
         enable: デモモードを有効にするか
+        engine: LiveTradingEngine
 
     Returns:
         ApiResponse[TradingModeResponse]: 更新後のモード
     """
-    engine = _get_engine(request)
     if not engine:
         return ApiResponse(
             success=False,
@@ -384,7 +379,6 @@ async def toggle_symbol_demo_mode(
     return await get_trading_mode(request)
 
 
-
 @router.post(
     "/mt5/switch-account",
     response_model=ApiResponse[MT5StatusResponse],
@@ -392,6 +386,7 @@ async def toggle_symbol_demo_mode(
 async def switch_account(
     request: Request,
     body: SwitchAccountRequest,
+    engine=Depends(get_live_engine),
 ) -> ApiResponse[MT5StatusResponse]:
     """MT5口座切替
 
@@ -400,15 +395,15 @@ async def switch_account(
     Args:
         request: FastAPIリクエスト
         body: 口座切替リクエスト
+        engine: LiveTradingEngine
 
     Returns:
         ApiResponse[MT5StatusResponse]: 新口座の接続結果
     """
     # 既存エンジン停止
-    old_engine = _get_engine(request)
-    if old_engine and old_engine.running:
+    if engine and engine.running:
         try:
-            await old_engine.stop()
+            await engine.stop()
             logger.info("口座切替: 既存エンジン停止")
         except Exception as e:
             logger.warning("既存エンジン停止エラー: %s", e)

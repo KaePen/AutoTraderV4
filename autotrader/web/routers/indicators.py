@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 import pandas as pd
 
 from autotrader.core.enums import Timeframe
-from autotrader.web.dependencies import get_db
+from autotrader.web.dependencies import get_db, get_live_engine
 from autotrader.web.schemas import (
     ApiResponse,
     IndicatorResponse,
@@ -25,140 +25,6 @@ logger = logging.getLogger(__name__)
 router = APIRouter()
 
 
-def _calc_indicators(
-    df: pd.DataFrame,
-    symbol: str,
-    timeframe: Timeframe,
-) -> IndicatorResponse:
-    """DataFrameからテクニカル指標を計算
-
-    Args:
-        df: OHLCVデータフレーム
-        symbol: 通貨ペア
-        timeframe: 時間足
-
-    Returns:
-        IndicatorResponse: 指標レスポンス
-    """
-    try:
-        import pandas_ta as ta
-    except ImportError:
-        return IndicatorResponse(
-            symbol=symbol,
-            timeframe=timeframe,
-            timestamp=datetime.now(timezone.utc),
-        )
-
-    if len(df) < 30:
-        return IndicatorResponse(
-            symbol=symbol,
-            timeframe=timeframe,
-            timestamp=datetime.now(timezone.utc),
-        )
-
-    close = df["close"]
-    high = df["high"]
-    low = df["low"]
-
-    # RSI
-    rsi_s = ta.rsi(close, length=14)
-    rsi_val = (
-        float(rsi_s.iloc[-1])
-        if rsi_s is not None and not rsi_s.empty
-        else None
-    )
-
-    # MACD
-    macd_df = ta.macd(close, fast=12, slow=26, signal=9)
-    macd_val = None
-    macd_signal_val = None
-    macd_hist_val = None
-    if macd_df is not None and not macd_df.empty:
-        cols = macd_df.columns.tolist()
-        macd_val = float(macd_df[cols[0]].iloc[-1])
-        macd_signal_val = float(macd_df[cols[1]].iloc[-1])
-        macd_hist_val = float(macd_df[cols[2]].iloc[-1])
-
-    # ADX / +DI / -DI
-    adx_df = ta.adx(high, low, close, length=14)
-    adx_val = None
-    plus_di_val = None
-    minus_di_val = None
-    if adx_df is not None and not adx_df.empty:
-        cols = adx_df.columns.tolist()
-        # 標準: ADX_14, DMP_14, DMN_14
-        adx_val = float(adx_df[cols[0]].iloc[-1])
-        plus_di_val = float(adx_df[cols[1]].iloc[-1])
-        minus_di_val = float(adx_df[cols[2]].iloc[-1])
-
-    # ボリンジャーバンド
-    bb_df = ta.bbands(close, length=20, std=2.0)
-    bb_upper = None
-    bb_middle = None
-    bb_lower = None
-    if bb_df is not None and not bb_df.empty:
-        cols = bb_df.columns.tolist()
-        # 標準: BBL, BBM, BBU, BBB, BBP
-        bb_lower = float(bb_df[cols[0]].iloc[-1])
-        bb_middle = float(bb_df[cols[1]].iloc[-1])
-        bb_upper = float(bb_df[cols[2]].iloc[-1])
-
-    # ATR
-    atr_s = ta.atr(high, low, close, length=14)
-    atr_val = (
-        float(atr_s.iloc[-1])
-        if atr_s is not None and not atr_s.empty
-        else None
-    )
-
-    # EMA
-    ema_fast_s = ta.ema(close, length=12)
-    ema_slow_s = ta.ema(close, length=26)
-    ema_fast_val = (
-        float(ema_fast_s.iloc[-1])
-        if ema_fast_s is not None and not ema_fast_s.empty
-        else None
-    )
-    ema_slow_val = (
-        float(ema_slow_s.iloc[-1])
-        if ema_slow_s is not None and not ema_slow_s.empty
-        else None
-    )
-
-    # NaN チェック
-    def _clean(v):
-        if v is None:
-            return None
-        if pd.isna(v):
-            return None
-        return v
-
-    timestamp = (
-        df["time"].iloc[-1]
-        if "time" in df.columns
-        else datetime.now(timezone.utc)
-    )
-
-    return IndicatorResponse(
-        symbol=symbol,
-        timeframe=timeframe,
-        timestamp=timestamp,
-        rsi=_clean(rsi_val),
-        macd=_clean(macd_val),
-        macd_signal=_clean(macd_signal_val),
-        macd_hist=_clean(macd_hist_val),
-        adx=_clean(adx_val),
-        plus_di=_clean(plus_di_val),
-        minus_di=_clean(minus_di_val),
-        bb_upper=_clean(bb_upper),
-        bb_middle=_clean(bb_middle),
-        bb_lower=_clean(bb_lower),
-        atr=_clean(atr_val),
-        ema_fast=_clean(ema_fast_val),
-        ema_slow=_clean(ema_slow_val),
-    )
-
-
 @router.get(
     "/indicators/{symbol}/{timeframe}",
     response_model=ApiResponse[IndicatorResponse],
@@ -168,10 +34,11 @@ async def get_indicators(
     symbol: str = Path(description="通貨ペア"),
     timeframe: Timeframe = Path(description="時間足"),
     db: Session = Depends(get_db),
+    engine=Depends(get_live_engine),
 ) -> ApiResponse[IndicatorResponse]:
     """指標スナップショットを取得
 
-    MT5接続中はローソク足から指標を計算して返却。
+    MT5接続中はエンジン計算済みデータから返却。
     未接続時はMarketServiceのスタブにフォールバック。
 
     Args:
@@ -179,15 +46,14 @@ async def get_indicators(
         symbol: 通貨ペア
         timeframe: 時間足
         db: DBセッション
+        engine: LiveTradingEngine
 
     Returns:
         ApiResponse[IndicatorResponse]: 指標情報
     """
-    engine = getattr(request.app.state, "live_engine", None)
     if engine and engine.connected:
         try:
-            # エンジン計算済みデータから取得（MT5再取得不要）
-            raw = engine._extract_indicators(timeframe.value)
+            raw = engine.get_indicators(timeframe.value)
             if raw:
                 ind = IndicatorResponse(
                     symbol=symbol,
@@ -232,6 +98,7 @@ async def get_indicator_series(
         default=500, ge=50, le=1000, description="取得本数"
     ),
     db: Session = Depends(get_db),
+    engine=Depends(get_live_engine),
 ) -> ApiResponse[IndicatorSeriesResponse]:
     """チャートオーバーレイ用指標時系列を取得
 
@@ -244,11 +111,11 @@ async def get_indicator_series(
         timeframe: 時間足
         limit: 取得本数
         db: DBセッション
+        engine: LiveTradingEngine
 
     Returns:
         ApiResponse[IndicatorSeriesResponse]: 指標時系列
     """
-    engine = getattr(request.app.state, "live_engine", None)
     if not (engine and engine.connected):
         return ApiResponse(data=IndicatorSeriesResponse())
 
@@ -258,7 +125,7 @@ async def get_indicator_series(
         return ApiResponse(data=IndicatorSeriesResponse())
 
     try:
-        df = await engine._data_provider.get_candles_from_pos(
+        df = await engine.get_candles(
             symbol, timeframe, limit
         )
     except Exception as e:

@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.orm import Session
 
-from autotrader.web.dependencies import get_db
+from autotrader.core.enums import SignalType
+from autotrader.web.dependencies import get_db, get_live_engine
 from autotrader.web.schemas import ApiResponse, PositionResponse
 from autotrader.web.services.market_service import MarketService
 
@@ -21,8 +24,6 @@ def _dict_to_position_response(d: dict) -> PositionResponse:
     Returns:
         PositionResponse: レスポンス
     """
-    from datetime import datetime, timezone
-    from autotrader.core.enums import SignalType
 
     opened_at = d.get("opened_at")
     if isinstance(opened_at, str):
@@ -64,6 +65,7 @@ async def get_positions(
         default=None,
         description="通貨ペア（指定なしで全て）",
     ),
+    engine=Depends(get_live_engine),
 ) -> ApiResponse[list[PositionResponse]]:
     """オープンポジションを取得
 
@@ -74,12 +76,12 @@ async def get_positions(
         request: FastAPIリクエスト
         db: DBセッション
         symbol: 通貨ペア
+        engine: LiveTradingEngine
 
     Returns:
         ApiResponse[list[PositionResponse]]: ポジション一覧
     """
     # エンジンのキャッシュを優先
-    engine = getattr(request.app.state, "live_engine", None)
     if engine is not None and engine.running:
         positions = engine.cached_positions
         if symbol:

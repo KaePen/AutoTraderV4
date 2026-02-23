@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Query, Request
+from fastapi import APIRouter, Depends, Query, Request
 
+from autotrader.web.dependencies import get_live_engine
 from autotrader.web.schemas import (
     ApiResponse,
     AnalysisResponse,
@@ -43,6 +44,7 @@ def _signal_to_response(signal) -> SignalResponse:
 )
 async def get_analysis(
     request: Request,
+    engine=Depends(get_live_engine),
 ) -> ApiResponse[AnalysisResponse]:
     """直近tick分析状態を取得
 
@@ -50,11 +52,11 @@ async def get_analysis(
 
     Args:
         request: FastAPIリクエスト
+        engine: LiveTradingEngine
 
     Returns:
         ApiResponse[AnalysisResponse]: 分析状態
     """
-    engine = getattr(request.app.state, "live_engine", None)
     if engine is None or engine.last_analysis is None:
         running = engine.running if engine else False
         connected = engine.connected if engine else False
@@ -117,6 +119,7 @@ async def get_current_signals(
     symbol: str = Query(
         default="USDJPY", description="通貨ペア"
     ),
+    engine=Depends(get_live_engine),
 ) -> ApiResponse[list[SignalResponse]]:
     """現在のシグナルを取得
 
@@ -126,11 +129,11 @@ async def get_current_signals(
     Args:
         request: FastAPIリクエスト
         symbol: 通貨ペア
+        engine: LiveTradingEngine
 
     Returns:
         ApiResponse[list[SignalResponse]]: シグナル一覧
     """
-    engine = getattr(request.app.state, "live_engine", None)
     if engine is not None and engine.signal_history:
         signals = [
             _signal_to_response(s)
@@ -157,6 +160,7 @@ async def get_signal_history(
     offset: int = Query(
         default=0, ge=0, description="オフセット"
     ),
+    engine=Depends(get_live_engine),
 ) -> ApiResponse[list[SignalResponse]]:
     """シグナル履歴を取得
 
@@ -168,11 +172,11 @@ async def get_signal_history(
         symbol: 通貨ペア
         limit: 取得件数
         offset: オフセット
+        engine: LiveTradingEngine
 
     Returns:
         ApiResponse[list[SignalResponse]]: シグナル履歴
     """
-    engine = getattr(request.app.state, "live_engine", None)
     if engine is not None and engine.signal_history:
         signals = [
             _signal_to_response(s)
