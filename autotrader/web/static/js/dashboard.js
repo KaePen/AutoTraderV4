@@ -1071,11 +1071,12 @@ const DashboardApp = {
     return `
       <div class="border-l-2 ${borderColor} bg-gray-800/60 rounded-r-lg px-3 py-2 cursor-pointer select-none"
            onclick="DashboardApp.togglePositionDetail('${detailId}', '${arrowId}')">
-        <!-- 上段: 方向 + PnL + 展開矢印 -->
+        <!-- 上段: 方向 + 現在価格 + PnL + 展開矢印 -->
         <div class="flex items-center justify-between mb-1.5">
           <div class="flex items-center gap-1.5">
             <span class="text-[11px] font-bold px-1.5 py-0.5 rounded ${dirBg}">${p.signal_type}</span>
             <span class="text-sm font-semibold text-gray-200">${p.symbol}</span>
+            <span class="text-xs font-mono tabular-nums ${pnlColor}">${p.current_price.toFixed(digits)}</span>
             <span class="text-[10px] text-gray-600">${p.volume.toFixed(2)}lot</span>
             <span class="text-[10px] text-gray-600">·</span>
             <span class="text-[10px] text-gray-500">${this.fmtHoldTime(p.opened_at)}</span>
