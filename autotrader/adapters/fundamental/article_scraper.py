@@ -224,21 +224,43 @@ class CNBCParser(ArticleParser):
 
 
 class DailyFXParser(ArticleParser):
-    """dailyfx.com パーサー"""
+    """dailyfx.com パーサー（ig.comへリダイレクト対応）"""
 
     @property
     def domain(self) -> str:
         return "dailyfx.com"
 
+    @property
+    def needs_tls_fingerprint(self) -> bool:
+        return True
+
     def extract_content(self, html: str) -> str | None:
-        """dailyfx.com の記事本文を抽出"""
+        """dailyfx.com / ig.com の記事本文を抽出
+
+        dailyfx.comはig.comにリダイレクトされるため、
+        両方のHTML構造に対応する。
+        """
         if _BeautifulSoup is None:
             return None
         soup = _BeautifulSoup(html, "lxml")
         for tag in soup.select(
-            "script, style, .dfx-ad, aside, nav, footer"
+            "script, style, .dfx-ad, aside, nav, footer, "
+            ".esma-rw, .cmp-pullout"
         ):
             tag.decompose()
+        # ig.com構造: .simple-text p タグ群
+        simple_texts = soup.select(
+            ".simple-text p"
+        )
+        if simple_texts:
+            paragraphs = [
+                p.get_text(strip=True)
+                for p in simple_texts
+                if len(p.get_text(strip=True)) > 20
+            ]
+            if paragraphs:
+                return "\n".join(paragraphs)
+        # dailyfx.com旧構造
         body = (
             soup.select_one("div.dfx-article__content")
             or soup.select_one(
@@ -286,7 +308,11 @@ class BBCParser(ArticleParser):
 
 
 class MarketWatchParser(ArticleParser):
-    """marketwatch.com パーサー"""
+    """marketwatch.com パーサー
+
+    注意: DataDome保護のためJS実行が必要。
+    多くの記事でHTTP 401が返る可能性あり。
+    """
 
     @property
     def domain(self) -> str:
@@ -538,7 +564,7 @@ class ArticleFetcher:
         response = _curl_requests.get(
             url,
             timeout=self.timeout,
-            impersonate="chrome110",
+            impersonate="chrome120",
         )
         response.raise_for_status()
         return str(response.text)
