@@ -125,6 +125,7 @@ class TickEntryOptimizer:
         self._symbol = symbol
         self._buffer = TickBuffer()
         self._data_provider = data_provider
+        self._last_evaluation: EntryConditionResult | None = None
 
     @property
     def state(self) -> OptimizerState:
@@ -145,6 +146,11 @@ class TickEntryOptimizer:
     def tick_count(self) -> int:
         """収集ティック数"""
         return self._buffer.count
+
+    @property
+    def last_evaluation(self) -> EntryConditionResult | None:
+        """直近の条件評価結果"""
+        return self._last_evaluation
 
     def start_monitoring(
         self,
@@ -237,6 +243,7 @@ class TickEntryOptimizer:
             self._buffer.ticks,
             self._pending_signal,
         )
+        self._last_evaluation = result
 
         if result.should_execute:
             self._state = OptimizerState.EXECUTING
@@ -547,3 +554,4 @@ class TickEntryOptimizer:
         self._state = OptimizerState.IDLE
         self._pending_signal = None
         self._buffer.clear()
+        self._last_evaluation = None
