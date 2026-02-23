@@ -81,6 +81,9 @@ def _make_mock_engine(
     engine.last_tick_time = None
     engine.signal_history = []
     engine.cached_positions = []
+    engine.active_symbol = "USDJPY"
+    engine.set_symbol_auto_trade = AsyncMock()
+    engine.change_symbol = AsyncMock()
     engine.sync_positions_on_toggle = AsyncMock()
     engine.account_info = SimpleNamespace(
         balance=1000000.0,

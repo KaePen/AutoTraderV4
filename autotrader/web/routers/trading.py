@@ -307,7 +307,12 @@ async def toggle_symbol_auto_trade(
             data=TradingModeResponse(),
         )
 
-    engine.set_symbol_auto_trade(symbol, enable)
+    # シンボル変更有無を記録（change_symbol内でsync済み判定用）
+    symbol_changed = (
+        hasattr(engine, "active_symbol")
+        and symbol != engine.active_symbol
+    )
+    await engine.set_symbol_auto_trade(symbol, enable)
     logger.info(
         "シンボル自動取引: %s %s（API経由）",
         symbol,
@@ -315,9 +320,8 @@ async def toggle_symbol_auto_trade(
     )
 
     # ONトグル時にポジション同期を実行
-    # engine.start() 内で _sync_positions() が呼ばれるため
-    # 未起動時は sync_positions_on_toggle 側でスキップ
-    if enable:
+    # change_symbol内で既にsync済みなら二重実行を回避
+    if enable and not symbol_changed:
         await engine.sync_positions_on_toggle()
 
     # エンジン未起動時は自動起動
@@ -336,6 +340,50 @@ async def toggle_symbol_auto_trade(
             )
     elif engine.running:
         engine.reset_data_update_timer()
+
+    return _build_trading_mode_response(engine)
+
+
+@router.post(
+    "/switch-symbol",
+    response_model=ApiResponse[TradingModeResponse],
+)
+async def switch_symbol(
+    request: Request,
+    symbol: str,
+    engine=Depends(get_live_engine),
+) -> ApiResponse[TradingModeResponse]:
+    """アクティブシンボルを切替
+
+    エンジンの処理対象シンボルを変更し、
+    コンポーネントを再初期化する。
+
+    Args:
+        request: FastAPIリクエスト
+        symbol: 切替先の通貨ペアシンボル
+        engine: LiveTradingEngine
+
+    Returns:
+        ApiResponse[TradingModeResponse]: 更新後のモード
+    """
+    if not engine:
+        return ApiResponse(
+            success=False,
+            error="ライブエンジンが設定されていません",
+            data=TradingModeResponse(),
+        )
+
+    try:
+        await engine.change_symbol(symbol)
+    except ValueError as e:
+        return ApiResponse(
+            success=False,
+            error=str(e),
+            data=TradingModeResponse(),
+        )
+    logger.info(
+        "シンボル切替: %s（API経由）", symbol
+    )
 
     return _build_trading_mode_response(engine)
 

@@ -94,6 +94,8 @@ class LiveTradingEngine:
         self._last_tick_time: datetime | None = None
         self._signal_history: list[Signal] = []
         self._enable_auto_trade = config.enable_auto_trade
+        # ランタイムで切替可能なアクティブシンボル
+        self._active_symbol = config.symbol
 
         # ティックエントリー最適化
         self._tick_optimizer = TickEntryOptimizer(
@@ -140,6 +142,11 @@ class LiveTradingEngine:
         return self._account_info
 
     @property
+    def active_symbol(self) -> str:
+        """現在のアクティブシンボル"""
+        return self._active_symbol
+
+    @property
     def enable_auto_trade(self) -> bool:
         """自動取引ON/OFF"""
         return self._enable_auto_trade
@@ -170,14 +177,14 @@ class LiveTradingEngine:
     @property
     def symbol_auto_trade_states(self) -> dict[str, bool]:
         """シンボル別自動取引状態"""
-        return {self._config.symbol: self._enable_auto_trade}
+        return {self._active_symbol: self._enable_auto_trade}
 
     @property
     def symbol_demo_mode_states(self) -> dict[str, bool]:
         """シンボル別デモモード状態"""
         if self._symbol_demo_mode:
             return dict(self._symbol_demo_mode)
-        return {self._config.symbol: self.demo_mode_enabled}
+        return {self._active_symbol: self.demo_mode_enabled}
 
     @property
     def trade_history(self) -> list[dict]:
@@ -189,15 +196,85 @@ class LiveTradingEngine:
         """キャッシュ済みオープンポジション（UI表示用）"""
         return self._cached_positions
 
-    def set_symbol_auto_trade(
+    async def change_symbol(self, symbol: str) -> None:
+        """アクティブシンボルを変更しコンポーネントを再初期化
+
+        Args:
+            symbol: 新しい通貨ペアシンボル
+
+        Raises:
+            ValueError: シンボルが空または不正な場合
+        """
+        if not symbol or not symbol.strip():
+            raise ValueError("symbolは空にできません")
+        symbol = symbol.strip().upper()
+        if symbol == self._active_symbol:
+            return
+
+        old = self._active_symbol
+        logger.info(
+            "シンボル変更: %s → %s", old, symbol
+        )
+
+        # 1. ティック監視キャンセル
+        if self._tick_optimizer.is_active:
+            self._tick_optimizer.cancel_monitoring(
+                "シンボル変更"
+            )
+
+        # 2. アクティブシンボル更新
+        self._active_symbol = symbol
+
+        # 3. PositionSizer再構築
+        self._sizer = PositionSizer(
+            self._build_sizer_config(
+                self._bot.config, symbol
+            )
+        )
+
+        # 4. TickEntryOptimizer再構築
+        self._tick_optimizer = TickEntryOptimizer(
+            config=self._config.tick_entry_config,
+            data_provider=self._data_provider,
+            symbol=symbol,
+        )
+
+        # 5. MT5TradeExecutorのデフォルトシンボル更新
+        self._executor._symbol = symbol
+
+        # 6. キャッシュリセット
+        self._last_signal = None
+        self._last_analysis = None
+        self._last_tick_data = None
+        self._last_mt5_tick_ms = 0
+        self._last_full_tick_time = 0.0
+        self._cached_positions = []
+        self._open_trades = {}
+
+        # 7. エンジン実行中なら過去データ再読込+ポジション同期
+        if self._running:
+            await self._load_historical_data()
+            await self._sync_positions()
+
+        logger.info(
+            "シンボル変更完了: %s", symbol
+        )
+
+    async def set_symbol_auto_trade(
         self, symbol: str, enable: bool
     ) -> None:
         """シンボルごとの自動取引ON/OFF設定
+
+        シンボルが現在と異なる場合はコンポーネントを再初期化する。
 
         Args:
             symbol: 通貨ペアシンボル
             enable: 自動取引を有効にするか
         """
+        # シンボルが異なる場合は切替
+        if symbol != self._active_symbol:
+            await self.change_symbol(symbol)
+
         self._enable_auto_trade = enable
         logger.info(
             "シンボル自動取引: %s %s",
@@ -264,7 +341,7 @@ class LiveTradingEngine:
         # （デモ時は閾値を大幅に下げてシグナルを活発化）
         self._bot._init_new_components()
         self._sizer = PositionSizer(
-            self._build_sizer_config(new_config, self._config.symbol)
+            self._build_sizer_config(new_config, self._active_symbol)
         )
         logger.info(
             "BotConfig更新完了 demo_mode=%s", new_config.demo_mode
@@ -365,7 +442,7 @@ class LiveTradingEngine:
         self._task = asyncio.create_task(self._main_loop())
         logger.info(
             "エンジン起動完了: symbol=%s interval=%.0fs auto=%s",
-            self._config.symbol,
+            self._active_symbol,
             self._config.check_interval_sec,
             self._enable_auto_trade,
         )
@@ -423,7 +500,7 @@ class LiveTradingEngine:
         """
         try:
             tick = await self._data_provider.get_tick_fast(
-                self._config.symbol
+                self._active_symbol
             )
         except Exception:
             return
@@ -448,7 +525,7 @@ class LiveTradingEngine:
             )
             asyncio.create_task(
                 broadcast_price_update({
-                    "symbol": self._config.symbol,
+                    "symbol": self._active_symbol,
                     "bid": bid,
                     "ask": ask,
                     "time_ms": tick_ms,
@@ -482,7 +559,7 @@ class LiveTradingEngine:
         if self._fundamental_memory:
             fundamental_ctx = (
                 self._fundamental_memory.get_context_for_llm(
-                    self._config.symbol, now_utc
+                    self._active_symbol, now_utc
                 )
             )
             if fundamental_ctx.has_high_impact_within_30min:
@@ -811,7 +888,7 @@ class LiveTradingEngine:
         """
         return Signal(
             signal_id=str(uuid.uuid4()),
-            symbol=self._config.symbol,
+            symbol=self._active_symbol,
             timeframe=cs.primary_tf,
             signal_type=cs.direction,
             confidence=cs.confidence,
@@ -831,7 +908,7 @@ class LiveTradingEngine:
         全TFのデータを一括収集してから設定。
         （個別set_market_dataは辞書を上書きするため）
         """
-        symbol = self._config.symbol
+        symbol = self._active_symbol
         lookback = self._config.candle_lookback
         timeframes = self._bot.timeframes
 
@@ -877,7 +954,7 @@ class LiveTradingEngine:
         バーのclose/high/lowを現在のtick価格で上書きしてから
         インジケータを再計算する。
         """
-        symbol = self._config.symbol
+        symbol = self._active_symbol
         # 全TFのデータを一括収集してから設定
         # sma_50計算に50本必要なためバッファを含め200本取得
         # （個別set_market_dataは辞書を上書きするため）
@@ -967,7 +1044,7 @@ class LiveTradingEngine:
         """
         # 既存ポジションチェック（設定値に基づく上限）
         positions = await self._executor.get_open_positions_async(
-            self._config.symbol
+            self._active_symbol
         )
         cfg = self._bot.config
         base_max = (
@@ -1040,7 +1117,7 @@ class LiveTradingEngine:
 
         # MT5発注（発注直前のtick価格を取得してentry_priceに使用）
         entry_tick = await self._data_provider.get_tick(
-            self._config.symbol
+            self._active_symbol
         )
         result = await self._executor.open_position_async(
             signal_with_lot, lot
@@ -1079,7 +1156,7 @@ class LiveTradingEngine:
                 "position_id": str(result.ticket or 0),
                 "trade_id": trade_id,
                 "ticket": result.ticket or 0,
-                "symbol": self._config.symbol,
+                "symbol": self._active_symbol,
                 "signal_type": (
                     signal_with_lot.signal_type.value
                 ),
@@ -1107,7 +1184,7 @@ class LiveTradingEngine:
                 )
                 asyncio.create_task(
                     broadcast_position_update(
-                        {"symbol": self._config.symbol}
+                        {"symbol": self._active_symbol}
                     )
                 )
             except Exception:
@@ -1313,7 +1390,7 @@ class LiveTradingEngine:
             exit_price = 0.0
             try:
                 tick = await self._data_provider.get_tick(
-                    self._config.symbol
+                    self._active_symbol
                 )
                 _bid = float(tick.get("bid", 0))
                 _ask = float(tick.get("ask", 0))
@@ -1364,7 +1441,7 @@ class LiveTradingEngine:
             pos = self._pm.get_position(str(ticket))
             pnl_pips = 0.0
             if pos and current_price > 0:
-                pip_size = self._get_pip_size(self._config.symbol)
+                pip_size = self._get_pip_size(self._active_symbol)
                 price_diff = (
                     current_price - pos.entry_price
                     if pos.direction == SignalType.BUY
@@ -1374,7 +1451,7 @@ class LiveTradingEngine:
                 # MT5から損益が取得できなかった場合、
                 # pnl_pipsとvolumeから概算（スプレッド・スワップ除く）
                 if profit_loss == 0.0 and abs(pnl_pips) > 0:
-                    pip_val = self._get_pip_value(self._config.symbol)
+                    pip_val = self._get_pip_value(self._active_symbol)
                     # ManagedPositionはremaining_volumeを使用
                     _vol = pos.remaining_volume
                     profit_loss = round(
@@ -1414,7 +1491,7 @@ class LiveTradingEngine:
                 )
                 asyncio.get_running_loop().create_task(
                     broadcast_position_update(
-                        {"symbol": self._config.symbol}
+                        {"symbol": self._active_symbol}
                     )
                 )
             except Exception:
@@ -1456,10 +1533,10 @@ class LiveTradingEngine:
 
         # ATR取得（ポジション管理で使用）
         # USDJPY換算で約20pips相当を最小値とする
-        _min_atr = 0.20 if "JPY" in self._config.symbol.upper() else 0.0020
+        _min_atr = 0.20 if "JPY" in self._active_symbol.upper() else 0.0020
         try:
             latest = await self._data_provider.get_latest_candle_async(
-                self._config.symbol, Timeframe.M15
+                self._active_symbol, Timeframe.M15
             )
             # ATRは簡易計算（最新の高値-安値）
             _h = float(latest.get("high", 0))
@@ -1766,7 +1843,7 @@ class LiveTradingEngine:
         ローカルDBから管理状態（フラグ・追跡値）も復元する。
         """
         positions = await self._executor.get_open_positions_async(
-            self._config.symbol
+            self._active_symbol
         )
         if not positions:
             logger.info("同期対象ポジションなし")
@@ -2120,7 +2197,7 @@ class LiveTradingEngine:
             llm_client = OllamaClient()
 
             # 現在価格取得
-            symbol = self._config.symbol
+            symbol = self._active_symbol
             upcoming_events = (
                 self._fundamental_memory.get_upcoming_events(
                     symbol, now, window_minutes=168  # 7日間
@@ -2191,7 +2268,7 @@ class LiveTradingEngine:
             from autotrader.adapters.ollama.client import OllamaClient
             llm_client = OllamaClient()
             now = datetime.now(timezone.utc)
-            symbol = self._config.symbol
+            symbol = self._active_symbol
 
             result = await llm_client.analyze_post_event_async(
                 symbol=symbol,
