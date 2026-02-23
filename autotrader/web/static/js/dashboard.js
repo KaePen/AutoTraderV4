@@ -964,7 +964,6 @@ const DashboardApp = {
     const countEl = document.getElementById('position-count');
     if (!listEl) return;
 
-    // 全通貨ペアのポジションを表示
     const displayPositions = this.positions;
 
     if (countEl) countEl.textContent = displayPositions.length > 0 ? displayPositions.length + ' open' : 'no open';
@@ -980,20 +979,61 @@ const DashboardApp = {
       if (!activeTickets.has(t)) this._expandedPositions.delete(t);
     }
 
-    // 1/3幅パネルのため1列表示
-    const wrapClass = 'space-y-2';
-    listEl.innerHTML = `<div class="${wrapClass}">` + displayPositions.map((p, i) => this.positionCard(p, i)).join('') + '</div>';
+    // 差分更新: ticketセットが同じならカード内部だけ更新し、
+    // DOM構造を維持して展開状態とスクロール位置を保持する
+    const existingCards = listEl.querySelectorAll('[data-ticket]');
+    const existingTickets = [...existingCards].map(
+      (el) => Number(el.dataset.ticket)
+    );
+    const newTickets = displayPositions.map((p) => p.ticket);
+    const sameStructure =
+      existingTickets.length === newTickets.length &&
+      existingTickets.every((t, i) => t === newTickets[i]);
+
+    if (sameStructure) {
+      // 構造同一: カード内部のみ更新（展開状態・スクロール保持）
+      displayPositions.forEach((p, i) => {
+        const card = existingCards[i];
+        if (!card) return;
+        const inner = this._positionCardInner(p, i);
+        // onclick更新（ticketが変わる可能性）
+        card.setAttribute(
+          'onclick',
+          `DashboardApp.togglePositionDetail('pos-detail-${i}', 'pos-arrow-${i}', ${p.ticket})`
+        );
+        card.innerHTML = inner;
+      });
+    } else {
+      // 構造変化（ポジション増減）: 全体再描画
+      listEl.innerHTML =
+        '<div class="space-y-2">' +
+        displayPositions
+          .map((p, i) => this.positionCard(p, i))
+          .join('') +
+        '</div>';
+    }
   },
 
   positionCard(p, idx) {
-    const isProfit = p.unrealized_pnl >= 0;
     const isBuy = p.signal_type === 'BUY';
     const borderColor = isBuy ? 'border-l-green-500' : 'border-l-red-500';
+    const inner = this._positionCardInner(p, idx);
+    return `
+      <div class="border-l-2 ${borderColor} bg-gray-800/60 rounded-r-lg px-3 py-2 cursor-pointer select-none"
+           data-ticket="${p.ticket}"
+           onclick="DashboardApp.togglePositionDetail('pos-detail-${idx}', 'pos-arrow-${idx}', ${p.ticket})">
+        ${inner}
+      </div>`;
+  },
+
+  /** ポジションカードの内部HTML（差分更新対応） */
+  _positionCardInner(p, idx) {
+    const isProfit = p.unrealized_pnl >= 0;
+    const isBuy = p.signal_type === 'BUY';
     const dirBg = isBuy ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400';
     const pnlColor = isProfit ? 'text-green-400' : 'text-red-400';
     const pnlBg = isProfit ? 'bg-green-500/10' : 'bg-red-500/10';
     const pnlSign = isProfit ? '+' : '';
-    // 小数点桁数: JPY系は3桁、それ以外は5桁
     const digits = p.entry_price > 20 ? 3 : 5;
 
     // SL/TP/Entry/Now の4点を可視化
@@ -1006,91 +1046,63 @@ const DashboardApp = {
       const range = hi - lo;
       if (range > 0) {
         const toPct = (v) => Math.max(0, Math.min(100, (v - lo) / range * 100));
-        const slPct = toPct(sl);
-        const tpPct = toPct(tp);
         const entryPct = toPct(entry);
         const nowPct = toPct(now);
+        const slPct = toPct(sl);
+        const tpPct = toPct(tp);
         const nowBg = pnlColor.replace('text-', 'bg-');
-
-        // Entryを基準にゾーン分け
-        // BUY: 左端〜Entry=SLゾーン(赤), Entry〜右端=TPゾーン(緑)
-        // SELL: 左端〜Entry=TPゾーン(緑), Entry〜右端=SLゾーン(赤)
         const leftZoneBg = isBuy ? 'bg-red-500/35' : 'bg-green-500/25';
         const rightZoneBg = isBuy ? 'bg-green-500/25' : 'bg-red-500/35';
 
         priceRowHtml = `
           <div class="grid grid-cols-4 text-center gap-1 mb-2">
-            <div>
-              <div class="text-[9px] text-gray-600 mb-0.5">SL</div>
-              <div class="text-[10px] tabular-nums text-red-400">${sl.toFixed(digits)}</div>
-            </div>
-            <div>
-              <div class="text-[9px] text-gray-600 mb-0.5">Entry</div>
-              <div class="text-[10px] tabular-nums text-gray-400">${entry.toFixed(digits)}</div>
-            </div>
-            <div>
-              <div class="text-[9px] text-gray-600 mb-0.5">Now</div>
-              <div class="text-[10px] tabular-nums font-semibold ${pnlColor}">${now.toFixed(digits)}</div>
-            </div>
-            <div>
-              <div class="text-[9px] text-gray-600 mb-0.5">TP</div>
-              <div class="text-[10px] tabular-nums text-green-400">${tp.toFixed(digits)}</div>
-            </div>
+            <div><div class="text-[9px] text-gray-600 mb-0.5">SL</div><div class="text-[10px] tabular-nums text-red-400">${sl.toFixed(digits)}</div></div>
+            <div><div class="text-[9px] text-gray-600 mb-0.5">Entry</div><div class="text-[10px] tabular-nums text-gray-400">${entry.toFixed(digits)}</div></div>
+            <div><div class="text-[9px] text-gray-600 mb-0.5">Now</div><div class="text-[10px] tabular-nums font-semibold ${pnlColor}">${now.toFixed(digits)}</div></div>
+            <div><div class="text-[9px] text-gray-600 mb-0.5">TP</div><div class="text-[10px] tabular-nums text-green-400">${tp.toFixed(digits)}</div></div>
           </div>`;
 
-        // SL/TPマーカーの左位置（端はみ出し防止）
         const slLeft = slPct <= 0 ? '0' : (slPct >= 100 ? 'calc(100% - 2px)' : `${slPct}%`);
         const tpLeft = tpPct <= 0 ? '0' : (tpPct >= 100 ? 'calc(100% - 2px)' : `${tpPct}%`);
 
         progressHtml = `
           <div class="mb-2">
             <div class="w-full h-3 relative">
-              <!-- バー本体 -->
               <div class="absolute inset-x-0 top-0.5 bottom-0.5 bg-gray-700 rounded-full overflow-hidden">
-                <!-- 左ゾーン: BUY=SL側(赤), SELL=TP側(緑) -->
                 <div class="absolute inset-y-0 left-0 ${leftZoneBg}" style="width:${entryPct}%"></div>
-                <!-- 右ゾーン: BUY=TP側(緑), SELL=SL側(赤) -->
                 <div class="absolute inset-y-0 right-0 ${rightZoneBg}" style="width:${100 - entryPct}%"></div>
-                <!-- Entryマーカー（グレー縦線） -->
                 <div class="absolute inset-y-0 w-px bg-gray-300 opacity-50" style="left:${entryPct}%"></div>
-                <!-- 現在価格マーカー（損益色太縦線） -->
                 <div class="absolute inset-y-0 w-0.5 ${nowBg}" style="left:${nowPct}%"></div>
               </div>
-              <!-- SLマーカー（赤縦線、バーを貫通） -->
               <div class="absolute inset-y-0 w-0.5 bg-red-500" style="left:${slLeft}"></div>
-              <!-- TPマーカー（緑縦線、バーを貫通） -->
               <div class="absolute inset-y-0 w-0.5 bg-green-500" style="left:${tpLeft}"></div>
             </div>
           </div>`;
       }
     } else {
-      // SL/TPなし: シンプルな価格表示
       priceRowHtml = `
         <div class="flex items-center gap-2 text-[11px] tabular-nums mb-2">
           <span class="text-gray-500">Entry</span>
           <span class="text-gray-400">${p.entry_price.toFixed(digits)}</span>
-          <span class="text-gray-600">→</span>
+          <span class="text-gray-600">&rarr;</span>
           <span class="font-semibold ${pnlColor}">${p.current_price.toFixed(digits)}</span>
         </div>`;
     }
 
     const detailId = `pos-detail-${idx}`;
     const arrowId = `pos-arrow-${idx}`;
-    // 展開状態を復元
     const isExpanded = this._expandedPositions.has(p.ticket);
     const detailCls = isExpanded ? '' : 'hidden';
-    const arrowChar = isExpanded ? '▾' : '▸';
+    const arrowChar = isExpanded ? '&#x25BE;' : '&#x25B8;';
+
     return `
-      <div class="border-l-2 ${borderColor} bg-gray-800/60 rounded-r-lg px-3 py-2 cursor-pointer select-none"
-           onclick="DashboardApp.togglePositionDetail('${detailId}', '${arrowId}', ${p.ticket})">
-        <!-- 上段: 方向 + 現在価格 + PnL + 展開矢印 -->
         <div class="flex items-center justify-between mb-1.5">
           <div class="flex items-center gap-1.5">
             <span class="text-[11px] font-bold px-1.5 py-0.5 rounded ${dirBg}">${p.signal_type}</span>
             <span class="text-sm font-semibold text-gray-200">${p.symbol}</span>
             <span class="text-xs font-mono tabular-nums ${pnlColor}">${p.current_price.toFixed(digits)}</span>
             <span class="text-[10px] text-gray-600">${p.volume.toFixed(2)}lot</span>
-            <span class="text-[10px] text-gray-600">·</span>
+            <span class="text-[10px] text-gray-600">&middot;</span>
             <span class="text-[10px] text-gray-500">${this.fmtHoldTime(p.opened_at)}</span>
             ${this._fmtRemainingTime(p)}
           </div>
@@ -1099,18 +1111,14 @@ const DashboardApp = {
               <span class="text-sm font-bold tabular-nums ${pnlColor}">${pnlSign}${this.fmtCurrency(p.unrealized_pnl)}</span>
               <span class="text-[10px] tabular-nums ${pnlColor} opacity-70">${pnlSign}${p.unrealized_pnl_pips.toFixed(1)}p</span>
             </div>
-            <span id="${arrowId}" class="text-[11px] text-gray-600">${arrowChar}</span>
+            <span id="${arrowId}" class="text-base text-gray-400">${arrowChar}</span>
           </div>
         </div>
-        <!-- バー（常に表示） -->
         ${progressHtml}
-        <!-- 詳細（折りたたみ）: 価格グリッド -->
         <div id="${detailId}" class="${detailCls}">
           ${priceRowHtml}
         </div>
-        <!-- トレードID -->
-        ${p.trade_id ? `<div class="mt-1 text-[9px] text-gray-700 tabular-nums truncate">ID: ${p.trade_id}</div>` : ''}
-      </div>`;
+        ${p.trade_id ? `<div class="mt-1 text-[9px] text-gray-700 tabular-nums truncate">ID: ${p.trade_id}</div>` : ''}`;
   },
 
   /** ポジションカードの詳細エリアをトグル */
