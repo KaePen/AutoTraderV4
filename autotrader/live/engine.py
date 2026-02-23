@@ -394,39 +394,25 @@ class LiveTradingEngine:
     async def _main_loop(self) -> None:
         """メインループ
 
-        2段階ループ:
-        - 0.1秒毎: MT5 tick変化検出 → 価格をbroadcast（軽い）
-        - check_interval_sec毎: ローソク足+指標+シグナル処理 → 全UI更新
-        - tick_optimizer稼働中: 100ms高速ポーリング（既存動作）
+        - 0.1秒毎: MT5 tick変化検出 → 価格をbroadcast
+        - check_interval_sec毎: ローソク足+指標+シグナル+
+          ティックエントリ評価 → 全UI更新
         """
         while self._running:
             try:
-                if self._tick_optimizer.is_active:
-                    # tick最適化中は既存の高速ポーリング
-                    await self._tick()
-                    await asyncio.sleep(
-                        self._config.tick_entry_config
-                        .poll_interval_sec
-                    )
-                    continue
-
                 now = _time.monotonic()
                 if (
                     now - self._last_full_tick_time
                     >= self._config.check_interval_sec
                 ):
-                    # フル処理（ローソク足+指標+シグナル+全UI更新）
                     await self._tick()
                     self._last_full_tick_time = now
                 else:
-                    # 軽量処理（tick変化検出 → 価格配信のみ）
                     await self._tick_price_update()
-
             except Exception as e:
                 logger.error(
                     "ティック処理エラー: %s", e, exc_info=True
                 )
-
             await asyncio.sleep(0.1)
 
     async def _tick_price_update(self) -> None:
@@ -684,12 +670,44 @@ class LiveTradingEngine:
             for tf in self._bot._market_data:
                 indicators[tf] = self._extract_indicators(tf)
 
+        # --- tick_entry (ティックエントリ状態) ---
+        optimizer = self._tick_optimizer
+        tick_entry: dict[str, any] = {
+            "state": optimizer.state.value,
+            "is_active": optimizer.is_active,
+        }
+        if optimizer.is_active:
+            tick_entry["elapsed_sec"] = round(
+                optimizer._buffer.elapsed, 1
+            )
+            tick_entry["tick_count"] = optimizer._buffer.count
+            if optimizer.pending_signal:
+                tick_entry["pending_direction"] = (
+                    optimizer.pending_signal.signal_type.value
+                )
+        last_eval = optimizer.last_evaluation
+        if last_eval is not None:
+            tick_entry["composite_score"] = (
+                last_eval.composite_score
+            )
+            tick_entry["spread_score"] = last_eval.spread_score
+            tick_entry["momentum_score"] = (
+                last_eval.momentum_score
+            )
+            tick_entry["retracement_score"] = (
+                last_eval.retracement_score
+            )
+            tick_entry["should_execute"] = (
+                last_eval.should_execute
+            )
+
         return {
             "analysis": analysis,
             "account": account,
             "positions": self._cached_positions,
             "radar": radar_serialized,
             "indicators": indicators,
+            "tick_entry": tick_entry,
         }
 
     async def get_candles(

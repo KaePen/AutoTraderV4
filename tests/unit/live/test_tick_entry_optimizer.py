@@ -184,6 +184,26 @@ class TestOptimizerStateTransitions:
         assert opt.pending_signal is None
         assert opt.tick_count == 0
 
+    def test_reset後にlast_evaluationがクリア(
+        self,
+    ) -> None:
+        """resetでlast_evaluationがNoneに戻る"""
+        config = TickEntryConfig()
+        opt = TickEntryOptimizer(config)
+        # 手動で_last_evaluationをセット
+        from autotrader.live.tick_entry_optimizer import (
+            EntryConditionResult,
+        )
+        opt._last_evaluation = EntryConditionResult(
+            should_execute=True,
+            composite_score=0.8,
+        )
+        assert opt.last_evaluation is not None
+
+        opt.reset()
+
+        assert opt.last_evaluation is None
+
 
 # --- 衝突ポリシーテスト ---
 
@@ -521,7 +541,6 @@ class TestTickEntryConfig:
         """デフォルト値が正しい"""
         config = TickEntryConfig()
         assert config.enabled is True
-        assert config.poll_interval_sec == 0.1
         assert config.max_monitoring_sec == 30.0
         assert config.execute_on_timeout is True
         assert config.conflict_policy == "replace"
@@ -536,9 +555,67 @@ class TestTickEntryConfig:
         """カスタム値が正しく設定される"""
         config = TickEntryConfig(
             enabled=True,
-            poll_interval_sec=0.05,
             max_monitoring_sec=15.0,
             spread_threshold_pips=2.0,
         )
         assert config.enabled is True
-        assert config.poll_interval_sec == 0.05
+        assert config.max_monitoring_sec == 15.0
+
+
+# --- last_evaluation テスト ---
+
+class TestLastEvaluation:
+    """last_evaluationプロパティのテスト"""
+
+    def test_初期値はNone(self) -> None:
+        """初期化直後はNone"""
+        config = TickEntryConfig()
+        opt = TickEntryOptimizer(config)
+        assert opt.last_evaluation is None
+
+    @pytest.mark.asyncio
+    async def test_poll_tickで評価結果が保存される(
+        self,
+    ) -> None:
+        """poll_tick条件評価後にlast_evaluationが更新"""
+        config = TickEntryConfig(
+            momentum_min_ticks=3,
+            max_monitoring_sec=10.0,
+            composite_threshold=0.3,
+            spread_threshold_pips=5.0,
+        )
+        tick_seq = _make_ticks_uptrend(
+            5,
+            start_ask=150.100,
+            start_bid=150.099,
+        )
+        call_count = 0
+
+        async def mock_get_tick_fast(
+            symbol: str,
+        ) -> dict:
+            nonlocal call_count
+            idx = min(call_count, len(tick_seq) - 1)
+            call_count += 1
+            return tick_seq[idx]
+
+        mock_dp = MagicMock()
+        mock_dp.get_tick_fast = mock_get_tick_fast
+
+        opt = TickEntryOptimizer(
+            config,
+            data_provider=mock_dp,
+            symbol="USDJPY",
+        )
+        opt.start_monitoring(
+            _make_signal(SignalType.BUY)
+        )
+
+        # min_ticks回ポーリングして条件評価
+        for _ in range(10):
+            result = await opt.poll_tick()
+            if result is not None:
+                break
+
+        assert opt.last_evaluation is not None
+        assert opt.last_evaluation.composite_score > 0

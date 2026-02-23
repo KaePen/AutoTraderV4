@@ -15,7 +15,6 @@ class TickEntryConfig:
 
     Attributes:
         enabled: ティック最適化の有効/無効
-        poll_interval_sec: ポーリング間隔（秒）
         max_monitoring_sec: 監視タイムアウト（秒）
         spread_threshold_pips: スプレッド閾値（pips）
         spread_weight: スプレッド条件の重み
@@ -31,7 +30,6 @@ class TickEntryConfig:
     """
 
     enabled: bool = True
-    poll_interval_sec: float = 0.1
     max_monitoring_sec: float = 30.0
     spread_threshold_pips: float = 1.5
     spread_weight: float = 0.4
