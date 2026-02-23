@@ -183,15 +183,98 @@ class BacktestRunner:
         # 例: data/USDJPY/ (data_dir="data", symbol="USDJPY")
         _base = Path(data_dir)
         self.data_dir = _base / self.config.symbol
-        self._h1_df: pd.DataFrame | None = None
-        self._h4_df: pd.DataFrame | None = None
-        self._h8_df: pd.DataFrame | None = None
-        self._d1_df: pd.DataFrame | None = None
-        self._m15_df: pd.DataFrame | None = None
-        self._m30_df: pd.DataFrame | None = None
-        self._m1_df: pd.DataFrame | None = None
-        self._m5_df: pd.DataFrame | None = None
+        # TFデータを統合dict管理
+        self._tf_data: dict[str, pd.DataFrame] = {}
         self._cancel_callback: Callable[[], bool] | None = None
+
+    # 後方互換プロパティ（個別TF属性 → _tf_data dict参照）
+    @property
+    def _h1_df(self) -> "pd.DataFrame | None":
+        return self._tf_data.get("H1")
+
+    @_h1_df.setter
+    def _h1_df(self, value: "pd.DataFrame | None") -> None:
+        if value is not None:
+            self._tf_data["H1"] = value
+        else:
+            self._tf_data.pop("H1", None)
+
+    @property
+    def _h4_df(self) -> "pd.DataFrame | None":
+        return self._tf_data.get("H4")
+
+    @_h4_df.setter
+    def _h4_df(self, value: "pd.DataFrame | None") -> None:
+        if value is not None:
+            self._tf_data["H4"] = value
+        else:
+            self._tf_data.pop("H4", None)
+
+    @property
+    def _h8_df(self) -> "pd.DataFrame | None":
+        return self._tf_data.get("H8")
+
+    @_h8_df.setter
+    def _h8_df(self, value: "pd.DataFrame | None") -> None:
+        if value is not None:
+            self._tf_data["H8"] = value
+        else:
+            self._tf_data.pop("H8", None)
+
+    @property
+    def _d1_df(self) -> "pd.DataFrame | None":
+        return self._tf_data.get("D1")
+
+    @_d1_df.setter
+    def _d1_df(self, value: "pd.DataFrame | None") -> None:
+        if value is not None:
+            self._tf_data["D1"] = value
+        else:
+            self._tf_data.pop("D1", None)
+
+    @property
+    def _m15_df(self) -> "pd.DataFrame | None":
+        return self._tf_data.get("M15")
+
+    @_m15_df.setter
+    def _m15_df(self, value: "pd.DataFrame | None") -> None:
+        if value is not None:
+            self._tf_data["M15"] = value
+        else:
+            self._tf_data.pop("M15", None)
+
+    @property
+    def _m30_df(self) -> "pd.DataFrame | None":
+        return self._tf_data.get("M30")
+
+    @_m30_df.setter
+    def _m30_df(self, value: "pd.DataFrame | None") -> None:
+        if value is not None:
+            self._tf_data["M30"] = value
+        else:
+            self._tf_data.pop("M30", None)
+
+    @property
+    def _m1_df(self) -> "pd.DataFrame | None":
+        return self._tf_data.get("M1")
+
+    @_m1_df.setter
+    def _m1_df(self, value: "pd.DataFrame | None") -> None:
+        if value is not None:
+            self._tf_data["M1"] = value
+        else:
+            self._tf_data.pop("M1", None)
+
+    @property
+    def _m5_df(self) -> "pd.DataFrame | None":
+        return self._tf_data.get("M5")
+
+    @_m5_df.setter
+    def _m5_df(self, value: "pd.DataFrame | None") -> None:
+        if value is not None:
+            self._tf_data["M5"] = value
+        else:
+            self._tf_data.pop("M5", None)
 
         # イベントエミッター初期化
         self._emitter = BacktestEventEmitter()
@@ -884,6 +967,7 @@ class BacktestRunner:
         period_start: datetime | None = None,
         period_end: datetime | None = None,
         sequential: bool = False,
+        max_year_workers: int = 5,
     ) -> BacktestResult:
         """統合ボットでのバックテスト実行
 
@@ -1036,7 +1120,9 @@ class BacktestRunner:
             import pickle as _pickle
 
             _log = logging.getLogger(__name__)
-            max_workers = min(len(years), os.cpu_count() or 4)
+            max_workers = min(
+                len(years), os.cpu_count() or 4, max_year_workers
+            )
             _total_years = len(years)
             _completed_count = 0
 
@@ -1282,6 +1368,7 @@ class BacktestRunner:
         include_m1: bool = False,
         on_tf_loaded: "Callable[[str, int, int], None] | None" = None,
         needed_years: list[int] | None = None,
+        timeframes_to_load: list[str] | None = None,
     ) -> dict[str, pd.DataFrame]:
         """全時間足データをロード
 
@@ -1292,11 +1379,14 @@ class BacktestRunner:
         Args:
             include_m1: M1/M5データを含める（メモリ使用量増加）。
                 UNIVERSALモードでは自動的にTrueになる。
+                timeframes_to_load指定時は無視される。
             on_tf_loaded: TFロード完了コールバック(tf名, 完了数, 全数)。
                 インジケータ計算後に呼ばれ、UIへの進捗通知に使用。
             needed_years: バックテストに必要な年のリスト。
                 指定時は該当年のデータのみを返し、メモリを節約する。
                 Noneの場合は全期間を返す（後方互換性）。
+            timeframes_to_load: 明示的なTFリスト。指定時は
+                include_m1を無視してこのリストのTFのみロードする。
 
         Returns:
             dict[str, pd.DataFrame]: 時間足別データフレーム
@@ -1305,9 +1395,11 @@ class BacktestRunner:
         loader = DataLoader(self.data_dir)
         data = {}
 
-        # M30・H8はDEFAULT_TIMEFRAMESに含まれるため常にロード。
-        # M1・M5はUNIVERSALモードやenable_scalping時のみロード。
-        if include_m1:
+        # TFリストの決定:
+        # 明示指定 > include_m1判定 > デフォルト
+        if timeframes_to_load is not None:
+            pass  # 明示指定をそのまま使用
+        elif include_m1:
             timeframes_to_load = [
                 "M1", "M5", "M15", "M30", "H1", "H4", "H8", "D1"
             ]
@@ -1316,109 +1408,101 @@ class BacktestRunner:
 
         total_tf = len(timeframes_to_load)
 
-        # インスタンス変数との対応マップ
-        _tf_attr_map = {
-            "M1": "_m1_df",
-            "M5": "_m5_df",
-            "M30": "_m30_df",
-            "H8": "_h8_df",
-        }
-
         symbol = self.config.symbol
-        for i, tf in enumerate(timeframes_to_load):
-            # ワイルドカードでファイル検索
+
+        def _load_single_tf(tf: str) -> tuple[str, pd.DataFrame | None]:
+            """単一TFのデータをロード（並列実行対象）"""
             pattern = f"{symbol}_{tf}_*.csv"
             tf_files = list(self.data_dir.glob(pattern))
 
             if not tf_files:
-                # ワイルドカードなしも試行（後方互換性）
                 tf_path = self.data_dir / f"{symbol}_{tf}.csv"
                 tf_files = [tf_path] if tf_path.exists() else []
 
-            if tf_files:
-                tf_path = sorted(tf_files)[0]
-                # キャッシュキー: TF名＋ファイルのmtime＋サイズ
-                stat = tf_path.stat()
-                cache_key = (
-                    f"{tf}"
-                    f"_{int(stat.st_mtime * 1000)}"
-                    f"_{stat.st_size}"
-                )
+            if not tf_files:
+                return tf, None
 
-                # 年別キャッシュが揃っているか事前確認
-                # → 揃っていれば CSV 読み込みをスキップ可能
-                cache_dir = (
-                    self.data_dir / ".indicator_cache" / cache_key
-                )
-                _can_skip_csv = False
-                if needed_years is not None and cache_dir.is_dir():
-                    cached_years = {
-                        int(p.stem)
-                        for p in cache_dir.glob("*.parquet")
-                        if p.stem.isdigit()
-                    }
-                    if set(needed_years).issubset(cached_years):
-                        _can_skip_csv = True
+            tf_path = sorted(tf_files)[0]
+            stat = tf_path.stat()
+            cache_key = (
+                f"{tf}"
+                f"_{int(stat.st_mtime * 1000)}"
+                f"_{stat.st_size}"
+            )
 
-                if _can_skip_csv:
-                    # CSV読み込み不要: 年別parquetを直接ロード
-                    try:
-                        years_to_load = sorted(needed_years)
-                        _dfs = [
-                            pd.read_parquet(
-                                cache_dir / f"{y}.parquet"
-                            )
-                            for y in years_to_load
-                        ]
-                        df = pd.concat(_dfs, ignore_index=True)
-                        _log.info(
-                            "年別キャッシュ使用（CSV省略）: %s [%s]",
-                            cache_key,
-                            ", ".join(
-                                str(y) for y in years_to_load
-                            ),
+            cache_dir = (
+                self.data_dir / ".indicator_cache" / cache_key
+            )
+            _can_skip_csv = False
+            if needed_years is not None and cache_dir.is_dir():
+                cached_years = {
+                    int(p.stem)
+                    for p in cache_dir.glob("*.parquet")
+                    if p.stem.isdigit()
+                }
+                if set(needed_years).issubset(cached_years):
+                    _can_skip_csv = True
+
+            df = None
+            if _can_skip_csv:
+                try:
+                    years_to_load = sorted(needed_years)
+                    _dfs = [
+                        pd.read_parquet(
+                            cache_dir / f"{y}.parquet"
                         )
-                    except Exception as e:
-                        _log.warning(
-                            "キャッシュ読み込み失敗: %s"
-                            "（CSV再読み込み）",
-                            e,
-                        )
-                        df = loader.load_csv(tf_path)
-                        if df is not None:
-                            df = self._calculate_indicators_cached(
-                                df, cache_key, needed_years
-                            )
-                else:
+                        for y in years_to_load
+                    ]
+                    df = pd.concat(_dfs, ignore_index=True)
+                    _log.info(
+                        "年別キャッシュ使用（CSV省略）: %s [%s]",
+                        cache_key,
+                        ", ".join(
+                            str(y) for y in years_to_load
+                        ),
+                    )
+                except Exception as e:
+                    _log.warning(
+                        "キャッシュ読み込み失敗: %s"
+                        "（CSV再読み込み）",
+                        e,
+                    )
                     df = loader.load_csv(tf_path)
                     if df is not None:
                         df = self._calculate_indicators_cached(
                             df, cache_key, needed_years
                         )
+            else:
+                df = loader.load_csv(tf_path)
+                if df is not None:
+                    df = self._calculate_indicators_cached(
+                        df, cache_key, needed_years
+                    )
 
+            return tf, df
+
+        # --- 並列ロード (ThreadPoolExecutor, I/Oバウンド) ---
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+
+        _max_workers = min(8, total_tf)
+        _completed = 0
+
+        with ThreadPoolExecutor(max_workers=_max_workers) as pool:
+            futures = {
+                pool.submit(_load_single_tf, tf): tf
+                for tf in timeframes_to_load
+            }
+            for future in as_completed(futures):
+                tf, df = future.result()
+                _completed += 1
                 if df is not None and not df.empty:
                     data[tf] = df
-                    # インスタンス変数にも保存
-                    attr = _tf_attr_map.get(tf)
-                    if attr:
-                        setattr(self, attr, df)
-
-            # TFロード・インジケータ計算完了を通知
-            if on_tf_loaded is not None:
-                on_tf_loaded(tf, i + 1, total_tf)
+                    self._tf_data[tf] = df
+                if on_tf_loaded is not None:
+                    on_tf_loaded(tf, _completed, total_tf)
 
         # 既にロード済みのデータをマージ（load_data()で先にロードした分）
-        for tf, attr in [
-            ("H1", "_h1_df"),
-            ("H4", "_h4_df"),
-            ("H8", "_h8_df"),
-            ("D1", "_d1_df"),
-            ("M15", "_m15_df"),
-            ("M30", "_m30_df"),
-            ("M1", "_m1_df"),
-            ("M5", "_m5_df"),
-        ]:
-            df = getattr(self, attr, None)
+        for tf, df in self._tf_data.items():
             if df is not None and tf not in data:
                 data[tf] = df
 

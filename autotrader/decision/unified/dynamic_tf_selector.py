@@ -8,7 +8,11 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from autotrader.core.enums import SignalType
+from autotrader.config.tf_params_registry import (
+    get_holding_minutes,
+    get_tp_sl_ratio,
+)
+from autotrader.core.enums import SignalType, Timeframe
 
 
 @dataclass(frozen=True)
@@ -39,28 +43,8 @@ class DynamicTFSelector:
     TFをエントリーTFとして動的に選択する。
     """
 
-    TF_HIERARCHY = ["M1", "M5", "M15", "H1", "H4", "H8", "D1"]
-
-    HOLDING_MINUTES_BY_ENTRY_TF: dict[str, int] = {
-        "M1": 90,
-        "M5": 480,
-        "M15": 480,
-        "H1": 2880,
-        "H4": 2880,
-        "H8": 5760,
-        "D1": 10080,
-    }
-
-    # entry_tf別のTP/SL比率範囲
-    TP_SL_RATIO_BY_ENTRY_TF: dict[str, tuple[float, float]] = {
-        "M1": (1.0, 1.3),
-        "M5": (1.1, 1.4),
-        "M15": (1.1, 1.4),
-        "H1": (1.2, 1.6),
-        "H4": (1.2, 1.6),
-        "H8": (1.3, 1.8),
-        "D1": (1.3, 1.8),
-    }
+    # Timeframe enumから全TF階層を動的生成（W1除外）
+    TF_HIERARCHY = [tf.value for tf in Timeframe.all_trading()]
 
     def _get_primary_tf(self, entry_tf: str) -> str:
         """エントリーTFの1つ上のTFを返す
@@ -89,11 +73,10 @@ class DynamicTFSelector:
         Returns:
             int: バー数
         """
-        tf_minutes = {
-            "M1": 1, "M5": 5, "M15": 15,
-            "H1": 60, "H4": 240, "H8": 480, "D1": 1440,
-        }
-        tf_min = tf_minutes.get(entry_tf, 15)
+        try:
+            tf_min = Timeframe(entry_tf).minutes()
+        except ValueError:
+            tf_min = 15
         return max(1, minutes // tf_min)
 
     def select(
@@ -175,11 +158,9 @@ class DynamicTFSelector:
             )
 
         primary_tf = self._get_primary_tf(best_tf)
-        holding_minutes = self.HOLDING_MINUTES_BY_ENTRY_TF.get(
-            best_tf, 480
-        )
+        holding_minutes = get_holding_minutes(best_tf)
         max_bars = self._minutes_to_bars(best_tf, holding_minutes)
-        tp_sl = self.TP_SL_RATIO_BY_ENTRY_TF.get(best_tf, (1.1, 1.4))
+        tp_sl = get_tp_sl_ratio(best_tf)
 
         return DynamicTFResult(
             selected_entry_tf=best_tf,

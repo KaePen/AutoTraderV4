@@ -425,17 +425,25 @@ class UnifiedTradeBot:
         tf_signals: dict[str, TimeframeSignal] = {}
         consensus_signals: dict[str, ConsensusTimeframeSignal] = {}
 
-        for tf in self.timeframes:
-            if tf not in self.evaluators:
-                continue
-            row = self._get_current_row(tf, current_time)
-            if row is None:
-                continue
+        # TF数が閾値を超えた場合のみ並列化
+        _PARALLEL_TF_THRESHOLD = 12
+        _eval_tfs = [
+            tf for tf in self.timeframes if tf in self.evaluators
+        ]
 
-            signal = self.evaluators[tf].evaluate(
-                row, candle, plan, current_time,
+        if len(_eval_tfs) > _PARALLEL_TF_THRESHOLD:
+            tf_signals = self._evaluate_tfs_parallel(
+                _eval_tfs, current_time, candle, plan,
             )
-            tf_signals[tf] = signal
+        else:
+            for tf in _eval_tfs:
+                row = self._get_current_row(tf, current_time)
+                if row is None:
+                    continue
+                signal = self.evaluators[tf].evaluate(
+                    row, candle, plan, current_time,
+                )
+                tf_signals[tf] = signal
 
         # UNIVERSALモード: 全TFシグナル取得後に動的TF選択でplanを更新
         if tf_signals:
@@ -946,6 +954,45 @@ class UnifiedTradeBot:
 
         return result
 
+    def _evaluate_tfs_parallel(
+        self,
+        eval_tfs: list[str],
+        current_time: pd.Timestamp,
+        candle: "Candle | None",
+        plan: "TradingPlan",
+    ) -> dict[str, TimeframeSignal]:
+        """TF評価を並列実行（12TF超の場合のみ使用）
+
+        Args:
+            eval_tfs: 評価対象TFリスト
+            current_time: 現在時刻
+            candle: ローソク足
+            plan: トレーディングプラン
+
+        Returns:
+            dict[str, TimeframeSignal]: TF別シグナル
+        """
+        from concurrent.futures import ThreadPoolExecutor
+
+        def _eval_single(tf: str) -> tuple[str, TimeframeSignal | None]:
+            row = self._get_current_row(tf, current_time)
+            if row is None:
+                return tf, None
+            signal = self.evaluators[tf].evaluate(
+                row, candle, plan, current_time,
+            )
+            return tf, signal
+
+        results: dict[str, TimeframeSignal] = {}
+        _max_w = min(4, (len(eval_tfs) + 3) // 4)
+        with ThreadPoolExecutor(max_workers=_max_w) as pool:
+            for tf, signal in pool.map(
+                _eval_single, eval_tfs
+            ):
+                if signal is not None:
+                    results[tf] = signal
+        return results
+
     def _detect_regime(self, current_time: pd.Timestamp) -> "RegimeResult":
         """レジームを検出
 
@@ -957,8 +1004,9 @@ class UnifiedTradeBot:
         """
         from autotrader.calculator.features.regime_detector import RegimeResult
 
-        # H1データを使用
-        row = self._get_current_row("H1", current_time)
+        # レジーム検出TFを使用
+        _regime_tf = self.config.regime_detection_tf
+        row = self._get_current_row(_regime_tf, current_time)
         if row is None:
             return RegimeResult(
                 regime=MarketRegime.RANGE,
@@ -966,7 +1014,7 @@ class UnifiedTradeBot:
                 volatility_level=1.0,
                 adx=0.0,
                 confidence=0.0,
-                reasoning="H1データなし",
+                reasoning=f"{_regime_tf}データなし",
             )
 
         return self.regime_detector.detect_from_row(row)
@@ -982,7 +1030,7 @@ class UnifiedTradeBot:
         """
         alignment_scores = []
 
-        for tf in ["H4", "D1"]:
+        for tf in self.config.htf_alignment_tfs:
             row = self._get_current_row(tf, current_time)
             if row is None:
                 continue
@@ -1152,7 +1200,7 @@ class UnifiedTradeBot:
             bool: トレンドが一致しているか
         """
         aligned_score = 0.0
-        check_tfs = ["H4", "D1"]
+        check_tfs = self.config.htf_alignment_tfs
 
         for tf in check_tfs:
             row = self._get_current_row(tf, current_time)

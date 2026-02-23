@@ -557,16 +557,14 @@ class PositionManager:
     ) -> ManagementAction | None:
         """時間決済チェック"""
         # dynamic_entry_tf に基づいて保有時間を動的計算
-        from autotrader.decision.unified.dynamic_tf_selector import (
-            DynamicTFSelector,
+        from autotrader.config.tf_params_registry import (
+            get_holding_minutes,
         )
         entry_tf = (
             getattr(position.plan, "dynamic_entry_tf", None)
             or position.plan.entry_tf
         )
-        max_minutes = DynamicTFSelector.HOLDING_MINUTES_BY_ENTRY_TF.get(
-            entry_tf, self.DEFAULT_MAX_HOLDING_MINUTES
-        )
+        max_minutes = get_holding_minutes(entry_tf)
         elapsed = (current_time - position.entry_time).total_seconds() / 60
 
         if elapsed >= max_minutes:

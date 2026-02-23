@@ -180,14 +180,14 @@ class TimeframePreset:
     def for_timeframe(cls, tf: Timeframe) -> TimeframePreset:
         """指定時間足のプリセットを取得
 
+        既知5TFはファクトリメソッドから取得。
+        未対応TFは最近接TFプリセットをベースに補間生成。
+
         Args:
             tf: 時間足
 
         Returns:
             TimeframePreset: 対応するプリセット
-
-        Raises:
-            ValueError: 未対応の時間足の場合
         """
         preset_map = {
             Timeframe.M1: cls.for_m1,
@@ -197,9 +197,61 @@ class TimeframePreset:
             Timeframe.H4: cls.for_h4,
         }
         factory = preset_map.get(tf)
-        if factory is None:
-            raise ValueError(f"未対応の時間足: {tf}")
-        return factory()
+        if factory is not None:
+            return factory()
+
+        # 未対応TF: 最近接プリセットをベースに返す
+        return cls._interpolate_preset(tf)
+
+    @classmethod
+    def _interpolate_preset(cls, tf: Timeframe) -> TimeframePreset:
+        """最近接TFプリセットを元に補間生成
+
+        Args:
+            tf: 未対応の時間足
+
+        Returns:
+            TimeframePreset: 補間されたプリセット
+        """
+        from autotrader.config.tf_params_registry import (
+            get_atr_multipliers,
+        )
+
+        target_min = tf.minutes()
+
+        # 既知プリセットから最近接を選択
+        known = [
+            (Timeframe.M1, 1),
+            (Timeframe.M5, 5),
+            (Timeframe.M15, 15),
+            (Timeframe.H1, 60),
+            (Timeframe.H4, 240),
+        ]
+        # 最も分数が近いTFを選択
+        closest_tf = min(
+            known, key=lambda x: abs(x[1] - target_min)
+        )[0]
+        base = cls.for_timeframe(closest_tf)
+        sl_mult, tp_mult = get_atr_multipliers(tf.value)
+
+        # 上位時間足のMTFレイヤーを決定
+        higher = Timeframe.get_higher_timeframes(tf)
+        mtf_layers = tuple(higher[:2]) if higher else (Timeframe.D1,)
+
+        return cls(
+            timeframe=tf,
+            min_signals=base.min_signals,
+            signal_margin=base.signal_margin,
+            adx_threshold=base.adx_threshold,
+            rsi_oversold=base.rsi_oversold,
+            rsi_overbought=base.rsi_overbought,
+            sl_atr_mult=sl_mult,
+            tp_atr_mult=tp_mult,
+            cooldown_bars=base.cooldown_bars,
+            min_atr_pips=base.min_atr_pips,
+            max_spread_atr_ratio=base.max_spread_atr_ratio,
+            mtf_layers=mtf_layers,
+        )
 
     def is_atr_sufficient(self, atr_pips: float) -> bool:
         """ATRが最小閾値以上か判定

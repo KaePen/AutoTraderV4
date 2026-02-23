@@ -170,6 +170,12 @@ class UnifiedBotConfig:
     # 品質ベース動的ポジション枠（バックテストと同一ロジック）
     bonus_max_positions: int = 0
     bonus_score_threshold: float = 7.0
+    # レジーム検出に使用するTF
+    regime_detection_tf: str = "H1"
+    # HTF整合性チェックに使用するTFリスト
+    htf_alignment_tfs: list[str] = field(
+        default_factory=lambda: ["H4", "D1"]
+    )
 
     def get_evaluator_config(self, timeframe: str) -> EvaluatorConfig:
         """時間足別評価器設定を取得

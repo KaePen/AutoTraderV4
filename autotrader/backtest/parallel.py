@@ -8,6 +8,11 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from ..config import DEFAULT_SCORING, DEFAULT_TF_SCORING
+from ..config.tf_params_registry import (
+    get_sl_base_mult,
+    get_tf_min_score,
+    get_tf_weight,
+)
 
 if TYPE_CHECKING:
 
@@ -209,7 +214,9 @@ def evaluate_timeframe_signal(
             reasons.append("HTF整合")
 
     # 方向と確度を決定
-    min_score = MIN_SCORES.get(timeframe, 5.0)
+    min_score = MIN_SCORES.get(
+        timeframe, get_tf_min_score(timeframe) * 1.5
+    )
     max_score = max(buy_score, sell_score)
 
     if max_score < min_score:
@@ -232,10 +239,7 @@ def evaluate_timeframe_signal(
     if atr is not None and close is not None and close > 0:
         atr_pips = atr * 100  # USDJPY用
 
-        base_mult = {
-            "M1": 0.8, "M5": 1.0, "M15": 1.2,
-            "H1": 1.5, "H4": 2.0, "D1": 2.5,
-        }.get(timeframe, 1.5)
+        base_mult = get_sl_base_mult(timeframe)
 
         sl_pips = max(10.0, min(atr_pips * base_mult, 50.0))
         tp_pips = sl_pips  # 勝率重視: TP = SL
@@ -298,7 +302,8 @@ class ParallelSignalEvaluator:
         Returns:
             str | None: 上位足の合意トレンド
         """
-        tf_order = ["M1", "M5", "M15", "H1", "H4", "D1"]
+        from autotrader.core.enums import Timeframe as _TF
+        tf_order = [tf.value for tf in _TF.all_trading()]
         try:
             idx = tf_order.index(timeframe)
         except ValueError:
@@ -549,7 +554,7 @@ class PriorityBasedEvaluator:
         sell_tfs: list[str] = []
 
         for tf, result in tf_results.items():
-            weight = TF_WEIGHTS.get(tf, 1.0)
+            weight = TF_WEIGHTS.get(tf, get_tf_weight(tf))
             strength = max(result.buy_strength, result.sell_strength)
 
             if result.direction == "BUY":

@@ -8,16 +8,28 @@ from enum import Enum
 class Timeframe(str, Enum):
     """時間足の列挙型
 
-    短期足（タイミング用）と長期足（環境認識用）を定義。
+    MT5対応の全19時間足（M1〜D1）+ W1を定義。
+    分数昇順で並べる。
     """
 
     M1 = "M1"
+    M2 = "M2"
+    M3 = "M3"
+    M4 = "M4"
     M5 = "M5"
+    M6 = "M6"
+    M10 = "M10"
+    M12 = "M12"
     M15 = "M15"
+    M20 = "M20"
     M30 = "M30"
     H1 = "H1"
+    H2 = "H2"
+    H3 = "H3"
     H4 = "H4"
+    H6 = "H6"
     H8 = "H8"
+    H12 = "H12"
     D1 = "D1"
     W1 = "W1"
 
@@ -28,8 +40,12 @@ class Timeframe(str, Enum):
             int: 分単位の値
         """
         mapping = {
-            "M1": 1, "M5": 5, "M15": 15, "M30": 30,
-            "H1": 60, "H4": 240, "H8": 480, "D1": 1440, "W1": 10080,
+            "M1": 1, "M2": 2, "M3": 3, "M4": 4, "M5": 5,
+            "M6": 6, "M10": 10, "M12": 12, "M15": 15,
+            "M20": 20, "M30": 30,
+            "H1": 60, "H2": 120, "H3": 180, "H4": 240,
+            "H6": 360, "H8": 480, "H12": 720,
+            "D1": 1440, "W1": 10080,
         }
         return mapping[self.value]
 
@@ -55,6 +71,15 @@ class Timeframe(str, Enum):
         all_tfs = list(cls)
         idx = all_tfs.index(tf)
         return all_tfs[idx + 1:]
+
+    @classmethod
+    def all_trading(cls) -> list["Timeframe"]:
+        """W1を除く全トレーディング時間足を返す
+
+        Returns:
+            list[Timeframe]: M1〜D1の19時間足
+        """
+        return [tf for tf in cls if tf != cls.W1]
 
 
 class SignalType(str, Enum):
