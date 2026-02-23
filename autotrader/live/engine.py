@@ -670,44 +670,12 @@ class LiveTradingEngine:
             for tf in self._bot._market_data:
                 indicators[tf] = self._extract_indicators(tf)
 
-        # --- tick_entry (ティックエントリ状態) ---
-        optimizer = self._tick_optimizer
-        tick_entry: dict[str, any] = {
-            "state": optimizer.state.value,
-            "is_active": optimizer.is_active,
-        }
-        if optimizer.is_active:
-            tick_entry["elapsed_sec"] = round(
-                optimizer._buffer.elapsed, 1
-            )
-            tick_entry["tick_count"] = optimizer._buffer.count
-            if optimizer.pending_signal:
-                tick_entry["pending_direction"] = (
-                    optimizer.pending_signal.signal_type.value
-                )
-        last_eval = optimizer.last_evaluation
-        if last_eval is not None:
-            tick_entry["composite_score"] = (
-                last_eval.composite_score
-            )
-            tick_entry["spread_score"] = last_eval.spread_score
-            tick_entry["momentum_score"] = (
-                last_eval.momentum_score
-            )
-            tick_entry["retracement_score"] = (
-                last_eval.retracement_score
-            )
-            tick_entry["should_execute"] = (
-                last_eval.should_execute
-            )
-
         return {
             "analysis": analysis,
             "account": account,
             "positions": self._cached_positions,
             "radar": radar_serialized,
             "indicators": indicators,
-            "tick_entry": tick_entry,
         }
 
     async def get_candles(

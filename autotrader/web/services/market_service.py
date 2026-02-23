@@ -175,6 +175,7 @@ class MarketService:
         return [
             TradeResponse(
                 trade_id=t.trade_id,
+                ticket=t.ticket or 0,
                 is_open=t.is_open,
                 symbol=t.symbol,
                 signal_type=t.signal_type,

@@ -61,6 +61,30 @@
   transform: translateX(1.25rem);
 }
 
+/* トレード履歴テーブル */
+.table {
+  width: 100%;
+  border-collapse: collapse;
+}
+.table th {
+  padding: 0.5rem 0.75rem;
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: rgb(156 163 175);
+  text-align: left;
+  border-bottom: 1px solid rgb(55 65 81 / 0.7);
+}
+.table td {
+  padding: 0.4rem 0.75rem;
+  border-bottom: 1px solid rgb(55 65 81 / 0.3);
+  vertical-align: middle;
+}
+.table tbody tr:hover {
+  background: rgb(55 65 81 / 0.2) !important;
+}
+
 /* スケルトンローディング */
 .skeleton {
   background: linear-gradient(90deg, rgb(55 65 81) 25%, rgb(75 85 99) 50%, rgb(55 65 81) 75%);

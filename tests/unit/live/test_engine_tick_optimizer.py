@@ -136,44 +136,6 @@ class TestEngineTickConfigIntegration:
         )
 
 
-class TestBuildTickPayloadTickEntry:
-    """_build_tick_payloadのtick_entryフィールドテスト"""
-
-    def test_ペイロードにtick_entryが含まれる(
-        self, tick_enabled_config: LiveTradingConfig,
-    ) -> None:
-        """ペイロードにtick_entryセクションが存在"""
-        engine = LiveTradingEngine(tick_enabled_config)
-        payload = engine._build_tick_payload()
-
-        assert "tick_entry" in payload
-        te = payload["tick_entry"]
-        assert te["state"] == "IDLE"
-        assert te["is_active"] is False
-
-    def test_監視中のtick_entryフィールド(
-        self, tick_enabled_config: LiveTradingConfig,
-    ) -> None:
-        """MONITORING中にelapsed_sec等が含まれる"""
-        engine = LiveTradingEngine(tick_enabled_config)
-        signal = Signal(
-            signal_type=SignalType.BUY,
-            symbol="USDJPY",
-            timeframe=Timeframe.M1,
-            confidence=0.8,
-        )
-        engine._tick_optimizer.start_monitoring(signal)
-
-        payload = engine._build_tick_payload()
-        te = payload["tick_entry"]
-
-        assert te["state"] == "MONITORING"
-        assert te["is_active"] is True
-        assert "elapsed_sec" in te
-        assert "tick_count" in te
-        assert te["pending_direction"] == "BUY"
-
-
 class TestEngineStopWithOptimizer:
     """エンジン停止時のOptimizer処理テスト"""
 
