@@ -914,7 +914,40 @@ const ChartManager = {
 
   /** シンボル変更 */
   setSymbol(symbol) {
+    if (this.symbol === symbol) return;
     this.symbol = symbol;
+
+    // 旧シンボルのキャッシュをクリア
+    this._lastBarData = null;
+    this.signals = [];
+    this._trades = [];
+
+    // 旧トレードラインを即座に削除
+    if (this.chart) {
+      for (const series of this._tradeLines) {
+        try { this.chart.removeSeries(series); } catch (_e) {}
+      }
+    }
+    this._tradeLines = [];
+    this._openTradeLineRefs = [];
+
+    // 旧マーカーをクリア
+    if (this._seriesMarkers) {
+      this._seriesMarkers.setMarkers([]);
+    }
+
+    // priceFormat を新シンボルに合わせて更新
+    const prec = this._getPricePrecision();
+    if (this.candleSeries) {
+      this.candleSeries.applyOptions({
+        priceFormat: {
+          type: 'price',
+          precision: prec,
+          minMove: prec === 3 ? 0.001 : 0.00001,
+        },
+      });
+    }
+
     this.fetchCandles();
   },
 
