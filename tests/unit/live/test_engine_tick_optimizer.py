@@ -34,7 +34,6 @@ def tick_enabled_config() -> LiveTradingConfig:
         ),
         tick_entry_config=TickEntryConfig(
             enabled=True,
-            enabled_modes=("UNIVERSAL",),
             poll_interval_sec=0.01,
             max_monitoring_sec=1.0,
         ),
@@ -86,9 +85,6 @@ class TestEngineTickOptimizer:
         """enabled=Trueで使用すべきと判定"""
         engine = LiveTradingEngine(tick_enabled_config)
 
-        # モード設定（botのcurrent_modeモック）
-        engine._bot.current_mode = "UNIVERSAL"  # type: ignore[attr-defined]
-
         result = engine._should_use_tick_optimizer()
         assert result is True
 
@@ -112,16 +108,6 @@ class TestEngineTickOptimizer:
             engine._bot.config, demo_mode=True
         )
         engine._bot.config = demo_config
-
-        result = engine._should_use_tick_optimizer()
-        assert result is False
-
-    def test_should_use_tick_optimizer_モード不一致(
-        self, tick_enabled_config: LiveTradingConfig,
-    ) -> None:
-        """有効モード外では使用しない"""
-        engine = LiveTradingEngine(tick_enabled_config)
-        engine._bot._last_mode = "INVALID_MODE"  # type: ignore[attr-defined]
 
         result = engine._should_use_tick_optimizer()
         assert result is False

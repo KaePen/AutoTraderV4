@@ -15,7 +15,6 @@ class TickEntryConfig:
 
     Attributes:
         enabled: ティック最適化の有効/無効
-        enabled_modes: 有効な取引モード名タプル
         poll_interval_sec: ポーリング間隔（秒）
         max_monitoring_sec: 監視タイムアウト（秒）
         spread_threshold_pips: スプレッド閾値（pips）
@@ -32,7 +31,6 @@ class TickEntryConfig:
     """
 
     enabled: bool = True
-    enabled_modes: tuple[str, ...] = ("UNIVERSAL",)
     poll_interval_sec: float = 0.1
     max_monitoring_sec: float = 30.0
     spread_threshold_pips: float = 1.5

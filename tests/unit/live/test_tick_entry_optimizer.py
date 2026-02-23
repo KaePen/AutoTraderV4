@@ -536,11 +536,9 @@ class TestTickEntryConfig:
         """カスタム値が正しく設定される"""
         config = TickEntryConfig(
             enabled=True,
-            enabled_modes=("UNIVERSAL",),
             poll_interval_sec=0.05,
             max_monitoring_sec=15.0,
             spread_threshold_pips=2.0,
         )
         assert config.enabled is True
-        assert "UNIVERSAL" in config.enabled_modes
         assert config.poll_interval_sec == 0.05

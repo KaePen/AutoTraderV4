@@ -921,21 +921,6 @@ class LiveTradingEngine:
         if getattr(self._bot.config, "demo_mode", False):
             return False
 
-        # 現在のモード判定（_last_modeはgenerate_signal後に設定される）
-        current_mode = getattr(
-            self._bot, "_last_mode", ""
-        )
-        if isinstance(current_mode, str):
-            mode_name = current_mode.upper()
-        else:
-            mode_name = str(current_mode).upper()
-
-        if cfg.enabled_modes and mode_name:
-            return mode_name in (
-                m.upper() for m in cfg.enabled_modes
-            )
-
-        # モード不明の場合はenabledに従う
         return True
 
     async def _execute_entry(self, signal: Signal) -> None:
