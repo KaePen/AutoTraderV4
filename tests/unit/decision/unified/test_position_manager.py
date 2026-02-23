@@ -331,7 +331,7 @@ class TestPositionManager:
             atr=0.5,
         )
         assert action.action_type == ManagementActionType.PARTIAL_CLOSE
-        assert action.close_ratio == 0.3
+        assert action.close_ratio == 0.05
         # DAY_TRADEもBE移動あり
         assert action.new_sl == pytest.approx(150.01)
 
@@ -371,7 +371,7 @@ class TestPositionManager:
         )
 
         assert action.action_type == ManagementActionType.PARTIAL_CLOSE
-        assert action.close_ratio == 0.3
+        assert action.close_ratio == 0.05
         # SLを1Rに移動（2R時は全モードで適用）
         assert action.new_sl == 150.5  # entry + 1R
 
@@ -862,7 +862,7 @@ class TestBreakevenImprovement:
             atr=0.5,
         )
         assert action.action_type == ManagementActionType.PARTIAL_CLOSE
-        assert action.close_ratio == 0.3
+        assert action.close_ratio == 0.05
         # DAY_TRADEでもBE移動あり
         assert action.new_sl == pytest.approx(150.01)
         assert action.exit_reason == ExitReason.TAKE_PROFIT_1R
@@ -964,7 +964,7 @@ class TestBreakevenImprovement:
             atr=0.5,
         )
         assert action.action_type == ManagementActionType.PARTIAL_CLOSE
-        assert action.close_ratio == 0.3
+        assert action.close_ratio == 0.05
         # SWINGではBE移動あり（offset付き）
         assert action.new_sl == pytest.approx(150.01)
 

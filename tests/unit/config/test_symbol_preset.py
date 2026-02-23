@@ -326,14 +326,14 @@ class TestTrailingStopDefaults:
         assert preset.use_position_manager is False
 
     def test_trailing_start_r_default(self):
-        """trailing_start_r デフォルト値 2.0"""
+        """trailing_start_r デフォルト値 1.5"""
         preset = SymbolPreset()
-        assert preset.trailing_start_r == 2.0
+        assert preset.trailing_start_r == 1.5
 
     def test_trailing_atr_multiplier_default(self):
-        """trailing_atr_multiplier デフォルト値 2.0"""
+        """trailing_atr_multiplier デフォルト値 1.5"""
         preset = SymbolPreset()
-        assert preset.trailing_atr_multiplier == 2.0
+        assert preset.trailing_atr_multiplier == 1.5
 
     def test_breakeven_at_1r_default_true(self):
         """デフォルトで breakeven_at_1r=True"""

@@ -281,16 +281,16 @@ class TestSlippageBuffer:
         result = sizer.calculate(context)
 
         # 手計算: conf_adjust = 0.3 + 0.7*0.7 = 0.79
-        # 1M * 0.02 * 0.79 / ((20+2) * 1000) ≈ 0.718 → 0.72
+        # 1M * 0.04 * 0.79 / ((20+2) * 1000) ≈ 1.436 → 1.44
         conf_adjust = 0.3 + 0.7 * 0.7
         expected_lot = (
-            1_000_000 * 0.02 * conf_adjust
+            1_000_000 * 0.04 * conf_adjust
         ) / (22.0 * 1000.0)
         # max_risk_pct_absoluteによる上限
         max_lot_risk = (
-            1_000_000 * 0.03
+            1_000_000 * 0.07
         ) / (22.0 * 1000.0)
-        expected = min(expected_lot, 2.0, max_lot_risk)
+        expected = min(expected_lot, 5.0, max_lot_risk)
         assert abs(result.lot - round(expected, 2)) < 0.02
 
 

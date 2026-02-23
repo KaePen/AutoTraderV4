@@ -71,7 +71,7 @@ class PositionSizerConfig:
     """
 
     symbol: str = ""              # 通貨ペアシンボル（pip_value自動計算用）
-    base_risk_pct: float = 0.02  # 2%リスク
+    base_risk_pct: float = 0.04  # 4%リスク
     pip_value: float = 0.0       # 0=シンボルから自動計算
     min_lot: float = 0.01
     max_lot: float = 10.0
@@ -85,8 +85,8 @@ class PositionSizerConfig:
     consecutive_loss_min_adjust: float = 0.3  # 最大減額時0.3x
     slippage_buffer_pips: float = 2.0     # SLスリッページバッファ
     # 資金管理パラメータ
-    max_lot_per_trade: float = 2.0        # 1トレード上限2ロット
-    max_risk_pct_absolute: float = 0.03   # 絶対最大3%リスク
+    max_lot_per_trade: float = 5.0        # 1トレード上限5ロット
+    max_risk_pct_absolute: float = 0.07   # 絶対最大7%リスク
     equity_floor_pct: float = 0.30        # 初期資金の30%で取引停止
     equity_caution_pct: float = 0.50      # 初期資金の50%で減額開始
     max_total_exposure_lot: float = 5.0   # 合計5ロット上限

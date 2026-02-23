@@ -373,26 +373,26 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--max-lot-per-trade",
         type=float,
-        default=2.0,
-        help="1トレードあたりの上限ロット（デフォルト: 2.0）",
+        default=5.0,
+        help="1トレードあたりの上限ロット（デフォルト: 5.0）",
     )
     parser.add_argument(
         "--max-total-exposure",
         type=float,
-        default=5.0,
-        help="合計オープンロット上限（デフォルト: 5.0）",
+        default=10.0,
+        help="合計オープンロット上限（デフォルト: 10.0）",
     )
     parser.add_argument(
         "--risk-pct",
         type=float,
-        default=0.02,
-        help="基本リスク率（デフォルト: 0.02=2%%）",
+        default=0.04,
+        help="基本リスク率（デフォルト: 0.04=4%%）",
     )
     parser.add_argument(
         "--max-risk-pct-abs",
         type=float,
-        default=0.03,
-        help="絶対最大リスク率（デフォルト: 0.03=3%%）",
+        default=0.07,
+        help="絶対最大リスク率（デフォルト: 0.07=7%%）",
     )
     parser.add_argument(
         "--equity-floor",
@@ -409,8 +409,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--tp-sl-ratio",
         type=float,
-        default=1.0,
-        help="TP/SL比率乗数（デフォルト: 1.0=プラン推奨値）",
+        default=1.2,
+        help="TP/SL比率乗数（デフォルト: 1.2）",
     )
     parser.add_argument(
         "--slippage-buffer",
@@ -448,14 +448,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--partial-1r-ratio",
         type=float,
-        default=0.3,
-        help="1R到達時の部分決済比率（デフォルト: 0.3）",
+        default=0.05,
+        help="1R到達時の部分決済比率（デフォルト: 0.05）",
     )
     parser.add_argument(
         "--partial-2r-ratio",
         type=float,
-        default=0.3,
-        help="2R到達時の部分決済比率（デフォルト: 0.3）",
+        default=0.05,
+        help="2R到達時の部分決済比率（デフォルト: 0.05）",
     )
     parser.add_argument(
         "--no-breakeven-1r",
@@ -465,14 +465,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--trailing-start-r",
         type=float,
-        default=2.0,
-        help="トレーリング開始R値（デフォルト: 2.0）",
+        default=1.5,
+        help="トレーリング開始R値（デフォルト: 1.5）",
     )
     parser.add_argument(
         "--trailing-atr-mult",
         type=float,
-        default=2.0,
-        help="ATRトレーリング倍率（デフォルト: 2.0）",
+        default=1.5,
+        help="ATRトレーリング倍率（デフォルト: 1.5）",
     )
     parser.add_argument(
         "--early-be-r",

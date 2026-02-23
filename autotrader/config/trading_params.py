@@ -87,14 +87,14 @@ class SymbolPreset:
     max_positions: int = 2
     bonus_max_positions: int = 1
     bonus_score_threshold: float = 7.0
-    base_risk_pct: float = 0.02
-    max_lot_per_trade: float = 2.0
+    base_risk_pct: float = 0.04
+    max_lot_per_trade: float = 5.0
     max_total_exposure_lot: float = 5.0
     equity_floor_pct: float = 0.30
     # トレーリングストップ設定
     use_position_manager: bool = False
-    trailing_start_r: float = 2.0
-    trailing_atr_multiplier: float = 2.0
+    trailing_start_r: float = 1.5
+    trailing_atr_multiplier: float = 1.5
     breakeven_at_1r: bool = True
 
     def to_pm_config(self) -> PositionManagerConfig:

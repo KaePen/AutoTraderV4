@@ -130,7 +130,7 @@ class UnifiedBotConfig:
     )
     min_adx: float = 20.0
     require_htf_trend: bool = True
-    tp_sl_ratio: float = 1.0
+    tp_sl_ratio: float = 1.2
     timeframe_configs: dict[str, TimeframeConfig] = field(
         default_factory=dict
     )
@@ -145,10 +145,10 @@ class UnifiedBotConfig:
     # 動的ロットサイズ（PositionSizer結果をSimulatorに渡す）
     use_dynamic_lot: bool = True
     # 資金管理パラメータ（PositionSizerConfigに渡す）
-    max_lot_per_trade: float = 2.0
-    max_total_exposure_lot: float = 5.0
-    base_risk_pct: float = 0.02
-    max_risk_pct_absolute: float = 0.03
+    max_lot_per_trade: float = 5.0
+    max_total_exposure_lot: float = 10.0
+    base_risk_pct: float = 0.04
+    max_risk_pct_absolute: float = 0.07
     equity_floor_pct: float = 0.30
     equity_caution_pct: float = 0.50
     # SLスリッページバッファ（pips）
