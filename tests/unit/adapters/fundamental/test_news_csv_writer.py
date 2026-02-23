@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
-
 from autotrader.adapters.fundamental.news_csv_writer import (
+    filter_news_csv,
     read_news_csv,
     write_news_csv,
 )
@@ -19,16 +19,17 @@ from autotrader.adapters.fundamental.news_schemas import (
 def _make_item(
     idx: int,
     source_type: NewsSource = NewsSource.GDELT,
+    source_name: str = "reuters.com",
 ) -> NewsItem:
     """テスト用NewsItemを生成"""
     return NewsItem(
         news_id=f"gdelt_{idx:012d}",
         published_at=datetime(
-            2024, 1, idx + 1, 12, 0, 0, tzinfo=timezone.utc
+            2024, 1, idx + 1, 12, 0, 0, tzinfo=UTC
         ),
         title=f"Test news title {idx}",
-        source_name="reuters.com",
-        source_url=f"https://reuters.com/{idx}",
+        source_name=source_name,
+        source_url=f"https://{source_name}/{idx}",
         currencies=["USD", "JPY"],
         source_type=source_type,
         snippet=f"Snippet text {idx}",
@@ -165,7 +166,7 @@ class TestReadNewsCsv:
         item = NewsItem(
             news_id="test_001",
             published_at=datetime(
-                2024, 1, 1, tzinfo=timezone.utc
+                2024, 1, 1, tzinfo=UTC
             ),
             title="Test",
             source_name="reuters.com",
@@ -187,7 +188,7 @@ class TestReadNewsCsv:
         item = NewsItem(
             news_id="test_002",
             published_at=datetime(
-                2024, 1, 1, tzinfo=timezone.utc
+                2024, 1, 1, tzinfo=UTC
             ),
             title="No snippet test",
             source_name="bloomberg.com",
@@ -225,13 +226,14 @@ class TestReadNewsCsv:
         # 不正なCSVを手動作成
         content = (
             "news_id,published_at,title,source_name,"
-            "source_url,currencies,source_type,snippet\n"
+            "source_url,currencies,source_type,snippet,"
+            "content\n"
             "valid_001,2024-01-01T00:00:00+00:00,"
             "Valid news,reuters.com,"
             "https://reuters.com/1,"
-            '["USD"],gdelt,\n'
+            '["USD"],gdelt,,\n'
             # news_idなし
-            ",invalid_date,Bad row,,,,,\n"
+            ",invalid_date,Bad row,,,,,,\n"
         )
         out_path.write_text(content, encoding="utf-8")
 
@@ -239,3 +241,137 @@ class TestReadNewsCsv:
         # 有効な1行のみ
         assert len(loaded) == 1
         assert loaded[0].news_id == "valid_001"
+
+    def test_content付きラウンドトリップ(
+        self, tmp_path: Path
+    ) -> None:
+        """content付きアイテムのラウンドトリップ"""
+        item = NewsItem(
+            news_id="test_content_001",
+            published_at=datetime(
+                2024, 1, 1, tzinfo=UTC
+            ),
+            title="Article with content",
+            source_name="fxstreet.com",
+            source_url="https://fxstreet.com/1",
+            currencies=["USD"],
+            source_type=NewsSource.RSS,
+            content="This is the article body text.",
+        )
+        out_path = tmp_path / "news.csv"
+
+        write_news_csv([item], out_path)
+        loaded = read_news_csv(out_path)
+
+        assert len(loaded) == 1
+        assert loaded[0].content == (
+            "This is the article body text."
+        )
+
+    def test_旧CSV読み込みでcontentはNone(
+        self, tmp_path: Path
+    ) -> None:
+        """旧CSV（content列なし）の読み込みでcontent=None"""
+        out_path = tmp_path / "old_news.csv"
+        # content列を含まない旧フォーマットCSV
+        content = (
+            "news_id,published_at,title,source_name,"
+            "source_url,currencies,source_type,snippet\n"
+            "old_001,2024-01-01T00:00:00+00:00,"
+            "Old format news,reuters.com,"
+            "https://reuters.com/1,"
+            '["USD"],gdelt,snippet text\n'
+        )
+        out_path.write_text(content, encoding="utf-8")
+
+        loaded = read_news_csv(out_path)
+        assert len(loaded) == 1
+        assert loaded[0].content is None
+        assert loaded[0].snippet == "snippet text"
+
+    def test_contentNoneのラウンドトリップ(
+        self, tmp_path: Path
+    ) -> None:
+        """content=Noneのアイテムも正常に保存復元"""
+        item = _make_item(0)
+        assert item.content is None  # デフォルトはNone
+        out_path = tmp_path / "news.csv"
+
+        write_news_csv([item], out_path)
+        loaded = read_news_csv(out_path)
+
+        assert loaded[0].content is None
+
+
+class TestFilterNewsCsv:
+    """filter_news_csv のテスト"""
+
+    def test_対象ソースのみ抽出(
+        self, tmp_path: Path
+    ) -> None:
+        """allowed_sourcesに含まれるソースのみ出力"""
+        items = [
+            _make_item(0, source_name="cnbc.com"),
+            _make_item(1, source_name="unknown.org"),
+            _make_item(2, source_name="fxstreet.com"),
+        ]
+        in_path = tmp_path / "news_2024.csv"
+        out_path = tmp_path / "news_rss_2024.csv"
+        write_news_csv(items, in_path)
+
+        allowed = frozenset({"cnbc.com", "fxstreet.com"})
+        count = filter_news_csv(in_path, out_path, allowed)
+
+        assert count == 2
+        loaded = read_news_csv(out_path)
+        assert len(loaded) == 2
+        sources = {item.source_name for item in loaded}
+        assert sources == {"cnbc.com", "fxstreet.com"}
+
+    def test_入力ファイル未存在で0件(
+        self, tmp_path: Path
+    ) -> None:
+        """存在しない入力ファイルは0件を返す"""
+        in_path = tmp_path / "nonexistent.csv"
+        out_path = tmp_path / "output.csv"
+        allowed = frozenset({"cnbc.com"})
+
+        count = filter_news_csv(in_path, out_path, allowed)
+
+        assert count == 0
+
+    def test_空セットで0件出力(
+        self, tmp_path: Path
+    ) -> None:
+        """allowed_sourcesが空なら0件出力"""
+        items = [
+            _make_item(0, source_name="cnbc.com"),
+        ]
+        in_path = tmp_path / "news.csv"
+        out_path = tmp_path / "filtered.csv"
+        write_news_csv(items, in_path)
+
+        count = filter_news_csv(
+            in_path, out_path, frozenset()
+        )
+
+        assert count == 0
+        # ヘッダーのみのファイルが作成される
+        assert out_path.exists()
+
+    def test_出力ディレクトリ自動作成(
+        self, tmp_path: Path
+    ) -> None:
+        """存在しない出力ディレクトリを自動作成"""
+        items = [
+            _make_item(0, source_name="cnbc.com"),
+        ]
+        in_path = tmp_path / "news.csv"
+        out_path = tmp_path / "sub" / "dir" / "out.csv"
+        write_news_csv(items, in_path)
+
+        allowed = frozenset({"cnbc.com"})
+        count = filter_news_csv(in_path, out_path, allowed)
+
+        assert count == 1
+        assert out_path.exists()

@@ -11,7 +11,7 @@ from __future__ import annotations
 import asyncio
 from collections import OrderedDict
 from collections.abc import Awaitable, Callable
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
 
 from loguru import logger
@@ -68,15 +68,19 @@ class RSSCollector:
         self,
         currencies: list[str],
         poll_interval: int = 300,
+        article_fetcher: object | None = None,
     ) -> None:
         """初期化
 
         Args:
             currencies: 対象通貨コードリスト
             poll_interval: ポーリング間隔（秒）
+            article_fetcher: ArticleFetcher インスタンス（任意）。
+                指定時は新着ニュースの本文を自動取得する。
         """
         self._currencies = [c.upper() for c in currencies]
         self._poll_interval = poll_interval
+        self._article_fetcher = article_fetcher
         self._running = False
         self._task: asyncio.Task | None = None  # type: ignore[type-arg]
         # OrderedDict で上限付き重複排除（メモリリーク防止）
@@ -144,6 +148,7 @@ class RSSCollector:
         while self._running:
             try:
                 items = await self._fetch_all_feeds()
+                await self._enrich_content(items)
                 for item in items:
                     if item.news_id not in self._seen_ids:
                         self._seen_ids[item.news_id] = None
@@ -163,6 +168,42 @@ class RSSCollector:
                 )
 
             await asyncio.sleep(self._poll_interval)
+
+    async def _enrich_content(
+        self, items: list[NewsItem]
+    ) -> None:
+        """新着アイテムの本文をベストエフォートで取得
+
+        article_fetcher が設定されている場合のみ動作する。
+        取得失敗してもアイテムは変更しない（title + snippet で配信）。
+
+        Args:
+            items: 本文取得対象のニュースアイテムリスト
+        """
+        if self._article_fetcher is None:
+            return
+
+        loop = asyncio.get_running_loop()
+        for item in items:
+            if item.content:
+                continue
+            try:
+                result = await asyncio.wait_for(
+                    loop.run_in_executor(
+                        None,
+                        self._article_fetcher.fetch,  # type: ignore[union-attr]
+                        item.source_url,
+                        None,
+                    ),
+                    timeout=10.0,
+                )
+                if result.status == "ok" and result.content:
+                    item.content = result.content
+            except Exception as e:
+                logger.debug(
+                    f"[RSSCollector] 本文取得失敗 "
+                    f"{item.source_url}: {e}"
+                )
 
     async def _fetch_all_feeds(self) -> list[NewsItem]:
         """全フィードから記事を取得
@@ -254,7 +295,7 @@ class RSSCollector:
         # 公開日時パース
         published_at = _parse_rss_date(entry)
         if published_at is None:
-            published_at = datetime.now(timezone.utc)
+            published_at = datetime.now(UTC)
 
         # タイトルから通貨を抽出
         currencies = _extract_currencies(
@@ -303,7 +344,7 @@ def _parse_rss_date(entry: object) -> datetime | None:
     if parsed:
         try:
             return datetime(
-                *parsed[:6], tzinfo=timezone.utc
+                *parsed[:6], tzinfo=UTC
             )
         except (ValueError, TypeError):
             pass
@@ -313,7 +354,7 @@ def _parse_rss_date(entry: object) -> datetime | None:
     if published_str:
         try:
             dt = parsedate_to_datetime(published_str)
-            return dt.astimezone(timezone.utc)
+            return dt.astimezone(UTC)
         except Exception:
             pass
 
