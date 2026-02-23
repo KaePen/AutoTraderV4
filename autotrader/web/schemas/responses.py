@@ -351,8 +351,8 @@ class CapitalManagementConfigResponse(BaseModel):
     """資金管理設定レスポンス"""
 
     use_dynamic_lot: bool = True
-    base_risk_pct: float = 0.02
-    max_lot_per_trade: float = 2.0
+    base_risk_pct: float = 0.04
+    max_lot_per_trade: float = 5.0
     max_total_exposure_lot: float = 5.0
     equity_floor_pct: float = 0.30
     slippage_buffer_pips: float = 2.0
@@ -363,12 +363,12 @@ class PositionManagementConfigResponse(BaseModel):
 
     enable_position_manager: bool = True
     # 部分利確
-    partial_close_1r_ratio: float = 0.3
-    partial_close_2r_ratio: float = 0.3
+    partial_close_1r_ratio: float = 0.05
+    partial_close_2r_ratio: float = 0.05
     breakeven_at_1r: bool = True
     # トレーリング
-    trailing_start_r: float = 2.0
-    trailing_atr_multiplier: float = 2.0
+    trailing_start_r: float = 1.5
+    trailing_atr_multiplier: float = 1.5
     # コスト
     spread_pips: float = 1.5
     slippage_pips: float = 0.5

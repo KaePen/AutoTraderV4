@@ -26,8 +26,8 @@ class TestConfigLoader:
         assert isinstance(bot, UnifiedBotConfig)
         assert isinstance(pm, PositionManagerConfig)
         # デフォルト値確認
-        assert bot.base_risk_pct == 0.02
-        assert pm.partial_close_1r_ratio == 0.3
+        assert bot.base_risk_pct == 0.04
+        assert pm.partial_close_1r_ratio == 0.05
 
     def test_正常なYAML読み込み(
         self, tmp_path: Path,
