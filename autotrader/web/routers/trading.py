@@ -56,19 +56,13 @@ def _account_to_response(acct) -> AccountInfoResponse:
     )
 
 
-@router.get(
-    "/mode",
-    response_model=ApiResponse[TradingModeResponse],
-)
-async def get_trading_mode(
-    request: Request,
-    engine=Depends(get_live_engine),
+def _build_trading_mode_response(
+    engine,
 ) -> ApiResponse[TradingModeResponse]:
-    """現在のトレーディングモード取得
+    """エンジンからTradingModeレスポンスを構築
 
     Args:
-        request: FastAPIリクエスト
-        engine: LiveTradingEngine
+        engine: LiveTradingEngine | None
 
     Returns:
         ApiResponse[TradingModeResponse]: モード情報
@@ -95,18 +89,32 @@ async def get_trading_mode(
 
 
 @router.get(
-    "/mt5/status",
-    response_model=ApiResponse[MT5StatusResponse],
+    "/mode",
+    response_model=ApiResponse[TradingModeResponse],
 )
-async def get_mt5_status(
+async def get_trading_mode(
     request: Request,
     engine=Depends(get_live_engine),
-) -> ApiResponse[MT5StatusResponse]:
-    """MT5接続状態取得
+) -> ApiResponse[TradingModeResponse]:
+    """現在のトレーディングモード取得
 
     Args:
         request: FastAPIリクエスト
         engine: LiveTradingEngine
+
+    Returns:
+        ApiResponse[TradingModeResponse]: モード情報
+    """
+    return _build_trading_mode_response(engine)
+
+
+def _build_mt5_status_response(
+    engine,
+) -> ApiResponse[MT5StatusResponse]:
+    """エンジンからMT5ステータスレスポンスを構築
+
+    Args:
+        engine: LiveTradingEngine | None
 
     Returns:
         ApiResponse[MT5StatusResponse]: MT5状態
@@ -126,6 +134,26 @@ async def get_mt5_status(
             account=account,
         )
     )
+
+
+@router.get(
+    "/mt5/status",
+    response_model=ApiResponse[MT5StatusResponse],
+)
+async def get_mt5_status(
+    request: Request,
+    engine=Depends(get_live_engine),
+) -> ApiResponse[MT5StatusResponse]:
+    """MT5接続状態取得
+
+    Args:
+        request: FastAPIリクエスト
+        engine: LiveTradingEngine
+
+    Returns:
+        ApiResponse[MT5StatusResponse]: MT5状態
+    """
+    return _build_mt5_status_response(engine)
 
 
 @router.post(
@@ -176,7 +204,7 @@ async def connect_mt5(
             data=MT5StatusResponse(connected=False),
         )
 
-    return await get_mt5_status(request)
+    return _build_mt5_status_response(engine)
 
 
 @router.post(
@@ -244,7 +272,7 @@ async def toggle_auto_trade(
         "ON" if enable else "OFF",
     )
 
-    return await get_trading_mode(request)
+    return _build_trading_mode_response(engine)
 
 
 @router.post(
@@ -299,7 +327,7 @@ async def toggle_symbol_auto_trade(
     elif engine.running:
         engine.reset_data_update_timer()
 
-    return await get_trading_mode(request)
+    return _build_trading_mode_response(engine)
 
 
 @router.post(
@@ -376,7 +404,7 @@ async def toggle_symbol_demo_mode(
         engine.demo_mode_enabled,
     )
 
-    return await get_trading_mode(request)
+    return _build_trading_mode_response(engine)
 
 
 @router.post(
@@ -447,7 +475,7 @@ async def switch_account(
             data=MT5StatusResponse(connected=False),
         )
 
-    return await get_mt5_status(request)
+    return _build_mt5_status_response(engine)
 
 
 @router.get(

@@ -142,6 +142,10 @@ class SignalResponse(BaseModel):
         reasoning: 判断理由
         created_at: 生成時刻
         indicators_snapshot: 指標スナップショット
+        regime: 市場レジーム
+        mode: トレードモード
+        consensus_score: コンセンサススコア
+        lot: ロット数
     """
 
     signal_id: str
@@ -155,6 +159,10 @@ class SignalResponse(BaseModel):
     reasoning: str = ""
     created_at: datetime
     indicators_snapshot: dict[str, Any] = Field(default_factory=dict)
+    regime: str | None = None
+    mode: str | None = None
+    consensus_score: float | None = None
+    lot: float | None = None
 
 
 class PositionResponse(BaseModel):
@@ -173,6 +181,10 @@ class PositionResponse(BaseModel):
         opened_at: オープン時刻
         unrealized_pnl: 未実現損益
         unrealized_pnl_pips: 未実現損益（pips）
+        signal_id: シグナルID
+        regime: 市場レジーム
+        mode: トレードモード
+        consensus_score: コンセンサススコア
     """
 
     position_id: str
@@ -188,6 +200,10 @@ class PositionResponse(BaseModel):
     opened_at: datetime
     unrealized_pnl: float = 0.0
     unrealized_pnl_pips: float = 0.0
+    signal_id: str | None = None
+    regime: str | None = None
+    mode: str | None = None
+    consensus_score: float | None = None
 
 
 class TradeResponse(BaseModel):
@@ -208,6 +224,15 @@ class TradeResponse(BaseModel):
         exit_reason: 決済理由
         opened_at: オープン時刻
         closed_at: クローズ時刻
+        signal_id: シグナルID
+        regime: 市場レジーム
+        mode: トレードモード
+        consensus_score: コンセンサススコア
+        parent_trade_id: 部分決済の親トレードID
+        position_id: ポジションID
+        mfe_pips: 最大含み益（pips）
+        mae_pips: 最大含み損（pips）
+        entry_spread: エントリー時スプレッド
     """
 
     trade_id: str
@@ -225,6 +250,15 @@ class TradeResponse(BaseModel):
     exit_reason: ExitReason | None = None
     opened_at: datetime
     closed_at: datetime | None = None
+    signal_id: str | None = None
+    regime: str | None = None
+    mode: str | None = None
+    consensus_score: float | None = None
+    parent_trade_id: str | None = None
+    position_id: str | None = None
+    mfe_pips: float | None = None
+    mae_pips: float | None = None
+    entry_spread: float | None = None
 
 
 class TradeSummaryResponse(BaseModel):
@@ -369,19 +403,39 @@ class PositionManagementConfigResponse(BaseModel):
     # トレーリング
     trailing_start_r: float = 1.5
     trailing_atr_multiplier: float = 1.5
+    # 時間決済
+    time_exit_enabled: bool = True
     # コスト
     spread_pips: float = 1.5
     slippage_pips: float = 0.5
+    # BE基本設定
+    early_breakeven_r: float = 0.5
+    early_breakeven_enabled: bool = True
+    disable_tp_after_partial: bool = True
+    signal_rev_close_ratio: float = 0.5
     # Stagnation
     stagnation_exit_minutes: float = 120.0
     stagnation_min_mfe_r: float = 0.15
-    # BE制御
+    # BE制御（RANGE×DAY）
     range_day_be_disabled: bool = True
     range_day_early_be_r: float = 0.3
     range_day_fast_be_enabled: bool = True
     range_day_fast_be_minutes: float = 90.0
-    # 保険
+    # RANGE×DAY stagnation段階化
+    range_day_stagnation_enabled: bool = False
+    range_day_stagnation_stage1_minutes: float = 45.0
+    range_day_stagnation_stage1_min_mfe_r: float = 0.05
+    range_day_stagnation_stage2_minutes: float = 60.0
+    range_day_stagnation_stage2_min_mfe_r: float = 0.10
+    # 0.5R早期部分利確
+    early_partial_close_enabled: bool = False
+    early_partial_close_ratio: float = 0.25
+    # RANGE×DAY 保険
     range_day_insurance_enabled: bool = True
+    range_day_insurance_max_minutes: float = 30.0
+    range_day_insurance_sl_offset_r: float = -0.1
+    range_day_insurance_partial_ratio: float = 0.20
+    # TP_EARLY厳格化
     insurance_trigger_r: float = 1.0
     insurance_block_high_mfe_r: float = 0.8
     insurance_min_holding_minutes: float = 15.0

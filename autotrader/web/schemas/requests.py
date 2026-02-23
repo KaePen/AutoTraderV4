@@ -75,12 +75,23 @@ class PositionManagementUpdate(BaseModel):
     trailing_atr_multiplier: float | None = Field(
         default=None, ge=0.5, le=5.0
     )
+    # 時間決済
+    time_exit_enabled: bool | None = None
     # コスト
     spread_pips: float | None = Field(
         default=None, ge=0.0, le=10.0
     )
     slippage_pips: float | None = Field(
         default=None, ge=0.0, le=5.0
+    )
+    # BE基本設定
+    early_breakeven_r: float | None = Field(
+        default=None, ge=0.0, le=2.0
+    )
+    early_breakeven_enabled: bool | None = None
+    disable_tp_after_partial: bool | None = None
+    signal_rev_close_ratio: float | None = Field(
+        default=None, ge=0.0, le=1.0
     )
     # Stagnation
     stagnation_exit_minutes: float | None = Field(
@@ -89,7 +100,7 @@ class PositionManagementUpdate(BaseModel):
     stagnation_min_mfe_r: float | None = Field(
         default=None, ge=0.0, le=1.0
     )
-    # BE制御
+    # BE制御（RANGE×DAY）
     range_day_be_disabled: bool | None = None
     range_day_early_be_r: float | None = Field(
         default=None, ge=0.0, le=2.0
@@ -98,8 +109,37 @@ class PositionManagementUpdate(BaseModel):
     range_day_fast_be_minutes: float | None = Field(
         default=None, ge=10.0, le=300.0
     )
-    # 保険
+    # RANGE×DAY stagnation段階化
+    range_day_stagnation_enabled: bool | None = None
+    range_day_stagnation_stage1_minutes: float | None = Field(
+        default=None, ge=10.0, le=300.0
+    )
+    range_day_stagnation_stage1_min_mfe_r: float | None = Field(
+        default=None, ge=0.0, le=1.0
+    )
+    range_day_stagnation_stage2_minutes: float | None = Field(
+        default=None, ge=10.0, le=300.0
+    )
+    range_day_stagnation_stage2_min_mfe_r: float | None = Field(
+        default=None, ge=0.0, le=1.0
+    )
+    # 0.5R早期部分利確
+    early_partial_close_enabled: bool | None = None
+    early_partial_close_ratio: float | None = Field(
+        default=None, ge=0.0, le=1.0
+    )
+    # RANGE×DAY 保険
     range_day_insurance_enabled: bool | None = None
+    range_day_insurance_max_minutes: float | None = Field(
+        default=None, ge=5.0, le=120.0
+    )
+    range_day_insurance_sl_offset_r: float | None = Field(
+        default=None, ge=-1.0, le=1.0
+    )
+    range_day_insurance_partial_ratio: float | None = Field(
+        default=None, ge=0.0, le=1.0
+    )
+    # TP_EARLY厳格化
     insurance_trigger_r: float | None = Field(
         default=None, ge=0.0, le=3.0
     )

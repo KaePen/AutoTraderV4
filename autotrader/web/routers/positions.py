@@ -51,6 +51,10 @@ def _dict_to_position_response(d: dict) -> PositionResponse:
         unrealized_pnl_pips=d.get(
             "unrealized_pnl_pips", 0.0
         ),
+        signal_id=d.get("signal_id"),
+        regime=d.get("regime"),
+        mode=d.get("mode"),
+        consensus_score=d.get("consensus_score"),
     )
 
 

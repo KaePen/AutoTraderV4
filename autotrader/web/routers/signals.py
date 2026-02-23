@@ -35,6 +35,10 @@ def _signal_to_response(signal) -> SignalResponse:
         reasoning=signal.reasoning,
         created_at=signal.created_at,
         indicators_snapshot=signal.indicators_snapshot,
+        regime=signal.regime,
+        mode=signal.mode,
+        consensus_score=signal.consensus_score,
+        lot=signal.lot,
     )
 
 
