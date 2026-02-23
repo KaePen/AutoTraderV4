@@ -605,9 +605,16 @@ class LiveTradingEngine:
                 "rationale": cs.rationale,
                 "htf_alignment": cs.htf_alignment,
                 "penalty_total": cs.penalty_total,
+                "penalty_breakdown": dict(cs.penalty_breakdown),
                 "trend_strength": cs.trend_strength,
                 "aligned_tfs": list(cs.aligned_tfs),
                 "tf_scores": dict(cs.scores),
+                "tf_breakdowns": {
+                    k: dict(v)
+                    for k, v
+                    in cs.tf_score_breakdowns.items()
+                },
+                "tf_directions": dict(cs.tf_directions),
                 "last_tick_time": (
                     tick_time.isoformat() if tick_time else None
                 ),
