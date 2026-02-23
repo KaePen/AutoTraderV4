@@ -233,6 +233,8 @@ const DashboardApp = {
     const score = a.consensus_score || 0;
     const threshold = a.entry_threshold || 1;
     const dir = a.direction;
+    const buyScore = a.buy_score || 0;
+    const sellScore = a.sell_score || 0;
     const scoreText = document.getElementById('ap-score-text');
     const scoreBar = document.getElementById('ap-score-bar');
     const thSell = document.getElementById('ap-threshold-sell');
@@ -244,24 +246,36 @@ const DashboardApp = {
     if (scoreBar) {
       // 片側の最大値: threshold * 1.5（スケーリング用）
       const maxHalf = threshold * 1.5;
+      // HOLD時はbuy/sellスコアの大きい方で方向を決定
+      let barDir = dir;
+      let barScore = score;
+      if (dir === 'HOLD' && (buyScore > 0 || sellScore > 0)) {
+        barDir = buyScore >= sellScore ? 'BUY' : 'SELL';
+        barScore = Math.max(buyScore, sellScore);
+      }
       // スコアの割合（0〜50%の範囲にマップ）
-      const halfPct = Math.min(50, (score / maxHalf) * 50);
+      const halfPct = Math.min(50, (barScore / maxHalf) * 50);
       // BUY: 中央から右へ、SELL: 中央から左へ
-      if (dir === 'BUY') {
+      if (barDir === 'BUY') {
         scoreBar.style.left = '50%';
         scoreBar.style.width = halfPct + '%';
-      } else if (dir === 'SELL') {
+      } else if (barDir === 'SELL') {
         scoreBar.style.left = (50 - halfPct) + '%';
         scoreBar.style.width = halfPct + '%';
       } else {
         scoreBar.style.left = '50%';
         scoreBar.style.width = '0%';
       }
-      const barColor = dir === 'BUY'
-        ? (score >= threshold ? 'bg-green-500' : score >= threshold * 0.7 ? 'bg-green-700' : 'bg-gray-500')
-        : dir === 'SELL'
-          ? (score >= threshold ? 'bg-red-500' : score >= threshold * 0.7 ? 'bg-red-700' : 'bg-gray-500')
-          : 'bg-gray-500';
+      // BUY/SELL確定: 閾値超えで鮮やか、未達で暗め
+      // HOLD: グレー系で方向傾向を表示
+      let barColor;
+      if (dir === 'BUY') {
+        barColor = score >= threshold ? 'bg-green-500' : score >= threshold * 0.7 ? 'bg-green-700' : 'bg-gray-500';
+      } else if (dir === 'SELL') {
+        barColor = score >= threshold ? 'bg-red-500' : score >= threshold * 0.7 ? 'bg-red-700' : 'bg-gray-500';
+      } else {
+        barColor = 'bg-gray-500';
+      }
       scoreBar.className = 'absolute top-0 h-full rounded-full transition-all duration-500 ' + barColor;
     }
     // 閾値マーカー（左右対称に配置）
