@@ -186,24 +186,19 @@ const DashboardApp = {
     const m = this.tradingMode;
     const isLive = m && (m.mode === 'live' || m.mode === 'demo');
     const posPanel = document.getElementById('position-panel');
-    const posList = document.getElementById('position-list');
     if (!isLive) {
       panel.classList.add('hidden');
-      // バックテスト時: ポジションを全幅（3列分）・2列グリッド表示
+      // バックテスト時: Analysis非表示のためrow-span不要
       if (posPanel) {
-        posPanel.classList.remove('lg:col-span-1');
-        posPanel.classList.add('lg:col-span-3');
+        posPanel.classList.remove('lg:row-span-2');
       }
-      if (posList) posList.dataset.wide = 'true';
       return;
     }
     panel.classList.remove('hidden');
-    // ライブ時: ポジションを1/3幅・1列表示
+    // ライブ時: Analysis+Chartの2行を跨ぐ
     if (posPanel) {
-      posPanel.classList.remove('lg:col-span-3');
-      posPanel.classList.add('lg:col-span-1');
+      posPanel.classList.add('lg:row-span-2');
     }
-    if (posList) posList.dataset.wide = 'false';
 
     if (!a) return;
 
@@ -974,11 +969,8 @@ const DashboardApp = {
       return;
     }
 
-    // wide モード（バックテスト時の全幅）は2列グリッド、通常は1列
-    const isWide = listEl.dataset.wide === 'true';
-    const wrapClass = isWide
-      ? 'grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3'
-      : 'space-y-2';
+    // 1/3幅パネルのため1列表示
+    const wrapClass = 'space-y-2';
     listEl.innerHTML = `<div class="${wrapClass}">` + displayPositions.map((p, i) => this.positionCard(p, i)).join('') + '</div>';
   },
 
