@@ -77,6 +77,7 @@ def _make_mock_engine(
     engine.demo_mode_enabled = False
     engine.symbol_auto_trade_states = {}
     engine.symbol_demo_mode_states = {}
+    engine._config = SimpleNamespace(symbol="USDJPY")
     engine.last_analysis = None
     engine.last_tick_time = None
     engine.signal_history = []

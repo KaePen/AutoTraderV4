@@ -56,6 +56,56 @@ class TestGetAnalysis:
         data = resp.json()["data"]
         assert data["rationale"] == "エンジン停止中"
 
+    def test_シンボル一致時(self, client, mock_engine):
+        """エンジンのシンボルと一致するクエリは通常レスポンス"""
+        resp = client.get(
+            "/api/v1/signals/analysis?symbol=USDJPY"
+        )
+        assert resp.status_code == 200
+        data = resp.json()["data"]
+        assert data["symbol"] == "USDJPY"
+        assert data["engine_running"] is True
+
+    def test_シンボル不一致時(self, client):
+        """エンジンのシンボルと異なる場合は未起動レスポンス"""
+        resp = client.get(
+            "/api/v1/signals/analysis?symbol=EURUSD"
+        )
+        assert resp.status_code == 200
+        data = resp.json()["data"]
+        assert data["symbol"] == "EURUSD"
+        assert data["engine_running"] is False
+        assert "未起動" in data["rationale"]
+
+    def test_レスポンスにsymbol含まれる(
+        self, client, mock_engine
+    ):
+        """分析データありの場合にsymbolフィールドが返る"""
+        mock_engine.last_analysis = SimpleNamespace(
+            direction=SimpleNamespace(value="BUY"),
+            confidence=0.85,
+            consensus_score=7.5,
+            entry_threshold=6.0,
+            regime="TREND",
+            rationale="テスト理由",
+            htf_alignment=0.8,
+            penalty_total=0.0,
+            penalty_breakdown={},
+            trend_strength=0.7,
+            aligned_tfs=["M15"],
+            scores={"M15": 7.0},
+            tf_score_breakdowns={"M15": {"rsi": 3.0}},
+            tf_directions={"M15": "BUY"},
+        )
+        mock_engine.get_current_entry_threshold = (
+            lambda: 6.5
+        )
+        resp = client.get("/api/v1/signals/analysis")
+        assert resp.status_code == 200
+        data = resp.json()["data"]
+        assert data["symbol"] == "USDJPY"
+        assert data["direction"] == "BUY"
+
 
 class TestGetCurrentSignals:
     """GET /api/v1/signals/current"""

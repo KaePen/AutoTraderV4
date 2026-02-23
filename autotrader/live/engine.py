@@ -596,6 +596,7 @@ class LiveTradingEngine:
         tick_time = self._last_tick_time
         if cs is not None:
             analysis = {
+                "symbol": self._config.symbol,
                 "direction": cs.direction.value,
                 "confidence": cs.confidence,
                 "consensus_score": cs.consensus_score,
@@ -630,6 +631,7 @@ class LiveTradingEngine:
             }
         else:
             analysis = {
+                "symbol": self._config.symbol,
                 "engine_running": self._running,
                 "mt5_connected": self.connected,
                 "auto_trade_enabled": self._enable_auto_trade,
