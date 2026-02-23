@@ -12,7 +12,7 @@ import dataclasses
 import logging
 import time as _time
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pandas as pd
 
@@ -706,6 +706,44 @@ class LiveTradingEngine:
         return await self._data_provider.get_candles_from_pos(
             symbol, timeframe, limit
         )
+
+    async def get_candles_before(
+        self,
+        symbol: str,
+        timeframe: str,
+        end_time: datetime,
+        limit: int,
+    ):
+        """指定時刻より前のローソク足データ取得
+
+        Args:
+            symbol: 通貨ペア
+            timeframe: 時間足文字列
+            end_time: この時刻より前のデータを取得（排他）
+            limit: 取得本数
+
+        Returns:
+            pd.DataFrame: ローソク足DataFrame
+        """
+        tf_val = (
+            timeframe.value
+            if hasattr(timeframe, "value")
+            else timeframe
+        )
+        tf_enum = Timeframe(tf_val)
+        tf_sec = tf_enum.minutes() * 60
+        # 休場日を考慮して3倍マージンで開始時刻を推定
+        start = end_time - timedelta(
+            seconds=tf_sec * limit * 3
+        )
+        df = await self._data_provider.get_candles_async(
+            symbol, tf_enum, start, end_time
+        )
+        if df.empty:
+            return df
+        # end_time未満にフィルタし末尾limit件を返す
+        df = df[df["time"] < end_time]
+        return df.tail(limit).reset_index(drop=True)
 
     def get_indicators(self, timeframe: str) -> dict | None:
         """計算済み指標取得（public API）

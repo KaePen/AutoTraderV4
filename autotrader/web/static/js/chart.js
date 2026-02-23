@@ -21,6 +21,11 @@ const ChartManager = {
   rsiResizeObserver: null,
   // 最新バーキャッシュ（price_update高速更新用）
   _lastBarData: null,
+  // 遅延読み込み用状態
+  _rawCandles: [],         // APIレスポンス形式の全ローソク足
+  _isLoadingMore: false,   // 追加読み込み中フラグ
+  _hasMoreData: true,      // 過去データがまだある
+  _loadBatchSize: 500,     // 1回の取得本数
   // 指標シリーズ（オーバーレイ）
   _indicatorSeries: {
     ema12: null,
@@ -203,6 +208,9 @@ const ChartManager = {
     // RSIサブチャート
     this._createRsiChart();
 
+    // スクロール時の遅延読み込み
+    this._setupLazyLoading();
+
     // リサイズ対応
     this.resizeObserver = new ResizeObserver((entries) => {
       for (const entry of entries) {
@@ -277,16 +285,154 @@ const ChartManager = {
     });
     this.rsiResizeObserver.observe(this.rsiContainerEl);
 
-    // タイムスケール同期（メイン→RSI一方向）
+    // タイムスケール同期（メイン→RSI 時刻ベース）
     this.chart.timeScale().subscribeVisibleLogicalRangeChange(
-      (range) => {
-        if (range !== null && this.rsiChart) {
-          this.rsiChart.timeScale().setVisibleLogicalRange(
-            range
-          );
+      () => {
+        if (!this.rsiChart) return;
+        try {
+          const timeRange = this.chart.timeScale().getVisibleRange();
+          if (timeRange) {
+            this.rsiChart.timeScale().setVisibleRange(timeRange);
+          }
+        } catch (_e) {
+          // 範囲外やデータなしの場合は無視
         }
       }
     );
+  },
+
+  /**
+   * スクロール時の遅延読み込みを設定
+   * 表示範囲の左端がデータ開始付近に達したら自動で過去データを取得
+   */
+  _setupLazyLoading() {
+    if (!this.chart) return;
+    this.chart.timeScale().subscribeVisibleLogicalRangeChange(
+      (range) => {
+        if (!range) return;
+        if (this._isLoadingMore || !this._hasMoreData) return;
+        if (this.isLoading) return;
+        // 左端から10本以内に近づいたら追加読み込み
+        if (range.from < 10) {
+          this._loadOlderCandles();
+        }
+      }
+    );
+  },
+
+  /**
+   * 過去のローソク足データを追加読み込み
+   * 現在の最古データより前のデータをAPIから取得してマージ
+   */
+  async _loadOlderCandles() {
+    if (this._isLoadingMore || !this._hasMoreData) return;
+    if (this._rawCandles.length === 0) return;
+    this._isLoadingMore = true;
+
+    // await中にTF/シンボルが変更された場合の検知用
+    const symbolBefore = this.symbol;
+    const tfBefore = this.timeframe;
+
+    try {
+      // 最古のローソク足の時刻をend_timeとして送信
+      const endTime = this._rawCandles[0].time;
+      const older = await getCandles(
+        this.symbol, this.timeframe,
+        this._loadBatchSize, endTime
+      );
+
+      // TF/シンボルが変更されていたら結果を捨てる
+      if (this.symbol !== symbolBefore || this.timeframe !== tfBefore) {
+        return;
+      }
+
+      if (!older || older.length === 0) {
+        this._hasMoreData = false;
+        return;
+      }
+
+      // 取得本数がバッチサイズ未満ならこれ以上過去データなし
+      if (older.length < this._loadBatchSize) {
+        this._hasMoreData = false;
+      }
+
+      // 重複排除（UNIX秒に正規化して比較）
+      const existingTimes = new Set(
+        this._rawCandles.map((c) => new Date(c.time).getTime())
+      );
+      const newCandles = older.filter(
+        (c) => !existingTimes.has(new Date(c.time).getTime())
+      );
+
+      if (newCandles.length === 0) {
+        return;
+      }
+
+      this._rawCandles = [...newCandles, ...this._rawCandles];
+      this._renderAllData(newCandles.length);
+    } catch (_e) {
+      // 読み込み失敗時は次回スクロールで再試行
+    } finally {
+      this._isLoadingMore = false;
+    }
+  },
+
+  /**
+   * _rawCandles から全シリーズデータを再描画
+   * prependedCount > 0 の場合、表示範囲を追加分だけシフトして保持
+   *
+   * @param {number} prependedCount - 先頭に追加されたローソク足数
+   */
+  _renderAllData(prependedCount = 0) {
+    if (!this.candleSeries) return;
+
+    // 現在の表示範囲を保存（追加読み込み時のみ）
+    let savedRange = null;
+    if (prependedCount > 0) {
+      try {
+        savedRange = this.chart.timeScale().getVisibleLogicalRange();
+      } catch (_e) {
+        // 取得失敗時は復元しない
+      }
+    }
+
+    const chartData = this._rawCandles.map((c) => ({
+      time: new Date(c.time).getTime() / 1000,
+      open: c.open,
+      high: c.high,
+      low: c.low,
+      close: c.close,
+    }));
+
+    this.candleSeries.setData(chartData);
+
+    // 最新バーをキャッシュ（price_update高速更新用）
+    if (chartData.length > 0) {
+      this._lastBarData = { ...chartData[chartData.length - 1] };
+    }
+
+    // ボリューム
+    if (this.volumeSeries) {
+      const volData = this._rawCandles.map((c) => ({
+        time: new Date(c.time).getTime() / 1000,
+        value: c.volume || 0,
+        color: c.close >= c.open ? '#22c55e28' : '#ef444428',
+      }));
+      this.volumeSeries.setData(volData);
+    }
+
+    // 表示範囲を復元（追加分だけシフト）
+    if (savedRange && prependedCount > 0) {
+      this.chart.timeScale().setVisibleLogicalRange({
+        from: savedRange.from + prependedCount,
+        to: savedRange.to + prependedCount,
+      });
+    }
+
+    // マーカー再描画
+    this._applyMarkers();
+    // トレードライン再描画
+    this._applyTradeLines();
   },
 
   /** タイムフレームボタン描画 */
@@ -486,22 +632,33 @@ const ChartManager = {
     }
   },
 
-  /** ローソク足取得（全件） */
+  /** ローソク足取得（初回・TF切替時） */
   async fetchCandles() {
     this.isLoading = true;
     this.showLoading(true);
+    // 遅延読み込み状態をリセット
+    this._rawCandles = [];
+    this._hasMoreData = true;
+    this._isLoadingMore = false;
     try {
       const [candleData, indData] = await Promise.allSettled([
-        getCandles(this.symbol, this.timeframe, 500),
-        getIndicatorSeries(this.symbol, this.timeframe, 500),
+        getCandles(this.symbol, this.timeframe, this._loadBatchSize),
+        getIndicatorSeries(this.symbol, this.timeframe, this._loadBatchSize),
       ]);
-      this.updateData(
-        candleData.status === 'fulfilled' ? candleData.value : []
-      );
+      const candles = candleData.status === 'fulfilled'
+        ? candleData.value : [];
+      this._rawCandles = candles;
+      // 取得本数がバッチサイズ未満なら過去データなし
+      if (candles.length < this._loadBatchSize) {
+        this._hasMoreData = false;
+      }
+      this.updateData(candles);
       if (indData.status === 'fulfilled') {
         this._updateIndicators(indData.value);
       }
     } catch (e) {
+      this._rawCandles = [];
+      this._hasMoreData = false;
       this.updateData([]);
     } finally {
       this.isLoading = false;
@@ -509,39 +666,14 @@ const ChartManager = {
     }
   },
 
-  /** データ更新（全件セット） */
+  /** データ更新（全件セット、初回・定期更新用） */
   updateData(candles) {
     if (!this.candleSeries) return;
-
-    const chartData = candles.map((c) => ({
-      time: new Date(c.time).getTime() / 1000,
-      open: c.open,
-      high: c.high,
-      low: c.low,
-      close: c.close,
-    }));
-
-    this.candleSeries.setData(chartData);
-
-    // 最新バーをキャッシュ（price_update高速更新用）
-    if (chartData.length > 0) {
-      this._lastBarData = { ...chartData[chartData.length - 1] };
+    // _rawCandlesが空の場合は初回読み込みデータとして保存
+    if (this._rawCandles.length === 0) {
+      this._rawCandles = candles;
     }
-
-    // ボリューム
-    if (this.volumeSeries) {
-      const volData = candles.map((c) => ({
-        time: new Date(c.time).getTime() / 1000,
-        value: c.volume || 0,
-        color: c.close >= c.open ? '#22c55e28' : '#ef444428',
-      }));
-      this.volumeSeries.setData(volData);
-    }
-
-    // マーカー再描画（シグナル＋トレード）
-    this._applyMarkers();
-    // トレードライン再描画（ローソク足データ更新後に必ず呼ぶ）
-    this._applyTradeLines();
+    this._renderAllData(0);
   },
 
   /** 指標時系列を更新 */
