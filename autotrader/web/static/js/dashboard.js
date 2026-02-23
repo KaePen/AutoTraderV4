@@ -223,13 +223,6 @@ const DashboardApp = {
     const regime = document.getElementById('ap-regime');
     if (regime) regime.textContent = a.regime || '--';
 
-    // 最終tick時刻
-    const tickTime = document.getElementById('ap-tick-time');
-    if (tickTime && a.last_tick_time) {
-      const d = new Date(a.last_tick_time);
-      tickTime.textContent = d.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit', second: '2-digit', timeZone: 'Asia/Tokyo' }) + ' JST';
-    }
-
     // スコアバー（中央0基準・左SELL/右BUY）
     const score = a.consensus_score || 0;
     const threshold = a.entry_threshold || 1;
