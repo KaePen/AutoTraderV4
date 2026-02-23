@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, Path, Query, Request
 from sqlalchemy.orm import Session
 
 from autotrader.core.enums import Timeframe
-from autotrader.web.dependencies import get_db
+from autotrader.web.dependencies import get_db, get_live_engine
 from autotrader.web.schemas import ApiResponse, CandleResponse
 from autotrader.web.services.market_service import MarketService
 
@@ -29,6 +29,7 @@ async def get_candles(
         default=200, ge=1, le=1000, description="取得本数"
     ),
     db: Session = Depends(get_db),
+    engine=Depends(get_live_engine),
 ) -> ApiResponse[list[CandleResponse]]:
     """ローソク足データを取得
 
@@ -40,15 +41,15 @@ async def get_candles(
         timeframe: 時間足
         limit: 取得本数
         db: DBセッション
+        engine: LiveTradingEngine
 
     Returns:
         ApiResponse[list[CandleResponse]]: ローソク足一覧
     """
     # MT5接続中はライブデータを取得
-    engine = getattr(request.app.state, "live_engine", None)
     if engine and engine.connected:
         try:
-            df = await engine._data_provider.get_candles_from_pos(
+            df = await engine.get_candles(
                 symbol, timeframe, limit
             )
             if not df.empty:

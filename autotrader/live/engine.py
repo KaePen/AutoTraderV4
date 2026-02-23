@@ -692,6 +692,34 @@ class LiveTradingEngine:
             "indicators": indicators,
         }
 
+    async def get_candles(
+        self, symbol: str, timeframe: str, limit: int,
+    ):
+        """ローソク足データ取得（public API）
+
+        Args:
+            symbol: 通貨ペア
+            timeframe: 時間足文字列またはTimeframe
+            limit: 取得本数
+
+        Returns:
+            pd.DataFrame: ローソク足DataFrame
+        """
+        return await self._data_provider.get_candles_from_pos(
+            symbol, timeframe, limit
+        )
+
+    def get_indicators(self, timeframe: str) -> dict | None:
+        """計算済み指標取得（public API）
+
+        Args:
+            timeframe: 時間足文字列
+
+        Returns:
+            dict | None: 指標辞書（データなしの場合は空dict）
+        """
+        return self._extract_indicators(timeframe)
+
     def _extract_indicators(self, timeframe: str) -> dict:
         """計算済み市場データから指標値を抽出
 

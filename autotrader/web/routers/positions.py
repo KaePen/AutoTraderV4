@@ -8,7 +8,7 @@ from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.orm import Session
 
 from autotrader.core.enums import SignalType
-from autotrader.web.dependencies import get_db
+from autotrader.web.dependencies import get_db, get_live_engine
 from autotrader.web.schemas import ApiResponse, PositionResponse
 from autotrader.web.services.market_service import MarketService
 
@@ -65,6 +65,7 @@ async def get_positions(
         default=None,
         description="通貨ペア（指定なしで全て）",
     ),
+    engine=Depends(get_live_engine),
 ) -> ApiResponse[list[PositionResponse]]:
     """オープンポジションを取得
 
@@ -75,12 +76,12 @@ async def get_positions(
         request: FastAPIリクエスト
         db: DBセッション
         symbol: 通貨ペア
+        engine: LiveTradingEngine
 
     Returns:
         ApiResponse[list[PositionResponse]]: ポジション一覧
     """
     # エンジンのキャッシュを優先
-    engine = getattr(request.app.state, "live_engine", None)
     if engine is not None and engine.running:
         positions = engine.cached_positions
         if symbol:

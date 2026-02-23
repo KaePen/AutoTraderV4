@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session
 import pandas as pd
 
 from autotrader.core.enums import Timeframe
-from autotrader.web.dependencies import get_db
+from autotrader.web.dependencies import get_db, get_live_engine
 from autotrader.web.schemas import (
     ApiResponse,
     IndicatorResponse,
@@ -34,10 +34,11 @@ async def get_indicators(
     symbol: str = Path(description="通貨ペア"),
     timeframe: Timeframe = Path(description="時間足"),
     db: Session = Depends(get_db),
+    engine=Depends(get_live_engine),
 ) -> ApiResponse[IndicatorResponse]:
     """指標スナップショットを取得
 
-    MT5接続中はローソク足から指標を計算して返却。
+    MT5接続中はエンジン計算済みデータから返却。
     未接続時はMarketServiceのスタブにフォールバック。
 
     Args:
@@ -45,15 +46,14 @@ async def get_indicators(
         symbol: 通貨ペア
         timeframe: 時間足
         db: DBセッション
+        engine: LiveTradingEngine
 
     Returns:
         ApiResponse[IndicatorResponse]: 指標情報
     """
-    engine = getattr(request.app.state, "live_engine", None)
     if engine and engine.connected:
         try:
-            # エンジン計算済みデータから取得（MT5再取得不要）
-            raw = engine._extract_indicators(timeframe.value)
+            raw = engine.get_indicators(timeframe.value)
             if raw:
                 ind = IndicatorResponse(
                     symbol=symbol,
@@ -98,6 +98,7 @@ async def get_indicator_series(
         default=500, ge=50, le=1000, description="取得本数"
     ),
     db: Session = Depends(get_db),
+    engine=Depends(get_live_engine),
 ) -> ApiResponse[IndicatorSeriesResponse]:
     """チャートオーバーレイ用指標時系列を取得
 
@@ -110,11 +111,11 @@ async def get_indicator_series(
         timeframe: 時間足
         limit: 取得本数
         db: DBセッション
+        engine: LiveTradingEngine
 
     Returns:
         ApiResponse[IndicatorSeriesResponse]: 指標時系列
     """
-    engine = getattr(request.app.state, "live_engine", None)
     if not (engine and engine.connected):
         return ApiResponse(data=IndicatorSeriesResponse())
 
@@ -124,7 +125,7 @@ async def get_indicator_series(
         return ApiResponse(data=IndicatorSeriesResponse())
 
     try:
-        df = await engine._data_provider.get_candles_from_pos(
+        df = await engine.get_candles(
             symbol, timeframe, limit
         )
     except Exception as e:
