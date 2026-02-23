@@ -1381,8 +1381,9 @@ class LiveTradingEngine:
         SL変更・部分決済・全決済をMT5で実行。
         _cached_positionsをMT5の現在状態で更新する。
         """
+        # 全通貨ペアのポジションを取得（UI表示用）
         positions = await self._executor.get_open_positions_async(
-            self._config.symbol
+            None
         )
         current_tickets = {pos.ticket for pos in positions}
 
@@ -1425,12 +1426,12 @@ class LiveTradingEngine:
         if self._last_signal:
             current_signal_type = self._last_signal.direction
 
-        # pip計算係数（通貨ペア別）
-        pip_factor = self._get_pip_size(self._config.symbol)
-        pip_value = self._get_pip_value(self._config.symbol)
-
         cache_list: list[dict] = []
         for position in positions:
+            # 通貨ペア別にpip計算（全通貨ペア対応）
+            pip_factor = self._get_pip_size(position.symbol)
+            pip_value = self._get_pip_value(position.symbol)
+
             pos_id = str(position.ticket)
 
             # ティック取得（キャッシュ＋管理評価で共用）

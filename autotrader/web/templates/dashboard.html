@@ -12,110 +12,77 @@
     <div class="card skeleton-card animate-pulse"><div class="h-3 skeleton w-16 mb-2"></div><div class="h-6 skeleton w-24"></div></div>
   </div>
 
-  <!-- ライブアナリティクス + ポジション (横並び、チャートと同じ2/3:1/3比率) -->
-  <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
-    <!-- 分析パネル (ライブ時のみ表示、チャートと同じ2/3幅) -->
-    <div id="analysis-panel" class="card border border-gray-700 hidden lg:col-span-2">
-      <div class="flex items-center gap-2 mb-3">
-        <h3 class="text-xs font-semibold text-gray-400 uppercase tracking-wider">Live Analysis</h3>
-        <span id="ap-direction-badge" class="inline-flex items-center px-2 py-0.5 rounded text-xs font-bold bg-gray-700 text-gray-400">--</span>
-        <span id="ap-score-text" class="text-[11px] tabular-nums text-gray-300 font-medium">-- / --</span>
-      </div>
-      <!-- スコアバー（中央0基準・左SELL/右BUY） -->
-      <div class="mb-3">
-        <!-- SELL/BUYラベル -->
-        <div class="flex items-center justify-between text-[9px] text-gray-600 mb-0.5">
-          <span>SELL</span>
-          <span>BUY</span>
-        </div>
-        <div class="w-full h-3 bg-gray-700 rounded-full overflow-hidden relative">
-          <!-- 中央から左右に伸びるバー -->
-          <div id="ap-score-bar" class="absolute top-0 h-full rounded-full transition-all duration-500 bg-gray-500" style="left:50%;width:0%"></div>
-          <!-- 中央線（0基準） -->
-          <div class="absolute top-0 left-1/2 w-px h-full bg-gray-400/60"></div>
-          <!-- 閾値マーカー（左右対称） -->
-          <div id="ap-threshold-sell" class="absolute top-0 w-0.5 h-full bg-yellow-400/70" style="left:30%"></div>
-          <div id="ap-threshold-buy" class="absolute top-0 w-0.5 h-full bg-yellow-400/70" style="left:70%"></div>
-        </div>
-      </div>
-      <!-- サブ指標 -->
-      <div class="grid grid-cols-3 gap-2 mb-3 text-xs">
-        <div class="bg-gray-800/50 rounded p-2">
-          <p class="text-gray-500 mb-0.5">HTF整合</p>
-          <p id="ap-htf" class="font-bold tabular-nums text-gray-300">--</p>
-        </div>
-        <div class="bg-gray-800/50 rounded p-2">
-          <p class="text-gray-500 mb-0.5">トレンド強度</p>
-          <p id="ap-trend" class="font-bold tabular-nums text-gray-300">--</p>
-        </div>
-        <div class="bg-gray-800/50 rounded p-2">
-          <p class="text-gray-500 mb-0.5">ペナルティ</p>
-          <p id="ap-penalty" class="font-bold tabular-nums text-gray-300">--</p>
-        </div>
-      </div>
-      <!-- 時間足スコア -->
-      <div id="ap-tf-scores" class="w-full"></div>
+  <!-- ライブアナリティクス（全幅） -->
+  <div id="analysis-panel" class="card border border-gray-700 hidden">
+    <div class="flex items-center gap-2 mb-3">
+      <h3 class="text-xs font-semibold text-gray-400 uppercase tracking-wider">Live Analysis</h3>
+      <span id="ap-direction-badge" class="inline-flex items-center px-2 py-0.5 rounded text-xs font-bold bg-gray-700 text-gray-400">--</span>
+      <span id="ap-score-text" class="text-[11px] tabular-nums text-gray-300 font-medium">-- / --</span>
     </div>
+    <!-- スコアバー（中央0基準・左SELL/右BUY） -->
+    <div class="mb-3">
+      <!-- SELL/BUYラベル -->
+      <div class="flex items-center justify-between text-[9px] text-gray-600 mb-0.5">
+        <span>SELL</span>
+        <span>BUY</span>
+      </div>
+      <div class="w-full h-3 bg-gray-700 rounded-full overflow-hidden relative">
+        <!-- 中央から左右に伸びるバー -->
+        <div id="ap-score-bar" class="absolute top-0 h-full rounded-full transition-all duration-500 bg-gray-500" style="left:50%;width:0%"></div>
+        <!-- 中央線（0基準） -->
+        <div class="absolute top-0 left-1/2 w-px h-full bg-gray-400/60"></div>
+        <!-- 閾値マーカー（左右対称） -->
+        <div id="ap-threshold-sell" class="absolute top-0 w-0.5 h-full bg-yellow-400/70" style="left:30%"></div>
+        <div id="ap-threshold-buy" class="absolute top-0 w-0.5 h-full bg-yellow-400/70" style="left:70%"></div>
+      </div>
+    </div>
+    <!-- サブ指標 -->
+    <div class="grid grid-cols-3 gap-2 mb-3 text-xs">
+      <div class="bg-gray-800/50 rounded p-2">
+        <p class="text-gray-500 mb-0.5">HTF整合</p>
+        <p id="ap-htf" class="font-bold tabular-nums text-gray-300">--</p>
+      </div>
+      <div class="bg-gray-800/50 rounded p-2">
+        <p class="text-gray-500 mb-0.5">トレンド強度</p>
+        <p id="ap-trend" class="font-bold tabular-nums text-gray-300">--</p>
+      </div>
+      <div class="bg-gray-800/50 rounded p-2">
+        <p class="text-gray-500 mb-0.5">ペナルティ</p>
+        <p id="ap-penalty" class="font-bold tabular-nums text-gray-300">--</p>
+      </div>
+    </div>
+    <!-- 時間足スコア -->
+    <div id="ap-tf-scores" class="w-full"></div>
+  </div>
 
-    <!-- ポジションパネル (バックテスト時: 全幅、ライブ時: 1/3幅) -->
-    <div class="card lg:col-span-3" id="position-panel">
-      <div class="flex items-center justify-between mb-3">
-        <h2 class="text-sm font-semibold text-gray-300 uppercase tracking-wider">Positions</h2>
-        <span id="position-count" class="text-xs text-gray-500">no open</span>
-      </div>
-      <div id="position-list" class="overflow-y-auto max-h-64">
-        <div class="flex items-center justify-center h-16 text-gray-500 text-sm">ポジションなし</div>
-      </div>
+  <!-- ポジションパネル（全幅） -->
+  <div class="card" id="position-panel">
+    <div class="flex items-center justify-between mb-3">
+      <h2 class="text-sm font-semibold text-gray-300 uppercase tracking-wider">Positions</h2>
+      <span id="position-count" class="text-xs text-gray-500">no open</span>
+    </div>
+    <div id="position-list" class="overflow-y-auto max-h-80" data-wide="true">
+      <div class="flex items-center justify-center h-16 text-gray-500 text-sm">ポジションなし</div>
     </div>
   </div>
 
-  <!-- メインコンテンツ: チャート(2/3) + インジケータ(1/3) -->
+  <!-- トレード履歴(2/3) + インジケータ(1/3) -->
   <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 items-stretch">
-
-    <!-- 左: チャートカード (2/3幅) -->
-    <div class="lg:col-span-2 flex flex-col">
-      <div class="card flex flex-col flex-1">
-        <div class="flex items-center justify-between mb-4 flex-shrink-0">
-          <h2 id="chart-title" class="text-lg font-semibold text-gray-100">USDJPY チャート</h2>
-          <div class="flex items-center gap-2 flex-wrap">
-            <!-- 指標切り替え -->
-            <div class="flex items-center gap-1">
-              <span class="text-[10px] text-gray-500 uppercase tracking-wider mr-1">Ind</span>
-              <div id="chart-indicator-toggles" class="flex gap-1"></div>
-            </div>
-            <div class="w-px h-4 bg-gray-700"></div>
-            <!-- 時間足ボタン -->
-            <div id="chart-timeframe-buttons" class="flex gap-1"></div>
-          </div>
+    <!-- 左: トレード履歴 -->
+    <div class="lg:col-span-2" id="trade-history-panel">
+      <div class="card h-full flex flex-col">
+        <div class="flex items-center justify-between mb-2">
+          <button id="trade-history-toggle" class="flex items-center gap-2 text-sm font-semibold text-gray-300 uppercase tracking-wider hover:text-white transition-colors">
+            <svg id="trade-history-chevron" class="w-4 h-4 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+            </svg>
+            Trade History
+          </button>
         </div>
-        <!-- OHLC情報バー（クロスヘア連動） -->
-        <div id="chart-ohlc-bar" class="flex items-center gap-3 px-1 pb-1 text-xs tabular-nums invisible flex-shrink-0">
-          <span class="text-gray-500">O:<span id="chart-ohlc-o" class="text-gray-300 ml-0.5">-</span></span>
-          <span class="text-gray-500">H:<span id="chart-ohlc-h" class="text-green-400 ml-0.5">-</span></span>
-          <span class="text-gray-500">L:<span id="chart-ohlc-l" class="text-red-400 ml-0.5">-</span></span>
-          <span class="text-gray-500">C:<span id="chart-ohlc-c" class="ml-0.5">-</span></span>
-          <span id="chart-ohlc-chg" class="font-medium">-</span>
-          <span class="text-gray-600">|</span>
-          <span class="text-gray-500">Vol:<span id="chart-ohlc-vol" class="text-gray-400 ml-0.5">-</span></span>
-        </div>
-        <!-- メインチャート (flex-1で残りスペース全て) -->
-        <div id="chart-container" class="flex-1 min-h-[280px] w-full relative">
-          <div id="chart-loader" class="absolute inset-0 flex items-center justify-center bg-gray-800/50 z-10">
-            <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
-          </div>
-        </div>
-        <!-- RSIサブチャート -->
-        <div id="rsi-panel" class="mt-1 border-t border-gray-700/50 flex-shrink-0">
-          <div class="flex items-center gap-2 px-1 py-0.5">
-            <span class="text-[10px] text-yellow-400 font-semibold uppercase tracking-wider">RSI(14)</span>
-            <span class="text-[10px] text-gray-600">70 / 30</span>
-          </div>
-          <div id="rsi-container" class="h-20 w-full"></div>
-        </div>
+        <div id="trade-history-table" class="overflow-x-auto max-h-80 flex-1"></div>
       </div>
     </div>
-
-    <!-- 右: インジケータパネル (1/3幅、チャートと同じ高さ) -->
+    <!-- 右: インジケータ -->
     <div class="card flex flex-col" id="indicator-panel">
       <div class="flex items-center justify-between mb-3 flex-shrink-0">
         <h2 class="text-sm font-semibold text-gray-300 uppercase tracking-wider">Indicators</h2>
@@ -126,23 +93,9 @@
       </div>
     </div>
   </div>
-
-  <!-- トレード履歴（全幅） -->
-  <div class="card" id="trade-history-panel">
-    <div class="flex items-center justify-between mb-2">
-      <button id="trade-history-toggle" class="flex items-center gap-2 text-sm font-semibold text-gray-300 uppercase tracking-wider hover:text-white transition-colors">
-        <svg id="trade-history-chevron" class="w-4 h-4 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
-        </svg>
-        Trade History
-      </button>
-    </div>
-    <div id="trade-history-table" class="overflow-x-auto max-h-80"></div>
-  </div>
 </div>
 {% endblock %}
 
 {% block scripts %}
-<script src="/static/js/chart.js?v=3"></script>
-<script src="/static/js/dashboard.js?v=9"></script>
+<script src="/static/js/dashboard.js?v=10"></script>
 {% endblock %}

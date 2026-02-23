@@ -51,9 +51,6 @@ const DashboardApp = {
     // トレーディングコントロール初期化
     this.initTradingControl();
 
-    // チャート初期化
-    ChartManager.init('chart-container', this.symbol);
-
     // 指標タブ描画
     this.renderIndicatorTabs();
 
@@ -64,7 +61,7 @@ const DashboardApp = {
     this.fetchTradingMode();
     this.fetchAnalysis();
 
-    // チャートは30秒毎にフル再取得（ローソク足確定検知・バックアップ）
+    // 30秒毎にフル再取得（バックアップ）
     this.pollInterval = setInterval(() => this.fetchAll(), 30000);
 
     // WS切断中フォールバック（10秒毎・必要最小限）
@@ -77,31 +74,8 @@ const DashboardApp = {
       }
     }, 10000);
 
-    // シグナルWebSocket（チャートマーカー更新）
-    this.signalWs = createWebSocketClient('/ws/signals');
-    this.signalWs.on('signal_update', (msg) => {
-      const signal = msg.data;
-      if (signal.symbol === this.symbol) {
-        const idx = this.currentSignals.findIndex((s) => s.signal_id === signal.signal_id);
-        if (idx >= 0) {
-          this.currentSignals[idx] = signal;
-        } else {
-          this.currentSignals.unshift(signal);
-          if (this.currentSignals.length > 3) this.currentSignals.length = 3;
-        }
-        ChartManager.setSignals(this.currentSignals);
-      }
-    });
-    this.signalWs.connect();
-
-    // ダッシュボードWebSocket（price_update + tick_update で全UI駆動）
+    // ダッシュボードWebSocket（tick_update で全UI駆動）
     this.dashWs = createWebSocketClient('/ws/dashboard');
-    // 高頻度: tick毎の価格更新 → チャートlastbar即時更新
-    this.dashWs.on('price_update', (msg) => {
-      this.wsActive = true;
-      const { bid } = msg.data;
-      if (bid > 0) ChartManager.updateLastBar(bid);
-    });
     // 1秒毎: フル処理完了 → 全UI一括更新
     this.dashWs.on('tick_update', (msg) => {
       this.wsActive = true;
@@ -185,25 +159,11 @@ const DashboardApp = {
     // エンジン未起動ならパネル非表示（live/demo両方で表示）
     const m = this.tradingMode;
     const isLive = m && (m.mode === 'live' || m.mode === 'demo');
-    const posPanel = document.getElementById('position-panel');
-    const posList = document.getElementById('position-list');
     if (!isLive) {
       panel.classList.add('hidden');
-      // バックテスト時: ポジションを全幅（3列分）・2列グリッド表示
-      if (posPanel) {
-        posPanel.classList.remove('lg:col-span-1');
-        posPanel.classList.add('lg:col-span-3');
-      }
-      if (posList) posList.dataset.wide = 'true';
       return;
     }
     panel.classList.remove('hidden');
-    // ライブ時: ポジションを1/3幅・1列表示
-    if (posPanel) {
-      posPanel.classList.remove('lg:col-span-3');
-      posPanel.classList.add('lg:col-span-1');
-    }
-    if (posList) posList.dataset.wide = 'false';
 
     if (!a) return;
 
@@ -752,10 +712,6 @@ const DashboardApp = {
     // 非表示ネイティブselectも同期
     const sel = document.getElementById('symbol-selector');
     if (sel) sel.value = symbol;
-    // chart-titleも更新
-    const chartTitle = document.getElementById('chart-title');
-    if (chartTitle) chartTitle.textContent = symbol + ' チャート';
-    ChartManager.setSymbol(symbol);
     // ドロップダウンを閉じる
     const list = document.getElementById('symbol-dropdown-list');
     if (list) list.classList.add('hidden');
@@ -823,7 +779,6 @@ const DashboardApp = {
     if (pos.status === 'fulfilled') this.positions = pos.value;
     if (tr.status === 'fulfilled') this.trades = tr.value;
     if (summary.status === 'fulfilled') this.tradeSummary = summary.value;
-    ChartManager.setTrades(this.trades);
     this.renderMetrics();
     this.renderPositions();
     this.renderTradeHistory();
@@ -841,18 +796,16 @@ const DashboardApp = {
     if (pos.status === 'fulfilled') this.positions = pos.value;
     if (tr.status === 'fulfilled') this.trades = tr.value;
     if (summary.status === 'fulfilled') this.tradeSummary = summary.value;
-    ChartManager.setTrades(this.trades);
     this.isLoading = false;
     this.renderMetrics();
     this.renderPositions();
     this.renderTradeHistory();
   },
 
-  /** シグナル取得（チャートマーカー更新用） */
+  /** シグナル取得 */
   async fetchSignals() {
     try {
       this.currentSignals = await getCurrentSignals(this.symbol);
-      ChartManager.setSignals(this.currentSignals);
     } catch (e) {
       this.currentSignals = [];
     }
@@ -964,10 +917,8 @@ const DashboardApp = {
     const countEl = document.getElementById('position-count');
     if (!listEl) return;
 
-    // 選択中シンボルでフィルター（全ポジションから表示対象を絞る）
-    const displayPositions = this.symbol
-      ? this.positions.filter(p => p.symbol === this.symbol)
-      : this.positions;
+    // 全通貨ペアのポジションを表示
+    const displayPositions = this.positions;
 
     if (countEl) countEl.textContent = displayPositions.length > 0 ? displayPositions.length + ' open' : 'no open';
 
@@ -976,8 +927,8 @@ const DashboardApp = {
       return;
     }
 
-    // wide モード（バックテスト時の全幅）は2列グリッド、通常は1列
-    const isWide = listEl.dataset.wide === 'true';
+    // 全幅パネルのため常にwideモード
+    const isWide = true;
     const wrapClass = isWide
       ? 'grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3'
       : 'space-y-2';
