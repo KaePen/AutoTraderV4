@@ -24,15 +24,25 @@
         </div>
         <span id="ap-tick-time" class="text-xs text-gray-600 tabular-nums">--</span>
       </div>
-      <!-- スコアバー -->
+      <!-- スコアバー（中央0基準・左SELL/右BUY） -->
       <div class="mb-3">
         <div class="flex items-center justify-between text-xs mb-1">
           <span class="text-gray-500">Consensus Score</span>
           <span id="ap-score-text" class="tabular-nums text-gray-300 font-medium">-- / --</span>
         </div>
-        <div class="w-full h-2 bg-gray-700 rounded-full overflow-hidden relative">
-          <div id="ap-score-bar" class="h-full rounded-full transition-all duration-500 bg-blue-500" style="width:0%"></div>
-          <div id="ap-threshold-marker" class="absolute top-0 w-0.5 h-full bg-yellow-400/80" style="left:50%"></div>
+        <!-- SELL/BUYラベル -->
+        <div class="flex items-center justify-between text-[9px] text-gray-600 mb-0.5">
+          <span>SELL</span>
+          <span>BUY</span>
+        </div>
+        <div class="w-full h-3 bg-gray-700 rounded-full overflow-hidden relative">
+          <!-- 中央から左右に伸びるバー -->
+          <div id="ap-score-bar" class="absolute top-0 h-full rounded-full transition-all duration-500 bg-gray-500" style="left:50%;width:0%"></div>
+          <!-- 中央線（0基準） -->
+          <div class="absolute top-0 left-1/2 w-px h-full bg-gray-400/60"></div>
+          <!-- 閾値マーカー（左右対称） -->
+          <div id="ap-threshold-sell" class="absolute top-0 w-0.5 h-full bg-yellow-400/70" style="left:30%"></div>
+          <div id="ap-threshold-buy" class="absolute top-0 w-0.5 h-full bg-yellow-400/70" style="left:70%"></div>
         </div>
       </div>
       <!-- サブ指標 -->
