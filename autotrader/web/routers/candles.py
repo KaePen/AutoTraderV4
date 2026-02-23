@@ -16,7 +16,11 @@ from fastapi import (
 from sqlalchemy.orm import Session
 
 from autotrader.core.enums import Timeframe
-from autotrader.web.dependencies import get_db, get_live_engine
+from autotrader.web.dependencies import (
+    get_db,
+    get_engine_manager,
+    get_live_engine,
+)
 from autotrader.web.schemas import ApiResponse, CandleResponse
 from autotrader.web.services.market_service import MarketService
 
@@ -42,11 +46,11 @@ async def get_candles(
     ),
     db: Session = Depends(get_db),
     engine=Depends(get_live_engine),
+    mgr=Depends(get_engine_manager),
 ) -> ApiResponse[list[CandleResponse]]:
     """ローソク足データを取得
 
-    MT5接続中はライブデータ、未接続時はCSVフォールバック。
-    end_time指定時は指定時刻より前のデータを返す。
+    EngineManager経由でシンボル別エンジンからデータ取得。
 
     Args:
         request: FastAPIリクエスト
@@ -56,10 +60,16 @@ async def get_candles(
         end_time: 排他上限時刻（ISO8601文字列）
         db: DBセッション
         engine: LiveTradingEngine
+        mgr: EngineManager
 
     Returns:
         ApiResponse[list[CandleResponse]]: ローソク足一覧
     """
+    # シンボル別エンジンを取得
+    if mgr:
+        target = mgr.get_engine(symbol)
+        if target:
+            engine = target
     # end_time文字列をdatetimeに変換
     end_dt: datetime | None = None
     if end_time:

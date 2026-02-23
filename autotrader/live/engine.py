@@ -59,15 +59,28 @@ class LiveTradingEngine:
         _account_info: 最新の口座情報
     """
 
-    def __init__(self, config: LiveTradingConfig) -> None:
+    def __init__(
+        self,
+        config: LiveTradingConfig,
+        shared_conn: MT5ConnectionManager | None = None,
+        shared_data_provider: MT5DataProvider | None = None,
+    ) -> None:
         """初期化
 
         Args:
             config: ライブトレーディング設定
+            shared_conn: 共有MT5接続（マルチエンジン時）
+            shared_data_provider: 共有データプロバイダ
         """
         self._config = config
-        self._conn = MT5ConnectionManager(config.mt5_config)
-        self._data_provider = MT5DataProvider(self._conn)
+        self._conn = shared_conn or MT5ConnectionManager(
+            config.mt5_config
+        )
+        self._data_provider = (
+            shared_data_provider or MT5DataProvider(self._conn)
+        )
+        # 共有接続の場合、接続/切断はEngineManagerが管理
+        self._owns_connection = shared_conn is None
         self._executor = MT5TradeExecutor(
             conn=self._conn,
             magic=config.mt5_config.magic_number,
@@ -423,8 +436,9 @@ class LiveTradingEngine:
 
         logger.info("ライブトレーディングエンジン開始")
 
-        # MT5接続
-        await self._conn.connect()
+        # MT5接続（共有接続時はスキップ）
+        if self._owns_connection:
+            await self._conn.connect()
 
         # 過去データ読込
         await self._load_historical_data()
@@ -465,7 +479,9 @@ class LiveTradingEngine:
                 pass
             self._task = None
 
-        await self._conn.disconnect()
+        # 共有接続時はdisconnectをスキップ
+        if self._owns_connection:
+            await self._conn.disconnect()
         logger.info("ライブトレーディングエンジン停止")
 
     async def _main_loop(self) -> None:

@@ -40,28 +40,15 @@ logger = logging.getLogger(__name__)
 templates = Jinja2Templates(directory=str(_TEMPLATES_DIR))
 
 
-def _create_live_engine():
-    """LiveTradingEngineを環境変数+YAML設定から生成
-
-    ConfigLoaderでYAML設定を読み込み、環境変数のMT5設定
-    とマージしてLiveTradingConfigを構築する。
+def _get_mt5_config():
+    """環境変数からMT5設定を構築
 
     Returns:
-        LiveTradingEngine: エンジンインスタンス
+        MT5Config: MT5接続設定
     """
     from autotrader.adapters.mt5.config import MT5Config
-    from autotrader.live.config import LiveTradingConfig
-    from autotrader.live.engine import LiveTradingEngine
-    from autotrader.web.services.settings_service import (
-        get_settings_service,
-    )
 
-    # YAML設定はSettingsServiceから取得（シングルトン）
-    svc = get_settings_service()
-    bot_config = svc.bot_config
-    pm_config = svc.pm_config
-
-    mt5_config = MT5Config(
+    return MT5Config(
         login=int(os.environ.get("MT5_LOGIN", "0")),
         password=os.environ.get("MT5_PASSWORD", ""),
         server=os.environ.get("MT5_SERVER", ""),
@@ -69,10 +56,31 @@ def _create_live_engine():
             "MT5_TERMINAL_PATH", ""
         ),
     )
-    live_config = LiveTradingConfig(
-        symbol=os.environ.get(
-            "AUTOTRADER_SYMBOL", "USDJPY"
-        ),
+
+
+def build_engine_config(symbol: str) -> object:
+    """シンボル用のLiveTradingConfigを構築
+
+    ルーターからも呼べるモジュールレベル関数。
+
+    Args:
+        symbol: 通貨ペアシンボル
+
+    Returns:
+        LiveTradingConfig: エンジン設定
+    """
+    from autotrader.live.config import LiveTradingConfig
+    from autotrader.web.services.settings_service import (
+        get_settings_service,
+    )
+
+    svc = get_settings_service()
+    bot_config = svc.bot_config
+    pm_config = svc.pm_config
+    mt5_config = _get_mt5_config()
+
+    return LiveTradingConfig(
+        symbol=symbol,
         bot_config=bot_config,
         mt5_config=mt5_config,
         pm_config=pm_config,
@@ -80,7 +88,37 @@ def _create_live_engine():
             "AUTOTRADER_AUTO_TRADE", ""
         ).lower() in ("1", "true", "yes"),
     )
-    return LiveTradingEngine(live_config)
+
+
+def _create_engine_manager():
+    """EngineManagerを環境変数+YAML設定から生成
+
+    Returns:
+        EngineManager: エンジンマネージャー
+    """
+    from autotrader.live.engine_manager import (
+        EngineManager,
+    )
+
+    mt5_config = _get_mt5_config()
+    return EngineManager(mt5_config)
+
+
+def _create_live_engine():
+    """LiveTradingEngineを環境変数+YAML設定から生成
+
+    後方互換用。単体テストなど EngineManager を
+    使わない場合のフォールバック。
+
+    Returns:
+        LiveTradingEngine: エンジンインスタンス
+    """
+    from autotrader.live.engine import LiveTradingEngine
+
+    config = build_engine_config(
+        os.environ.get("AUTOTRADER_SYMBOL", "USDJPY")
+    )
+    return LiveTradingEngine(config)
 
 
 @asynccontextmanager
@@ -109,22 +147,34 @@ async def lifespan(app: FastAPI):
         logger.error("DB初期化失敗（テーブルが存在しない可能性）: %s", e)
         logger.error("scripts/init_db.py を実行してテーブルを作成してください")
 
-    # MT5ライブエンジン初期化（常に作成、自動接続）
+    # EngineManager初期化（マルチシンボル対応）
     try:
-        engine = _create_live_engine()
-        app.state.live_engine = engine
+        mgr = _create_engine_manager()
+        app.state.engine_manager = mgr
 
-        # SettingsServiceにエンジン参照を設定
+        # SettingsServiceにEngineManager参照を設定
         from autotrader.web.services.settings_service import (
             get_settings_service,
         )
         svc = get_settings_service()
-        svc.set_engine(engine)
+        svc.set_engine_manager(mgr)
 
         # MT5自動接続
         try:
-            await engine.start()
-            acct = engine.account_info
+            await mgr.connect()
+
+            # デフォルトシンボルのエンジンを追加
+            default_symbol = os.environ.get(
+                "AUTOTRADER_SYMBOL", "USDJPY"
+            )
+            config = build_engine_config(default_symbol)
+            engine = await mgr.add_symbol(config)
+
+            # 後方互換: app.state.live_engine も設定
+            app.state.live_engine = engine
+            svc.set_engine(engine)
+
+            acct = mgr.account_info
             if acct:
                 logger.info(
                     "MT5接続成功: balance=%.0f "
@@ -141,14 +191,15 @@ async def lifespan(app: FastAPI):
             )
     except Exception as e:
         logger.error("エンジン初期化失敗: %s", e)
+        app.state.engine_manager = None
         app.state.live_engine = None
 
     yield
 
     # シャットダウン
-    engine = getattr(app.state, "live_engine", None)
-    if engine and engine.running:
-        await engine.stop()
+    mgr = getattr(app.state, "engine_manager", None)
+    if mgr:
+        await mgr.disconnect()
 
 
 def create_app() -> FastAPI:

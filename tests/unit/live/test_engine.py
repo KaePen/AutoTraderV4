@@ -360,6 +360,98 @@ class TestChangeSymbol:
         assert engine.enable_auto_trade is True
 
 
+class TestSharedConnection:
+    """共有接続モードテスト"""
+
+    def test_shared_connなしは自前接続(
+        self, mock_config: LiveTradingConfig
+    ) -> None:
+        """shared_conn=Noneで_owns_connection=True"""
+        engine = LiveTradingEngine(mock_config)
+        assert engine._owns_connection is True
+
+    def test_shared_conn渡しは非所有(
+        self, mock_config: LiveTradingConfig
+    ) -> None:
+        """shared_conn渡しで_owns_connection=False"""
+        shared = MagicMock()
+        engine = LiveTradingEngine(
+            mock_config, shared_conn=shared
+        )
+        assert engine._owns_connection is False
+        assert engine._conn is shared
+
+    def test_shared_data_provider渡し(
+        self, mock_config: LiveTradingConfig
+    ) -> None:
+        """shared_data_provider渡しで共有"""
+        shared_dp = MagicMock()
+        engine = LiveTradingEngine(
+            mock_config, shared_data_provider=shared_dp
+        )
+        assert engine._data_provider is shared_dp
+
+    @pytest.mark.asyncio
+    async def test_start_共有接続時はconnectスキップ(
+        self, mock_config: LiveTradingConfig
+    ) -> None:
+        """共有接続時はstart()でconnect()を呼ばない"""
+        shared = MagicMock()
+        shared.connect = AsyncMock()
+        shared.connected = True
+        engine = LiveTradingEngine(
+            mock_config, shared_conn=shared
+        )
+        engine._data_provider.get_account_info = AsyncMock(
+            return_value=AccountInfo(
+                balance=1000000, equity=1000000
+            )
+        )
+        engine._data_provider.get_candles_from_pos = (
+            AsyncMock(
+                return_value=pd.DataFrame(
+                    columns=[
+                        "time", "open", "high",
+                        "low", "close", "volume",
+                    ]
+                )
+            )
+        )
+        engine._executor.get_open_positions_async = (
+            AsyncMock(return_value=[])
+        )
+
+        with patch.object(
+            engine, "_main_loop", new_callable=AsyncMock
+        ):
+            await engine.start()
+            # connectは呼ばれない
+            shared.connect.assert_not_called()
+            assert engine.running is True
+
+        # クリーンアップ
+        engine._running = False
+
+    @pytest.mark.asyncio
+    async def test_stop_共有接続時はdisconnectスキップ(
+        self, mock_config: LiveTradingConfig
+    ) -> None:
+        """共有接続時はstop()でdisconnect()を呼ばない"""
+        shared = MagicMock()
+        shared.connect = AsyncMock()
+        shared.disconnect = AsyncMock()
+        shared.connected = True
+        engine = LiveTradingEngine(
+            mock_config, shared_conn=shared
+        )
+        engine._running = True
+        engine._task = None
+
+        await engine.stop()
+        # disconnectは呼ばれない
+        shared.disconnect.assert_not_called()
+
+
 class TestLiveTradingConfig:
     """LiveTradingConfig テスト"""
 

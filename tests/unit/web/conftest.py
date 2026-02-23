@@ -17,6 +17,7 @@ from autotrader.core.enums import (
 )
 from autotrader.web.dependencies import (
     get_db,
+    get_engine_manager,
     get_live_engine,
 )
 from autotrader.web.routers import (
@@ -61,6 +62,10 @@ def _create_test_app() -> FastAPI:
     # DBセッションはモックで置き換え
     app.dependency_overrides[get_db] = (
         lambda: MagicMock()
+    )
+    # EngineManagerはデフォルトNone（後方互換テスト）
+    app.dependency_overrides[get_engine_manager] = (
+        lambda: None
     )
     return app
 
