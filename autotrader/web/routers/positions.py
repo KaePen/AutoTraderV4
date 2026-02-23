@@ -55,6 +55,9 @@ def _dict_to_position_response(d: dict) -> PositionResponse:
         regime=d.get("regime"),
         mode=d.get("mode"),
         consensus_score=d.get("consensus_score"),
+        remaining_minutes=d.get("remaining_minutes"),
+        max_hold_minutes=d.get("max_hold_minutes"),
+        elapsed_minutes=d.get("elapsed_minutes"),
     )
 
 
