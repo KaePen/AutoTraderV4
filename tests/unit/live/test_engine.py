@@ -277,6 +277,89 @@ class TestLiveTradingEngine:
         engine._executor.modify_position_async.assert_called_once()
 
 
+class TestChangeSymbol:
+    """change_symbol() テスト"""
+
+    def test_active_symbolが変更される(
+        self, engine: LiveTradingEngine
+    ) -> None:
+        """active_symbolが初期値から変更される"""
+        assert engine.active_symbol == "USDJPY"
+        # change_symbolはasyncだがsymbol更新だけならsyncで検証
+        engine._active_symbol = "EURUSD"
+        assert engine.active_symbol == "EURUSD"
+
+    @pytest.mark.asyncio
+    async def test_change_symbol_sizer再構築(
+        self, engine: LiveTradingEngine
+    ) -> None:
+        """change_symbolでPositionSizerが新シンボル用に再構築"""
+        old_sizer = engine._sizer
+        await engine.change_symbol("EURUSD")
+        assert engine._sizer is not old_sizer
+        assert engine.active_symbol == "EURUSD"
+
+    @pytest.mark.asyncio
+    async def test_change_symbol_tick_optimizer再構築(
+        self, engine: LiveTradingEngine
+    ) -> None:
+        """change_symbolでTickEntryOptimizerが新シンボルで再作成"""
+        old_optimizer = engine._tick_optimizer
+        await engine.change_symbol("GBPUSD")
+        assert engine._tick_optimizer is not old_optimizer
+        assert engine._tick_optimizer._symbol == "GBPUSD"
+
+    @pytest.mark.asyncio
+    async def test_change_symbolキャッシュリセット(
+        self, engine: LiveTradingEngine
+    ) -> None:
+        """change_symbolでlast_signal等がリセットされる"""
+        engine._last_signal = MagicMock()
+        engine._last_analysis = MagicMock()
+        engine._last_tick_data = {"bid": 1.0}
+        await engine.change_symbol("EURUSD")
+        assert engine._last_signal is None
+        assert engine._last_analysis is None
+        assert engine._last_tick_data is None
+
+    @pytest.mark.asyncio
+    async def test_change_symbol_同一シンボルはスキップ(
+        self, engine: LiveTradingEngine
+    ) -> None:
+        """同一シンボルではchange_symbolが何もしない"""
+        old_sizer = engine._sizer
+        await engine.change_symbol("USDJPY")
+        assert engine._sizer is old_sizer
+
+    @pytest.mark.asyncio
+    async def test_set_symbol_auto_trade_異なるシンボル(
+        self, engine: LiveTradingEngine
+    ) -> None:
+        """異なるシンボルでset_symbol_auto_tradeがchange_symbolを呼ぶ"""
+        with patch.object(
+            engine, "change_symbol", new_callable=AsyncMock
+        ) as mock_change:
+            await engine.set_symbol_auto_trade(
+                "EURUSD", True
+            )
+            mock_change.assert_called_once_with("EURUSD")
+        assert engine.enable_auto_trade is True
+
+    @pytest.mark.asyncio
+    async def test_set_symbol_auto_trade_同一シンボル(
+        self, engine: LiveTradingEngine
+    ) -> None:
+        """同一シンボルではchange_symbolが呼ばれない"""
+        with patch.object(
+            engine, "change_symbol", new_callable=AsyncMock
+        ) as mock_change:
+            await engine.set_symbol_auto_trade(
+                "USDJPY", True
+            )
+            mock_change.assert_not_called()
+        assert engine.enable_auto_trade is True
+
+
 class TestLiveTradingConfig:
     """LiveTradingConfig テスト"""
 

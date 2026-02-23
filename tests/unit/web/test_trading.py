@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from unittest.mock import AsyncMock
+
 import pytest
 
 
@@ -97,6 +99,34 @@ class TestToggleSymbolAutoTrade:
         )
         assert resp.status_code == 200
         mock_engine.start.assert_called_once()
+
+
+class TestSwitchSymbol:
+    """POST /api/v1/trading/switch-symbol"""
+
+    def test_シンボル切替成功(
+        self, client, mock_engine
+    ):
+        mock_engine.change_symbol = AsyncMock()
+        resp = client.post(
+            "/api/v1/trading/switch-symbol"
+            "?symbol=EURUSD"
+        )
+        assert resp.status_code == 200
+        assert resp.json()["success"] is True
+        mock_engine.change_symbol.assert_called_once_with(
+            "EURUSD"
+        )
+
+    def test_エンジンなし時はエラー(
+        self, no_engine_client
+    ):
+        resp = no_engine_client.post(
+            "/api/v1/trading/switch-symbol"
+            "?symbol=EURUSD"
+        )
+        assert resp.status_code == 200
+        assert resp.json()["success"] is False
 
 
 class TestAccountPresets:
