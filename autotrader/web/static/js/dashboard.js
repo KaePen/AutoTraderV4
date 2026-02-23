@@ -30,6 +30,10 @@ const DashboardApp = {
 
   /** 初期化 */
   init() {
+    // 保存済みシンボルを復元
+    const saved = localStorage.getItem('chart_symbol');
+    if (saved) this.symbol = saved;
+
     // カスタムシンボルドロップダウン初期化（クリック外で閉じる）
     document.addEventListener('click', (e) => {
       const wrapper = document.getElementById('symbol-dropdown-wrapper');
@@ -55,6 +59,12 @@ const DashboardApp = {
 
     // トレーディングコントロール初期化
     this.initTradingControl();
+
+    // 復元シンボルをUIに反映
+    const sel = document.getElementById('symbol-selector');
+    if (sel) sel.value = this.symbol;
+    const chartTitle = document.getElementById('chart-title');
+    if (chartTitle) chartTitle.textContent = this.symbol + ' チャート';
 
     // チャート初期化
     ChartManager.init('chart-container', this.symbol);
@@ -749,6 +759,7 @@ const DashboardApp = {
   /** シンボル選択（カスタムドロップダウンから呼ぶ） */
   selectSymbol(symbol) {
     this.symbol = symbol;
+    localStorage.setItem('chart_symbol', symbol);
     // 非表示ネイティブselectも同期
     const sel = document.getElementById('symbol-selector');
     if (sel) sel.value = symbol;
