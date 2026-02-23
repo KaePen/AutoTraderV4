@@ -1080,6 +1080,7 @@ const DashboardApp = {
             <span class="text-[10px] text-gray-600">${p.volume.toFixed(2)}lot</span>
             <span class="text-[10px] text-gray-600">·</span>
             <span class="text-[10px] text-gray-500">${this.fmtHoldTime(p.opened_at)}</span>
+            ${this._fmtRemainingTime(p)}
           </div>
           <div class="flex items-center gap-2">
             <div class="flex items-baseline gap-1 ${pnlBg} px-2 py-0.5 rounded-md">
@@ -1619,6 +1620,23 @@ const DashboardApp = {
     const diffHour = Math.floor(diffMin / 60);
     if (diffHour < 24) return diffHour + 'h ' + (diffMin % 60) + 'm';
     return Math.floor(diffHour / 24) + 'd ' + (diffHour % 24) + 'h';
+  },
+  /** 残り保有時間の表示 */
+  _fmtRemainingTime(p) {
+    if (p.remaining_minutes == null) return '';
+    const rem = p.remaining_minutes;
+    // 残り20%以下で警告色
+    const ratio = p.max_hold_minutes ? rem / p.max_hold_minutes : 1;
+    const cls = ratio <= 0.2 ? 'text-orange-400' : 'text-gray-500';
+    let label;
+    if (rem < 60) {
+      label = `残${rem}m`;
+    } else {
+      const h = Math.floor(rem / 60);
+      const m = rem % 60;
+      label = m > 0 ? `残${h}h${m}m` : `残${h}h`;
+    }
+    return `<span class="text-[10px] ${cls}">/ ${label}</span>`;
   },
   escapeHtml(str) {
     const div = document.createElement('div');
