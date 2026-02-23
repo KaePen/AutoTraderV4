@@ -17,19 +17,16 @@
     <!-- 分析パネル (ライブ時のみ表示、チャートと同じ2/3幅) -->
     <div id="analysis-panel" class="card border border-gray-700 hidden lg:col-span-2">
       <div class="flex items-center justify-between mb-3">
-        <div class="flex items-center gap-3">
+        <div class="flex items-center gap-2">
           <h3 class="text-xs font-semibold text-gray-400 uppercase tracking-wider">Live Analysis</h3>
           <span id="ap-direction-badge" class="inline-flex items-center px-2 py-0.5 rounded text-xs font-bold bg-gray-700 text-gray-400">--</span>
-          <span id="ap-regime" class="text-xs text-gray-500">--</span>
+          <span id="ap-score-text" class="text-[11px] tabular-nums text-gray-300 font-medium">-- / --</span>
+          <span id="ap-regime" class="text-[10px] text-gray-500">--</span>
         </div>
         <span id="ap-tick-time" class="text-xs text-gray-600 tabular-nums">--</span>
       </div>
       <!-- スコアバー（中央0基準・左SELL/右BUY） -->
       <div class="mb-3">
-        <div class="flex items-center justify-between text-xs mb-1">
-          <span class="text-gray-500">Consensus Score</span>
-          <span id="ap-score-text" class="tabular-nums text-gray-300 font-medium">-- / --</span>
-        </div>
         <!-- SELL/BUYラベル -->
         <div class="flex items-center justify-between text-[9px] text-gray-600 mb-0.5">
           <span>SELL</span>
