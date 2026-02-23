@@ -26,7 +26,10 @@ class TestGetAnalysis:
             consensus_score=7.5,
             entry_threshold=6.0,
             regime="TREND",
+            mode="trend",
             rationale="テスト理由",
+            buy_score=7.5,
+            sell_score=2.0,
             htf_alignment=0.8,
             penalty_total=0.0,
             penalty_breakdown={},
@@ -87,7 +90,10 @@ class TestGetAnalysis:
             consensus_score=7.5,
             entry_threshold=6.0,
             regime="TREND",
+            mode="trend",
             rationale="テスト理由",
+            buy_score=7.5,
+            sell_score=2.0,
             htf_alignment=0.8,
             penalty_total=0.0,
             penalty_breakdown={},
@@ -105,6 +111,8 @@ class TestGetAnalysis:
         data = resp.json()["data"]
         assert data["symbol"] == "USDJPY"
         assert data["direction"] == "BUY"
+        assert data["buy_score"] == 7.5
+        assert data["sell_score"] == 2.0
 
 
 class TestGetCurrentSignals:

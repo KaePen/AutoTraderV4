@@ -220,8 +220,10 @@ const DashboardApp = {
       posPanel.classList.add('lg:row-span-2');
     }
 
-    if (!a) {
-      // シンボル切替中（データなし）: UI要素をリセット
+    // データなし or エンジン未起動（シンボル不一致）: プレースホルダ表示
+    const noData = !a || (!a.engine_running && (!a.tf_scores || Object.keys(a.tf_scores).length === 0));
+    if (noData) {
+      const msg = (a && a.rationale) ? a.rationale : '分析データなし';
       const dirBadge = document.getElementById('ap-direction-badge');
       if (dirBadge) {
         dirBadge.textContent = '--';
@@ -231,8 +233,14 @@ const DashboardApp = {
       if (scoreText) scoreText.textContent = '--';
       const scoreBar = document.getElementById('ap-score-bar');
       if (scoreBar) scoreBar.style.width = '0%';
+      const htfEl = document.getElementById('ap-htf');
+      if (htfEl) { htfEl.textContent = '--'; htfEl.className = 'font-bold tabular-nums text-gray-500'; }
+      const trendEl = document.getElementById('ap-trend');
+      if (trendEl) { trendEl.textContent = '--'; trendEl.className = 'font-bold tabular-nums text-gray-500'; }
+      const penaltyEl = document.getElementById('ap-penalty');
+      if (penaltyEl) { penaltyEl.textContent = '--'; penaltyEl.className = 'font-bold tabular-nums text-gray-500'; }
       const tfEl = document.getElementById('ap-tf-scores');
-      if (tfEl) tfEl.innerHTML = '<p class="text-gray-500 text-xs text-center py-4">分析データなし</p>';
+      if (tfEl) tfEl.innerHTML = '<p class="text-gray-500 text-xs text-center py-4">' + msg + '</p>';
       return;
     }
 

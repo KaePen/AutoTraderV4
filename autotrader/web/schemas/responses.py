@@ -512,6 +512,9 @@ class AnalysisResponse(BaseModel):
         tf_breakdowns: 時間足別スコア内訳
         last_tick_time: 最終tick時刻（ISO形式）
         demo_mode: デモモード状態
+        buy_score: 買いスコア
+        sell_score: 売りスコア
+        mode: トレードモード
     """
 
     symbol: str | None = None
@@ -520,7 +523,10 @@ class AnalysisResponse(BaseModel):
     consensus_score: float | None = None
     entry_threshold: float = 0.0
     regime: str | None = None
+    mode: str | None = None
     rationale: str = "データなし"
+    buy_score: float = 0.0
+    sell_score: float = 0.0
     htf_alignment: float = 0.0
     penalty_total: float = 0.0
     penalty_breakdown: dict[str, float] = Field(
