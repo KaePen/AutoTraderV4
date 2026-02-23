@@ -5,6 +5,7 @@ from __future__ import annotations
 from functools import lru_cache
 from typing import Generator
 
+from fastapi import Request
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
@@ -52,7 +53,7 @@ def get_db() -> Generator[Session, None, None]:
         db.close()
 
 
-def get_live_engine(request):
+def get_live_engine(request: Request):
     """LiveTradingEngineを取得
 
     Args:
