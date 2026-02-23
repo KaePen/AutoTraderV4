@@ -82,6 +82,8 @@ class SimulatorConfig:
             "off_hours": 2.5,
         }
     )
+    # UnifiedBotConfig（TradingPlan生成用）
+    bot_config: Any = None
 
     @classmethod
     def from_preset(
@@ -197,6 +199,8 @@ class TradeSimulator:
                 slippage_pips=self.config.slippage_pips,
             )
             self._pm = PositionManager(pm_cfg)
+        # UnifiedBotConfig（TradingPlan生成用）
+        self._bot_config = self.config.bot_config
         # シグナル参照保持（PositionManager用）
         self._signal_cache: dict[str, Signal] = {}
         # MFE/MAE追跡（pips単位）
@@ -818,21 +822,12 @@ class TradeSimulator:
             from autotrader.decision.unified.mode_selector import (
                 TradingPlan,
             )
-            mode = TradingStrategyMode.UNIVERSAL
-            if signal.mode:
-                try:
-                    mode = TradingStrategyMode(signal.mode)
-                except ValueError:
-                    pass
-
-            plan = TradingPlan(
-                mode=mode,
-                primary_tf="M15",
-                entry_tf="M5",
-                confirm_tfs=["H1"],
-                manage_tf="M15",
-                max_holding_bars=96,
-                tp_sl_ratio_range=(1.0, 1.5),
+            import dataclasses as _dc
+            plan = TradingPlan.create_universal(
+                self._bot_config,
+            )
+            plan = _dc.replace(
+                plan,
                 regime=signal.regime,
             )
             self._pm.register_position(

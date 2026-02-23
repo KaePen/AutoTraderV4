@@ -81,10 +81,10 @@ class TimeframeSet:
         role = self.get_role(tf)
         weights = {
             TimeframeRole.PRIMARY: 3.0,
-            TimeframeRole.ENTRY: 2.0,
-            TimeframeRole.CONFIRM: 1.5,
-            TimeframeRole.MANAGE: 1.0,
-            TimeframeRole.OTHER: 0.5,
+            TimeframeRole.ENTRY: 2.5,
+            TimeframeRole.CONFIRM: 2.0,
+            TimeframeRole.MANAGE: 1.5,
+            TimeframeRole.OTHER: 1.0,
         }
         return weights[role]
 

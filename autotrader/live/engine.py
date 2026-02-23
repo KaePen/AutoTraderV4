@@ -1749,16 +1749,13 @@ class LiveTradingEngine:
                 from autotrader.decision.unified.mode_selector import (
                     TradingPlan,
                 )
-                from autotrader.core.enums import TradingStrategyMode
+                import dataclasses as _dc
 
-                plan = TradingPlan(
-                    mode=TradingStrategyMode.UNIVERSAL,
-                    primary_tf="M15",
-                    entry_tf="M15",
-                    confirm_tfs=["H1", "H4"],
-                    manage_tf="M15",
-                    max_holding_bars=32,
-                    tp_sl_ratio_range=(1.1, 1.4),
+                plan = TradingPlan.create_universal(
+                    self._bot.config,
+                )
+                plan = _dc.replace(
+                    plan,
                     selection_reason="synced_at_startup",
                 )
 

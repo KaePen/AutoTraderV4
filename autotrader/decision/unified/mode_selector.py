@@ -6,8 +6,12 @@ UNIVERSALモード固定で全TFを動的評価するプランを返す。
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from autotrader.core.enums import TradingStrategyMode
+
+if TYPE_CHECKING:
+    from autotrader.decision.unified.config import UnifiedBotConfig
 
 
 @dataclass(frozen=True)
@@ -54,7 +58,48 @@ class TradingPlan:
         Returns:
             float: 推奨比率（範囲の中央値）
         """
-        return (self.tp_sl_ratio_range[0] + self.tp_sl_ratio_range[1]) / 2
+        return (
+            self.tp_sl_ratio_range[0] + self.tp_sl_ratio_range[1]
+        ) / 2
+
+    @classmethod
+    def create_universal(
+        cls,
+        config: UnifiedBotConfig | None = None,
+    ) -> TradingPlan:
+        """UnifiedBotConfigからUNIVERSALプランを生成
+
+        唯一のTradingPlan生成手段。全モジュールはこのファクトリ
+        メソッドを通じてプランを取得する。
+
+        Args:
+            config: ボット設定（Noneの場合はデフォルト）
+
+        Returns:
+            TradingPlan: UNIVERSALトレーディングプラン
+        """
+        if config is None:
+            from autotrader.decision.unified.config import (
+                UnifiedBotConfig,
+            )
+            config = UnifiedBotConfig()
+        _confirm = [
+            tf for tf in config.timeframes
+            if tf not in {
+                config.default_primary_tf,
+                config.default_entry_tf,
+            }
+        ]
+        return cls(
+            mode=TradingStrategyMode.UNIVERSAL,
+            primary_tf=config.default_primary_tf,
+            entry_tf=config.default_entry_tf,
+            confirm_tfs=_confirm,
+            manage_tf=config.default_manage_tf,
+            max_holding_bars=config.default_max_holding_bars,
+            tp_sl_ratio_range=config.default_tp_sl_ratio_range,
+            selection_reason="UNIVERSAL（動的TF選択）",
+        )
 
 
 @dataclass(frozen=True)
@@ -68,24 +113,21 @@ class TradingModeSelector:
     UNIVERSALモード固定で全TFを動的評価するプランを返す。
     """
 
-    # UNIVERSALプラン定義（confirm_tfsは初期化時にconfig.timeframesで上書き）
-    _DEFAULT_CONFIRM_TFS = [
-        "M1", "M5", "M15", "H1", "H4", "H8", "D1",
-    ]
-
     def __init__(
         self,
         config: ModeSelectorConfig | None = None,
         timeframes: list[str] | None = None,
+        bot_config: UnifiedBotConfig | None = None,
     ) -> None:
         """初期化
 
         Args:
             config: モード選択設定（互換性のため残存）
-            timeframes: 使用TFリスト（confirm_tfs用）
+            timeframes: 使用TFリスト（互換性のため残存）
+            bot_config: ボット設定（推奨）
         """
         self.config = config or ModeSelectorConfig()
-        self._confirm_tfs = timeframes or self._DEFAULT_CONFIRM_TFS
+        self._bot_config = bot_config
 
     def select(
         self,
@@ -113,13 +155,4 @@ class TradingModeSelector:
         Returns:
             TradingPlan: UNIVERSALトレーディングプラン
         """
-        return TradingPlan(
-            mode=TradingStrategyMode.UNIVERSAL,
-            primary_tf="M15",
-            entry_tf="M5",
-            confirm_tfs=self._confirm_tfs,
-            manage_tf="M15",
-            max_holding_bars=32,
-            tp_sl_ratio_range=(1.1, 1.4),
-            selection_reason="UNIVERSAL（動的TF選択）",
-        )
+        return TradingPlan.create_universal(self._bot_config)

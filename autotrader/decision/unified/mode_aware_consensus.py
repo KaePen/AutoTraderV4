@@ -65,15 +65,17 @@ class ConsensusConfig:
         primary_weight: 主要TFの重み
         entry_weight: エントリーTFの重み
         confirm_weight: 確認TFの重み
+        manage_weight: 管理TFの重み
         other_weight: その他TFの重み
         threshold: コンセンサス閾値（UNIVERSALモード）
         enable_counter_signal: 多面分析（逆方向シグナル活用）の有効化
     """
 
     primary_weight: float = 3.0
-    entry_weight: float = 2.0
-    confirm_weight: float = 1.5
-    other_weight: float = 0.5
+    entry_weight: float = 2.5
+    confirm_weight: float = 2.0
+    manage_weight: float = 1.5
+    other_weight: float = 1.0
     threshold: float = 4.5
     enable_counter_signal: bool = True
 
@@ -91,15 +93,6 @@ class ModeAwareScoreConsensus:
     4. モード別閾値で判定
     """
 
-    # 役割別重み（UNIVERSAL固定）
-    ROLE_WEIGHTS: dict[TimeframeRole, float] = {
-        TimeframeRole.PRIMARY: 3.0,
-        TimeframeRole.ENTRY: 2.5,
-        TimeframeRole.CONFIRM: 2.0,
-        TimeframeRole.MANAGE: 1.5,
-        TimeframeRole.OTHER: 1.0,
-    }
-
     def __init__(self, config: ConsensusConfig | None = None) -> None:
         """初期化
 
@@ -108,12 +101,12 @@ class ModeAwareScoreConsensus:
         """
         self.config = config or ConsensusConfig()
 
-        # 設定から重みを更新
+        # 設定から重みを構築
         self.role_weights = {
             TimeframeRole.PRIMARY: self.config.primary_weight,
             TimeframeRole.ENTRY: self.config.entry_weight,
             TimeframeRole.CONFIRM: self.config.confirm_weight,
-            TimeframeRole.MANAGE: 1.5,
+            TimeframeRole.MANAGE: self.config.manage_weight,
             TimeframeRole.OTHER: self.config.other_weight,
         }
 
