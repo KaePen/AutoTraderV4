@@ -1464,13 +1464,25 @@ class LiveTradingEngine:
             )
             if position.signal_type == SignalType.SELL:
                 pip_diff = -pip_diff
-            # 保有時間を計算（opened_atを単一ソースとして使用）
+            # 保有時間を計算
             managed = self._pm.get_position(pos_id)
             remaining_minutes = None
             max_hold_minutes = None
             elapsed_minutes = None
-            # opened_atからの経過時間（全ポジション共通）
-            if hasattr(position.opened_at, "timestamp"):
+            # PM管理ポジション: entry_time（正確なUTC）を使用
+            # MT5のopened_atはブローカータイムゾーン(UTC+2)のため不正確
+            if managed is not None and hasattr(
+                managed, "entry_time"
+            ):
+                elapsed_sec = (
+                    datetime.now(timezone.utc)
+                    - managed.entry_time
+                ).total_seconds()
+                elapsed_minutes = max(
+                    0, int(elapsed_sec / 60)
+                )
+            elif hasattr(position.opened_at, "timestamp"):
+                # 非PM管理ポジション: opened_atを使用（TZオフセットあり）
                 elapsed_sec = (
                     datetime.now(timezone.utc)
                     - position.opened_at
