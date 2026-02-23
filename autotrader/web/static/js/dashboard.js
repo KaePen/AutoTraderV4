@@ -241,12 +241,11 @@ const DashboardApp = {
     const thSell = document.getElementById('ap-threshold-sell');
     const thBuy = document.getElementById('ap-threshold-buy');
     if (scoreText) {
-      const dirLabel = dir === 'BUY' ? 'BUY' : dir === 'SELL' ? 'SELL' : 'HOLD';
-      // HOLD時はbuy/sellスコアも表示
+      // HOLD時はbuy/sellスコア内訳を表示
       if (dir === 'HOLD' && (buyScore > 0 || sellScore > 0)) {
-        scoreText.textContent = dirLabel + ' B:' + buyScore.toFixed(1) + ' S:' + sellScore.toFixed(1) + ' / ' + threshold.toFixed(1);
+        scoreText.textContent = 'B:' + buyScore.toFixed(1) + ' S:' + sellScore.toFixed(1) + ' / ' + threshold.toFixed(1);
       } else {
-        scoreText.textContent = dirLabel + ' ' + score.toFixed(2) + ' / ' + threshold.toFixed(1);
+        scoreText.textContent = score.toFixed(2) + ' / ' + threshold.toFixed(1);
       }
     }
     if (scoreBar) {
