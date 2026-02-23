@@ -132,7 +132,7 @@ const DashboardApp = {
     // 分析パネル
     if (data.analysis) {
       this.lastAnalysis = data.analysis;
-      this.renderAnalysisPanel();
+      this.renderAnalysis();
       this.renderTradingControl();
     }
 
@@ -182,8 +182,9 @@ const DashboardApp = {
     if (!panel) return;
 
     const a = this.lastAnalysis;
-    // エンジン未起動ならパネル非表示
-    const isLive = this.tradingMode && this.tradingMode.mode === 'live';
+    // エンジン未起動ならパネル非表示（live/demo両方で表示）
+    const m = this.tradingMode;
+    const isLive = m && (m.mode === 'live' || m.mode === 'demo');
     const posPanel = document.getElementById('position-panel');
     const posList = document.getElementById('position-list');
     if (!isLive) {
@@ -241,7 +242,12 @@ const DashboardApp = {
     const thBuy = document.getElementById('ap-threshold-buy');
     if (scoreText) {
       const dirLabel = dir === 'BUY' ? 'BUY' : dir === 'SELL' ? 'SELL' : 'HOLD';
-      scoreText.textContent = dirLabel + ' ' + score.toFixed(2) + ' / ' + threshold.toFixed(1);
+      // HOLD時はbuy/sellスコアも表示
+      if (dir === 'HOLD' && (buyScore > 0 || sellScore > 0)) {
+        scoreText.textContent = dirLabel + ' B:' + buyScore.toFixed(1) + ' S:' + sellScore.toFixed(1) + ' / ' + threshold.toFixed(1);
+      } else {
+        scoreText.textContent = dirLabel + ' ' + score.toFixed(2) + ' / ' + threshold.toFixed(1);
+      }
     }
     if (scoreBar) {
       // 片側の最大値: threshold * 1.5（スケーリング用）
