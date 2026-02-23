@@ -272,6 +272,10 @@ async def toggle_auto_trade(
         "ON" if enable else "OFF",
     )
 
+    # ONトグル時にポジション同期を実行
+    if enable:
+        await engine.sync_positions_on_toggle()
+
     return _build_trading_mode_response(engine)
 
 
@@ -309,6 +313,10 @@ async def toggle_symbol_auto_trade(
         symbol,
         "ON" if enable else "OFF",
     )
+
+    # ONトグル時にポジション同期を実行
+    if enable and engine.running:
+        await engine.sync_positions_on_toggle()
 
     # エンジン未起動時は自動起動
     if enable and not engine.running:

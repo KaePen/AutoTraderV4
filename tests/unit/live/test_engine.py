@@ -230,6 +230,7 @@ class TestLiveTradingEngine:
         engine._conn = MagicMock()
         engine._conn.connected = True
         engine._conn.session = MagicMock()
+        engine._enable_auto_trade = True
 
         position = Position(
             position_id="12345",

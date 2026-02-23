@@ -1535,8 +1535,11 @@ class LiveTradingEngine:
                 "elapsed_minutes": elapsed_minutes,
             })
 
-            # PM未登録ならアクション評価をスキップ
+            # PM未登録 or 自動取引OFFなら評価スキップ
+            # OFF時はMT5手動決済に委ねる
             if managed is None:
+                continue
+            if not self._enable_auto_trade:
                 continue
 
             try:
@@ -1683,10 +1686,21 @@ class LiveTradingEngine:
                     str(position.ticket)
                 )
 
+    async def sync_positions_on_toggle(self) -> None:
+        """自動取引ON切替時のポジション同期
+
+        auto_tradeがONにトグルされた際にrouterから呼ばれる。
+        MT5の既存ポジションとPMを同期し、ローカルDBから
+        管理状態（フラグ・追跡値）を復元する。
+        """
+        if not self.running:
+            return
+        await self._sync_positions()
+
     async def _sync_positions(self) -> None:
         """MT5の既存ポジションとPositionManagerを同期
 
-        エンジン起動時に呼び出される。
+        エンジン起動時・auto_tradeトグルON時に呼び出される。
         DBから is_open=True のレコードを検索して
         _open_trades（ticket→trade_id）を復元する。
         ローカルDBから管理状態（フラグ・追跡値）も復元する。

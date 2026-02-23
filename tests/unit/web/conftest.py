@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timezone
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from fastapi import FastAPI
@@ -81,6 +81,7 @@ def _make_mock_engine(
     engine.last_tick_time = None
     engine.signal_history = []
     engine.cached_positions = []
+    engine.sync_positions_on_toggle = AsyncMock()
     engine.account_info = SimpleNamespace(
         balance=1000000.0,
         equity=1000000.0,
