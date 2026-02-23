@@ -1052,6 +1052,8 @@ class LiveTradingEngine:
                 ).isoformat(),
                 "unrealized_pnl": 0.0,
                 "unrealized_pnl_pips": 0.0,
+                "remaining_minutes": None,
+                "max_hold_minutes": None,
             })
 
             # TradeBotに通知（取引時刻を渡す）
@@ -1457,6 +1459,27 @@ class LiveTradingEngine:
             )
             if position.signal_type == SignalType.SELL:
                 pip_diff = -pip_diff
+            # 残り保有時間を計算（PM登録済みのみ）
+            managed = self._pm.get_position(pos_id)
+            remaining_minutes = None
+            max_hold_minutes = None
+            if managed is not None:
+                from autotrader.config.tf_params_registry import (
+                    get_holding_minutes,
+                )
+                entry_tf = (
+                    getattr(managed.plan, "dynamic_entry_tf", None)
+                    or managed.plan.entry_tf
+                )
+                max_hold_minutes = get_holding_minutes(entry_tf)
+                elapsed = (
+                    datetime.now(timezone.utc)
+                    - managed.entry_time
+                ).total_seconds() / 60
+                remaining_minutes = max(
+                    0, int(max_hold_minutes - elapsed)
+                )
+
             cache_list.append({
                 "position_id": str(position.ticket),
                 "trade_id": self._open_trades.get(
@@ -1479,10 +1502,11 @@ class LiveTradingEngine:
                     pip_diff * position.volume * pip_value
                 ),
                 "unrealized_pnl_pips": pip_diff,
+                "remaining_minutes": remaining_minutes,
+                "max_hold_minutes": max_hold_minutes,
             })
 
             # PM未登録ならアクション評価をスキップ
-            managed = self._pm.get_position(pos_id)
             if managed is None:
                 continue
 
