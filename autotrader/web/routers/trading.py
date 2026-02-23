@@ -315,7 +315,9 @@ async def toggle_symbol_auto_trade(
     )
 
     # ONトグル時にポジション同期を実行
-    if enable and engine.running:
+    # engine.start() 内で _sync_positions() が呼ばれるため
+    # 未起動時は sync_positions_on_toggle 側でスキップ
+    if enable:
         await engine.sync_positions_on_toggle()
 
     # エンジン未起動時は自動起動

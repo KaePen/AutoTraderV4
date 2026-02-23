@@ -1704,10 +1704,17 @@ class LiveTradingEngine:
         auto_tradeがONにトグルされた際にrouterから呼ばれる。
         MT5の既存ポジションとPMを同期し、ローカルDBから
         管理状態（フラグ・追跡値）を復元する。
+        失敗時は次回tickの通常フローで自己修復される。
         """
         if not self.running:
             return
-        await self._sync_positions()
+        try:
+            await self._sync_positions()
+        except Exception:
+            logger.error(
+                "トグル時ポジション同期失敗",
+                exc_info=True,
+            )
 
     async def _sync_positions(self) -> None:
         """MT5の既存ポジションとPositionManagerを同期

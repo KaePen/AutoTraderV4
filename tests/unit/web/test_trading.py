@@ -59,6 +59,7 @@ class TestToggleAutoTrade:
         )
         assert resp.status_code == 200
         assert mock_engine.enable_auto_trade is True
+        mock_engine.sync_positions_on_toggle.assert_called_once()
 
     def test_エンジンなし時はエラー(
         self, no_engine_client
@@ -84,6 +85,7 @@ class TestToggleSymbolAutoTrade:
         mock_engine.set_symbol_auto_trade.assert_called_once_with(
             "USDJPY", True
         )
+        mock_engine.sync_positions_on_toggle.assert_called_once()
 
     def test_エンジン未起動時は自動起動(
         self, client, mock_engine
