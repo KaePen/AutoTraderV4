@@ -18,6 +18,7 @@ from autotrader.decision.unified.timeframe_evaluator import (
 
 if TYPE_CHECKING:
     from autotrader.core.entities import Candle
+    from autotrader.decision.unified.config import UnifiedBotConfig
 
 
 @dataclass(frozen=True)
@@ -45,17 +46,43 @@ class ModeConfig:
     min_confidence: float = 0.5
 
 
-# UNIVERSALモードの設定
-UNIVERSAL_CONFIG = ModeConfig(
-    mode=TradingStrategyMode.UNIVERSAL,
-    primary_tf="M15",
-    entry_tf="M5",
-    confirm_tfs=["M1", "H1", "H4", "H8", "D1"],
-    max_hold_minutes=480,  # デフォルト8時間（動的変更可）
-    sl_range=(10.0, 100.0),
-    tp_range=(10.0, 400.0),
-    min_confidence=0.5,
-)
+def _universal_config_from_bot_config(
+    bot_config: "UnifiedBotConfig | None" = None,
+) -> ModeConfig:
+    """UnifiedBotConfigからUNIVERSAL ModeConfigを生成
+
+    Args:
+        bot_config: ボット設定（Noneの場合デフォルト）
+
+    Returns:
+        ModeConfig: UNIVERSALモード設定
+    """
+    if bot_config is None:
+        from autotrader.decision.unified.config import (
+            UnifiedBotConfig,
+        )
+        bot_config = UnifiedBotConfig()
+    _confirm = [
+        tf for tf in bot_config.timeframes
+        if tf not in {
+            bot_config.default_primary_tf,
+            bot_config.default_entry_tf,
+        }
+    ]
+    return ModeConfig(
+        mode=TradingStrategyMode.UNIVERSAL,
+        primary_tf=bot_config.default_primary_tf,
+        entry_tf=bot_config.default_entry_tf,
+        confirm_tfs=_confirm,
+        max_hold_minutes=480,
+        sl_range=(10.0, 100.0),
+        tp_range=(10.0, 400.0),
+        min_confidence=0.5,
+    )
+
+
+# 後方互換: デフォルト設定
+UNIVERSAL_CONFIG = _universal_config_from_bot_config()
 
 
 @dataclass

@@ -127,9 +127,10 @@ class NoTradeStrategy(BaseStrategy):
         # NoTradeが0.2を超えると有力候補になる
         notrade_score = min(1.0, penalty * 0.5 + regime_bonus)
 
+        _ptf = self.timeframes.primary_tf
         hold_consensus = InStrategyConsensusResult(
             direction=SignalType.HOLD,
-            primary_tf="M15",
+            primary_tf=_ptf,
             aligned_tfs=(),
             total_score=0.0,
             buy_score=0.0,
@@ -153,7 +154,7 @@ class NoTradeStrategy(BaseStrategy):
             edge_score=notrade_score,
             edge_components=edge_components,
             consensus=hold_consensus,
-            primary_tf="M15",
+            primary_tf=_ptf,
             sl_pips=0.0,
             tp_pips=0.0,
             reasoning=(

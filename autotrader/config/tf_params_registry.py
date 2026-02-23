@@ -136,6 +136,20 @@ _DEFAULT_TP_RATIOS: dict[str, float] = {
 }
 
 # ===================================================================
+# TF別SL最大値（pips） - TFスケールに応じたSLキャップ
+# ===================================================================
+_SL_MAX_PIPS: dict[str, float] = {
+    "M1": 20.0,
+    "M5": 30.0,
+    "M15": 50.0,
+    "M30": 70.0,
+    "H1": 100.0,
+    "H4": 150.0,
+    "H8": 200.0,
+    "D1": 300.0,
+}
+
+# ===================================================================
 # 構造ベースSL ATR倍率 - 元: timeframe_evaluator.py
 # ===================================================================
 _STRUCTURE_SL_MULT: dict[str, float] = {
@@ -209,3 +223,8 @@ def get_default_tp_ratio(tf: str) -> float:
 def get_structure_sl_mult(tf: str) -> float:
     """構造ベースSL ATR倍率を取得（補間付き）"""
     return interpolate_tf_param(_STRUCTURE_SL_MULT, tf)
+
+
+def get_sl_max_pips(tf: str) -> float:
+    """TF別SL最大値を取得（補間付き）"""
+    return interpolate_tf_param(_SL_MAX_PIPS, tf)

@@ -4,7 +4,9 @@ from __future__ import annotations
 
 
 from autotrader.core.enums import SignalType
+from autotrader.decision.unified.config import UnifiedBotConfig
 from autotrader.decision.unified.dynamic_tf_selector import (
+    MAJOR_TF_LADDER,
     DynamicTFSelector,
 )
 
@@ -71,12 +73,14 @@ class TestDynamicTFSelector:
         )
         assert result.selected_entry_tf == "H1"  # BUY方向のみ評価
 
-    def test_primary_tf_is_one_level_higher(self) -> None:
-        """primary_tfはentry_tfの1つ上"""
+    def test_primary_tf_uses_major_ladder(self) -> None:
+        """primary_tfはメジャーTFラダーで1段上"""
         tf_signals = {"M5": MockSignal(SignalType.BUY, 0.9)}
         result = self.selector.select(tf_signals)
         assert result.selected_entry_tf == "M5"
-        assert result.selected_primary_tf == "M6"
+        # メジャーTFラダー: M1→M5→M15→H1→H4→D1
+        # M5の1段上はM15
+        assert result.selected_primary_tf == "M15"
 
     def test_all_hold_signals_returns_default(self) -> None:
         """全シグナルがHOLD時はデフォルトを返す"""
@@ -116,3 +120,124 @@ class TestDynamicTFSelector:
         )
         # BUY方向シグナルがないのでデフォルト
         assert result.selected_entry_tf == "M15"
+
+
+class TestDeriveAllRoles:
+    """_derive_all_rolesのテスト（メジャーTFラダー）"""
+
+    def setup_method(self) -> None:
+        """テストセットアップ"""
+        self.selector = DynamicTFSelector()
+
+    def test_m5_entry_roles(self) -> None:
+        """M5エントリー時の全ロール導出"""
+        tf_signals = {"M5": MockSignal(SignalType.BUY, 0.9)}
+        result = self.selector.select(tf_signals)
+        assert result.selected_entry_tf == "M5"
+        assert result.selected_primary_tf == "M15"
+        assert result.selected_manage_tf == "M15"
+        assert result.selected_regime_tf == "H1"
+        assert result.selected_htf_alignment_tfs == ["H4", "D1"]
+
+    def test_m15_entry_roles(self) -> None:
+        """M15エントリー時の全ロール導出"""
+        tf_signals = {"M15": MockSignal(SignalType.BUY, 0.9)}
+        result = self.selector.select(tf_signals)
+        assert result.selected_entry_tf == "M15"
+        assert result.selected_primary_tf == "H1"
+        assert result.selected_manage_tf == "H1"
+        assert result.selected_regime_tf == "H4"
+        assert result.selected_htf_alignment_tfs == ["D1"]
+
+    def test_h1_entry_roles(self) -> None:
+        """H1エントリー時の全ロール導出"""
+        tf_signals = {"H1": MockSignal(SignalType.BUY, 0.9)}
+        result = self.selector.select(tf_signals)
+        assert result.selected_entry_tf == "H1"
+        assert result.selected_primary_tf == "H4"
+        assert result.selected_manage_tf == "H4"
+        assert result.selected_regime_tf == "D1"
+        # regime_tf(D1)より上がないので[D1]保証
+        assert result.selected_htf_alignment_tfs == ["D1"]
+
+    def test_h4_entry_roles(self) -> None:
+        """H4エントリー時の全ロール導出（上限近く）"""
+        tf_signals = {"H4": MockSignal(SignalType.BUY, 0.9)}
+        result = self.selector.select(tf_signals)
+        assert result.selected_entry_tf == "H4"
+        assert result.selected_primary_tf == "D1"
+        assert result.selected_manage_tf == "D1"
+        assert result.selected_regime_tf == "D1"
+        assert result.selected_htf_alignment_tfs == ["D1"]
+
+    def test_d1_entry_roles(self) -> None:
+        """D1エントリー時の全ロール導出（最上段）"""
+        tf_signals = {"D1": MockSignal(SignalType.BUY, 0.9)}
+        result = self.selector.select(tf_signals)
+        assert result.selected_entry_tf == "D1"
+        # 全て最上段にキャップ
+        assert result.selected_primary_tf == "D1"
+        assert result.selected_manage_tf == "D1"
+        assert result.selected_regime_tf == "D1"
+        assert result.selected_htf_alignment_tfs == ["D1"]
+
+    def test_m1_entry_roles(self) -> None:
+        """M1エントリー時の全ロール導出（最下段）"""
+        tf_signals = {"M1": MockSignal(SignalType.BUY, 0.9)}
+        result = self.selector.select(tf_signals)
+        assert result.selected_entry_tf == "M1"
+        assert result.selected_primary_tf == "M5"
+        assert result.selected_manage_tf == "M5"
+        assert result.selected_regime_tf == "M15"
+        assert result.selected_htf_alignment_tfs == ["H1", "H4", "D1"]
+
+
+class TestSnapToLadder:
+    """_snap_to_ladderのテスト"""
+
+    def setup_method(self) -> None:
+        """テストセットアップ"""
+        self.selector = DynamicTFSelector()
+
+    def test_exact_match(self) -> None:
+        """ラダーに完全一致するTF"""
+        for i, tf in enumerate(MAJOR_TF_LADDER):
+            assert self.selector._snap_to_ladder(tf) == i
+
+    def test_intermediate_tf_snaps_down(self) -> None:
+        """中間TFは最も近い以下のラダー段に吸着"""
+        # M10 → M5段（idx=1）
+        assert self.selector._snap_to_ladder("M10") == 1
+        # M30 → M15段（idx=2）
+        assert self.selector._snap_to_ladder("M30") == 2
+        # H2 → H1段（idx=3）
+        assert self.selector._snap_to_ladder("H2") == 3
+        # H8 → H4段（idx=4）
+        assert self.selector._snap_to_ladder("H8") == 4
+
+
+class TestFallbackWithConfig:
+    """config参照フォールバックのテスト"""
+
+    def test_fallback_uses_config_defaults(self) -> None:
+        """フォールバック時にconfigのデフォルト値が使われる"""
+        config = UnifiedBotConfig(
+            default_entry_tf="H1",
+            default_primary_tf="H4",
+            default_manage_tf="H4",
+        )
+        selector = DynamicTFSelector(bot_config=config)
+        result = selector.select({})
+        assert result.selected_entry_tf == "H1"
+        assert result.selected_primary_tf == "H4"
+        assert result.selected_manage_tf == "H4"
+
+    def test_fallback_without_config(self) -> None:
+        """config未設定時のハードコードデフォルト"""
+        selector = DynamicTFSelector()
+        result = selector.select({})
+        assert result.selected_entry_tf == "M15"
+        assert result.selected_primary_tf == "H1"
+        assert result.selected_manage_tf == "M15"
+        assert result.selected_regime_tf == "H1"
+        assert result.selected_htf_alignment_tfs == ["H4", "D1"]

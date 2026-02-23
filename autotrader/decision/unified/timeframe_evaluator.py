@@ -11,6 +11,7 @@ from autotrader.config.tf_params_registry import (
     get_atr_multipliers,
     get_default_tp_ratio,
     get_normalized_min_score,
+    get_sl_max_pips,
     get_sl_multiplier,
     get_structure_sl_mult,
 )
@@ -907,8 +908,9 @@ class TimeframeEvaluator:
         # SL計算
         sl_pips = atr_pips * sl_mult
 
-        # 最低/最大制限
-        sl_pips = max(10.0, min(sl_pips, 50.0))
+        # 最低/最大制限（TF別SL上限を使用）
+        _sl_max = get_sl_max_pips(self.timeframe)
+        sl_pips = max(10.0, min(sl_pips, _sl_max))
 
         # TF別デフォルトTP/SL比率（レジストリから補間付き取得）
         tp_ratio = get_default_tp_ratio(self.timeframe)

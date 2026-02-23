@@ -183,8 +183,6 @@ class UnifiedTradeBot:
     ポジションサイジングを統合。
     """
 
-    DEFAULT_TIMEFRAMES = ["M1", "M5", "M15", "M30", "H1", "H4", "H8", "D1"]
-
     def __init__(self, config: UnifiedBotConfig | None = None):
         """初期化
 
@@ -192,7 +190,7 @@ class UnifiedTradeBot:
             config: ボット設定
         """
         self.config = config or UnifiedBotConfig()
-        self.timeframes = self.config.timeframes or self.DEFAULT_TIMEFRAMES
+        self.timeframes = self.config.timeframes
 
         # 時間足別評価器
         self.evaluators: dict[str, TimeframeEvaluator] = {
@@ -225,24 +223,27 @@ class UnifiedTradeBot:
         self.regime_detector = MarketRegimeDetector(RegimeDetectorConfig())
 
         # モード選択器（UNIVERSAL固定）
-        self.mode_selector = TradingModeSelector(ModeSelectorConfig())
+        self.mode_selector = TradingModeSelector(
+            bot_config=self.config,
+        )
 
         # タイムフレームルーター
         self.tf_router = TimeframeRouter()
 
-        # コンセンサス統合器（デモモード時は閾値を大幅に下げる）
-        if self.config.demo_mode:
-            self.consensus = ModeAwareScoreConsensus(
-                ConsensusConfig(
-                    threshold=self.config.demo_consensus_threshold,
-                )
-            )
-        else:
-            self.consensus = ModeAwareScoreConsensus(
-                ConsensusConfig(
-                    threshold=self.config.consensus_threshold,
-                )
-            )
+        # コンセンサス統合器（config→ConsensusConfig伝搬）
+        _consensus_cfg = ConsensusConfig(
+            primary_weight=self.config.consensus_primary_weight,
+            entry_weight=self.config.consensus_entry_weight,
+            confirm_weight=self.config.consensus_confirm_weight,
+            manage_weight=self.config.consensus_manage_weight,
+            other_weight=self.config.consensus_other_weight,
+            threshold=(
+                self.config.demo_consensus_threshold
+                if self.config.demo_mode
+                else self.config.consensus_threshold
+            ),
+        )
+        self.consensus = ModeAwareScoreConsensus(_consensus_cfg)
 
         # ポジションサイザー（資金管理パラメータを設定から注入）
         self.position_sizer = PositionSizer(PositionSizerConfig(
@@ -262,7 +263,9 @@ class UnifiedTradeBot:
         from autotrader.decision.unified.dynamic_tf_selector import (
             DynamicTFSelector,
         )
-        self._dynamic_tf_selector = DynamicTFSelector()
+        self._dynamic_tf_selector = DynamicTFSelector(
+            bot_config=self.config,
+        )
 
         # リスク管理器（デモモード時はクールダウンを排除）
         risk_config = dataclasses.replace(
@@ -371,61 +374,22 @@ class UnifiedTradeBot:
         Returns:
             ConsolidatedSignal: 統合シグナル
         """
-        # 日次リセット
+        # 1. 日次リセット
         py_time = current_time.to_pydatetime()
         self.risk_manager.reset_daily(py_time)
 
-        # レジーム検出（H1データを使用）
-        regime_result = self._detect_regime(current_time)
-
-        # モード・プラン選択（時間帯考慮）
-        htf_alignment = self._get_htf_alignment(current_time)
-        hour_utc = current_time.hour if hasattr(current_time, 'hour') else None
-        plan = self.mode_selector.select(
-            regime=regime_result.regime,
-            volatility_level=regime_result.volatility_level,
-            htf_alignment=htf_alignment,
-            hour_utc=hour_utc,
-        )
-
-        # UNIVERSALモード固定: 動的TF選択（tf_signals取得後に実行）
-
-        # 分析用に最後のモード/レジームを保持
-        self._last_mode = plan.mode.value
-        self._last_regime = regime_result.regime.value
-
-        # TFセット取得
-        tf_set = self.tf_router.route(plan)
-
-        # リスク管理チェック
+        # 2. リスク管理チェック（早期リターンで不要な計算を回避）
         can_trade, reason = self.risk_manager.can_trade(py_time)
         if not can_trade:
-            if self._flow_analyzer:
-                from autotrader.core.diagnostics import (
-                    SignalStepRecord,
-                )
-                self._flow_analyzer.collect(SignalStepRecord(
-                    timestamp=str(current_time),
-                    regime=regime_result.regime.value,
-                    volatility=regime_result.volatility_level,
-                    mode=plan.mode.value,
-                    primary_tf=plan.primary_tf,
-                    risk_passed=False,
-                    risk_reason=reason,
-                    consensus_score=0.0,
-                    consensus_threshold=0.0,
-                    final_direction="HOLD",
-                    hold_reason=f"リスク管理: {reason}",
-                ))
             return self._hold_signal(reason)
 
-        # 全TFを評価（アナリティクス表示用）
-        # config.timeframes 全TFのスコアを計算してWebUIに表示する。
-        # コンセンサス計算はモード別TFセットのみ使用（役割ベース重み付け維持）。
+        # 3. 初期プラン（デフォルトTF値）
+        plan = self.mode_selector.select()
+
+        # 4. 全TF評価 → tf_signals
         tf_signals: dict[str, TimeframeSignal] = {}
         consensus_signals: dict[str, ConsensusTimeframeSignal] = {}
 
-        # TF数が閾値を超えた場合のみ並列化
         _PARALLEL_TF_THRESHOLD = 12
         _eval_tfs = [
             tf for tf in self.timeframes if tf in self.evaluators
@@ -445,19 +409,43 @@ class UnifiedTradeBot:
                 )
                 tf_signals[tf] = signal
 
-        # UNIVERSALモード: 全TFシグナル取得後に動的TF選択でplanを更新
+        # 5. 動的TF選択 → 全TFロール決定
         if tf_signals:
-            # コンセンサス方向を支配方向として渡す（先のコンセンサス前のため
-            # None で全TF評価）
-            _dynamic_result = self._dynamic_tf_selector.select(tf_signals)
+            _dynamic_result = self._dynamic_tf_selector.select(
+                tf_signals,
+            )
             plan = dataclasses.replace(
                 plan,
+                primary_tf=_dynamic_result.selected_primary_tf,
+                manage_tf=_dynamic_result.selected_manage_tf,
                 dynamic_entry_tf=_dynamic_result.selected_entry_tf,
                 max_holding_bars=_dynamic_result.max_holding_bars,
                 tp_sl_ratio_range=_dynamic_result.tp_sl_ratio_range,
             )
+            _regime_tf = _dynamic_result.selected_regime_tf
+            _htf_tfs = _dynamic_result.selected_htf_alignment_tfs
+        else:
+            _regime_tf = self.config.regime_detection_tf
+            _htf_tfs = list(self.config.htf_alignment_tfs)
 
-        # コンセンサスはモード別TFセットのみ対象（役割重みを保持）
+        # 6. レジーム検出（動的regime_tfを使用）
+        regime_result = self._detect_regime(
+            current_time, regime_tf=_regime_tf,
+        )
+
+        # 7. HTF整合度（動的htf_tfsを使用）
+        htf_alignment = self._get_htf_alignment(
+            current_time, htf_tfs=_htf_tfs,
+        )
+
+        # 分析用に最後のモード/レジームを保持
+        self._last_mode = plan.mode.value
+        self._last_regime = regime_result.regime.value
+
+        # 8. TFルーティング（動的plan使用）
+        tf_set = self.tf_router.route(plan)
+
+        # 9. コンセンサスはモード別TFセットのみ対象（役割重みを保持）
         for tf in tf_set.all_tfs:
             if tf not in tf_signals:
                 continue
@@ -567,9 +555,10 @@ class UnifiedTradeBot:
 
         # デモモード: コンセンサス閾値のみ。追加フィルタースキップ
         if not self.config.demo_mode:
-            # 上位足トレンドフィルター（必須条件）
+            # 上位足トレンドフィルター（必須条件、動的htf_tfs使用）
             if not self._check_htf_trend_alignment(
                 current_time, consensus.direction,
+                htf_tfs=_htf_tfs,
             ):
                 if self._flow_analyzer:
                     from autotrader.core.diagnostics import (
@@ -737,7 +726,7 @@ class UnifiedTradeBot:
                 _macd_slope = (
                     _primary_sig.score_breakdown.macd_slope
                 )
-                if _macd_slope <= -2.0:
+                if _macd_slope <= self.config.macd_slope_filter_threshold:
                     return _filt_hold(
                         f"MACDスロープ逆方向: "
                         f"{_macd_slope:.1f}"
@@ -995,19 +984,24 @@ class UnifiedTradeBot:
                     results[tf] = signal
         return results
 
-    def _detect_regime(self, current_time: pd.Timestamp) -> "RegimeResult":
+    def _detect_regime(
+        self,
+        current_time: pd.Timestamp,
+        regime_tf: str | None = None,
+    ) -> "RegimeResult":
         """レジームを検出
 
         Args:
             current_time: 現在時刻
+            regime_tf: レジーム検出TF（Noneの場合configデフォルト）
 
         Returns:
             RegimeResult: レジーム判定結果
         """
         from autotrader.calculator.features.regime_detector import RegimeResult
 
-        # レジーム検出TFを使用
-        _regime_tf = self.config.regime_detection_tf
+        # レジーム検出TFを使用（動的 or configデフォルト）
+        _regime_tf = regime_tf or self.config.regime_detection_tf
         row = self._get_current_row(_regime_tf, current_time)
         if row is None:
             return RegimeResult(
@@ -1021,18 +1015,24 @@ class UnifiedTradeBot:
 
         return self.regime_detector.detect_from_row(row)
 
-    def _get_htf_alignment(self, current_time: pd.Timestamp) -> float:
+    def _get_htf_alignment(
+        self,
+        current_time: pd.Timestamp,
+        htf_tfs: list[str] | None = None,
+    ) -> float:
         """HTF整合度を取得
 
         Args:
             current_time: 現在時刻
+            htf_tfs: HTF整合チェック用TFリスト（Noneの場合configデフォルト）
 
         Returns:
             float: HTF整合度（-1から1）
         """
         alignment_scores = []
+        _tfs = htf_tfs or list(self.config.htf_alignment_tfs)
 
-        for tf in self.config.htf_alignment_tfs:
+        for tf in _tfs:
             row = self._get_current_row(tf, current_time)
             if row is None:
                 continue
@@ -1193,18 +1193,20 @@ class UnifiedTradeBot:
         self,
         current_time: pd.Timestamp,
         direction: SignalType,
+        htf_tfs: list[str] | None = None,
     ) -> bool:
         """上位足トレンド一致チェック
 
         Args:
             current_time: 現在時刻
             direction: シグナル方向
+            htf_tfs: HTFリスト（Noneの場合configデフォルト）
 
         Returns:
             bool: トレンドが一致しているか
         """
         aligned_score = 0.0
-        check_tfs = self.config.htf_alignment_tfs
+        check_tfs = htf_tfs or list(self.config.htf_alignment_tfs)
 
         for tf in check_tfs:
             row = self._get_current_row(tf, current_time)

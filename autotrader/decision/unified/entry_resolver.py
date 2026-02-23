@@ -6,8 +6,12 @@ UNIVERSALモードで動的にエントリー判断を行う。
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 from autotrader.core.enums import TradingStrategyMode
+
+if TYPE_CHECKING:
+    from autotrader.decision.unified.config import UnifiedBotConfig
 
 
 @dataclass(frozen=True)
@@ -25,15 +29,6 @@ class EntryConfig:
     entry_tf: str
     confirm_tfs: list[str]
     min_score_threshold: float
-
-
-# UNIVERSALモードのエントリー設定
-UNIVERSAL_ENTRY_CONFIG = EntryConfig(
-    primary_tf="M15",
-    entry_tf="M5",
-    confirm_tfs=["M1", "H1", "H4", "H8", "D1"],
-    min_score_threshold=4.0,
-)
 
 
 @dataclass(frozen=True)
@@ -61,9 +56,33 @@ class EntryTimeframeResolver:
     UNIVERSALモードで任意のTF確定時にエントリー判断を行う。
     """
 
-    def __init__(self) -> None:
-        """初期化"""
-        self._config = UNIVERSAL_ENTRY_CONFIG
+    def __init__(
+        self,
+        bot_config: UnifiedBotConfig | None = None,
+    ) -> None:
+        """初期化
+
+        Args:
+            bot_config: ボット設定（Noneの場合デフォルト）
+        """
+        if bot_config is None:
+            from autotrader.decision.unified.config import (
+                UnifiedBotConfig,
+            )
+            bot_config = UnifiedBotConfig()
+        _confirm = [
+            tf for tf in bot_config.timeframes
+            if tf not in {
+                bot_config.default_primary_tf,
+                bot_config.default_entry_tf,
+            }
+        ]
+        self._config = EntryConfig(
+            primary_tf=bot_config.default_primary_tf,
+            entry_tf=bot_config.default_entry_tf,
+            confirm_tfs=_confirm,
+            min_score_threshold=4.0,
+        )
 
     def get_entry_config(
         self,

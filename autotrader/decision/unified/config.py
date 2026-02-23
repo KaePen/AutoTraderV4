@@ -176,6 +176,22 @@ class UnifiedBotConfig:
     htf_alignment_tfs: list[str] = field(
         default_factory=lambda: ["H4", "D1"]
     )
+    # --- TradingPlan デフォルト設定 ---
+    default_primary_tf: str = "M15"
+    default_entry_tf: str = "M5"
+    default_manage_tf: str = "M15"
+    default_max_holding_bars: int = 32
+    default_tp_sl_ratio_range: tuple[float, float] = (1.1, 1.4)
+    # --- フィルター閾値 ---
+    macd_slope_filter_threshold: float = -2.0
+    sl_min_pips: float = 10.0
+    sl_max_pips_default: float = 50.0
+    # --- コンセンサス重み ---
+    consensus_primary_weight: float = 3.0
+    consensus_entry_weight: float = 2.5
+    consensus_confirm_weight: float = 2.0
+    consensus_manage_weight: float = 1.5
+    consensus_other_weight: float = 1.0
 
     def get_evaluator_config(self, timeframe: str) -> EvaluatorConfig:
         """時間足別評価器設定を取得
