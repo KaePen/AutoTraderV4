@@ -1106,9 +1106,9 @@ const DashboardApp = {
             <span class="text-[11px] font-bold px-1.5 py-0.5 rounded ${dirBg}">${p.signal_type}</span>
             <span class="text-sm font-semibold text-gray-200">${p.symbol}</span>
             <span class="text-xs font-mono tabular-nums ${pnlColor}">${p.current_price.toFixed(digits)}</span>
-            <span class="text-[10px] text-gray-600">${p.volume.toFixed(2)}lot</span>
-            <span class="text-[10px] text-gray-600">&middot;</span>
-            <span class="text-[10px] text-gray-500">${this.fmtHoldTime(p.opened_at)}</span>
+            <span class="text-xs text-gray-400">${p.volume.toFixed(2)}lot</span>
+            <span class="text-xs text-gray-600">&middot;</span>
+            <span class="text-xs text-gray-400">${this.fmtHoldTime(p.opened_at)}</span>
             ${this._fmtRemainingTime(p)}
           </div>
           <div class="flex items-center gap-2">
@@ -1669,7 +1669,7 @@ const DashboardApp = {
       const m = rem % 60;
       label = m > 0 ? `残${h}h${m}m` : `残${h}h`;
     }
-    return `<span class="text-[10px] ${cls}">/ ${label}</span>`;
+    return `<span class="text-xs ${cls}">/ ${label}</span>`;
   },
   escapeHtml(str) {
     const div = document.createElement('div');
