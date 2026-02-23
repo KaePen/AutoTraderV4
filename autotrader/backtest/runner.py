@@ -187,6 +187,21 @@ class BacktestRunner:
         self._tf_data: dict[str, pd.DataFrame] = {}
         self._cancel_callback: Callable[[], bool] | None = None
 
+        # イベントエミッター初期化
+        self._emitter = BacktestEventEmitter()
+        if verbose:
+            self._emitter.add_listener(
+                ConsoleEventListener(verbose=True)
+            )
+
+        # ファイルログリスナー追加
+        self._file_listener: FileEventListener | None = None
+        if log_to_file:
+            self._file_listener = FileEventListener(
+                log_dir=log_dir, verbose=verbose
+            )
+            self._emitter.add_listener(self._file_listener)
+
     # 後方互換プロパティ（個別TF属性 → _tf_data dict参照）
     @property
     def _h1_df(self) -> "pd.DataFrame | None":
@@ -275,19 +290,6 @@ class BacktestRunner:
             self._tf_data["M5"] = value
         else:
             self._tf_data.pop("M5", None)
-
-        # イベントエミッター初期化
-        self._emitter = BacktestEventEmitter()
-        if verbose:
-            self._emitter.add_listener(ConsoleEventListener(verbose=True))
-
-        # ファイルログリスナー追加
-        self._file_listener: FileEventListener | None = None
-        if log_to_file:
-            self._file_listener = FileEventListener(
-                log_dir=log_dir, verbose=verbose
-            )
-            self._emitter.add_listener(self._file_listener)
 
     def set_cancel_callback(self, callback: Callable[[], bool]) -> None:
         """キャンセルコールバックを設定
