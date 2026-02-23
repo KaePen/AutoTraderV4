@@ -1002,6 +1002,7 @@ class LiveTradingEngine:
                 result.ticket or 0, lot,
             )
             # PositionManagerに登録
+            trade_id = ""
             if result.ticket:
                 await self._register_new_position(
                     result.ticket, signal_with_lot, lot, entry_tick
@@ -1009,9 +1010,41 @@ class LiveTradingEngine:
                 # DB書き込み（エントリー記録）
                 trade_id = self._write_entry_to_db(
                     result.ticket, signal_with_lot, lot, entry_tick
-                )
+                ) or ""
                 if trade_id:
                     self._open_trades[result.ticket] = trade_id
+
+            # _cached_positionsに即時追加（次tick待ち不要）
+            entry_price = signal_with_lot.stop_loss or 0.0
+            if entry_tick:
+                price_key = (
+                    "ask"
+                    if signal_with_lot.signal_type == SignalType.BUY
+                    else "bid"
+                )
+                entry_price = float(
+                    entry_tick.get(price_key, 0)
+                ) or entry_price
+            self._cached_positions.append({
+                "position_id": str(result.ticket or 0),
+                "trade_id": trade_id,
+                "ticket": result.ticket or 0,
+                "symbol": self._config.symbol,
+                "signal_type": (
+                    signal_with_lot.signal_type.value
+                ),
+                "volume": lot,
+                "entry_price": entry_price,
+                "current_price": entry_price,
+                "stop_loss": signal_with_lot.stop_loss,
+                "take_profit": signal_with_lot.take_profit,
+                "opened_at": datetime.now(
+                    timezone.utc
+                ).isoformat(),
+                "unrealized_pnl": 0.0,
+                "unrealized_pnl_pips": 0.0,
+            })
+
             # TradeBotに通知（取引時刻を渡す）
             self._bot.on_trade_executed(signal.created_at)
             # WebSocketポジション更新ブロードキャスト
