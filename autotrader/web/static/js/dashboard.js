@@ -1487,15 +1487,16 @@ const DashboardApp = {
       // OPEN=青、利益=緑、損失=赤
       const rowBg = isOpen ? 'rgba(30,58,138,0.10)' : (isProfit ? 'rgba(20,83,45,0.07)' : 'rgba(127,29,29,0.07)');
       const borderClr = isOpen ? 'rgba(96,165,250,0.5)' : (isProfit ? 'rgba(34,197,94,0.45)' : 'rgba(239,68,68,0.45)');
-      const pnlCellBg = isOpen ? 'transparent' : (isProfit ? 'rgba(20,83,45,0.18)' : 'rgba(127,29,29,0.18)');
+      // 損益テキスト色も行カラーに統一
+      const rowTextClr = isOpen ? 'text-gray-400' : (isProfit ? 'text-green-400' : 'text-red-400');
       return `<tr style="background:${rowBg}">
-        <td style="box-shadow:inset 3px 0 0 ${borderClr}" class="text-xs text-gray-400 whitespace-nowrap tabular-nums">${this.fmtDateTime(t.closed_at || t.opened_at)}</td>
+        <td style="box-shadow:inset 3px 0 0 ${borderClr}" class="text-xs ${rowTextClr} whitespace-nowrap tabular-nums">${this.fmtDateTime(t.closed_at || t.opened_at)}</td>
         <td><span class="text-xs font-bold ${dirColor}">${t.signal_type}</span></td>
-        <td class="text-xs text-gray-500 tabular-nums">${t.volume.toFixed(2)}</td>
-        <td class="text-xs text-gray-400 tabular-nums">${t.entry_price.toFixed(3)}</td>
-        <td class="text-xs text-gray-400 tabular-nums">${t.exit_price !== null ? t.exit_price.toFixed(3) : '-'}</td>
+        <td class="text-xs ${rowTextClr} tabular-nums">${t.volume.toFixed(2)}</td>
+        <td class="text-xs ${rowTextClr} tabular-nums">${t.entry_price.toFixed(3)}</td>
+        <td class="text-xs ${rowTextClr} tabular-nums">${t.exit_price !== null ? t.exit_price.toFixed(3) : '-'}</td>
         <td>${reasonHtml}</td>
-        <td style="background:${pnlCellBg}" class="text-right text-xs font-bold tabular-nums ${isOpen ? 'text-gray-500' : pnlColor}">${pnlText}</td>
+        <td class="text-right text-xs font-bold tabular-nums ${rowTextClr}">${pnlText}</td>
       </tr>`;
     }).join('');
 
