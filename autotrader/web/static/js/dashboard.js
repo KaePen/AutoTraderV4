@@ -25,6 +25,8 @@ const DashboardApp = {
   tcBusy: false,
   // 分析パネル
   lastAnalysis: null,
+  // ポジション詳細の展開状態（ticket番号をキーに保持）
+  _expandedPositions: new Set(),
 
   /** 初期化 */
   init() {
@@ -972,6 +974,12 @@ const DashboardApp = {
       return;
     }
 
+    // 決済済みポジションの展開状態をクリーンアップ
+    const activeTickets = new Set(displayPositions.map((p) => p.ticket));
+    for (const t of this._expandedPositions) {
+      if (!activeTickets.has(t)) this._expandedPositions.delete(t);
+    }
+
     // 1/3幅パネルのため1列表示
     const wrapClass = 'space-y-2';
     listEl.innerHTML = `<div class="${wrapClass}">` + displayPositions.map((p, i) => this.positionCard(p, i)).join('') + '</div>';
@@ -1068,9 +1076,13 @@ const DashboardApp = {
 
     const detailId = `pos-detail-${idx}`;
     const arrowId = `pos-arrow-${idx}`;
+    // 展開状態を復元
+    const isExpanded = this._expandedPositions.has(p.ticket);
+    const detailCls = isExpanded ? '' : 'hidden';
+    const arrowChar = isExpanded ? '▾' : '▸';
     return `
       <div class="border-l-2 ${borderColor} bg-gray-800/60 rounded-r-lg px-3 py-2 cursor-pointer select-none"
-           onclick="DashboardApp.togglePositionDetail('${detailId}', '${arrowId}')">
+           onclick="DashboardApp.togglePositionDetail('${detailId}', '${arrowId}', ${p.ticket})">
         <!-- 上段: 方向 + 現在価格 + PnL + 展開矢印 -->
         <div class="flex items-center justify-between mb-1.5">
           <div class="flex items-center gap-1.5">
@@ -1087,13 +1099,13 @@ const DashboardApp = {
               <span class="text-sm font-bold tabular-nums ${pnlColor}">${pnlSign}${this.fmtCurrency(p.unrealized_pnl)}</span>
               <span class="text-[10px] tabular-nums ${pnlColor} opacity-70">${pnlSign}${p.unrealized_pnl_pips.toFixed(1)}p</span>
             </div>
-            <span id="${arrowId}" class="text-[11px] text-gray-600">▸</span>
+            <span id="${arrowId}" class="text-[11px] text-gray-600">${arrowChar}</span>
           </div>
         </div>
         <!-- バー（常に表示） -->
         ${progressHtml}
         <!-- 詳細（折りたたみ）: 価格グリッド -->
-        <div id="${detailId}" class="hidden">
+        <div id="${detailId}" class="${detailCls}">
           ${priceRowHtml}
         </div>
         <!-- トレードID -->
@@ -1102,12 +1114,20 @@ const DashboardApp = {
   },
 
   /** ポジションカードの詳細エリアをトグル */
-  togglePositionDetail(detailId, arrowId) {
+  togglePositionDetail(detailId, arrowId, ticket) {
     const detail = document.getElementById(detailId);
     const arrow = document.getElementById(arrowId);
     if (!detail) return;
     const isHidden = detail.classList.toggle('hidden');
     if (arrow) arrow.textContent = isHidden ? '▸' : '▾';
+    // 展開状態を保持
+    if (ticket != null) {
+      if (isHidden) {
+        this._expandedPositions.delete(ticket);
+      } else {
+        this._expandedPositions.add(ticket);
+      }
+    }
   },
 
   /** インジケーター時間足タブを描画 */
