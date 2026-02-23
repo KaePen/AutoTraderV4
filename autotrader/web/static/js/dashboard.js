@@ -1042,11 +1042,16 @@ const DashboardApp = {
     if (p.stop_loss != null && p.take_profit != null) {
       const sl = p.stop_loss, tp = p.take_profit;
       const entry = p.entry_price, now = p.current_price;
-      const lo = Math.min(sl, tp), hi = Math.max(sl, tp);
-      const range = hi - lo;
+      // エントリーを常に50%（中央）に固定し、SL/TP/Nowを
+      // エントリーからの距離で対称配置する
+      const halfRange = Math.max(
+        Math.abs(entry - sl), Math.abs(entry - tp),
+        Math.abs(entry - now), 0.0001
+      );
+      const range = halfRange * 2;
       if (range > 0) {
-        const toPct = (v) => Math.max(0, Math.min(100, (v - lo) / range * 100));
-        const entryPct = toPct(entry);
+        const toPct = (v) => Math.max(0, Math.min(100, 50 + (v - entry) / halfRange * 50));
+        const entryPct = 50;
         const nowPct = toPct(now);
         const slPct = toPct(sl);
         const tpPct = toPct(tp);
