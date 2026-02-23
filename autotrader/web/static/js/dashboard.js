@@ -229,30 +229,47 @@ const DashboardApp = {
       tickTime.textContent = d.toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit', second: '2-digit', timeZone: 'Asia/Tokyo' }) + ' JST';
     }
 
-    // スコアバー
+    // スコアバー（中央0基準・左SELL/右BUY）
     const score = a.consensus_score || 0;
     const threshold = a.entry_threshold || 1;
+    const dir = a.direction;
     const scoreText = document.getElementById('ap-score-text');
     const scoreBar = document.getElementById('ap-score-bar');
-    const thresholdMarker = document.getElementById('ap-threshold-marker');
-    if (scoreText) scoreText.textContent = score.toFixed(2) + ' / ' + threshold.toFixed(1);
-    if (scoreBar) {
-      // バーの最大値は threshold * 1.4 として可視化
-      const maxVal = threshold * 1.5;
-      const pct = Math.min(100, (score / maxVal) * 100);
-      const dir = a.direction;
-      const barColor = dir === 'BUY'
-        ? (score >= threshold ? 'bg-green-500' : score >= threshold * 0.7 ? 'bg-yellow-500' : 'bg-gray-500')
-        : dir === 'SELL'
-          ? (score >= threshold ? 'bg-red-500' : score >= threshold * 0.7 ? 'bg-yellow-500' : 'bg-gray-500')
-          : 'bg-gray-500';
-      scoreBar.style.width = pct + '%';
-      scoreBar.className = 'h-full rounded-full transition-all duration-500 ' + barColor;
+    const thSell = document.getElementById('ap-threshold-sell');
+    const thBuy = document.getElementById('ap-threshold-buy');
+    if (scoreText) {
+      const dirLabel = dir === 'BUY' ? 'BUY' : dir === 'SELL' ? 'SELL' : 'HOLD';
+      scoreText.textContent = dirLabel + ' ' + score.toFixed(2) + ' / ' + threshold.toFixed(1);
     }
-    if (thresholdMarker) {
-      const maxVal = threshold * 1.5;
-      const thPct = Math.min(99, (threshold / maxVal) * 100);
-      thresholdMarker.style.left = thPct + '%';
+    if (scoreBar) {
+      // 片側の最大値: threshold * 1.5（スケーリング用）
+      const maxHalf = threshold * 1.5;
+      // スコアの割合（0〜50%の範囲にマップ）
+      const halfPct = Math.min(50, (score / maxHalf) * 50);
+      // BUY: 中央から右へ、SELL: 中央から左へ
+      if (dir === 'BUY') {
+        scoreBar.style.left = '50%';
+        scoreBar.style.width = halfPct + '%';
+      } else if (dir === 'SELL') {
+        scoreBar.style.left = (50 - halfPct) + '%';
+        scoreBar.style.width = halfPct + '%';
+      } else {
+        scoreBar.style.left = '50%';
+        scoreBar.style.width = '0%';
+      }
+      const barColor = dir === 'BUY'
+        ? (score >= threshold ? 'bg-green-500' : score >= threshold * 0.7 ? 'bg-green-700' : 'bg-gray-500')
+        : dir === 'SELL'
+          ? (score >= threshold ? 'bg-red-500' : score >= threshold * 0.7 ? 'bg-red-700' : 'bg-gray-500')
+          : 'bg-gray-500';
+      scoreBar.className = 'absolute top-0 h-full rounded-full transition-all duration-500 ' + barColor;
+    }
+    // 閾値マーカー（左右対称に配置）
+    if (thSell || thBuy) {
+      const maxHalf = threshold * 1.5;
+      const thHalfPct = Math.min(49, (threshold / maxHalf) * 50);
+      if (thSell) thSell.style.left = (50 - thHalfPct) + '%';
+      if (thBuy) thBuy.style.left = (50 + thHalfPct) + '%';
     }
 
     // サブ指標
