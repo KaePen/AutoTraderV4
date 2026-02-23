@@ -1077,10 +1077,11 @@ const DashboardApp = {
                 <div class="absolute inset-y-0 left-0 ${leftZoneBg}" style="width:${entryPct}%"></div>
                 <div class="absolute inset-y-0 right-0 ${rightZoneBg}" style="width:${100 - entryPct}%"></div>
                 <div class="absolute inset-y-0 w-px bg-gray-300 opacity-50" style="left:${entryPct}%"></div>
-                <div class="absolute inset-y-0 w-0.5 ${nowBg}" style="left:${nowPct}%"></div>
               </div>
               <div class="absolute inset-y-0 w-0.5 bg-red-500" style="left:${slLeft}"></div>
               <div class="absolute inset-y-0 w-0.5 bg-green-500" style="left:${tpLeft}"></div>
+              <div class="absolute -top-0.5 -bottom-0.5 w-1 ${nowBg} rounded-sm" style="left:${nowPct}%;transform:translateX(-50%)"></div>
+              <div class="absolute w-2.5 h-2.5 ${nowBg} rounded-full border border-gray-900/70" style="left:${nowPct}%;top:50%;transform:translate(-50%,-50%)"></div>
             </div>
           </div>`;
       }
