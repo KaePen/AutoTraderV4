@@ -1054,6 +1054,7 @@ class LiveTradingEngine:
                 "unrealized_pnl_pips": 0.0,
                 "remaining_minutes": None,
                 "max_hold_minutes": None,
+                "elapsed_minutes": 0,
             })
 
             # TradeBotに通知（取引時刻を渡す）
@@ -1459,10 +1460,20 @@ class LiveTradingEngine:
             )
             if position.signal_type == SignalType.SELL:
                 pip_diff = -pip_diff
-            # 残り保有時間を計算（PM登録済みのみ）
+            # 保有時間を計算（opened_atを単一ソースとして使用）
             managed = self._pm.get_position(pos_id)
             remaining_minutes = None
             max_hold_minutes = None
+            elapsed_minutes = None
+            # opened_atからの経過時間（全ポジション共通）
+            if hasattr(position.opened_at, "timestamp"):
+                elapsed_sec = (
+                    datetime.now(timezone.utc)
+                    - position.opened_at
+                ).total_seconds()
+                elapsed_minutes = max(
+                    0, int(elapsed_sec / 60)
+                )
             if managed is not None:
                 try:
                     from autotrader.config.tf_params_registry import (
@@ -1479,16 +1490,16 @@ class LiveTradingEngine:
                         else etf if isinstance(etf, str)
                         else None
                     )
-                    if entry_tf is not None:
+                    if (
+                        entry_tf is not None
+                        and elapsed_minutes is not None
+                    ):
                         max_hold_minutes = get_holding_minutes(
                             entry_tf
                         )
-                        elapsed = (
-                            datetime.now(timezone.utc)
-                            - managed.entry_time
-                        ).total_seconds() / 60
                         remaining_minutes = max(
-                            0, int(max_hold_minutes - elapsed)
+                            0,
+                            int(max_hold_minutes - elapsed_minutes),
                         )
                 except Exception:
                     pass
@@ -1517,6 +1528,7 @@ class LiveTradingEngine:
                 "unrealized_pnl_pips": pip_diff,
                 "remaining_minutes": remaining_minutes,
                 "max_hold_minutes": max_hold_minutes,
+                "elapsed_minutes": elapsed_minutes,
             })
 
             # PM未登録ならアクション評価をスキップ

@@ -187,6 +187,7 @@ class PositionResponse(BaseModel):
         consensus_score: コンセンサススコア
         remaining_minutes: 残り保有時間（分）
         max_hold_minutes: 最大保有時間（分）
+        elapsed_minutes: 経過時間（分）
     """
 
     position_id: str
@@ -208,6 +209,7 @@ class PositionResponse(BaseModel):
     consensus_score: float | None = None
     remaining_minutes: int | None = None
     max_hold_minutes: int | None = None
+    elapsed_minutes: int | None = None
 
 
 class TradeResponse(BaseModel):

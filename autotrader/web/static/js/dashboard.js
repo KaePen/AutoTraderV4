@@ -1108,7 +1108,7 @@ const DashboardApp = {
             <span class="text-xs font-mono tabular-nums ${pnlColor}">${p.current_price.toFixed(digits)}</span>
             <span class="text-xs text-gray-400">${p.volume.toFixed(2)}lot</span>
             <span class="text-xs text-gray-600">&middot;</span>
-            <span class="text-xs text-gray-400">${this.fmtHoldTime(p.opened_at)}</span>
+            <span class="text-xs text-gray-400">${this._fmtElapsedTime(p)}</span>
             ${this._fmtRemainingTime(p)}
           </div>
           <div class="flex items-center gap-2">
@@ -1646,13 +1646,21 @@ const DashboardApp = {
   fmtDateTime(dateStr) {
     return new Date(dateStr).toLocaleDateString('ja-JP', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Tokyo' });
   },
-  fmtHoldTime(openedAt) {
-    const diffMs = Date.now() - new Date(openedAt).getTime();
-    const diffMin = Math.max(0, Math.floor(diffMs / 60000));
+  fmtHoldTime(openedAt, elapsedMin) {
+    const diffMin = elapsedMin != null
+      ? elapsedMin
+      : Math.max(0, Math.floor((Date.now() - new Date(openedAt).getTime()) / 60000));
     if (diffMin < 60) return diffMin + 'm';
     const diffHour = Math.floor(diffMin / 60);
     if (diffHour < 24) return diffHour + 'h ' + (diffMin % 60) + 'm';
     return Math.floor(diffHour / 24) + 'd ' + (diffHour % 24) + 'h';
+  },
+  /** 経過時間の表示（バックエンド算出値を優先） */
+  _fmtElapsedTime(p) {
+    if (p.elapsed_minutes != null) {
+      return this.fmtHoldTime(null, p.elapsed_minutes);
+    }
+    return this.fmtHoldTime(p.opened_at);
   },
   /** 残り保有時間の表示 */
   _fmtRemainingTime(p) {
