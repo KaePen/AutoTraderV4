@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+from datetime import datetime, timezone
+
 from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.orm import Session
 
+from autotrader.core.enums import SignalType
 from autotrader.web.dependencies import get_db
 from autotrader.web.schemas import ApiResponse, PositionResponse
 from autotrader.web.services.market_service import MarketService
@@ -21,8 +24,6 @@ def _dict_to_position_response(d: dict) -> PositionResponse:
     Returns:
         PositionResponse: レスポンス
     """
-    from datetime import datetime, timezone
-    from autotrader.core.enums import SignalType
 
     opened_at = d.get("opened_at")
     if isinstance(opened_at, str):
