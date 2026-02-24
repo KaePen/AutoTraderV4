@@ -205,11 +205,20 @@ const DashboardApp = {
     // エンジン未起動ならパネル非表示（live/demo両方で表示）
     const m = this.tradingMode;
     const isLive = m && (m.mode === 'live' || m.mode === 'demo');
+    const posPanel = document.getElementById('position-panel');
     if (!isLive) {
       panel.classList.add('hidden');
+      // バックテスト時: Analysis非表示のためrow-span不要
+      if (posPanel) {
+        posPanel.classList.remove('lg:row-span-2');
+      }
       return;
     }
     panel.classList.remove('hidden');
+    // ライブ時: Analysis+Chartの2行を跨ぐ
+    if (posPanel) {
+      posPanel.classList.add('lg:row-span-2');
+    }
 
     // データなし or エンジン未起動（シンボル不一致）: プレースホルダ表示
     const noData = !a || (!a.engine_running && (!a.tf_scores || Object.keys(a.tf_scores).length === 0));
