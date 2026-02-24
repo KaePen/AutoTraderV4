@@ -27,6 +27,10 @@ const DashboardApp = {
   lastAnalysis: null,
   // ポジション詳細の展開状態（ticket番号をキーに保持）
   _expandedPositions: new Set(),
+  // ポジション時間キャッシュ: { ticket: { openedAtMs, maxHoldMin } }
+  _posTimeCache: {},
+  // ポジション時間カウントダウンタイマーID
+  _posTimeInterval: null,
 
   /** 初期化 */
   init() {
@@ -81,6 +85,9 @@ const DashboardApp = {
     this.fetchIndicators();
     this.fetchTradingMode();
     this.fetchAnalysis();
+
+    // ポジション経過/残り時間を1秒ごとにクライアント側でカウント
+    this._posTimeInterval = setInterval(() => this._tickPositionTimers(), 1000);
 
     // チャートは30秒毎にフル再取得（ローソク足確定検知・バックアップ）
     this.pollInterval = setInterval(() => this.fetchAll(), 30000);
@@ -1017,6 +1024,9 @@ const DashboardApp = {
 
     const displayPositions = this.positions;
 
+    // ポジション時間キャッシュを更新（opened_at, max_hold_minutes を保持）
+    this._updatePosTimeCache(displayPositions);
+
     if (countEl) countEl.textContent = displayPositions.length > 0 ? displayPositions.length + ' open' : 'no open';
 
     if (displayPositions.length === 0) {
@@ -1160,8 +1170,8 @@ const DashboardApp = {
             <span class="text-xs font-mono tabular-nums ${pnlColor}">${p.current_price.toFixed(digits)}</span>
             <span class="text-xs text-gray-400">${p.volume.toFixed(2)}lot</span>
             <span class="text-xs text-gray-600">&middot;</span>
-            <span class="text-xs text-gray-400">${this._fmtElapsedTime(p)}</span>
-            ${this._fmtRemainingTime(p)}
+            <span class="text-xs text-gray-400" data-elapsed-ticket="${p.ticket}">${this._fmtElapsedTime(p)}</span>
+            <span class="text-xs inline-block" data-remaining-ticket="${p.ticket}">${this._fmtRemainingTimeInner(p)}</span>
           </div>
           <div class="flex items-center gap-2">
             <div class="flex items-baseline gap-1 ${pnlBg} px-2 py-0.5 rounded-md">
@@ -1708,19 +1718,67 @@ const DashboardApp = {
     if (diffHour < 24) return diffHour + 'h ' + (diffMin % 60) + 'm';
     return Math.floor(diffHour / 24) + 'd ' + (diffHour % 24) + 'h';
   },
-  /** 経過時間の表示（バックエンド算出値を優先） */
+  /**
+   * ポジション時間キャッシュを更新する。
+   * 新しいポジションデータが到着した際に呼び出す。
+   */
+  _updatePosTimeCache(positions) {
+    const activeTickets = new Set();
+    for (const p of positions) {
+      const t = Number(p.ticket);
+      activeTickets.add(t);
+      const existing = this._posTimeCache[t];
+      // opened_at からエポックmsを算出（常にクライアント側で経過計算の基準）
+      const openedAtMs = p.opened_at ? new Date(p.opened_at).getTime() : null;
+      // max_hold_minutes はサーバーから取得された場合のみ更新
+      const maxHoldMin = p.max_hold_minutes != null
+        ? p.max_hold_minutes
+        : (existing ? existing.maxHoldMin : null);
+      this._posTimeCache[t] = { openedAtMs, maxHoldMin };
+    }
+    // 決済済みポジションのキャッシュを除去
+    for (const ticket of Object.keys(this._posTimeCache)) {
+      if (!activeTickets.has(Number(ticket))) {
+        delete this._posTimeCache[ticket];
+      }
+    }
+  },
+
+  /**
+   * 経過時間（分）をクライアント側で算出する。
+   * opened_at（UTC ISO文字列）から現在時刻との差分を計算。
+   * サーバー再起動後もopened_atが保持されている限り正確。
+   */
+  _calcElapsedMin(ticket) {
+    const cache = this._posTimeCache[ticket];
+    if (!cache || !cache.openedAtMs) return 0;
+    return Math.max(0, Math.floor((Date.now() - cache.openedAtMs) / 60000));
+  },
+
+  /** 経過時間の表示（常にopened_atからクライアント側計算） */
   _fmtElapsedTime(p) {
+    // キャッシュ経由で計算（renderPositions内で_updatePosTimeCacheが先行）
+    if (p.opened_at || this._posTimeCache[p.ticket]) {
+      return this.fmtHoldTime(null, this._calcElapsedMin(p.ticket));
+    }
+    // フォールバック: サーバー算出値
     if (p.elapsed_minutes != null) {
       return this.fmtHoldTime(null, p.elapsed_minutes);
     }
-    return this.fmtHoldTime(p.opened_at);
+    return '0m';
   },
-  /** 残り保有時間の表示 */
-  _fmtRemainingTime(p) {
-    if (p.remaining_minutes == null) return '';
-    const rem = p.remaining_minutes;
-    // 残り20%以下で警告色
-    const ratio = p.max_hold_minutes ? rem / p.max_hold_minutes : 1;
+
+  /**
+   * 残り時間のHTML文字列を返す（共通ロジック）。
+   * max_hold_minutes が既知の場合、クライアント側で
+   * elapsed を引いて算出する。
+   */
+  _calcRemainingHtml(ticket) {
+    const cache = this._posTimeCache[ticket];
+    if (!cache || cache.maxHoldMin == null) return '';
+    const elapsed = this._calcElapsedMin(ticket);
+    const rem = Math.max(0, cache.maxHoldMin - elapsed);
+    const ratio = cache.maxHoldMin > 0 ? rem / cache.maxHoldMin : 1;
     const cls = ratio <= 0.2 ? 'text-orange-400' : 'text-gray-500';
     let label;
     if (rem < 60) {
@@ -1730,8 +1788,35 @@ const DashboardApp = {
       const m = rem % 60;
       label = m > 0 ? `残${h}h${m}m` : `残${h}h`;
     }
-    return `<span class="text-xs ${cls}">/ ${label}</span>`;
+    return `<span class="${cls}">/ ${label}</span>`;
   },
+
+  /** カード描画用: 残り時間の内部HTML */
+  _fmtRemainingTimeInner(p) {
+    return this._calcRemainingHtml(Number(p.ticket));
+  },
+
+  /**
+   * 1秒ごとのタイマーコールバック。
+   * DOM上の経過時間・残り時間テキストを直接更新する。
+   * innerHTML全体の再描画を伴わないためレイアウトシフトが発生しない。
+   */
+  _tickPositionTimers() {
+    // 経過時間の更新
+    const elapsedEls = document.querySelectorAll('[data-elapsed-ticket]');
+    for (const el of elapsedEls) {
+      const ticket = Number(el.dataset.elapsedTicket);
+      const min = this._calcElapsedMin(ticket);
+      el.textContent = this.fmtHoldTime(null, min);
+    }
+    // 残り時間の更新
+    const remainEls = document.querySelectorAll('[data-remaining-ticket]');
+    for (const el of remainEls) {
+      const ticket = Number(el.dataset.remainingTicket);
+      el.innerHTML = this._calcRemainingHtml(ticket);
+    }
+  },
+
   escapeHtml(str) {
     const div = document.createElement('div');
     div.textContent = str || '';

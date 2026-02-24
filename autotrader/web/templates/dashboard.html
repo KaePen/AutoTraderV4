@@ -58,7 +58,7 @@
     </div>
 
     <!-- ポジションパネル (右1/3, Analysis+Chartの2行を跨ぐ) -->
-    <div class="card flex flex-col lg:row-span-2" id="position-panel">
+    <div class="card flex flex-col lg:row-span-2 max-h-[calc(100vh-10rem)]" id="position-panel">
       <div class="flex items-center justify-between mb-3 flex-shrink-0">
         <h2 class="text-sm font-semibold text-gray-300 uppercase tracking-wider">Positions</h2>
         <span id="position-count" class="text-xs text-gray-500">no open</span>
@@ -145,5 +145,5 @@
 
 {% block scripts %}
 <script src="/static/js/chart.js?v=3"></script>
-<script src="/static/js/dashboard.js?v=13"></script>
+<script src="/static/js/dashboard.js?v=14"></script>
 {% endblock %}
