@@ -1,0 +1,11 @@
+run_id,stage,params_json,trades,win_rate,non_loss_rate,profit_factor,net_profit,max_drawdown,sharpe_ratio,annual_return,composite_score,elapsed_sec
+s0_a2804f18,0,"{""timeframes"": [""M1"", ""M5"", ""M15"", ""H1"", ""H4""], ""regime_detection_tf"": ""H1"", ""htf_alignment_tfs"": [""H4""]}",2828,55.74,70.84,1.69,2238221.0,5.89,2.91,74.61,1.5905,56.9
+s0_be6b490a,0,"{""timeframes"": [""M5"", ""M15"", ""H1"", ""H4""], ""regime_detection_tf"": ""H1"", ""htf_alignment_tfs"": [""H4""]}",2479,59.68,73.55,1.97,2338778.0,4.02,4.34,77.96,1.8908,57.6
+s0_c299308e,0,"{""timeframes"": [""M1"", ""M5"", ""M15"", ""H1"", ""H4"", ""D1""], ""regime_detection_tf"": ""H1"", ""htf_alignment_tfs"": [""H4"", ""D1""]}",3069,56.07,69.88,1.7,2162365.0,4.41,3.1,72.08,1.625,66.2
+s0_1cd0bb2a,0,"{""timeframes"": [""M5"", ""M15"", ""H1"", ""H4"", ""D1""], ""regime_detection_tf"": ""H1"", ""htf_alignment_tfs"": [""H4"", ""D1""]}",2680,57.28,70.63,1.73,1643290.0,4.09,3.45,54.78,1.6592,52.7
+s0_ddff3f61,0,"{""timeframes"": [""M15"", ""H1"", ""H4""], ""regime_detection_tf"": ""H1"", ""htf_alignment_tfs"": [""H4""]}",247,73.13,85.42,7.55,440878.0,1.12,3.84,14.7,7.4654,47.9
+s0_20173d3e,0,"{""timeframes"": [""M15"", ""H1"", ""H4"", ""D1""], ""regime_detection_tf"": ""H1"", ""htf_alignment_tfs"": [""H4"", ""D1""]}",1257,65.91,75.69,4.15,1150815.0,1.41,6.12,38.36,4.0915,50.2
+s0_b026e156,0,"{""timeframes"": [""M1"", ""M15"", ""H1"", ""H4""], ""regime_detection_tf"": ""H1"", ""htf_alignment_tfs"": [""H4""]}",857,62.12,76.6,3.04,713217.0,2.09,4.38,23.77,2.9765,48.1
+s0_55b20159,0,"{""timeframes"": [""M5"", ""M15"", ""M30"", ""H1"", ""H4""], ""regime_detection_tf"": ""H1"", ""htf_alignment_tfs"": [""H4""]}",2648,59.41,73.91,1.87,2176456.0,5.44,4.18,72.55,1.7683,43.9
+s0_e147da49,0,"{""timeframes"": [""M1"", ""M5"", ""M15"", ""H1"", ""H4"", ""H8""], ""regime_detection_tf"": ""H1"", ""htf_alignment_tfs"": [""H4""]}",3022,56.16,71.05,1.65,2262566.0,5.9,2.9,75.42,1.5526,57.7
+s0_fced95a3,0,"{""timeframes"": [""M1"", ""M5"", ""M15"", ""M30"", ""H1"", ""H4"", ""H8"", ""D1""], ""regime_detection_tf"": ""H1"", ""htf_alignment_tfs"": [""H4"", ""D1""]}",3124,56.08,69.4,1.77,2521871.0,6.04,3.27,84.06,1.6631,67.2

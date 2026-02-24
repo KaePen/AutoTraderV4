@@ -90,7 +90,7 @@ class TestGetPresetUsdjpy:
     def test_usdjpy_max_positions(self):
         """max_positions が USDJPY 正しい値"""
         preset = get_preset("USDJPY")
-        assert preset.max_positions == 2
+        assert preset.max_positions == 3
 
     def test_usdjpy_bonus_score_threshold(self):
         """bonus_score_threshold が USDJPY 正しい値"""

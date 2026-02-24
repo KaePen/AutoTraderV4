@@ -15,11 +15,11 @@ from __future__ import annotations
 import argparse
 import csv
 import hashlib
+import json
 import logging
 import random
 import sys
 import time
-from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
 # プロジェクトルートをパスに追加
@@ -79,22 +79,33 @@ def composite_score(
     profit_factor: float,
     max_drawdown: float,
     win_rate: float,
+    trades: int = 0,
+    years: int = 3,
 ) -> float:
     """複合スコアを計算する。
+
+    PFは10.0にキャップし、年間50取引未満はペナルティ。
 
     Args:
         profit_factor: プロフィットファクター
         max_drawdown: 最大ドローダウン（%）
         win_rate: 勝率（%）
+        trades: 取引数
+        years: 期間（年数）
 
     Returns:
         float: 複合スコア
     """
-    dd_factor = 1.0 - max_drawdown / 100.0
-    if dd_factor < 0:
-        dd_factor = 0.0
+    pf_capped = min(profit_factor, 10.0)
+    dd_factor = max(0.0, 1.0 - max_drawdown / 100.0)
     wr_factor = min(1.0, win_rate / 50.0)
-    return profit_factor * dd_factor * wr_factor
+    # 年間50取引未満にペナルティ
+    min_trades = 50 * years
+    trade_factor = (
+        min(1.0, trades / min_trades)
+        if min_trades > 0 else 1.0
+    )
+    return pf_capped * dd_factor * wr_factor * trade_factor
 
 
 def resolve_regime_tf(combo: list[str]) -> str:
@@ -207,23 +218,35 @@ def append_result(
         writer.writerow(row)
 
 
-def load_top_n(csv_path: Path, n: int) -> list[dict]:
+def load_top_n(
+    csv_path: Path,
+    n: int,
+    years: int = 3,
+) -> list[dict]:
     """CSVから複合スコアTop Nのパラメータを読み込む。
+
+    CSVの生メトリクスからスコアを再計算する（PFキャップ・
+    取引数ペナルティ対応）。
 
     Args:
         csv_path: 結果CSVパス
         n: 取得件数
+        years: バックテスト期間（年数）
 
     Returns:
         list[dict]: Top Nのパラメータ辞書リスト
     """
-    import json
     rows = []
     with open(csv_path, encoding="utf-8", newline="") as f:
         reader = csv.DictReader(f)
         for row in reader:
-            row["composite_score"] = float(
-                row.get("composite_score", 0)
+            # 生メトリクスからスコア再計算
+            pf = float(row.get("profit_factor", 0))
+            dd = float(row.get("max_drawdown", 0))
+            wr = float(row.get("win_rate", 0))
+            tr = int(float(row.get("trades", 0)))
+            row["composite_score"] = composite_score(
+                pf, dd, wr, tr, years,
             )
             rows.append(row)
     rows.sort(
@@ -257,7 +280,6 @@ def lhs_sample(
     """
     rng = random.Random(seed)
     param_names = list(param_ranges.keys())
-    n_params = len(param_names)
 
     # 各パラメータの区間割り当て
     intervals: dict[str, list] = {}
@@ -727,8 +749,6 @@ def run_stage(
         max_year_workers: 年単位並列ワーカー数
         dry_run: 実行せずにパラメータ一覧を表示
     """
-    import json
-
     cfg = STAGE_CONFIG[stage]
     output_path = Path(cfg["output"])
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -813,10 +833,13 @@ def run_stage(
             )
             elapsed = time.time() - t0
 
+            n_years = end_year - start_year + 1
             cs = composite_score(
                 metrics["profit_factor"],
                 metrics["max_drawdown"],
                 metrics["win_rate"],
+                metrics["trades"],
+                n_years,
             )
 
             row = {
@@ -895,8 +918,6 @@ def generate_summary(data_dir: str) -> None:
     Args:
         data_dir: データディレクトリ
     """
-    import json
-
     summary_path = Path("reports/opt_summary.txt")
     oos_csv = Path(STAGE_CONFIG[5]["output"])
     is_csv = Path(STAGE_CONFIG[4]["output"])

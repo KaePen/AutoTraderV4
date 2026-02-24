@@ -210,7 +210,7 @@ class TestPositionManager:
         # 8時間後（最大保有時間）
         action = self.manager.evaluate(
             position_id="test1",
-            current_price=150.2,  # 利益状態
+            current_price=150.1,  # 小幅利益（early_be_r=0.3未満の0.2R）
             current_time=self.entry_time + timedelta(hours=9),
             atr=0.5,
         )
@@ -276,7 +276,8 @@ class TestPositionManager:
         )
 
         assert action.action_type == ManagementActionType.PARTIAL_CLOSE
-        assert action.close_ratio == 0.5
+        # signal_rev_close_ratio=0.0: 部分決済なし、BE移動のみ
+        assert action.close_ratio == 0.0
         assert action.exit_reason == ExitReason.SIGNAL_REVERSAL
         assert action.new_sl is not None  # BE移動
 
@@ -429,7 +430,7 @@ class TestPositionManager:
 
         action = self.manager.evaluate(
             position_id="test1",
-            current_price=150.2,  # まだ1R未達
+            current_price=150.1,  # 0.2R（early_be_r=0.3未満）
             current_time=self.entry_time + timedelta(minutes=30),
             atr=0.5,
         )
@@ -668,22 +669,22 @@ class TestStagnationExit:
             plan=self.plan,
         )
 
-        # 先に0.2R以上の進捗を記録
+        # 先に0.2R以上の進捗を記録（early_be_r=0.3未満）
         self.manager.evaluate(
             position_id="test1",
-            current_price=150.15,  # 0.3R
+            current_price=150.12,  # 0.24R（early_be未発火、stag_mfe超過）
             current_time=(
                 self.entry_time + timedelta(minutes=30)
             ),
             atr=0.5,
         )
 
-        # 価格が戻っても、highest_r >= 0.2Rなので継続
+        # 価格が戻っても、highest_r >= stagnation_min_mfe_rなので継続
         action = self.manager.evaluate(
             position_id="test1",
             current_price=150.01,
             current_time=(
-                self.entry_time + timedelta(minutes=121)
+                self.entry_time + timedelta(minutes=241)
             ),
             atr=0.5,
         )
@@ -762,8 +763,8 @@ class TestBreakevenImprovement:
         # SELL: entry - 2*slip = 150.0 - 0.01 = 149.99
         assert be_price == pytest.approx(149.99)
 
-    def test_day_trade_early_be_at_0_5r(self) -> None:
-        """DAY_TRADEで0.5RでBE発火"""
+    def test_day_trade_early_be_at_0_3r(self) -> None:
+        """UNIVERSALで0.3RでBE発火"""
         day_plan = TradingPlan(
             mode=TradingStrategyMode.UNIVERSAL,
             primary_tf="M15",
@@ -784,19 +785,19 @@ class TestBreakevenImprovement:
             plan=day_plan,
         )
 
-        # 0.4R → まだ未達（閾値0.5R）
+        # 0.2R → まだ未達（閾値0.3R）
         action = self.manager.evaluate(
             position_id="test1",
-            current_price=150.2,  # 0.4R
+            current_price=150.1,  # 0.2R
             current_time=self.entry_time + timedelta(minutes=15),
             atr=0.5,
         )
         assert action.action_type == ManagementActionType.HOLD
 
-        # 0.6R → 早期BE発火（閾値0.5R超）
+        # 0.4R → 早期BE発火（閾値0.3R超）
         action = self.manager.evaluate(
             position_id="test1",
-            current_price=150.3,  # 0.6R
+            current_price=150.2,  # 0.4R
             current_time=self.entry_time + timedelta(minutes=30),
             atr=0.5,
         )
@@ -905,8 +906,8 @@ class TestBreakevenImprovement:
         assert action.action_type == ManagementActionType.FULL_CLOSE
         assert action.exit_reason == ExitReason.BREAKEVEN
 
-    def test_swing_early_be_at_0_5r(self) -> None:
-        """SWING早期BEが0.5Rで発火"""
+    def test_swing_early_be_at_0_3r(self) -> None:
+        """SWING早期BEが0.3Rで発火"""
         self.manager.register_position(
             position_id="test1",
             direction=SignalType.BUY,
@@ -918,19 +919,19 @@ class TestBreakevenImprovement:
             plan=SWING_PLAN,
         )
 
-        # 0.4R → まだ未達（閾値0.5R）
+        # 0.2R → まだ未達（閾値0.3R）
         action = self.manager.evaluate(
             position_id="test1",
-            current_price=150.2,  # 0.4R
+            current_price=150.1,  # 0.2R
             current_time=self.entry_time + timedelta(minutes=30),
             atr=0.5,
         )
         assert action.action_type == ManagementActionType.HOLD
 
-        # 0.52R → 早期BE発火（閾値0.5R超）
+        # 0.4R → 早期BE発火（閾値0.3R超）
         action = self.manager.evaluate(
             position_id="test1",
-            current_price=150.26,  # 0.52R
+            current_price=150.2,  # 0.4R
             current_time=self.entry_time + timedelta(minutes=60),
             atr=0.5,
         )
