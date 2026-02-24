@@ -26,6 +26,7 @@ const ChartManager = {
   _isLoadingMore: false,   // 追加読み込み中フラグ
   _hasMoreData: true,      // 過去データがまだある
   _loadBatchSize: 500,     // 1回の取得本数
+  _rsiDataCount: 0,        // RSIデータ数（メインとの同期オフセット計算用）
   // 指標シリーズ（オーバーレイ）
   _indicatorSeries: {
     ema12: null,
@@ -285,15 +286,20 @@ const ChartManager = {
     });
     this.rsiResizeObserver.observe(this.rsiContainerEl);
 
-    // タイムスケール同期（メイン→RSI 時刻ベース）
+    // タイムスケール同期（メイン→RSI オフセット補正付き論理範囲）
+    // 遅延読み込みでメインのデータ数が増えるとRSIとの差分が生じるため、
+    // 論理範囲をオフセット補正して正確に同期する
     this.chart.timeScale().subscribeVisibleLogicalRangeChange(
-      () => {
-        if (!this.rsiChart) return;
+      (logicalRange) => {
+        if (!this.rsiChart || !logicalRange) return;
         try {
-          const timeRange = this.chart.timeScale().getVisibleRange();
-          if (timeRange) {
-            this.rsiChart.timeScale().setVisibleRange(timeRange);
-          }
+          const mainCount = this._rawCandles.length;
+          const rsiCount = this._rsiDataCount || mainCount;
+          const offset = mainCount - rsiCount;
+          this.rsiChart.timeScale().setVisibleLogicalRange({
+            from: logicalRange.from - offset,
+            to: logicalRange.to - offset,
+          });
         } catch (_e) {
           // 範囲外やデータなしの場合は無視
         }
@@ -370,6 +376,20 @@ const ChartManager = {
 
       this._rawCandles = [...newCandles, ...this._rawCandles];
       this._renderAllData(newCandles.length);
+
+      // インジケータも拡張取得してRSI同期ズレを防ぐ
+      const totalCount = Math.min(this._rawCandles.length, 1000);
+      try {
+        const indData = await getIndicatorSeries(
+          this.symbol, this.timeframe, totalCount
+        );
+        // TF/シンボル変更チェック（await後）
+        if (this.symbol === symbolBefore && this.timeframe === tfBefore && indData) {
+          this._updateIndicators(indData);
+        }
+      } catch (_ie) {
+        // インジケータ取得失敗はnon-critical
+      }
     } catch (_e) {
       // 読み込み失敗時は次回スクロールで再試行
     } finally {
@@ -640,6 +660,7 @@ const ChartManager = {
     this._rawCandles = [];
     this._hasMoreData = true;
     this._isLoadingMore = false;
+    this._rsiDataCount = 0;
     try {
       const [candleData, indData] = await Promise.allSettled([
         getCandles(this.symbol, this.timeframe, this._loadBatchSize),
@@ -712,6 +733,7 @@ const ChartManager = {
     if (this.rsiSeries && data.rsi && data.rsi.length > 0) {
       const rsiPoints = toPoints(data.rsi);
       this.rsiSeries.setData(rsiPoints);
+      this._rsiDataCount = rsiPoints.length;
 
       // 70/30 ライン（RSIデータと同じ時間範囲）
       const line70 = rsiPoints.map((p) => ({ time: p.time, value: 70 }));
