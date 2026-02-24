@@ -1,9 +1,10 @@
 {% extends "base.html" %}
 
 {% block content %}
-<div class="space-y-4">
+<!-- lg+: ビューポート全体をフレックスコラムで占有。各要素は適切に伸縮する -->
+<div class="flex flex-col gap-4 lg:h-[calc(100vh-5.5rem)] lg:overflow-hidden">
   <!-- メトリクスストリップ -->
-  <div id="metrics-strip" class="grid grid-cols-2 md:grid-cols-5 gap-3">
+  <div id="metrics-strip" class="flex-shrink-0 grid grid-cols-2 md:grid-cols-5 gap-3">
     <!-- スケルトン -->
     <div class="card skeleton-card animate-pulse"><div class="h-3 skeleton w-16 mb-2"></div><div class="h-6 skeleton w-24"></div></div>
     <div class="card skeleton-card animate-pulse"><div class="h-3 skeleton w-16 mb-2"></div><div class="h-6 skeleton w-24"></div></div>
@@ -13,7 +14,8 @@
   </div>
 
   <!-- Row 2-3: 左カラム(Analysis+Chart) + 右カラム(Position) -->
-  <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 lg:h-[calc(100vh-12rem)]">
+  <!-- lg+: flex-1 で残りスペースを埋める -->
+  <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 lg:flex-1 lg:min-h-0">
     <!-- 左カラム (2/3幅): Analysis + Chart を縦積み -->
     <div class="lg:col-span-2 flex flex-col gap-4 min-h-0">
       <!-- 分析パネル (ライブ時のみ表示) -->
@@ -100,8 +102,8 @@
     </div>
   </div>
 
-  <!-- Row 4: トレード履歴（全幅） -->
-  <div id="trade-history-panel">
+  <!-- Row 4: トレード履歴（全幅）lg+: flex-shrink-0で固定 -->
+  <div id="trade-history-panel" class="flex-shrink-0">
     <div class="card flex flex-col">
       <div class="flex items-center justify-between mb-3 flex-shrink-0">
         <button id="trade-history-toggle" class="flex items-center gap-2 text-sm font-semibold text-gray-300 uppercase tracking-wider hover:text-white transition-colors">
