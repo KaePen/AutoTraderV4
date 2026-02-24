@@ -238,9 +238,11 @@ class TestPositionManager:
         )
 
         # 90分後（M1 entry_tfの最大保有時間）
+        # BE価格=entry+slip*2+cushion=150.0+0.01+0.03=150.04
+        # → 150.05はBE上で時間決済が先に発動
         action = self.manager.evaluate(
             position_id="test1",
-            current_price=150.02,  # 0.2R（early_BE未到達）
+            current_price=150.05,  # 0.5R（BE価格150.04の上）
             current_time=self.entry_time + timedelta(minutes=95),
             atr=0.1,
         )
@@ -333,8 +335,8 @@ class TestPositionManager:
         )
         assert action.action_type == ManagementActionType.PARTIAL_CLOSE
         assert action.close_ratio == 0.05
-        # DAY_TRADEもBE移動あり
-        assert action.new_sl == pytest.approx(150.01)
+        # DAY_TRADEもBE移動あり（slip*2 + cushion = 0.01+0.03）
+        assert action.new_sl == pytest.approx(150.04)
 
     def test_partial_close_2r(self) -> None:
         """2R到達での部分決済（DAY_TRADE）"""
@@ -725,9 +727,9 @@ class TestBreakevenImprovement:
         """テストセットアップ"""
         self.manager = PositionManager()
         self.entry_time = datetime(2024, 1, 1, 10, 0, 0)
-        # デフォルト: slip=0.5 → offset=0.01 (2*slip)
-        # entry/exit両方にslip適用 → 2倍
-        self.be_offset = 0.5 * 2 * 0.01  # 0.01
+        # デフォルト: slip=0.5, cushion=3.0
+        # offset = slip*2*0.01 + cushion*0.01 = 0.01 + 0.03 = 0.04
+        self.be_offset = 0.5 * 2 * 0.01 + 3.0 * 0.01  # 0.04
 
     def test_be_price_buy_includes_spread(self) -> None:
         """BUY BE価格 = entry + spread + slippage"""
@@ -743,8 +745,8 @@ class TestBreakevenImprovement:
         )
         position = self.manager.get_position("test1")
         be_price = self.manager._get_be_price(position)
-        # BUY: entry + 2*slip = 150.0 + 0.01 = 150.01
-        assert be_price == pytest.approx(150.01)
+        # BUY: entry + 2*slip + cushion = 150.0 + 0.01 + 0.03
+        assert be_price == pytest.approx(150.04)
 
     def test_be_price_sell_includes_spread(self) -> None:
         """SELL BE価格 = entry - spread - slippage"""
@@ -760,8 +762,8 @@ class TestBreakevenImprovement:
         )
         position = self.manager.get_position("test1")
         be_price = self.manager._get_be_price(position)
-        # SELL: entry - 2*slip = 150.0 - 0.01 = 149.99
-        assert be_price == pytest.approx(149.99)
+        # SELL: entry - 2*slip - cushion = 150.0 - 0.01 - 0.03
+        assert be_price == pytest.approx(149.96)
 
     def test_day_trade_early_be_at_0_3r(self) -> None:
         """UNIVERSALで0.3RでBE発火"""
@@ -802,7 +804,7 @@ class TestBreakevenImprovement:
             atr=0.5,
         )
         assert action.action_type == ManagementActionType.UPDATE_SL
-        assert action.new_sl == pytest.approx(150.01)
+        assert action.new_sl == pytest.approx(150.04)
 
     def test_be_applied_for_universal(self) -> None:
         """UNIVERSALでBE発火"""
@@ -865,7 +867,7 @@ class TestBreakevenImprovement:
         assert action.action_type == ManagementActionType.PARTIAL_CLOSE
         assert action.close_ratio == 0.05
         # DAY_TRADEでもBE移動あり
-        assert action.new_sl == pytest.approx(150.01)
+        assert action.new_sl == pytest.approx(150.04)
         assert action.exit_reason == ExitReason.TAKE_PROFIT_1R
 
     def test_be_exit_reason_with_offset(self) -> None:
@@ -936,7 +938,7 @@ class TestBreakevenImprovement:
             atr=0.5,
         )
         assert action.action_type == ManagementActionType.UPDATE_SL
-        assert action.new_sl == pytest.approx(150.01)
+        assert action.new_sl == pytest.approx(150.04)
 
     def test_swing_1r_be_with_offset(self) -> None:
         """SWING 1RでBE移動（offset付き）"""
@@ -967,7 +969,7 @@ class TestBreakevenImprovement:
         assert action.action_type == ManagementActionType.PARTIAL_CLOSE
         assert action.close_ratio == 0.05
         # SWINGではBE移動あり（offset付き）
-        assert action.new_sl == pytest.approx(150.01)
+        assert action.new_sl == pytest.approx(150.04)
 
     def test_current_sl_updated_on_2r(self) -> None:
         """2R到達時にcurrent_slが同期される"""
@@ -1962,7 +1964,7 @@ class TestRangeDayHalfRPartial:
         )
         assert abs(action.close_ratio - 0.20) < 0.001
         # BE移動
-        assert action.new_sl == pytest.approx(150.01)
+        assert action.new_sl == pytest.approx(150.04)
         # trigger_price = 150.0 + 0.5*0.5 = 150.25
         assert action.trigger_price == pytest.approx(
             150.25, abs=0.001,

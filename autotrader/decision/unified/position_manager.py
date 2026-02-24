@@ -184,13 +184,14 @@ class PositionManagerConfig:
         early_breakeven_r: 早期BE移動のR閾値
         early_breakeven_enabled: 早期BE移動を有効にするか
         disable_tp_after_partial: 1R部分利確後にTPを無効化するか
+        be_cushion_pips: BE移動時の利益方向クッション(pips)
     """
 
     partial_close_1r_ratio: float = 0.05
     partial_close_2r_ratio: float = 0.05
     breakeven_at_1r: bool = True
     trailing_start_r: float = 0.5
-    trailing_atr_multiplier: float = 2.0
+    trailing_atr_multiplier: float = 2.5
     time_exit_enabled: bool = True
     spread_pips: float = 1.5
     slippage_pips: float = 0.5
@@ -201,8 +202,8 @@ class PositionManagerConfig:
     early_breakeven_enabled: bool = True
     disable_tp_after_partial: bool = True
     signal_rev_close_ratio: float = 0.0
-    stagnation_exit_minutes: float = 240.0
-    stagnation_min_mfe_r: float = 0.15
+    stagnation_exit_minutes: float = 120.0
+    stagnation_min_mfe_r: float = 0.10
     # P0-1: RANGE×DAY BE制御
     range_day_be_disabled: bool = True
     range_day_early_be_r: float = 0.3
@@ -231,6 +232,8 @@ class PositionManagerConfig:
     range_day_half_r_partial_enabled: bool = True
     range_day_half_r_partial_ratio: float = 0.20
     range_day_half_r_trigger: float = 0.5
+    # BE移動クッション: BE価格に余裕を持たせノイズによるBE_HIT削減
+    be_cushion_pips: float = 3.0
 
 
 class PositionManager:
@@ -503,17 +506,23 @@ class PositionManager:
         self,
         position: ManagedPosition,
     ) -> float:
-        """スプレッド+スリッページを考慮した真のBE価格を算出
+        """スプレッド+スリッページ+クッションを考慮したBE価格
+
+        クッションによりノイズでのBE_HITを防ぎ、
+        利益方向に少し余裕を持たせる。
 
         Args:
             position: 管理対象ポジション
 
         Returns:
-            float: BE価格
+            float: BE価格（クッション込み）
         """
         # entry=fill(Ask/Bid+slip), exit=trigger±slip
         # 両方にslippage適用 → BE損益ゼロには2倍必要
-        offset = self.config.slippage_pips * 2 * 0.01  # pips→price
+        slip_offset = self.config.slippage_pips * 2 * 0.01
+        # クッション: BE_HIT頻度低減のため利益方向に余裕
+        cushion = self.config.be_cushion_pips * 0.01
+        offset = slip_offset + cushion
         if position.direction == SignalType.BUY:
             return position.entry_price + offset
         else:
