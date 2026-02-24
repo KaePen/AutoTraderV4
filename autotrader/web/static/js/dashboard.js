@@ -374,7 +374,7 @@ const DashboardApp = {
           <div class="w-full bg-gray-700/50 rounded-full h-1 mb-1">
             <div class="bg-red-500/60 h-1 rounded-full" style="width:${penaltyBarW}%"></div>
           </div>
-          <div class="space-y-0.5">
+          <div class="hidden xl:block space-y-0.5">
             ${penaltyItems.map(([k, v]) => {
               const lbl = penaltyLabel[k];
               const c = v > 0 ? 'text-red-400' : 'text-gray-600';
@@ -439,7 +439,7 @@ const DashboardApp = {
               <span class="text-xs font-bold tabular-nums text-gray-500">N/A</span>
             </div>
             <div class="w-full bg-gray-600/40 rounded-full h-1 mb-1"></div>
-            <div class="space-y-0.5">${naDetailHtml}</div>
+            <div class="hidden xl:block space-y-0.5">${naDetailHtml}</div>
           </div>`;
         }
         const isAligned = aligned.includes(tf);
@@ -490,7 +490,7 @@ const DashboardApp = {
           <div class="w-full bg-gray-700/50 rounded-full h-1 mb-1">
             <div class="${barColor} h-1 rounded-full" style="width:${barW}%"></div>
           </div>
-          ${detailHtml ? `<div class="space-y-0.5">${detailHtml}</div>` : ''}
+          ${detailHtml ? `<div class="hidden xl:block space-y-0.5">${detailHtml}</div>` : ''}
         </div>`;
       }).join('');
 
