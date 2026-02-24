@@ -8,8 +8,8 @@ bot_config:
   # 最大同時ポジション数
   max_positions: 3
   bonus_max_positions: 0
-  # コンセンサス設定（2026-02 再構築: SL下限引上げ+閾値強化）
-  consensus_threshold: 7.0
+  # コンセンサス設定（2026-02 Round2: 閾値8.0+ペナルティ/トレンド上限フィルタ）
+  consensus_threshold: 8.0
   consensus_primary_weight: 2.0
   consensus_entry_weight: 1.5
   consensus_confirm_weight: 3.0
@@ -20,7 +20,10 @@ bot_config:
   range_day_score_premium: 0.3
   weak_hours_enabled: true
   weak_hours_score_premium: 0.5
-  sl_min_pips: 15.0
+  sl_min_pips: 20.0
+  # エントリーフィルター（Round2追加）
+  penalty_cap: 0.3
+  trend_strength_max: 0.8
   # SoftGuardペナルティ
   sg_spread_penalty_rate: 0.2
   sg_off_hours_penalty: 0.25

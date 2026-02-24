@@ -910,7 +910,7 @@ class TimeframeEvaluator:
 
         # 最低/最大制限（TF別SL上限を使用）
         _sl_max = get_sl_max_pips(self.timeframe)
-        sl_pips = max(15.0, min(sl_pips, _sl_max))
+        sl_pips = max(20.0, min(sl_pips, _sl_max))
 
         # TF別デフォルトTP/SL比率（レジストリから補間付き取得）
         tp_ratio = get_default_tp_ratio(self.timeframe)
