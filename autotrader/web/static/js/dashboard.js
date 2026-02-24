@@ -27,6 +27,8 @@ const DashboardApp = {
   _posTimeCache: {},
   // ポジション時間カウントダウンタイマーID
   _posTimeInterval: null,
+  // trade_idキャッシュ: REST API（DB）経由でのみ更新
+  _tradeIdCache: {},
 
   /** 初期化 */
   init() {
@@ -171,8 +173,20 @@ const DashboardApp = {
 
     // ポジション
     if (data.positions !== undefined) {
+      // WS経由: trade_idはキャッシュ（DB由来）を使う
+      const prevTickets = new Set(this.positions.map(p => p.ticket));
+      const newTickets = new Set(data.positions.map(p => p.ticket));
+      for (const p of data.positions) {
+        p.trade_id = this._tradeIdCache[p.ticket] || '';
+      }
       this.positions = data.positions;
       this.renderPositions();
+      // ポジション増減時はREST再取得でtrade_idをDB同期
+      const added = data.positions.some(p => !prevTickets.has(p.ticket));
+      const removed = [...prevTickets].some(t => !newTickets.has(t));
+      if (added || removed) {
+        this.fetchPositionsAndTrades();
+      }
     }
 
   },
@@ -851,6 +865,19 @@ const DashboardApp = {
     el.classList.remove('hidden');
   },
 
+  /** trade_idキャッシュをREST取得結果で同期 */
+  _syncTradeIdCache() {
+    const active = new Set();
+    for (const p of this.positions) {
+      if (p.trade_id) this._tradeIdCache[p.ticket] = p.trade_id;
+      active.add(p.ticket);
+    }
+    // 決済済みポジションのキャッシュを除去
+    for (const ticket of Object.keys(this._tradeIdCache)) {
+      if (!active.has(Number(ticket))) delete this._tradeIdCache[ticket];
+    }
+  },
+
   /** ポジション・トレード・サマリを即時取得（WebSocket position_update時） */
   async fetchPositionsAndTrades() {
     const [dash, pos, tr, summary] = await Promise.allSettled([
@@ -864,6 +891,7 @@ const DashboardApp = {
     if (tr.status === 'fulfilled') this.trades = tr.value;
     if (summary.status === 'fulfilled') this.tradeSummary = summary.value;
     ChartManager.setTrades(this.trades);
+    this._syncTradeIdCache();
     this.renderMetrics();
     this.renderPositions();
     this.renderTradeHistory();
@@ -882,6 +910,7 @@ const DashboardApp = {
     if (tr.status === 'fulfilled') this.trades = tr.value;
     if (summary.status === 'fulfilled') this.tradeSummary = summary.value;
     ChartManager.setTrades(this.trades);
+    this._syncTradeIdCache();
     this.isLoading = false;
     this.renderMetrics();
     this.renderPositions();
