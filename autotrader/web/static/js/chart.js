@@ -2,12 +2,9 @@
 
 const ChartManager = {
   chart: null,
-  rsiChart: null,
   candleSeries: null,
   volumeSeries: null,
-  rsiSeries: null,
   containerEl: null,
-  rsiContainerEl: null,
   timeframe: 'M15',
   symbol: 'USDJPY',
   signals: [],
@@ -18,7 +15,6 @@ const ChartManager = {
 
   isLoading: false,
   resizeObserver: null,
-  rsiResizeObserver: null,
   // 最新バーキャッシュ（price_update高速更新用）
   _lastBarData: null,
   // 遅延読み込み用状態
@@ -26,27 +22,6 @@ const ChartManager = {
   _isLoadingMore: false,   // 追加読み込み中フラグ
   _hasMoreData: true,      // 過去データがまだある
   _loadBatchSize: 500,     // 1回の取得本数
-  // 指標シリーズ（オーバーレイ）
-  _indicatorSeries: {
-    ema12: null,
-    ema26: null,
-    ema50: null,
-    ema200: null,
-    bbUpper: null,
-    bbMiddle: null,
-    bbLower: null,
-    vwap: null,
-  },
-  // 指標表示ON/OFF状態
-  _indVisible: {
-    ema: true,
-    bb: true,
-    rsi: true,
-    ema50: false,
-    ema200: false,
-    vwap: false,
-  },
-
   /** 初期化 */
   init(containerId, symbol) {
     this.containerEl = document.getElementById(containerId);
@@ -59,7 +34,6 @@ const ChartManager = {
     this.createChart();
     this.fetchCandles();
     this.renderTimeframeButtons();
-    this.renderIndicatorToggles();
   },
 
   /** チャート作成 */
@@ -110,85 +84,6 @@ const ChartManager = {
       },
     });
 
-    // EMA(12)
-    this._indicatorSeries.ema12 = this.chart.addSeries(LightweightCharts.LineSeries, {
-      color: '#60a5fa',
-      lineWidth: 1,
-      priceLineVisible: false,
-      lastValueVisible: false,
-      crosshairMarkerVisible: false,
-    });
-
-    // EMA(26)
-    this._indicatorSeries.ema26 = this.chart.addSeries(LightweightCharts.LineSeries, {
-      color: '#f97316',
-      lineWidth: 1,
-      priceLineVisible: false,
-      lastValueVisible: false,
-      crosshairMarkerVisible: false,
-    });
-
-    // EMA(50)
-    this._indicatorSeries.ema50 = this.chart.addSeries(LightweightCharts.LineSeries, {
-      color: '#22d3ee',
-      lineWidth: 1.5,
-      priceLineVisible: false,
-      lastValueVisible: false,
-      crosshairMarkerVisible: false,
-      visible: false,
-    });
-
-    // EMA(200)
-    this._indicatorSeries.ema200 = this.chart.addSeries(LightweightCharts.LineSeries, {
-      color: '#e2e8f0',
-      lineWidth: 2,
-      priceLineVisible: false,
-      lastValueVisible: false,
-      crosshairMarkerVisible: false,
-      visible: false,
-    });
-
-    // BB Upper
-    this._indicatorSeries.bbUpper = this.chart.addSeries(LightweightCharts.LineSeries, {
-      color: '#a78bfa',
-      lineWidth: 1,
-      lineStyle: 2, // Dashed
-      priceLineVisible: false,
-      lastValueVisible: false,
-      crosshairMarkerVisible: false,
-    });
-
-    // BB Middle
-    this._indicatorSeries.bbMiddle = this.chart.addSeries(LightweightCharts.LineSeries, {
-      color: '#6b7280',
-      lineWidth: 1,
-      lineStyle: 1, // Dotted
-      priceLineVisible: false,
-      lastValueVisible: false,
-      crosshairMarkerVisible: false,
-    });
-
-    // BB Lower
-    this._indicatorSeries.bbLower = this.chart.addSeries(LightweightCharts.LineSeries, {
-      color: '#a78bfa',
-      lineWidth: 1,
-      lineStyle: 2, // Dashed
-      priceLineVisible: false,
-      lastValueVisible: false,
-      crosshairMarkerVisible: false,
-    });
-
-    // VWAP
-    this._indicatorSeries.vwap = this.chart.addSeries(LightweightCharts.LineSeries, {
-      color: '#4ade80',
-      lineWidth: 1.5,
-      lineStyle: 0,
-      priceLineVisible: false,
-      lastValueVisible: false,
-      crosshairMarkerVisible: false,
-      visible: false,
-    });
-
     // Volume（チャート下部30%に背景として表示）
     this.volumeSeries = this.chart.addSeries(LightweightCharts.HistogramSeries, {
       priceFormat: { type: 'volume' },
@@ -205,9 +100,6 @@ const ChartManager = {
       this._onCrosshairMove(param);
     });
 
-    // RSIサブチャート
-    this._createRsiChart();
-
     // スクロール時の遅延読み込み
     this._setupLazyLoading();
 
@@ -219,86 +111,6 @@ const ChartManager = {
       }
     });
     this.resizeObserver.observe(this.containerEl);
-  },
-
-  /** RSIサブチャート作成 */
-  _createRsiChart() {
-    this.rsiContainerEl = document.getElementById('rsi-container');
-    if (!this.rsiContainerEl) return;
-
-    this.rsiChart = LightweightCharts.createChart(this.rsiContainerEl, {
-      layout: {
-        background: { type: 'solid', color: '#1f2937' },
-        textColor: '#9ca3af',
-      },
-      grid: {
-        vertLines: { color: '#374151' },
-        horzLines: { color: '#374151' },
-      },
-      crosshair: { mode: 1 },
-      rightPriceScale: {
-        borderColor: '#374151',
-        scaleMargins: { top: 0.1, bottom: 0.1 },
-      },
-      timeScale: {
-        borderColor: '#374151',
-        timeVisible: true,
-        secondsVisible: false,
-        tickMarkFormatter: (time, type) => this._jstTickMarkFormatter(time, type),
-      },
-    });
-
-    // RSI ライン
-    this.rsiSeries = this.rsiChart.addSeries(LightweightCharts.LineSeries, {
-      color: '#facc15',
-      lineWidth: 1.5,
-      priceLineVisible: false,
-      lastValueVisible: true,
-    });
-
-    // 70ライン
-    this._rsiLine70 = this.rsiChart.addSeries(LightweightCharts.LineSeries, {
-      color: '#ef4444',
-      lineWidth: 1,
-      lineStyle: 2,
-      priceLineVisible: false,
-      lastValueVisible: false,
-      crosshairMarkerVisible: false,
-    });
-
-    // 30ライン
-    this._rsiLine30 = this.rsiChart.addSeries(LightweightCharts.LineSeries, {
-      color: '#22c55e',
-      lineWidth: 1,
-      lineStyle: 2,
-      priceLineVisible: false,
-      lastValueVisible: false,
-      crosshairMarkerVisible: false,
-    });
-
-    // RSIリサイズ対応
-    this.rsiResizeObserver = new ResizeObserver((entries) => {
-      for (const entry of entries) {
-        const { width, height } = entry.contentRect;
-        if (this.rsiChart) this.rsiChart.applyOptions({ width, height });
-      }
-    });
-    this.rsiResizeObserver.observe(this.rsiContainerEl);
-
-    // タイムスケール同期（メイン→RSI 時刻ベース）
-    this.chart.timeScale().subscribeVisibleLogicalRangeChange(
-      () => {
-        if (!this.rsiChart) return;
-        try {
-          const timeRange = this.chart.timeScale().getVisibleRange();
-          if (timeRange) {
-            this.rsiChart.timeScale().setVisibleRange(timeRange);
-          }
-        } catch (_e) {
-          // 範囲外やデータなしの場合は無視
-        }
-      }
-    );
   },
 
   /**
@@ -459,83 +271,6 @@ const ChartManager = {
     });
   },
 
-  /** 指標切り替えボタン描画 */
-  renderIndicatorToggles() {
-    const container = document.getElementById('chart-indicator-toggles');
-    if (!container) return;
-
-    const toggles = [
-      { key: 'ema', label: 'EMA', color: '#60a5fa' },
-      { key: 'ema50', label: 'E50', color: '#22d3ee' },
-      { key: 'ema200', label: 'E200', color: '#e2e8f0' },
-      { key: 'bb', label: 'BB', color: '#a78bfa' },
-      { key: 'vwap', label: 'VWAP', color: '#4ade80' },
-      { key: 'rsi', label: 'RSI', color: '#facc15' },
-    ];
-
-    container.innerHTML = toggles.map(({ key, label, color }) => {
-      const active = this._indVisible[key];
-      const cls = active
-        ? 'ring-1 ring-white/30 opacity-100'
-        : 'opacity-40';
-      return `<button data-ind="${key}"
-        class="px-2 py-1 text-xs rounded transition-all ${cls}"
-        style="background:${color}22; color:${color}; border:1px solid ${color}55"
-      >${label}</button>`;
-    }).join('');
-
-    container.querySelectorAll('button[data-ind]').forEach((btn) => {
-      btn.addEventListener('click', () => {
-        const key = btn.dataset.ind;
-        this._indVisible[key] = !this._indVisible[key];
-        this._applyIndicatorVisibility();
-        this.renderIndicatorToggles();
-      });
-    });
-  },
-
-  /** 指標の表示/非表示を適用 */
-  _applyIndicatorVisibility() {
-    const showEma = this._indVisible.ema;
-    const showBb = this._indVisible.bb;
-    const showRsi = this._indVisible.rsi;
-    const showEma50 = this._indVisible.ema50;
-    const showEma200 = this._indVisible.ema200;
-    const showVwap = this._indVisible.vwap;
-
-    if (this._indicatorSeries.ema12) {
-      this._indicatorSeries.ema12.applyOptions({ visible: showEma });
-    }
-    if (this._indicatorSeries.ema26) {
-      this._indicatorSeries.ema26.applyOptions({ visible: showEma });
-    }
-    if (this._indicatorSeries.ema50) {
-      this._indicatorSeries.ema50.applyOptions({ visible: showEma50 });
-    }
-    if (this._indicatorSeries.ema200) {
-      this._indicatorSeries.ema200.applyOptions({ visible: showEma200 });
-    }
-    if (this._indicatorSeries.bbUpper) {
-      this._indicatorSeries.bbUpper.applyOptions({ visible: showBb });
-    }
-    if (this._indicatorSeries.bbMiddle) {
-      this._indicatorSeries.bbMiddle.applyOptions({ visible: showBb });
-    }
-    if (this._indicatorSeries.bbLower) {
-      this._indicatorSeries.bbLower.applyOptions({ visible: showBb });
-    }
-    if (this._indicatorSeries.vwap) {
-      this._indicatorSeries.vwap.applyOptions({ visible: showVwap });
-    }
-
-    // RSIサブチャートの表示/非表示
-    if (this.rsiContainerEl) {
-      this.rsiContainerEl.parentElement.classList.toggle(
-        'hidden', !showRsi
-      );
-    }
-  },
-
   /** クロスヘア移動時にOHLC情報バーを更新 */
   _onCrosshairMove(param) {
     const bar = document.getElementById('chart-ohlc-bar');
@@ -641,21 +376,15 @@ const ChartManager = {
     this._hasMoreData = true;
     this._isLoadingMore = false;
     try {
-      const [candleData, indData] = await Promise.allSettled([
-        getCandles(this.symbol, this.timeframe, this._loadBatchSize),
-        getIndicatorSeries(this.symbol, this.timeframe, this._loadBatchSize),
-      ]);
-      const candles = candleData.status === 'fulfilled'
-        ? candleData.value : [];
-      this._rawCandles = candles;
+      const candles = await getCandles(
+        this.symbol, this.timeframe, this._loadBatchSize
+      );
+      this._rawCandles = candles || [];
       // 取得本数がバッチサイズ未満なら過去データなし
-      if (candles.length < this._loadBatchSize) {
+      if (this._rawCandles.length < this._loadBatchSize) {
         this._hasMoreData = false;
       }
-      this.updateData(candles);
-      if (indData.status === 'fulfilled') {
-        this._updateIndicators(indData.value);
-      }
+      this.updateData(this._rawCandles);
     } catch (e) {
       this._rawCandles = [];
       this._hasMoreData = false;
@@ -674,53 +403,6 @@ const ChartManager = {
       this._rawCandles = candles;
     }
     this._renderAllData(0);
-  },
-
-  /** 指標時系列を更新 */
-  _updateIndicators(data) {
-    if (!data) return;
-
-    const toPoints = (arr) =>
-      (arr || []).map((p) => ({ time: p.time, value: p.value }));
-
-    if (this._indicatorSeries.ema12) {
-      this._indicatorSeries.ema12.setData(toPoints(data.ema12));
-    }
-    if (this._indicatorSeries.ema26) {
-      this._indicatorSeries.ema26.setData(toPoints(data.ema26));
-    }
-    if (this._indicatorSeries.ema50) {
-      this._indicatorSeries.ema50.setData(toPoints(data.ema50));
-    }
-    if (this._indicatorSeries.ema200) {
-      this._indicatorSeries.ema200.setData(toPoints(data.ema200));
-    }
-    if (this._indicatorSeries.vwap) {
-      this._indicatorSeries.vwap.setData(toPoints(data.vwap));
-    }
-    if (this._indicatorSeries.bbUpper) {
-      this._indicatorSeries.bbUpper.setData(toPoints(data.bb_upper));
-    }
-    if (this._indicatorSeries.bbMiddle) {
-      this._indicatorSeries.bbMiddle.setData(toPoints(data.bb_middle));
-    }
-    if (this._indicatorSeries.bbLower) {
-      this._indicatorSeries.bbLower.setData(toPoints(data.bb_lower));
-    }
-
-    // RSIサブチャート
-    if (this.rsiSeries && data.rsi && data.rsi.length > 0) {
-      const rsiPoints = toPoints(data.rsi);
-      this.rsiSeries.setData(rsiPoints);
-
-      // 70/30 ライン（RSIデータと同じ時間範囲）
-      const line70 = rsiPoints.map((p) => ({ time: p.time, value: 70 }));
-      const line30 = rsiPoints.map((p) => ({ time: p.time, value: 30 }));
-      if (this._rsiLine70) this._rsiLine70.setData(line70);
-      if (this._rsiLine30) this._rsiLine30.setData(line30);
-    }
-
-    this._applyIndicatorVisibility();
   },
 
   /** シグナル設定 */
@@ -964,9 +646,6 @@ const ChartManager = {
     if (this.resizeObserver) {
       this.resizeObserver.disconnect();
     }
-    if (this.rsiResizeObserver) {
-      this.rsiResizeObserver.disconnect();
-    }
     if (this.chart) {
       // トレードライン・マーカーは chart.remove() で一括破棄される
       this._tradeLines = [];
@@ -976,11 +655,6 @@ const ChartManager = {
       this.chart = null;
       this.candleSeries = null;
       this.volumeSeries = null;
-    }
-    if (this.rsiChart) {
-      this.rsiChart.remove();
-      this.rsiChart = null;
-      this.rsiSeries = null;
     }
   },
 };
