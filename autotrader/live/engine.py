@@ -1452,7 +1452,7 @@ class LiveTradingEngine:
             TradeRepository,
         )
         from autotrader.config.settings import get_settings
-        trade_id = self._open_trades.pop(ticket, None)
+        trade_id = self._open_trades.get(ticket)
         if not trade_id:
             return
         try:
@@ -1489,6 +1489,8 @@ class LiveTradingEngine:
                         profit_loss=profit_loss,
                         profit_loss_pips=pnl_pips,
                     )
+            # DB書き込み成功後にpop（失敗時は次回tickで再試行）
+            self._open_trades.pop(ticket, None)
             self._closed_trades.append({
                 "trade_id": trade_id,
                 "ticket": ticket,
@@ -1515,6 +1517,7 @@ class LiveTradingEngine:
             except Exception:
                 pass
         except Exception as e:
+            # trade_idは_open_tradesに残るため次回tickで再試行
             logger.error("DB書き込みエラー（決済）: %s", e)
 
     async def _manage_positions(self) -> None:
@@ -1863,6 +1866,15 @@ class LiveTradingEngine:
         positions = await self._executor.get_open_positions_async(
             self._active_symbol
         )
+
+        # DBゴーストレコード掃除（MT5に存在しないis_open=true）
+        active_tickets = (
+            {p.ticket for p in positions}
+            if positions
+            else set()
+        )
+        self._close_ghost_db_records(active_tickets)
+
         if not positions:
             logger.info("同期対象ポジションなし")
             return
@@ -1942,6 +1954,68 @@ class LiveTradingEngine:
             str(p.ticket) for p in positions
         }
         self._cleanup_stale_states(active_ids)
+
+    def _close_ghost_db_records(
+        self, active_tickets: set[int]
+    ) -> None:
+        """MT5に存在しないDBゴーストレコードを決済済みに更新
+
+        エンジン停止中にMT5側で決済されたポジションの
+        is_open=trueレコードをクリーンアップする。
+
+        Note:
+            _active_symbolのレコードのみ対象。
+            他シンボルのゴーストはfix_ghost_positions.pyで対応。
+
+        Args:
+            active_tickets: MT5で現在有効なチケットIDの集合
+        """
+        from autotrader.adapters.database.connection import (
+            get_session,
+        )
+        from autotrader.adapters.database.models import (
+            TradeRecord,
+        )
+        from autotrader.config.settings import get_settings
+        try:
+            db_url = get_settings().database_url
+            with get_session(db_url) as db:
+                ghost_records = (
+                    db.query(TradeRecord)
+                    .filter(
+                        TradeRecord.is_open.is_(True),
+                        TradeRecord.symbol == (
+                            self._active_symbol
+                        ),
+                    )
+                    .all()
+                )
+                closed_count = 0
+                for r in ghost_records:
+                    if r.ticket not in active_tickets:
+                        r.is_open = False
+                        r.exit_reason = "GHOST_CLEANUP"
+                        r.closed_at = datetime.now(
+                            timezone.utc
+                        )
+                        closed_count += 1
+                        logger.info(
+                            "ゴーストレコード掃除:"
+                            " ticket=%s trade_id=%s",
+                            r.ticket,
+                            r.trade_id,
+                        )
+                if closed_count > 0:
+                    db.flush()
+                    logger.info(
+                        "ゴーストレコード %d件を"
+                        " is_open=false に更新",
+                        closed_count,
+                    )
+        except Exception as e:
+            logger.warning(
+                "ゴーストレコード掃除スキップ: %s", e
+            )
 
     def _restore_open_trades_from_db(
         self, tickets: list[int]
