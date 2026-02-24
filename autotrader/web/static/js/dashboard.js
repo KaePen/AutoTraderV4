@@ -72,6 +72,9 @@ const DashboardApp = {
     // 指標タブ描画
     this.renderIndicatorTabs();
 
+    // エンジン確保（復元シンボルがデフォルトと異なる場合）
+    ensureSymbolEngine(this.symbol).catch(() => {});
+
     // データ取得
     this.fetchAll();
     this.fetchSignals();
@@ -775,7 +778,7 @@ const DashboardApp = {
   },
 
   /** シンボル選択（カスタムドロップダウンから呼ぶ） */
-  selectSymbol(symbol) {
+  async selectSymbol(symbol) {
     this.symbol = symbol;
     localStorage.setItem('chart_symbol', symbol);
     // 非表示ネイティブselectも同期
@@ -788,6 +791,12 @@ const DashboardApp = {
     // ドロップダウンを閉じる
     const list = document.getElementById('symbol-dropdown-list');
     if (list) list.classList.add('hidden');
+    // エンジン確保（なければ自動作成）
+    try {
+      await ensureSymbolEngine(symbol);
+    } catch (e) {
+      // エンジン作成失敗でもデータ取得は続行
+    }
     // 前シンボルの分析データをクリアして再取得
     this.lastAnalysis = null;
     this.renderAnalysis();

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import logging
+
 from fastapi import APIRouter, Depends, Query, Request
 
 from autotrader.web.dependencies import (
@@ -13,6 +15,8 @@ from autotrader.web.schemas import (
     AnalysisResponse,
     SignalResponse,
 )
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -45,6 +49,46 @@ def _signal_to_response(signal) -> SignalResponse:
     )
 
 
+async def _resolve_engine(mgr, symbol, fallback_engine):
+    """シンボルに対応するエンジンを解決（なければ自動作成）
+
+    Args:
+        mgr: EngineManager | None
+        symbol: 通貨ペアシンボル | None
+        fallback_engine: フォールバックエンジン
+
+    Returns:
+        LiveTradingEngine | None: エンジン
+    """
+    if not mgr or not symbol:
+        return fallback_engine
+
+    # 既存エンジンを検索
+    target = mgr.get_engine(symbol)
+    if target:
+        return target
+
+    # MT5未接続ならフォールバック
+    if not mgr.connected:
+        return fallback_engine
+
+    # エンジンを自動作成（auto_trade=Falseで起動）
+    try:
+        from autotrader.web.main import build_engine_config
+        config = build_engine_config(symbol)
+        target = await mgr.add_symbol(config)
+        logger.info(
+            "エンジン自動作成: %s（シンボル切替）",
+            symbol,
+        )
+        return target
+    except Exception as e:
+        logger.warning(
+            "エンジン自動作成失敗: %s: %s", symbol, e,
+        )
+        return fallback_engine
+
+
 @router.get(
     "/signals/analysis",
     response_model=ApiResponse[AnalysisResponse],
@@ -61,6 +105,7 @@ async def get_analysis(
     """直近tick分析状態を取得
 
     EngineManager経由でシンボル別エンジンから分析結果を取得。
+    対象シンボルのエンジンがなければ自動作成する。
 
     Args:
         request: FastAPIリクエスト
@@ -71,17 +116,17 @@ async def get_analysis(
     Returns:
         ApiResponse[AnalysisResponse]: 分析状態
     """
-    # EngineManager経由でシンボル別エンジンを取得
-    if mgr and symbol:
-        target = mgr.get_engine(symbol)
-        if target:
-            engine = target
+    # シンボル別エンジンを解決（なければ自動作成）
+    engine = await _resolve_engine(
+        mgr, symbol, engine,
+    )
 
     engine_symbol = (
         engine._config.symbol if engine else None
     )
 
-    # シンボル指定ありでエンジンのシンボルと不一致
+    # エンジン自動作成後もシンボル不一致
+    # （MT5未接続等で作成できなかった場合）
     if (
         symbol
         and engine
@@ -91,9 +136,7 @@ async def get_analysis(
         return ApiResponse(
             data=AnalysisResponse(
                 symbol=symbol,
-                rationale=(
-                    "この通貨ペアのエンジンは未起動です"
-                ),
+                rationale="MT5未接続のため起動できません",
                 engine_running=False,
                 mt5_connected=engine.connected
                 if engine else False,
@@ -108,7 +151,7 @@ async def get_analysis(
         )
         return ApiResponse(
             data=AnalysisResponse(
-                symbol=engine_symbol,
+                symbol=engine_symbol or symbol,
                 rationale=(
                     "分析待機中（データなし）"
                     if running
@@ -181,6 +224,7 @@ async def get_current_signals(
         default="USDJPY", description="通貨ペア"
     ),
     engine=Depends(get_live_engine),
+    mgr=Depends(get_engine_manager),
 ) -> ApiResponse[list[SignalResponse]]:
     """現在のシグナルを取得
 
@@ -191,10 +235,17 @@ async def get_current_signals(
         request: FastAPIリクエスト
         symbol: 通貨ペア
         engine: LiveTradingEngine
+        mgr: EngineManager
 
     Returns:
         ApiResponse[list[SignalResponse]]: シグナル一覧
     """
+    # シンボル別エンジンを取得
+    if mgr:
+        target = mgr.get_engine(symbol)
+        if target:
+            engine = target
+
     if engine is not None and engine.signal_history:
         signals = [
             _signal_to_response(s)
@@ -222,6 +273,7 @@ async def get_signal_history(
         default=0, ge=0, description="オフセット"
     ),
     engine=Depends(get_live_engine),
+    mgr=Depends(get_engine_manager),
 ) -> ApiResponse[list[SignalResponse]]:
     """シグナル履歴を取得
 
@@ -234,10 +286,17 @@ async def get_signal_history(
         limit: 取得件数
         offset: オフセット
         engine: LiveTradingEngine
+        mgr: EngineManager
 
     Returns:
         ApiResponse[list[SignalResponse]]: シグナル履歴
     """
+    # シンボル別エンジンを取得
+    if mgr:
+        target = mgr.get_engine(symbol)
+        if target:
+            engine = target
+
     if engine is not None and engine.signal_history:
         signals = [
             _signal_to_response(s)

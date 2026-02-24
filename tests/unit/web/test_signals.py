@@ -3,10 +3,15 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from tests.unit.web.conftest import _make_signal
+from autotrader.web.dependencies import get_engine_manager
+from tests.unit.web.conftest import (
+    _make_mock_engine,
+    _make_signal,
+)
 
 
 class TestGetAnalysis:
@@ -69,8 +74,8 @@ class TestGetAnalysis:
         assert data["symbol"] == "USDJPY"
         assert data["engine_running"] is True
 
-    def test_シンボル不一致時(self, client):
-        """エンジンのシンボルと異なる場合は未起動レスポンス"""
+    def test_シンボル不一致時_mgr無し(self, client):
+        """EngineManagerなしでシンボル不一致の場合"""
         resp = client.get(
             "/api/v1/signals/analysis?symbol=EURUSD"
         )
@@ -78,7 +83,48 @@ class TestGetAnalysis:
         data = resp.json()["data"]
         assert data["symbol"] == "EURUSD"
         assert data["engine_running"] is False
-        assert "未起動" in data["rationale"]
+        assert "MT5" in data["rationale"]
+
+    def test_シンボル不一致時_mgr有り_エンジン自動作成(
+        self, app, mock_engine,
+    ):
+        """EngineManagerありでシンボル不一致→エンジン自動作成"""
+        # EURUSD用エンジンのモック
+        eurusd_engine = _make_mock_engine()
+        eurusd_engine._config = SimpleNamespace(
+            symbol="EURUSD",
+        )
+
+        mock_mgr = MagicMock()
+        mock_mgr.connected = True
+        # 初回はNone（未登録）、add_symbol後はEURUSDエンジン
+        mock_mgr.get_engine = MagicMock(
+            side_effect=[None, eurusd_engine],
+        )
+        mock_mgr.add_symbol = AsyncMock(
+            return_value=eurusd_engine,
+        )
+
+        app.dependency_overrides[
+            get_engine_manager
+        ] = lambda: mock_mgr
+
+        from fastapi.testclient import TestClient
+        client = TestClient(app)
+
+        with patch(
+            "autotrader.web.main.build_engine_config",
+        ) as mock_build:
+            mock_build.return_value = MagicMock()
+            resp = client.get(
+                "/api/v1/signals/analysis?symbol=EURUSD"
+            )
+
+        assert resp.status_code == 200
+        data = resp.json()["data"]
+        assert data["symbol"] == "EURUSD"
+        # 自動作成でエンジンが見つかる
+        assert data["engine_running"] is True
 
     def test_レスポンスにsymbol含まれる(
         self, client, mock_engine
