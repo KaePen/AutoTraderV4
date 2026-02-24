@@ -1,0 +1,110 @@
+==============================================================================================================
+USDJPY M1探索 最終レポート
+IS: 2020-2022 / OOS: 2023-2025 / 初期資金: 1,000,000 JPY
+==============================================================================================================
+
+検証規模:
+  Phase 1 (広域スイープ): 126 runs - M1必須TF 6組合 x 閾値7段階 x max_positions 1-3
+  Phase 2 (リファイン):   296 runs - Top10ベースの重み/PM/閾値/フィルタ微調整
+  Phase 3 (OOS検証):       12 runs - Top10 + ベースライン2種
+  合計:                   434 runs
+
+--------------------------------------------------------------------------------------------------------------
+ No TF組み合わせ                           th  mp |  IS_Ret%  IS_PF  IS_DD% |  OOS_Ret%  OOS_PF  OOS_DD%  OOS_Tr  Robust%
+--------------------------------------------------------------------------------------------------------------
+  1 M1,M5,M15,M30,H1,H4,H8,D1          -   3 |      N/A    N/A     N/A |     192.1    2.05     5.13    7747     N/A
+  2 M1,M5,M15,M30,H1,H4,D1           4.0   3 |    124.5   1.78    4.46 |     190.1    1.97     4.20    7665     153%
+  3 M1,M5,M15,M30,H1,H4,D1           5.0   3 |    124.8   1.78    4.19 |     187.9    1.98     3.96    7477     151%
+  4 M1,M5,M15,H1,H4                  2.0   3 |    129.7   1.81    7.38 |     180.8    1.91     5.39    7373     139%
+  5 M1,M5,M15,H1,H4                  2.5   3 |    131.8   1.83    7.28 |     180.6    1.92     5.40    7351     137%
+  6 M1,M5,M15,H1,H4                  3.0   3 |    126.8   1.84    5.88 |     175.4    1.93     5.47    7060     138%
+  7 M1,M15,H1,H4                     4.0   1 |     35.3   3.73    1.47 |      45.5    3.86     1.63    1088     129%
+  8 M1,M15,H1,H4                     6.0   2 |     28.7   3.70    1.57 |      38.0    4.82     1.19     965     132%
+  9 M1,M15,H1,H4                     4.5   2 |     19.3   5.21    1.39 |      15.1    5.12     0.83     407      78%
+ 10 M15,H1,H4                        4.5   1 |      N/A    N/A     N/A |      14.4   20.81     0.43     219     N/A
+ 11 M1,M15,H1,H4                     5.0   2 |     19.0   5.29    1.34 |      14.3    4.89     0.85     389      75%
+ 12 M1,M15,H1,H4                     4.5   1 |     13.5   5.46    0.91 |      11.6    7.99     0.78     274      86%
+--------------------------------------------------------------------------------------------------------------
+
+主要発見:
+
+1. 高リターン群 (AnnRet > 100%)
+   - TF: [M1,M5,M15,H1,H4] or [M1,M5,M15,M30,H1,H4,D1]
+   - max_positions=3 が必須
+   - OOS: 175-192% / PF: 1.9-2.1 / DD: 3.9-5.5% / Trades: 7000-7700
+   - IS対比Robustness: 137-153% (OOSがISを上回る)
+   - 年間約2500取引 (1日平均10+取引)
+
+2. 高品質群 (PF > 3.5, DD < 2%)
+   - TF: [M1,M15,H1,H4]
+   - max_positions=1-2
+   - OOS: 14-46% / PF: 3.9-20.8 / DD: 0.4-1.6%
+   - 年間約100-360取引
+
+トップ3構成の詳細パラメータ:
+
+--- No.1 ---
+  bonus_max_positions: 0
+  htf_alignment_tfs: ['H4', 'D1']
+  max_positions: 3
+  regime_detection_tf: H1
+  timeframes: ['M1', 'M5', 'M15', 'M30', 'H1', 'H4', 'H8', 'D1']
+  [OOS] AnnRet=192.1% PF=2.05 DD=5.13% Trades=7747
+
+--- No.2 ---
+  bonus_max_positions: 0
+  consensus_confirm_weight: 3.0
+  consensus_entry_weight: 1.5
+  consensus_manage_weight: 0.5
+  consensus_other_weight: 1.0
+  consensus_primary_weight: 2.0
+  consensus_threshold: 4.0
+  early_be_r: 0.3
+  htf_alignment_tfs: ['H4', 'D1']
+  max_positions: 3
+  partial_1r_ratio: 0.05
+  range_day_bbw_threshold: 0.25
+  range_day_score_premium: 0.3
+  regime_detection_tf: H1
+  sg_off_hours_penalty: 0.25
+  sg_recent_loss_penalty: 0.1
+  sg_spread_penalty_rate: 0.2
+  sg_volatility_penalty: 0.05
+  signal_rev_ratio: 0.0
+  sl_min_pips: 8.0
+  stag_exit_minutes: 240.0
+  timeframes: ['M1', 'M5', 'M15', 'M30', 'H1', 'H4', 'D1']
+  tp_sl_ratio: 1.2
+  trailing_atr_mult: 2.0
+  trailing_start_r: 0.5
+  weak_hours_score_premium: 0.5
+  [OOS] AnnRet=190.1% PF=1.97 DD=4.20% Trades=7665
+
+--- No.3 ---
+  bonus_max_positions: 0
+  consensus_confirm_weight: 3.0
+  consensus_entry_weight: 1.5
+  consensus_manage_weight: 0.5
+  consensus_other_weight: 1.0
+  consensus_primary_weight: 2.0
+  consensus_threshold: 5.0
+  early_be_r: 0.3
+  htf_alignment_tfs: ['H4', 'D1']
+  max_positions: 3
+  partial_1r_ratio: 0.05
+  range_day_bbw_threshold: 0.25
+  range_day_score_premium: 0.3
+  regime_detection_tf: H1
+  sg_off_hours_penalty: 0.25
+  sg_recent_loss_penalty: 0.1
+  sg_spread_penalty_rate: 0.2
+  sg_volatility_penalty: 0.05
+  signal_rev_ratio: 0.0
+  sl_min_pips: 8.0
+  stag_exit_minutes: 240.0
+  timeframes: ['M1', 'M5', 'M15', 'M30', 'H1', 'H4', 'D1']
+  tp_sl_ratio: 1.2
+  trailing_atr_mult: 2.0
+  trailing_start_r: 0.5
+  weak_hours_score_premium: 0.5
+  [OOS] AnnRet=187.9% PF=1.98 DD=3.96% Trades=7477
