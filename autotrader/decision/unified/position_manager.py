@@ -234,6 +234,14 @@ class PositionManagerConfig:
     range_day_half_r_trigger: float = 0.5
     # BE移動クッション: BE価格に余裕を持たせノイズによるBE_HIT削減
     be_cushion_pips: float = 3.0
+    # コンセンサス逆転exit
+    consensus_exit_enabled: bool = False
+    # 逆方向スコアがこの閾値以上で発動
+    consensus_exit_threshold: float = 6.0
+    # ポジション方向スコアがこの閾値以下で発動
+    consensus_exit_own_max: float = 3.0
+    # 含み損時のみ発動（含み益時はトレーリングに任せる）
+    consensus_exit_loss_only: bool = False
 
 
 class PositionManager:
@@ -434,6 +442,8 @@ class PositionManager:
         current_time: datetime,
         atr: float,
         current_signal: SignalType | None = None,
+        buy_score: float = 0.0,
+        sell_score: float = 0.0,
     ) -> ManagementAction:
         """ポジションを評価
 
@@ -443,6 +453,8 @@ class PositionManager:
             current_time: 現在時刻
             atr: ATR値
             current_signal: 現在のシグナル（反転チェック用）
+            buy_score: BUY方向コンセンサススコア
+            sell_score: SELL方向コンセンサススコア
 
         Returns:
             ManagementAction: 管理アクション
@@ -491,6 +503,15 @@ class PositionManager:
         if current_signal is not None:
             action = self._check_signal_reversal(
                 position, current_signal, current_price,
+            )
+            if action is not None:
+                return action
+
+        # 6.5 コンセンサス逆転exit
+        if self.config.consensus_exit_enabled:
+            action = self._check_consensus_exit(
+                position, current_price,
+                buy_score, sell_score,
             )
             if action is not None:
                 return action
@@ -731,6 +752,64 @@ class PositionManager:
                 exit_reason=ExitReason.SIGNAL_REVERSAL,
                 trigger_price=current_price,
             )
+        return None
+
+    def _check_consensus_exit(
+        self,
+        position: ManagedPosition,
+        current_price: float,
+        buy_score: float,
+        sell_score: float,
+    ) -> ManagementAction | None:
+        """コンセンサス逆転exit
+
+        ポジション方向のスコアが低下し、逆方向スコアが
+        閾値を超えた場合に早期撤退する。
+        SL到達前に損失を最小化し、利益がある場合は残す。
+
+        Args:
+            position: 管理中ポジション
+            current_price: 現在価格
+            buy_score: 現在のBUY方向スコア
+            sell_score: 現在のSELL方向スコア
+
+        Returns:
+            ManagementAction | None: 決済アクション
+        """
+        # スコアが両方0（HOLDシグナル、データなし等）は無視
+        if buy_score == 0.0 and sell_score == 0.0:
+            return None
+
+        # ポジション方向に応じてスコアを取得
+        if position.direction == SignalType.BUY:
+            own_score = buy_score
+            opp_score = sell_score
+        else:
+            own_score = sell_score
+            opp_score = buy_score
+
+        # 逆方向スコアが閾値を超え、かつ自方向が弱い
+        if (
+            opp_score >= self.config.consensus_exit_threshold
+            and own_score <= self.config.consensus_exit_own_max
+        ):
+            # 含み益制限モード: 含み損時のみ発動
+            if (
+                self.config.consensus_exit_loss_only
+                and position.current_r > 0
+            ):
+                return None
+
+            return ManagementAction.full_close(
+                reason=(
+                    f"コンセンサス逆転: "
+                    f"自方向={own_score:.1f}, "
+                    f"逆方向={opp_score:.1f}"
+                ),
+                exit_reason=ExitReason.SIGNAL_REVERSAL,
+                trigger_price=current_price,
+            )
+
         return None
 
     def _check_partial_close(

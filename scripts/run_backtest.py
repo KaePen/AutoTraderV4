@@ -566,6 +566,29 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="セッション別スプレッド有効化",
     )
+    # --- コンセンサス逆転exit ---
+    parser.add_argument(
+        "--consensus-exit",
+        action="store_true",
+        help="コンセンサス逆転exitを有効化",
+    )
+    parser.add_argument(
+        "--consensus-exit-threshold",
+        type=float,
+        default=6.0,
+        help="逆方向スコア閾値（デフォルト: 6.0）",
+    )
+    parser.add_argument(
+        "--consensus-exit-own-max",
+        type=float,
+        default=3.0,
+        help="自方向スコア上限（デフォルト: 3.0）",
+    )
+    parser.add_argument(
+        "--consensus-exit-loss-only",
+        action="store_true",
+        help="含み損時のみコンセンサス逆転exitを発動",
+    )
     # --- アダプティブパラメータ調整 ---
     parser.add_argument(
         "--adaptive",
@@ -1128,6 +1151,10 @@ def run_single_backtest(args: argparse.Namespace):
         range_day_half_r_partial_ratio=args.half_r_ratio,
         range_day_half_r_trigger=args.half_r_trigger,
         time_exit_enabled=not args.no_time_exit,
+        consensus_exit_enabled=args.consensus_exit,
+        consensus_exit_threshold=args.consensus_exit_threshold,
+        consensus_exit_own_max=args.consensus_exit_own_max,
+        consensus_exit_loss_only=args.consensus_exit_loss_only,
     )
 
     # ファンダメンタルCSVリスト構築

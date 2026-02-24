@@ -1884,7 +1884,18 @@ class BacktestRunner:
                 for p in simulator.get_open_positions()
             }
             prev_trade_count = len(simulator.get_closed_trades())
-            simulator.process_candle(candle, signal)
+
+            # コンセンサススコアを渡す（逆転exit用）
+            _consensus_scores = None
+            if consolidated is not None:
+                _consensus_scores = (
+                    consolidated.buy_score,
+                    consolidated.sell_score,
+                )
+            simulator.process_candle(
+                candle, signal,
+                consensus_scores=_consensus_scores,
+            )
 
             # 新規ポジション検出
             current_positions = simulator.get_open_positions()
