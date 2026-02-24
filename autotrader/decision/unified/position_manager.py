@@ -189,19 +189,19 @@ class PositionManagerConfig:
     partial_close_1r_ratio: float = 0.05
     partial_close_2r_ratio: float = 0.05
     breakeven_at_1r: bool = True
-    trailing_start_r: float = 1.5
-    trailing_atr_multiplier: float = 1.5
+    trailing_start_r: float = 0.5
+    trailing_atr_multiplier: float = 2.0
     time_exit_enabled: bool = True
     spread_pips: float = 1.5
     slippage_pips: float = 0.5
     be_enabled_modes: tuple[TradingStrategyMode, ...] = (
         TradingStrategyMode.UNIVERSAL,
     )
-    early_breakeven_r: float = 0.5
+    early_breakeven_r: float = 0.3
     early_breakeven_enabled: bool = True
     disable_tp_after_partial: bool = True
-    signal_rev_close_ratio: float = 0.5
-    stagnation_exit_minutes: float = 120.0
+    signal_rev_close_ratio: float = 0.0
+    stagnation_exit_minutes: float = 240.0
     stagnation_min_mfe_r: float = 0.15
     # P0-1: RANGE×DAY BE制御
     range_day_be_disabled: bool = True

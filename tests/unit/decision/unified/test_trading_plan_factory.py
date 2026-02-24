@@ -79,16 +79,16 @@ class TestUnifiedBotConfigNewFields:
         """フィルター閾値のデフォルト値"""
         config = UnifiedBotConfig()
         assert config.macd_slope_filter_threshold == -2.0
-        assert config.sl_min_pips == 10.0
+        assert config.sl_min_pips == 8.0
         assert config.sl_max_pips_default == 50.0
 
     def test_default_consensus_weights(self) -> None:
-        """コンセンサス重みのデフォルト値"""
+        """コンセンサス重みのデフォルト値（M1最適化No.3）"""
         config = UnifiedBotConfig()
-        assert config.consensus_primary_weight == 3.0
-        assert config.consensus_entry_weight == 2.5
-        assert config.consensus_confirm_weight == 2.0
-        assert config.consensus_manage_weight == 1.5
+        assert config.consensus_primary_weight == 2.0
+        assert config.consensus_entry_weight == 1.5
+        assert config.consensus_confirm_weight == 3.0
+        assert config.consensus_manage_weight == 0.5
         assert config.consensus_other_weight == 1.0
 
     def test_custom_consensus_weights(self) -> None:

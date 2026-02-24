@@ -123,7 +123,7 @@ class UnifiedBotConfig:
     )
     risk: RiskConfig = field(default_factory=RiskConfig)
     timeframes: list[str] = field(
-        default_factory=lambda: ["M1", "M5", "M15", "M30", "H1", "H4", "H8", "D1"]
+        default_factory=lambda: ["M1", "M5", "M15", "M30", "H1", "H4", "D1"]
     )
     evaluator_configs: dict[str, EvaluatorConfig] = field(
         default_factory=dict
@@ -137,8 +137,8 @@ class UnifiedBotConfig:
     enable_position_sizing: bool = True
     enable_position_manager: bool = True
     use_position_manager: bool = True
-    range_day_bbw_threshold: float = 0.20
-    range_day_score_premium: float = 0.55
+    range_day_bbw_threshold: float = 0.25
+    range_day_score_premium: float = 0.3
     # Weak Hours RANGEフィルター（JST 18-21 = UTC 9-12）
     weak_hours_enabled: bool = True
     weak_hours_score_premium: float = 0.5
@@ -156,9 +156,9 @@ class UnifiedBotConfig:
     # デモモード（閾値を下げて活発にシグナルを発火させる）
     demo_mode: bool = False
     # コンセンサス閾値
-    consensus_threshold: float = 4.5
+    consensus_threshold: float = 5.0
     # 最大同時ポジション数（ライブ用）
-    max_positions: int = 1
+    max_positions: int = 3
     # デモモード時の最大同時ポジション数
     demo_max_positions: int = 1
     # デモモード時のクールダウン時間（分）: 0=無効
@@ -184,19 +184,19 @@ class UnifiedBotConfig:
     default_tp_sl_ratio_range: tuple[float, float] = (1.1, 1.4)
     # --- フィルター閾値 ---
     macd_slope_filter_threshold: float = -2.0
-    sl_min_pips: float = 10.0
+    sl_min_pips: float = 8.0
     sl_max_pips_default: float = 50.0
     # --- コンセンサス重み ---
-    consensus_primary_weight: float = 3.0
-    consensus_entry_weight: float = 2.5
-    consensus_confirm_weight: float = 2.0
-    consensus_manage_weight: float = 1.5
+    consensus_primary_weight: float = 2.0
+    consensus_entry_weight: float = 1.5
+    consensus_confirm_weight: float = 3.0
+    consensus_manage_weight: float = 0.5
     consensus_other_weight: float = 1.0
     # --- SoftGuardペナルティ ---
-    sg_spread_penalty_rate: float = 0.1
-    sg_off_hours_penalty: float = 0.15
-    sg_volatility_penalty: float = 0.1
-    sg_recent_loss_penalty: float = 0.2
+    sg_spread_penalty_rate: float = 0.2
+    sg_off_hours_penalty: float = 0.25
+    sg_volatility_penalty: float = 0.05
+    sg_recent_loss_penalty: float = 0.1
 
     def get_evaluator_config(self, timeframe: str) -> EvaluatorConfig:
         """時間足別評価器設定を取得

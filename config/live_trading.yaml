@@ -7,10 +7,26 @@ symbol: USDJPY
 bot_config:
   # 最大同時ポジション数
   max_positions: 3
-  range_day_bbw_threshold: 0.20
-  range_day_score_premium: 0.55
+  bonus_max_positions: 0
+  # コンセンサス設定（M1最適化 No.3: OOS AnnRet=187.9% PF=1.98 DD=3.96%）
+  consensus_threshold: 5.0
+  consensus_primary_weight: 2.0
+  consensus_entry_weight: 1.5
+  consensus_confirm_weight: 3.0
+  consensus_manage_weight: 0.5
+  consensus_other_weight: 1.0
+  # フィルター
+  range_day_bbw_threshold: 0.25
+  range_day_score_premium: 0.3
   weak_hours_enabled: true
   weak_hours_score_premium: 0.5
+  sl_min_pips: 8.0
+  # SoftGuardペナルティ
+  sg_spread_penalty_rate: 0.2
+  sg_off_hours_penalty: 0.25
+  sg_volatility_penalty: 0.05
+  sg_recent_loss_penalty: 0.1
+  # 資金管理
   use_dynamic_lot: true
   base_risk_pct: 0.02
   max_lot_per_trade: 2.0
@@ -19,12 +35,14 @@ bot_config:
   slippage_buffer_pips: 2.0
 
 pm_config:
-  # 基本
-  partial_close_1r_ratio: 0.3
-  partial_close_2r_ratio: 0.3
+  # 基本（M1最適化 No.3）
+  partial_close_1r_ratio: 0.05
+  partial_close_2r_ratio: 0.05
   breakeven_at_1r: true
-  trailing_start_r: 2.0
+  trailing_start_r: 0.5
   trailing_atr_multiplier: 2.0
+  early_breakeven_r: 0.3
+  signal_rev_close_ratio: 0.0
   spread_pips: 1.5
   slippage_pips: 0.5
   # BE制御
@@ -33,7 +51,7 @@ pm_config:
   range_day_fast_be_enabled: true
   range_day_fast_be_minutes: 90.0
   # Stagnation
-  stagnation_exit_minutes: 120.0
+  stagnation_exit_minutes: 240.0
   stagnation_min_mfe_r: 0.15
   # 保険
   range_day_insurance_enabled: true
