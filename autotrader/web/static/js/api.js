@@ -193,6 +193,14 @@ function addAccountPreset(login, server, name) {
   });
 }
 
+/** シンボルのエンジンを確保（なければ追加） */
+function ensureSymbolEngine(symbol) {
+  return fetchApi(
+    `/trading/symbols/add?symbol=${encodeURIComponent(symbol)}`,
+    { method: 'POST' }
+  );
+}
+
 /** 口座プリセット削除 */
 function deleteAccountPreset(login) {
   return fetchApi(`/trading/accounts/${login}`, { method: 'DELETE' });
