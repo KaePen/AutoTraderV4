@@ -394,7 +394,7 @@ const DashboardApp = {
       // 投票サマリーバー
       const summaryHtml = `
         <div class="mb-2">
-          <div class="flex items-center gap-2 text-[10px] mb-1">
+          <div class="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] mb-1">
             <span class="text-gray-500">Vote:</span>
             <span class="text-green-400 font-bold">${buyCount} BUY</span>
             <span class="text-gray-500">|</span>
@@ -494,7 +494,7 @@ const DashboardApp = {
         </div>`;
       }).join('');
 
-      tfEl.innerHTML = `<div class="w-full">${summaryHtml}</div>` + `<div class="grid grid-cols-9 gap-1.5 mt-2">${cardsHtml}${penaltyCardHtml}</div>`;
+      tfEl.innerHTML = `<div class="w-full">${summaryHtml}</div>` + `<div class="grid grid-cols-3 sm:grid-cols-5 lg:grid-cols-9 gap-1.5 mt-2">${cardsHtml}${penaltyCardHtml}</div>`;
     }
 
   },
