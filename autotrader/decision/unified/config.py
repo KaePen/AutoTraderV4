@@ -156,7 +156,7 @@ class UnifiedBotConfig:
     # デモモード（閾値を下げて活発にシグナルを発火させる）
     demo_mode: bool = False
     # コンセンサス閾値
-    consensus_threshold: float = 5.0
+    consensus_threshold: float = 7.0
     # 最大同時ポジション数（ライブ用）
     max_positions: int = 3
     # デモモード時の最大同時ポジション数
@@ -184,7 +184,7 @@ class UnifiedBotConfig:
     default_tp_sl_ratio_range: tuple[float, float] = (1.1, 1.4)
     # --- フィルター閾値 ---
     macd_slope_filter_threshold: float = -2.0
-    sl_min_pips: float = 8.0
+    sl_min_pips: float = 15.0
     sl_max_pips_default: float = 50.0
     # --- コンセンサス重み ---
     consensus_primary_weight: float = 2.0
