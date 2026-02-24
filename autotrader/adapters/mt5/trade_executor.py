@@ -432,7 +432,7 @@ class MT5TradeExecutor(TradeExecutor):
 
     async def get_open_positions_async(
         self, symbol: str | None = None
-    ) -> list[Position]:
+    ) -> list[Position] | None:
         """オープンポジションを非同期で取得
 
         magic_numberフィルタで自動トレーダのポジションのみ返却。
@@ -441,10 +441,15 @@ class MT5TradeExecutor(TradeExecutor):
             symbol: シンボル（Noneで全て）
 
         Returns:
-            list[Position]: ポジションリスト
+            list[Position] | None: ポジションリスト。
+                MT5接続エラー時はNone。
         """
         async with self._conn.session() as transport:
             raw_positions = await transport.positions_get(symbol)
+
+        # MT5接続エラー時はNoneを伝搬
+        if raw_positions is None:
+            return None
 
         # magic_numberフィルタ
         positions = []

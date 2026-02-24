@@ -277,6 +277,173 @@ class TestLiveTradingEngine:
         engine._executor.modify_position_async.assert_called_once()
 
 
+class TestSyncPositions:
+    """_sync_positions ゴーストクリーンアップ安全性テスト"""
+
+    @pytest.mark.asyncio
+    async def test_MT5取得失敗時ゴースト掃除スキップ(
+        self, engine: LiveTradingEngine
+    ) -> None:
+        """positions_getがNone→ゴースト掃除もDB復元もスキップ"""
+        engine._conn = MagicMock()
+        engine._conn.connected = True
+        engine._conn.session = MagicMock()
+
+        # MT5接続エラー: Noneを返す
+        engine._executor.get_open_positions_async = AsyncMock(
+            return_value=None
+        )
+
+        with (
+            patch.object(
+                engine, "_close_ghost_db_records"
+            ) as mock_ghost,
+            patch.object(
+                engine, "_restore_open_trades_from_db"
+            ) as mock_restore,
+        ):
+            await engine._sync_positions()
+
+        # どちらも呼ばれない
+        mock_ghost.assert_not_called()
+        mock_restore.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_空リスト時ゴースト掃除実行(
+        self, engine: LiveTradingEngine
+    ) -> None:
+        """positions_getが空リスト→ゴースト掃除は実行される"""
+        engine._conn = MagicMock()
+        engine._conn.connected = True
+        engine._conn.session = MagicMock()
+
+        # MT5正常: 0件
+        engine._executor.get_open_positions_async = AsyncMock(
+            return_value=[]
+        )
+
+        with (
+            patch.object(
+                engine, "_close_ghost_db_records"
+            ) as mock_ghost,
+            patch.object(
+                engine, "_restore_open_trades_from_db"
+            ) as mock_restore,
+        ):
+            await engine._sync_positions()
+
+        # ゴースト掃除は空セットで呼ばれる
+        mock_ghost.assert_called_once_with(set())
+        # DB復元はスキップ（ポジション0件）
+        mock_restore.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_ポジション存在時ゴースト掃除とDB復元(
+        self, engine: LiveTradingEngine
+    ) -> None:
+        """MT5にポジションあり→ゴースト掃除とDB復元の両方実行"""
+        engine._conn = MagicMock()
+        engine._conn.connected = True
+        engine._conn.session = MagicMock()
+
+        position = Position(
+            position_id="12345",
+            ticket=12345,
+            symbol="USDJPY",
+            signal_type=SignalType.BUY,
+            volume=1.0,
+            entry_price=150.0,
+            stop_loss=149.5,
+            take_profit=150.5,
+            opened_at=datetime.now(timezone.utc),
+        )
+
+        engine._executor.get_open_positions_async = AsyncMock(
+            return_value=[position]
+        )
+
+        with (
+            patch.object(
+                engine, "_close_ghost_db_records"
+            ) as mock_ghost,
+            patch.object(
+                engine, "_restore_open_trades_from_db"
+            ) as mock_restore,
+            patch.object(
+                engine, "_load_position_states",
+                return_value={},
+            ),
+        ):
+            await engine._sync_positions()
+
+        # ゴースト掃除はticketセットで呼ばれる
+        mock_ghost.assert_called_once_with({12345})
+        # DB復元も呼ばれる
+        mock_restore.assert_called_once_with([12345])
+
+
+class TestManagePositionsNullSafety:
+    """_manage_positions None安全性テスト"""
+
+    @pytest.mark.asyncio
+    async def test_MT5取得失敗時管理スキップ(
+        self, engine: LiveTradingEngine
+    ) -> None:
+        """positions_getがNone→ポジション管理をスキップ"""
+        engine._conn = MagicMock()
+        engine._conn.connected = True
+        engine._conn.session = MagicMock()
+        engine._enable_auto_trade = True
+
+        engine._executor.get_open_positions_async = AsyncMock(
+            return_value=None
+        )
+
+        # 例外が発生しないことを確認
+        await engine._manage_positions()
+
+        # キャッシュが変更されないこと
+        engine._executor.get_open_positions_async \
+            .assert_called_once()
+
+
+class TestExecuteEntryNullSafety:
+    """_execute_entry None安全性テスト"""
+
+    @pytest.mark.asyncio
+    async def test_MT5取得失敗時エントリースキップ(
+        self, engine: LiveTradingEngine
+    ) -> None:
+        """positions_getがNone→エントリーを安全にスキップ"""
+        engine._conn = MagicMock()
+        engine._conn.connected = True
+        engine._conn.session = MagicMock()
+        engine._enable_auto_trade = True
+        engine._account_info = AccountInfo(
+            balance=1000000, equity=1000000
+        )
+
+        engine._executor.get_open_positions_async = AsyncMock(
+            return_value=None
+        )
+        engine._executor.open_position_async = AsyncMock()
+
+        signal = Signal(
+            signal_id="test-001",
+            symbol="USDJPY",
+            signal_type=SignalType.BUY,
+            confidence=0.8,
+            stop_loss=149.5,
+            take_profit=150.5,
+        )
+
+        await engine._execute_entry(signal)
+
+        # MT5発注が呼ばれないこと
+        engine._executor.open_position_async \
+            .assert_not_called()
+
+
 class TestCloseGhostDbRecords:
     """_close_ghost_db_records テスト"""
 

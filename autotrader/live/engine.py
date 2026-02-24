@@ -1064,6 +1064,12 @@ class LiveTradingEngine:
         positions = await self._executor.get_open_positions_async(
             self._active_symbol
         )
+        # MT5接続エラー時はエントリーを安全にスキップ
+        if positions is None:
+            logger.warning(
+                "MT5ポジション取得失敗 — エントリースキップ"
+            )
+            return
         cfg = self._bot.config
         base_max = (
             cfg.demo_max_positions
@@ -1531,6 +1537,10 @@ class LiveTradingEngine:
         positions = await self._executor.get_open_positions_async(
             None
         )
+        # MT5接続エラー時はポジション管理をスキップ
+        if positions is None:
+            logger.debug("MT5ポジション取得失敗 — 管理スキップ")
+            return
         current_tickets = {pos.ticket for pos in positions}
 
         # _open_tradesが未復元の場合、DBから復元（起動タイミング対応）
@@ -1866,6 +1876,15 @@ class LiveTradingEngine:
         positions = await self._executor.get_open_positions_async(
             self._active_symbol
         )
+
+        # MT5接続エラー時はゴースト掃除をスキップ
+        # None=取得失敗、[]=ポジション0件の区別が必要
+        if positions is None:
+            logger.warning(
+                "MT5ポジション取得失敗 — "
+                "ゴースト掃除・復元をスキップ"
+            )
+            return
 
         # DBゴーストレコード掃除（MT5に存在しないis_open=true）
         active_tickets = (
