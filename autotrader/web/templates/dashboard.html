@@ -55,14 +55,60 @@
     <div id="ap-tf-scores" class="w-full"></div>
   </div>
 
-  <!-- Row 3: ポジションパネル（全幅・拡張） -->
-  <div class="card" id="position-panel">
-    <div class="flex items-center justify-between mb-3">
-      <h2 class="text-sm font-semibold text-gray-300 uppercase tracking-wider">Positions</h2>
-      <span id="position-count" class="text-xs text-gray-500">no open</span>
+  <!-- Row 3: チャート(左2/3) + ポジション(右1/3) -->
+  <div class="grid grid-cols-1 lg:grid-cols-3 gap-4">
+    <!-- チャートカード (左2/3) -->
+    <div class="lg:col-span-2 flex flex-col">
+      <div class="card flex flex-col flex-1">
+        <div class="flex items-center justify-between mb-4 flex-shrink-0">
+          <h2 id="chart-title" class="text-lg font-semibold text-gray-100">USDJPY チャート</h2>
+          <div class="flex items-center gap-2 flex-wrap">
+            <!-- 指標切り替え -->
+            <div class="flex items-center gap-1">
+              <span class="text-[10px] text-gray-500 uppercase tracking-wider mr-1">Ind</span>
+              <div id="chart-indicator-toggles" class="flex gap-1"></div>
+            </div>
+            <div class="w-px h-4 bg-gray-700"></div>
+            <!-- 時間足ボタン -->
+            <div id="chart-timeframe-buttons" class="flex gap-1"></div>
+          </div>
+        </div>
+        <!-- OHLC情報バー（クロスヘア連動） -->
+        <div id="chart-ohlc-bar" class="flex items-center gap-3 px-1 pb-1 text-xs tabular-nums invisible flex-shrink-0">
+          <span class="text-gray-500">O:<span id="chart-ohlc-o" class="text-gray-300 ml-0.5">-</span></span>
+          <span class="text-gray-500">H:<span id="chart-ohlc-h" class="text-green-400 ml-0.5">-</span></span>
+          <span class="text-gray-500">L:<span id="chart-ohlc-l" class="text-red-400 ml-0.5">-</span></span>
+          <span class="text-gray-500">C:<span id="chart-ohlc-c" class="ml-0.5">-</span></span>
+          <span id="chart-ohlc-chg" class="font-medium">-</span>
+          <span class="text-gray-600">|</span>
+          <span class="text-gray-500">Vol:<span id="chart-ohlc-vol" class="text-gray-400 ml-0.5">-</span></span>
+        </div>
+        <!-- メインチャート (flex-1で残りスペース全て) -->
+        <div id="chart-container" class="flex-1 min-h-[280px] w-full relative">
+          <div id="chart-loader" class="absolute inset-0 flex items-center justify-center bg-gray-800/50 z-10">
+            <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
+          </div>
+        </div>
+        <!-- RSIサブチャート -->
+        <div id="rsi-panel" class="mt-1 border-t border-gray-700/50 flex-shrink-0">
+          <div class="flex items-center gap-2 px-1 py-0.5">
+            <span class="text-[10px] text-yellow-400 font-semibold uppercase tracking-wider">RSI(14)</span>
+            <span class="text-[10px] text-gray-600">70 / 30</span>
+          </div>
+          <div id="rsi-container" class="h-20 w-full"></div>
+        </div>
+      </div>
     </div>
-    <div id="position-list" class="overflow-y-auto max-h-80" data-wide="true">
-      <div class="flex items-center justify-center h-16 text-gray-500 text-sm">ポジションなし</div>
+
+    <!-- ポジションパネル (右1/3) -->
+    <div class="card flex flex-col" id="position-panel">
+      <div class="flex items-center justify-between mb-3 flex-shrink-0">
+        <h2 class="text-sm font-semibold text-gray-300 uppercase tracking-wider">Positions</h2>
+        <span id="position-count" class="text-xs text-gray-500">no open</span>
+      </div>
+      <div id="position-list" class="overflow-y-auto flex-1 min-h-0">
+        <div class="flex items-center justify-center h-16 text-gray-500 text-sm">ポジションなし</div>
+      </div>
     </div>
   </div>
 
@@ -98,5 +144,6 @@
 {% endblock %}
 
 {% block scripts %}
-<script src="/static/js/dashboard.js?v=14"></script>
+<script src="/static/js/chart.js?v=3"></script>
+<script src="/static/js/dashboard.js?v=15"></script>
 {% endblock %}
