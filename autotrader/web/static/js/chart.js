@@ -7,11 +7,6 @@ const ChartManager = {
   containerEl: null,
   timeframe: 'M15',
   symbol: 'USDJPY',
-  _trades: [],
-  _tradeLines: [],        // トレードライン LineSeries のリスト
-  _openTradeLineRefs: [], // オープン中ポジションのラインシリーズ（tick更新用）
-  _seriesMarkers: null,   // createSeriesMarkers プリミティブ（v5）
-
   isLoading: false,
   resizeObserver: null,
   // 最新バーキャッシュ（price_update高速更新用）
@@ -240,10 +235,6 @@ const ChartManager = {
       });
     }
 
-    // マーカー再描画
-    this._applyMarkers();
-    // トレードライン再描画
-    this._applyTradeLines();
   },
 
   /** タイムフレームボタン描画 */
@@ -322,18 +313,6 @@ const ChartManager = {
     }
   },
 
-  /**
-   * DBのUTC日時文字列をチャート時刻（MT5 GMT+2基準のUNIX秒）に変換
-   * MT5ブローカーはGMT+2でローソク足を記録するため、
-   * チャートのバー時刻と一致させるには UTC+2h が必要
-   *
-   * @param {string} dateStr - ISO 8601 日時文字列（UTC）
-   * @returns {number} チャート時刻（整数 UNIX秒）
-   */
-  _toChartTime(dateStr) {
-    return Math.floor(new Date(dateStr).getTime() / 1000) + 2 * 3600;
-  },
-
   /** シンボルに応じた価格の小数点桁数 */
   _getPricePrecision() {
     return this.symbol && this.symbol.includes('JPY') ? 3 : 5;
@@ -404,148 +383,6 @@ const ChartManager = {
     this._renderAllData(0);
   },
 
-  /** トレード設定（エントリー/エグジットマーカー更新） */
-  setTrades(trades) {
-    this._trades = trades || [];
-    this._applyMarkers();
-    this._applyTradeLines();
-  },
-
-  /**
-   * トレードマーカーをチャートに描画
-   * v5: createSeriesMarkers プリミティブで管理
-   * エントリー/エグジット価格位置に正確に表示
-   */
-  _applyMarkers() {
-    if (!this.candleSeries) return;
-    const markers = [];
-
-    // トレードマーカー（atPriceMiddle + price で正確な価格位置に表示）
-    if (this._trades && this._trades.length > 0) {
-      for (const t of this._trades) {
-        if (t.symbol !== this.symbol) continue;
-
-        const isBuy = t.signal_type === 'BUY';
-        const entryTime = this._toChartTime(t.opened_at);
-
-        // エントリーマーカー
-        // 買い: ▲（arrowUp）緑 / 売り: ●（circle）赤
-        if (entryTime > 0 && t.entry_price != null) {
-          markers.push({
-            time: entryTime,
-            position: 'atPriceMiddle',
-            price: t.entry_price,
-            color: isBuy ? '#22c55e' : '#ef4444',
-            shape: isBuy ? 'arrowUp' : 'circle',
-          });
-        }
-
-        // エグジットマーカー（クローズ済みのみ）
-        // 買い: ▼（arrowDown）損益色 / 売り: ■（square）損益色
-        if (!t.is_open && t.closed_at && t.exit_price != null) {
-          const exitTime = this._toChartTime(t.closed_at);
-          const isProfit = (t.profit_loss || 0) >= 0;
-          markers.push({
-            time: exitTime,
-            position: 'atPriceMiddle',
-            price: t.exit_price,
-            color: isProfit ? '#4ade80' : '#f87171',
-            shape: isBuy ? 'arrowDown' : 'square',
-          });
-        }
-      }
-    }
-
-    // time 昇順ソート（setMarkers の要件）
-    markers.sort((a, b) => a.time - b.time);
-
-    // v5: createSeriesMarkers プリミティブで管理
-    if (!this._seriesMarkers) {
-      this._seriesMarkers = LightweightCharts.createSeriesMarkers(
-        this.candleSeries, markers
-      );
-    } else {
-      this._seriesMarkers.setMarkers(markers);
-    }
-  },
-
-  /**
-   * エントリー→エグジット（またはエントリー→現在価格）の破線を描画
-   * LineSeries を各トレードごとに生成し、_tradeLines に保持する
-   */
-  _applyTradeLines() {
-    if (!this.chart) return;
-
-    // 既存ラインを全削除
-    for (const series of this._tradeLines) {
-      try { this.chart.removeSeries(series); } catch (_e) {}
-    }
-    this._tradeLines = [];
-    this._openTradeLineRefs = [];
-
-    if (!this._trades || this._trades.length === 0) return;
-
-    for (const t of this._trades) {
-      if (t.symbol !== this.symbol) continue;
-
-      const entryTime = this._toChartTime(t.opened_at);
-      if (entryTime <= 0) continue;
-
-      let exitTime, exitPrice;
-
-      if (t.is_open) {
-        // オープン中：最新バーの時刻・価格まで延ばす
-        if (!this._lastBarData) continue;
-        exitTime = this._lastBarData.time;
-        exitPrice = this._lastBarData.close;
-      } else {
-        if (!t.closed_at || t.exit_price == null) continue;
-        exitTime = this._toChartTime(t.closed_at);
-        exitPrice = t.exit_price;
-      }
-
-      // 同一バー内は破線描画不可（チャート破損を防ぐ）
-      // time はバー開始時刻（整数）に丸めて使う
-      const TF_SECONDS = {
-        M1: 60, M5: 300, M15: 900, M30: 1800,
-        H1: 3600, H4: 14400, D1: 86400,
-      };
-      const tfSec = TF_SECONDS[this.timeframe] || 900;
-      const entryBar = Math.floor(entryTime / tfSec) * tfSec;
-      const exitBar = Math.floor(exitTime / tfSec) * tfSec;
-      if (entryBar >= exitBar) continue;
-
-      const isBuy = t.signal_type === 'BUY';
-      let lineColor;
-      if (t.is_open) {
-        lineColor = isBuy ? '#22c55eaa' : '#ef4444aa';
-      } else {
-        const isProfit = (t.profit_loss || 0) >= 0;
-        lineColor = isProfit ? '#4ade80aa' : '#f87171aa';
-      }
-
-      const series = this.chart.addSeries(LightweightCharts.LineSeries, {
-        color: lineColor,
-        lineWidth: 1,
-        lineStyle: 2, // Dashed（破線）
-        priceLineVisible: false,
-        lastValueVisible: false,
-        crosshairMarkerVisible: false,
-      });
-
-      // バー開始時刻（整数）を使うことでチャート時刻と一致させ崩れを防ぐ
-      series.setData([
-        { time: entryBar, value: t.entry_price },
-        { time: exitBar, value: exitPrice },
-      ]);
-
-      this._tradeLines.push(series);
-      if (t.is_open) {
-        this._openTradeLineRefs.push(series);
-      }
-    }
-  },
-
   /**
    * MT5のtick price_updateで最新バーのcloseをリアルタイム更新
    * ローソク足APIを呼ばずに高速でチャートを更新する。
@@ -563,10 +400,6 @@ const ChartManager = {
     try {
       this.candleSeries.update(updated);
       this._lastBarData = updated;
-      // オープン中ポジションの線を現在価格まで延ばす
-      for (const series of this._openTradeLineRefs) {
-        try { series.update({ time: updated.time, value: bid }); } catch (_e2) {}
-      }
     } catch (_e) {
       // チャート未準備時は無視
     }
@@ -579,21 +412,6 @@ const ChartManager = {
 
     // 旧シンボルのキャッシュをクリア
     this._lastBarData = null;
-    this._trades = [];
-
-    // 旧トレードラインを即座に削除
-    if (this.chart) {
-      for (const series of this._tradeLines) {
-        try { this.chart.removeSeries(series); } catch (_e) {}
-      }
-    }
-    this._tradeLines = [];
-    this._openTradeLineRefs = [];
-
-    // 旧マーカーをクリア
-    if (this._seriesMarkers) {
-      this._seriesMarkers.setMarkers([]);
-    }
 
     // priceFormat を新シンボルに合わせて更新
     const prec = this._getPricePrecision();
@@ -624,10 +442,6 @@ const ChartManager = {
       this.resizeObserver.disconnect();
     }
     if (this.chart) {
-      // トレードライン・マーカーは chart.remove() で一括破棄される
-      this._tradeLines = [];
-      this._openTradeLineRefs = [];
-      this._seriesMarkers = null;
       this.chart.remove();
       this.chart = null;
       this.candleSeries = null;

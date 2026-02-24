@@ -892,7 +892,6 @@ const DashboardApp = {
     if (pos.status === 'fulfilled') this.positions = pos.value;
     if (tr.status === 'fulfilled') this.trades = tr.value;
     if (summary.status === 'fulfilled') this.tradeSummary = summary.value;
-    ChartManager.setTrades(this.trades);
     this._syncTradeIdCache();
     this.renderMetrics();
     this.renderPositions();
@@ -911,7 +910,6 @@ const DashboardApp = {
     if (pos.status === 'fulfilled') this.positions = pos.value;
     if (tr.status === 'fulfilled') this.trades = tr.value;
     if (summary.status === 'fulfilled') this.tradeSummary = summary.value;
-    ChartManager.setTrades(this.trades);
     this._syncTradeIdCache();
     this.isLoading = false;
     this.renderMetrics();
