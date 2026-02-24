@@ -241,7 +241,7 @@ def evaluate_timeframe_signal(
 
         base_mult = get_sl_base_mult(timeframe)
 
-        sl_pips = max(15.0, min(atr_pips * base_mult, 50.0))
+        sl_pips = max(20.0, min(atr_pips * base_mult, 50.0))
         tp_pips = sl_pips  # 勝率重視: TP = SL
     else:
         default_sl = params.atr_sl_multiplier * 10.0

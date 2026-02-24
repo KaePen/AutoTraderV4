@@ -599,6 +599,30 @@ class UnifiedTradeBot:
                     f"{sg_result.total_penalty:.2f}"
                 )
 
+            # ペナルティ上限フィルター（設定可能）
+            if (
+                self.config.penalty_cap < 0.8
+                and sg_result.total_penalty
+                >= self.config.penalty_cap
+            ):
+                return _filt_hold(
+                    f"ペナルティ上限: "
+                    f"{sg_result.total_penalty:.2f}"
+                    f" >= {self.config.penalty_cap}"
+                )
+
+            # トレンド強度上限フィルター
+            if (
+                self.config.trend_strength_max < 999.0
+                and regime_result.trend_strength
+                >= self.config.trend_strength_max
+            ):
+                return _filt_hold(
+                    f"トレンド強度過大: "
+                    f"{regime_result.trend_strength:.2f}"
+                    f" >= {self.config.trend_strength_max}"
+                )
+
             # LONDONオフ時間ブロック（hour=7はLONDON境界）
             if hour_utc == 7 and sg_result.total_penalty > 0:
                 return _filt_hold(

@@ -442,8 +442,20 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--consensus-threshold",
         type=float,
-        default=5.5,
-        help="コンセンサス閾値（デフォルト: 5.5）",
+        default=8.0,
+        help="コンセンサス閾値（デフォルト: 8.0）",
+    )
+    parser.add_argument(
+        "--penalty-cap",
+        type=float,
+        default=0.3,
+        help="ペナルティ上限（デフォルト: 0.3）",
+    )
+    parser.add_argument(
+        "--trend-strength-max",
+        type=float,
+        default=0.8,
+        help="トレンド強度上限（デフォルト: 0.8）",
     )
     # RANGE×DAY 0.5R部分利確（デフォルトON）
     parser.add_argument(
@@ -1049,6 +1061,8 @@ def run_single_backtest(args: argparse.Namespace):
         slippage_buffer_pips=args.slippage_buffer,
         tp_sl_ratio=args.tp_sl_ratio,
         consensus_threshold=args.consensus_threshold,
+        penalty_cap=args.penalty_cap,
+        trend_strength_max=args.trend_strength_max,
         bonus_max_positions=args.bonus_max_positions,
         bonus_score_threshold=args.bonus_score_threshold,
         enable_position_sizing=not args.no_position_sizing,

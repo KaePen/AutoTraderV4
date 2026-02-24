@@ -79,7 +79,7 @@ class TestUnifiedBotConfigNewFields:
         """フィルター閾値のデフォルト値"""
         config = UnifiedBotConfig()
         assert config.macd_slope_filter_threshold == -2.0
-        assert config.sl_min_pips == 15.0
+        assert config.sl_min_pips == 20.0
         assert config.sl_max_pips_default == 50.0
 
     def test_default_consensus_weights(self) -> None:
