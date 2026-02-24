@@ -6,7 +6,6 @@ const DashboardApp = {
   positions: [],
   trades: [],
   tradeSummary: null,
-  currentSignals: [],
   indicators: null,
   indicatorsAllTf: {},
   indicatorTf: localStorage.getItem('indicator_tf') || 'M15',
@@ -17,7 +16,6 @@ const DashboardApp = {
   tradeFilterDays: null,     // null = 全期間
   pollInterval: null,
   indicatorInterval: null,
-  signalWs: null,
   // WebSocket駆動フラグ（接続中はpollingを停止）
   wsActive: false,
   // トレーディングコントロール状態
@@ -63,23 +61,17 @@ const DashboardApp = {
     // 復元シンボルをUIに反映
     const sel = document.getElementById('symbol-selector');
     if (sel) sel.value = this.symbol;
-    const chartTitle = document.getElementById('chart-title');
-    if (chartTitle) chartTitle.textContent = this.symbol + ' チャート';
-
-    // チャート初期化
-    ChartManager.init('chart-container', this.symbol);
 
     // 指標タブ描画
     this.renderIndicatorTabs();
 
     // データ取得
     this.fetchAll();
-    this.fetchSignals();
     this.fetchIndicators();
     this.fetchTradingMode();
     this.fetchAnalysis();
 
-    // チャートは30秒毎にフル再取得（ローソク足確定検知・バックアップ）
+    // 30秒毎にフル再取得（データ更新バックアップ）
     this.pollInterval = setInterval(() => this.fetchAll(), 30000);
 
     // WS切断中フォールバック（10秒毎・必要最小限）
@@ -92,33 +84,11 @@ const DashboardApp = {
       }
     }, 10000);
 
-    // シグナルWebSocket（チャートマーカー更新）
-    this.signalWs = createWebSocketClient('/ws/signals');
-    this.signalWs.on('signal_update', (msg) => {
-      const signal = msg.data;
-      if (signal.symbol === this.symbol) {
-        const idx = this.currentSignals.findIndex((s) => s.signal_id === signal.signal_id);
-        if (idx >= 0) {
-          this.currentSignals[idx] = signal;
-        } else {
-          this.currentSignals.unshift(signal);
-          if (this.currentSignals.length > 3) this.currentSignals.length = 3;
-        }
-        ChartManager.setSignals(this.currentSignals);
-      }
-    });
-    this.signalWs.connect();
-
-    // ダッシュボードWebSocket（price_update + tick_update で全UI駆動）
+    // ダッシュボードWebSocket（tick_update で全UI駆動）
     this.dashWs = createWebSocketClient('/ws/dashboard');
-    // 高頻度: tick毎の価格更新 → チャートlastbar即時更新
-    this.dashWs.on('price_update', (msg) => {
+    // 高頻度: tick毎の価格更新
+    this.dashWs.on('price_update', () => {
       this.wsActive = true;
-      const { symbol, bid } = msg.data;
-      // 選択中シンボルのtickのみチャートに反映
-      if (bid > 0 && symbol === this.symbol) {
-        ChartManager.updateLastBar(bid);
-      }
     });
     // 1秒毎: フル処理完了 → 全UI一括更新
     this.dashWs.on('tick_update', (msg) => {
@@ -205,20 +175,11 @@ const DashboardApp = {
     // エンジン未起動ならパネル非表示（live/demo両方で表示）
     const m = this.tradingMode;
     const isLive = m && (m.mode === 'live' || m.mode === 'demo');
-    const posPanel = document.getElementById('position-panel');
     if (!isLive) {
       panel.classList.add('hidden');
-      // バックテスト時: Analysis非表示のためrow-span不要
-      if (posPanel) {
-        posPanel.classList.remove('lg:row-span-2');
-      }
       return;
     }
     panel.classList.remove('hidden');
-    // ライブ時: Analysis+Chartの2行を跨ぐ
-    if (posPanel) {
-      posPanel.classList.add('lg:row-span-2');
-    }
 
     // データなし or エンジン未起動（シンボル不一致）: プレースホルダ表示
     const noData = !a || (!a.engine_running && (!a.tf_scores || Object.keys(a.tf_scores).length === 0));
@@ -790,10 +751,6 @@ const DashboardApp = {
     // 非表示ネイティブselectも同期
     const sel = document.getElementById('symbol-selector');
     if (sel) sel.value = symbol;
-    // chart-titleも更新
-    const chartTitle = document.getElementById('chart-title');
-    if (chartTitle) chartTitle.textContent = symbol + ' チャート';
-    ChartManager.setSymbol(symbol);
     // ドロップダウンを閉じる
     const list = document.getElementById('symbol-dropdown-list');
     if (list) list.classList.add('hidden');
@@ -804,7 +761,6 @@ const DashboardApp = {
     this.renderTradingControl();
     this.fetchAll();
     this.fetchIndicators();
-    this.fetchSignals();
   },
 
   /** シンボルごとの自動トレードON/OFFトグル */
@@ -865,7 +821,6 @@ const DashboardApp = {
     if (pos.status === 'fulfilled') this.positions = pos.value;
     if (tr.status === 'fulfilled') this.trades = tr.value;
     if (summary.status === 'fulfilled') this.tradeSummary = summary.value;
-    ChartManager.setTrades(this.trades);
     this.renderMetrics();
     this.renderPositions();
     this.renderTradeHistory();
@@ -883,21 +838,10 @@ const DashboardApp = {
     if (pos.status === 'fulfilled') this.positions = pos.value;
     if (tr.status === 'fulfilled') this.trades = tr.value;
     if (summary.status === 'fulfilled') this.tradeSummary = summary.value;
-    ChartManager.setTrades(this.trades);
     this.isLoading = false;
     this.renderMetrics();
     this.renderPositions();
     this.renderTradeHistory();
-  },
-
-  /** シグナル取得（チャートマーカー更新用） */
-  async fetchSignals() {
-    try {
-      this.currentSignals = await getCurrentSignals(this.symbol);
-      ChartManager.setSignals(this.currentSignals);
-    } catch (e) {
-      this.currentSignals = [];
-    }
   },
 
   /** 指標取得（全TF並列取得してキャッシュ） */
