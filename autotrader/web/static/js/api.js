@@ -50,12 +50,6 @@ function getDashboard() {
   return fetchApi('/dashboard');
 }
 
-/** 現在のシグナル取得 */
-function getCurrentSignals(symbol) {
-  symbol = symbol || 'USDJPY';
-  return fetchApi(`/signals/current?symbol=${symbol}`);
-}
-
 /** シグナル履歴取得 */
 function getSignalHistory(symbol, limit, offset) {
   symbol = symbol || 'USDJPY';
