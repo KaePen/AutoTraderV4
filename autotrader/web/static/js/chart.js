@@ -375,9 +375,9 @@ const ChartManager = {
       }
 
       this._rawCandles = [...newCandles, ...this._rawCandles];
-      this._renderAllData(newCandles.length);
 
-      // インジケータも拡張取得してRSI同期ズレを防ぐ
+      // インジケータを先に取得（_rsiDataCountを更新してから描画しないと
+      // オフセット計算が狂いRSIが先頭にジャンプする）
       const totalCount = Math.min(this._rawCandles.length, 1000);
       try {
         const indData = await getIndicatorSeries(
@@ -390,6 +390,9 @@ const ChartManager = {
       } catch (_ie) {
         // インジケータ取得失敗はnon-critical
       }
+
+      // _rsiDataCount更新後にレンダリング（同期オフセットが正確）
+      this._renderAllData(newCandles.length);
     } catch (_e) {
       // 読み込み失敗時は次回スクロールで再試行
     } finally {
