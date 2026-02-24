@@ -137,14 +137,16 @@ class MT5Transport(ABC):
     @abstractmethod
     async def positions_get(
         self, symbol: str | None = None
-    ) -> list[dict]:
+    ) -> list[dict] | None:
         """オープンポジション取得
 
         Args:
             symbol: シンボル（Noneで全て）
 
         Returns:
-            list[dict]: ポジションデータ
+            list[dict] | None: ポジションデータ。
+                MT5がNoneを返した場合（接続エラー等）は
+                Noneをそのまま返す。
         """
         ...
 
@@ -341,8 +343,14 @@ class DirectTransport(MT5Transport):
 
     async def positions_get(
         self, symbol: str | None = None
-    ) -> list[dict]:
-        """オープンポジション取得"""
+    ) -> list[dict] | None:
+        """オープンポジション取得
+
+        Returns:
+            list[dict] | None: ポジションデータ。
+                MT5がNoneを返した場合（接続エラー等）は
+                Noneをそのまま返す。
+        """
         loop = asyncio.get_running_loop()
         if symbol:
             positions = await loop.run_in_executor(
@@ -356,7 +364,7 @@ class DirectTransport(MT5Transport):
                 None, self._mt5.positions_get
             )
         if positions is None:
-            return []
+            return None
         return [p._asdict() for p in positions]
 
     async def history_deals_get(
