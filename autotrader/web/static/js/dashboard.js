@@ -80,8 +80,8 @@ const DashboardApp = {
     this.fetchTradingMode();
     this.fetchAnalysis();
 
-    // ポジション経過/残り時間を1秒ごとにクライアント側でカウント
-    this._posTimeInterval = setInterval(() => this._tickPositionTimers(), 1000);
+    // ポジション経過/残り時間を1分ごとにクライアント側でカウントアップ
+    this._posTimeInterval = setInterval(() => this._tickPositionTimers(), 60000);
 
     // チャートは30秒毎にフル再取得（ローソク足確定検知・バックアップ）
     this.pollInterval = setInterval(() => this.fetchAll(), 30000);
@@ -1178,8 +1178,8 @@ const DashboardApp = {
         ${progressHtml}
         <div id="${detailId}" class="${detailCls}">
           ${priceRowHtml}
-        </div>
-        ${p.trade_id ? `<div class="mt-1 text-[9px] text-gray-700 tabular-nums truncate">ID: ${p.trade_id}</div>` : ''}`;
+          ${p.trade_id ? `<div class="mt-1 text-[9px] text-gray-700 tabular-nums truncate">ID: ${p.trade_id}</div>` : ''}
+        </div>`;
   },
 
   /** ポジションカードの詳細エリアをトグル */
@@ -1405,7 +1405,8 @@ const DashboardApp = {
   },
   /**
    * ポジション時間キャッシュを更新する。
-   * 新しいポジションデータが到着した際に呼び出す。
+   * opened_atは初回取得時のみ保存し、以降は上書きしない。
+   * ブラウザ再読み込みまでDB再取得なしでカウントアップする。
    */
   _updatePosTimeCache(positions) {
     const activeTickets = new Set();
@@ -1413,9 +1414,11 @@ const DashboardApp = {
       const t = Number(p.ticket);
       activeTickets.add(t);
       const existing = this._posTimeCache[t];
-      // opened_at からエポックmsを算出（常にクライアント側で経過計算の基準）
-      const openedAtMs = p.opened_at ? new Date(p.opened_at).getTime() : null;
-      // max_hold_minutes はサーバーから取得された場合のみ更新
+      // opened_at: キャッシュ済みなら上書きしない（初回ロードで固定）
+      const openedAtMs = (existing && existing.openedAtMs)
+        ? existing.openedAtMs
+        : (p.opened_at ? new Date(p.opened_at).getTime() : null);
+      // max_hold_minutes: サーバーから取得された場合のみ更新
       const maxHoldMin = p.max_hold_minutes != null
         ? p.max_hold_minutes
         : (existing ? existing.maxHoldMin : null);
@@ -1482,7 +1485,7 @@ const DashboardApp = {
   },
 
   /**
-   * 1秒ごとのタイマーコールバック。
+   * 1分ごとのタイマーコールバック。
    * DOM上の経過時間・残り時間テキストを直接更新する。
    * innerHTML全体の再描画を伴わないためレイアウトシフトが発生しない。
    */
