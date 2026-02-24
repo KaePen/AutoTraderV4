@@ -395,6 +395,10 @@ class TestManagePositionsNullSafety:
         engine._conn.session = MagicMock()
         engine._enable_auto_trade = True
 
+        # 事前にキャッシュを設定
+        stale_cache = [MagicMock(ticket=99999)]
+        engine._cached_positions = stale_cache
+
         engine._executor.get_open_positions_async = AsyncMock(
             return_value=None
         )
@@ -402,7 +406,8 @@ class TestManagePositionsNullSafety:
         # 例外が発生しないことを確認
         await engine._manage_positions()
 
-        # キャッシュが変更されないこと
+        # キャッシュが保持されること（Noneで上書きされない）
+        assert engine._cached_positions is stale_cache
         engine._executor.get_open_positions_async \
             .assert_called_once()
 

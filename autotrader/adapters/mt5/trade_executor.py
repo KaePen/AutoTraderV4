@@ -417,7 +417,11 @@ class MT5TradeExecutor(TradeExecutor):
     def get_open_positions(
         self, symbol: str | None = None
     ) -> list[Position]:
-        """オープンポジションを取得
+        """オープンポジションを取得（同期版）
+
+        非同期版がNone（MT5接続エラー）を返した場合は
+        空リストにフォールバックする。バックテスト等の
+        同期呼び出し元はリストを期待するため。
 
         Args:
             symbol: シンボル（Noneで全て）
@@ -426,9 +430,12 @@ class MT5TradeExecutor(TradeExecutor):
             list[Position]: ポジションリスト
         """
         import asyncio
-        return asyncio.get_event_loop().run_until_complete(
+        result = asyncio.get_event_loop().run_until_complete(
             self.get_open_positions_async(symbol)
         )
+        if result is None:
+            return []
+        return result
 
     async def get_open_positions_async(
         self, symbol: str | None = None

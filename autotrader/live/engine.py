@@ -1537,9 +1537,12 @@ class LiveTradingEngine:
         positions = await self._executor.get_open_positions_async(
             None
         )
-        # MT5接続エラー時はポジション管理をスキップ
+        # MT5接続エラー時は_cached_positionsを更新しない
+        # （一時的な切断時にUIが空になるのを防ぐ）
         if positions is None:
-            logger.debug("MT5ポジション取得失敗 — 管理スキップ")
+            logger.warning(
+                "MT5ポジション取得失敗 — 管理スキップ"
+            )
             return
         current_tickets = {pos.ticket for pos in positions}
 
