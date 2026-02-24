@@ -326,9 +326,8 @@ const DashboardApp = {
     const tfEl = document.getElementById('ap-tf-scores');
     if (tfEl && a.tf_scores) {
       const tfOrder = ['M1', 'M5', 'M15', 'M30', 'H1', 'H4', 'H8', 'D1'];
-      const tfs = Object.entries(a.tf_scores).sort((x, y) => {
-        return tfOrder.indexOf(x[0]) - tfOrder.indexOf(y[0]);
-      });
+      // tfOrderを基準に全TFを列挙。データなしはnull（グレー表示用）
+      const tfs = tfOrder.map(tf => [tf, a.tf_scores[tf] ?? null]);
       const bd = a.tf_breakdowns || {};
       const aligned = a.aligned_tfs || [];
 
@@ -339,14 +338,15 @@ const DashboardApp = {
         tfDirs[tf] = tfDirsRaw[tf] || 'HOLD';
       }
 
-      // コンセンサス投票サマリー
+      // コンセンサス投票サマリー（データあるTFのみカウント）
       let buyCount = 0, sellCount = 0, holdCount = 0;
-      for (const [tf] of tfs) {
+      for (const [tf, sc] of tfs) {
+        if (sc === null) continue;
         if (tfDirs[tf] === 'BUY') buyCount++;
         else if (tfDirs[tf] === 'SELL') sellCount++;
         else holdCount++;
       }
-      const total = tfs.length;
+      const total = buyCount + sellCount + holdCount;
       const buyPct = total > 0 ? (buyCount / total * 100) : 0;
       const sellPct = total > 0 ? (sellCount / total * 100) : 0;
       const holdPct = total > 0 ? (holdCount / total * 100) : 0;
@@ -417,6 +417,16 @@ const DashboardApp = {
 
       // TFカード
       const cardsHtml = tfs.map(([tf, sc]) => {
+        // データなし: グレーのプレースホルダーカード
+        if (sc === null) {
+          return `<div class="rounded border border-gray-800 bg-gray-800/20 px-2 py-1.5 opacity-40">
+          <div class="flex items-center justify-between mb-0.5">
+            <span class="text-[10px] text-gray-600 uppercase font-bold">${tf}</span>
+            <span class="text-xs font-bold tabular-nums text-gray-700">--</span>
+          </div>
+          <div class="w-full bg-gray-800/40 rounded-full h-1"></div>
+        </div>`;
+        }
         const isAligned = aligned.includes(tf);
         const dir = tfDirs[tf];
         const dirIcon = dir === 'BUY' ? '&#9650;' : dir === 'SELL' ? '&#9660;' : '&#9644;';
