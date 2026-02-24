@@ -1137,7 +1137,6 @@ const DashboardApp = {
             <span class="text-xs text-gray-600">&middot;</span>
             <span class="text-xs text-gray-400" data-elapsed-ticket="${p.ticket}">${this._fmtElapsedTime(p)}</span>
             <span class="text-xs inline-block" data-remaining-ticket="${p.ticket}">${this._fmtRemainingTimeInner(p)}</span>
-            ${p.trade_id ? `<span class="text-xs text-gray-600">&middot;</span><span class="text-xs text-gray-500 tabular-nums truncate max-w-[120px]" title="${p.trade_id}">ID:${p.trade_id}</span>` : ''}
           </div>
           <div class="flex items-center gap-2">
             <div class="flex items-baseline gap-1 ${pnlBg} px-2 py-0.5 rounded-md">
@@ -1150,7 +1149,8 @@ const DashboardApp = {
         ${progressHtml}
         <div id="${detailId}" class="${detailCls}">
           ${priceRowHtml}
-        </div>`;
+        </div>
+        ${p.trade_id ? `<div class="mt-1 text-[9px] text-gray-700 tabular-nums truncate">ID: ${p.trade_id}</div>` : ''}`;
   },
 
   /** ポジションカードの詳細エリアをトグル */
