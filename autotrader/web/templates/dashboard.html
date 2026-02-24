@@ -13,54 +13,55 @@
     <div class="card skeleton-card animate-pulse"><div class="h-3 skeleton w-16 mb-2"></div><div class="h-6 skeleton w-24"></div></div>
   </div>
 
-  <!-- Row 2-3: 左カラム(Analysis+Chart) + 右カラム(Position) -->
-  <!-- lg+: flex-1 で残りスペースを埋める -->
-  <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 lg:flex-1 lg:min-h-0">
-    <!-- 左カラム (2/3幅): Analysis + Chart を縦積み -->
-    <div class="lg:col-span-2 flex flex-col gap-4 min-h-0">
-      <!-- 分析パネル (ライブ時のみ表示) -->
-      <div id="analysis-panel" class="card border border-gray-700 hidden flex-shrink-0">
-        <div class="flex items-center gap-2 mb-3">
-          <h2 class="text-sm font-semibold text-gray-300 uppercase tracking-wider">Live Analysis</h2>
-          <span id="ap-direction-badge" class="inline-flex items-center px-2 py-0.5 rounded text-xs font-bold bg-gray-700 text-gray-400">--</span>
-          <span id="ap-score-text" class="text-[11px] tabular-nums text-gray-300 font-medium">-- / --</span>
-        </div>
-        <!-- スコアバー（中央0基準・左SELL/右BUY） -->
-        <div class="mb-3">
-          <!-- SELL/BUYラベル -->
-          <div class="flex items-center justify-between text-[9px] text-gray-600 mb-0.5">
-            <span>SELL</span>
-            <span>BUY</span>
-          </div>
-          <div class="w-full h-3 bg-gray-700 rounded-full overflow-hidden relative">
-            <!-- 中央から左右に伸びるバー -->
-            <div id="ap-score-bar" class="absolute top-0 h-full rounded-full transition-all duration-500 bg-gray-500" style="left:50%;width:0%"></div>
-            <!-- 中央線（0基準） -->
-            <div class="absolute top-0 left-1/2 w-px h-full bg-gray-400/60"></div>
-            <!-- 閾値マーカー（左右対称） -->
-            <div id="ap-threshold-sell" class="absolute top-0 w-0.5 h-full bg-yellow-400/70" style="left:30%"></div>
-            <div id="ap-threshold-buy" class="absolute top-0 w-0.5 h-full bg-yellow-400/70" style="left:70%"></div>
-          </div>
-        </div>
-        <!-- サブ指標 -->
-        <div class="grid grid-cols-3 gap-2 mb-3 text-xs">
-          <div class="bg-gray-800/50 rounded p-2">
-            <p class="text-gray-500 mb-0.5">HTF整合</p>
-            <p id="ap-htf" class="font-bold tabular-nums text-gray-300">--</p>
-          </div>
-          <div class="bg-gray-800/50 rounded p-2">
-            <p class="text-gray-500 mb-0.5">トレンド強度</p>
-            <p id="ap-trend" class="font-bold tabular-nums text-gray-300">--</p>
-          </div>
-          <div class="bg-gray-800/50 rounded p-2">
-            <p class="text-gray-500 mb-0.5">ペナルティ</p>
-            <p id="ap-penalty" class="font-bold tabular-nums text-gray-300">--</p>
-          </div>
-        </div>
-        <!-- 時間足スコア -->
-        <div id="ap-tf-scores" class="w-full"></div>
+  <!-- 分析パネル (ライブ時のみ表示) flex-shrink-0 で高さを確保しグリッドの外に配置 -->
+  <!-- グリッドの外に置くことでチャートとポジションパネルが常に同じ高さになる -->
+  <div id="analysis-panel" class="flex-shrink-0 card border border-gray-700 hidden">
+    <div class="flex items-center gap-2 mb-3">
+      <h2 class="text-sm font-semibold text-gray-300 uppercase tracking-wider">Live Analysis</h2>
+      <span id="ap-direction-badge" class="inline-flex items-center px-2 py-0.5 rounded text-xs font-bold bg-gray-700 text-gray-400">--</span>
+      <span id="ap-score-text" class="text-[11px] tabular-nums text-gray-300 font-medium">-- / --</span>
+    </div>
+    <!-- スコアバー（中央0基準・左SELL/右BUY） -->
+    <div class="mb-3">
+      <!-- SELL/BUYラベル -->
+      <div class="flex items-center justify-between text-[9px] text-gray-600 mb-0.5">
+        <span>SELL</span>
+        <span>BUY</span>
       </div>
+      <div class="w-full h-3 bg-gray-700 rounded-full overflow-hidden relative">
+        <!-- 中央から左右に伸びるバー -->
+        <div id="ap-score-bar" class="absolute top-0 h-full rounded-full transition-all duration-500 bg-gray-500" style="left:50%;width:0%"></div>
+        <!-- 中央線（0基準） -->
+        <div class="absolute top-0 left-1/2 w-px h-full bg-gray-400/60"></div>
+        <!-- 閾値マーカー（左右対称） -->
+        <div id="ap-threshold-sell" class="absolute top-0 w-0.5 h-full bg-yellow-400/70" style="left:30%"></div>
+        <div id="ap-threshold-buy" class="absolute top-0 w-0.5 h-full bg-yellow-400/70" style="left:70%"></div>
+      </div>
+    </div>
+    <!-- サブ指標 -->
+    <div class="grid grid-cols-3 gap-2 mb-3 text-xs">
+      <div class="bg-gray-800/50 rounded p-2">
+        <p class="text-gray-500 mb-0.5">HTF整合</p>
+        <p id="ap-htf" class="font-bold tabular-nums text-gray-300">--</p>
+      </div>
+      <div class="bg-gray-800/50 rounded p-2">
+        <p class="text-gray-500 mb-0.5">トレンド強度</p>
+        <p id="ap-trend" class="font-bold tabular-nums text-gray-300">--</p>
+      </div>
+      <div class="bg-gray-800/50 rounded p-2">
+        <p class="text-gray-500 mb-0.5">ペナルティ</p>
+        <p id="ap-penalty" class="font-bold tabular-nums text-gray-300">--</p>
+      </div>
+    </div>
+    <!-- 時間足スコア -->
+    <div id="ap-tf-scores" class="w-full"></div>
+  </div>
 
+  <!-- チャート + ポジション グリッド -->
+  <!-- lg+: flex-1 で残りスペースを埋める。両カラムは常に同じ高さ -->
+  <div class="grid grid-cols-1 lg:grid-cols-3 gap-4 lg:flex-1 lg:min-h-0">
+    <!-- 左カラム (2/3幅): チャートのみ -->
+    <div class="lg:col-span-2 flex flex-col min-h-0">
       <!-- チャートカード -->
       <div class="card flex flex-col flex-1 min-h-0">
         <div class="flex items-center justify-between mb-3 flex-shrink-0">
