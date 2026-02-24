@@ -417,15 +417,28 @@ const DashboardApp = {
 
       // TFカード
       const cardsHtml = tfs.map(([tf, sc]) => {
-        // データなし: グレーのプレースホルダーカード
+        // データなし: 通常カードと同じ構造でN/A表示（グレー・半透明）
         if (sc === null) {
-          return `<div class="rounded border border-gray-800 bg-gray-800/20 px-2 py-1.5 opacity-40">
-          <div class="flex items-center justify-between mb-0.5">
-            <span class="text-[10px] text-gray-600 uppercase font-bold">${tf}</span>
-            <span class="text-xs font-bold tabular-nums text-gray-700">--</span>
-          </div>
-          <div class="w-full bg-gray-800/40 rounded-full h-1"></div>
-        </div>`;
+          const naIndKeys = ['trend', 'adx', 'rsi', 'macd_slope', 'divergence', 'ema_cross', 'stochastic', 'htf'];
+          const naDetailHtml = naIndKeys.map(k => {
+            const lbl = indLabel[k] || k.slice(0, 4).toUpperCase();
+            return `<div class="flex items-center gap-1">
+              <span class="text-[8px] text-gray-700 w-7 text-right flex-shrink-0">${lbl}</span>
+              <div class="flex-1 h-1 bg-gray-800/40 rounded-full overflow-hidden"></div>
+              <span class="text-[9px] tabular-nums text-gray-700 w-6 text-right flex-shrink-0">--</span>
+            </div>`;
+          }).join('');
+          return `<div class="rounded border border-gray-700 bg-gray-800/40 px-2 py-1.5 opacity-50">
+            <div class="flex items-center justify-between mb-0.5">
+              <div class="flex items-center">
+                <span class="text-gray-600 text-[10px] mr-1">&#9644;</span>
+                <span class="text-[10px] text-gray-600 uppercase font-bold">${tf}</span>
+              </div>
+              <span class="text-xs font-bold tabular-nums text-gray-700">N/A</span>
+            </div>
+            <div class="w-full bg-gray-700/30 rounded-full h-1 mb-1"></div>
+            <div class="space-y-0.5">${naDetailHtml}</div>
+          </div>`;
         }
         const isAligned = aligned.includes(tf);
         const dir = tfDirs[tf];
