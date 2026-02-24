@@ -87,19 +87,6 @@ function getTradeSummary(symbol, days) {
   return fetchApi(`/trades/summary?${params.toString()}`);
 }
 
-/** 指標取得 */
-function getIndicators(symbol, timeframe) {
-  return fetchApi(`/indicators/${symbol}/${timeframe}`);
-}
-
-/** チャートオーバーレイ用指標時系列取得 */
-function getIndicatorSeries(symbol, timeframe, limit) {
-  limit = limit || 500;
-  return fetchApi(
-    `/indicators/${symbol}/${timeframe}/series?limit=${limit}`
-  );
-}
-
 /** ローソク足取得 */
 function getCandles(symbol, timeframe, limit, endTime) {
   limit = limit || 200;

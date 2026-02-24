@@ -63,16 +63,8 @@
       <div class="card flex flex-col flex-1 min-h-0">
         <div class="flex items-center justify-between mb-4 flex-shrink-0">
           <h2 id="chart-title" class="text-lg font-semibold text-gray-100">USDJPY チャート</h2>
-          <div class="flex items-center gap-2 flex-wrap">
-            <!-- 指標切り替え -->
-            <div class="flex items-center gap-1">
-              <span class="text-[10px] text-gray-500 uppercase tracking-wider mr-1">Ind</span>
-              <div id="chart-indicator-toggles" class="flex gap-1"></div>
-            </div>
-            <div class="w-px h-4 bg-gray-700"></div>
-            <!-- 時間足ボタン -->
-            <div id="chart-timeframe-buttons" class="flex gap-1"></div>
-          </div>
+          <!-- 時間足ボタン -->
+          <div id="chart-timeframe-buttons" class="flex gap-1"></div>
         </div>
         <!-- OHLC情報バー（クロスヘア連動） -->
         <div id="chart-ohlc-bar" class="flex items-center gap-3 px-1 pb-1 text-xs tabular-nums invisible flex-shrink-0">
@@ -124,6 +116,6 @@
 {% endblock %}
 
 {% block scripts %}
-<script src="/static/js/chart.js?v=4"></script>
+<script src="/static/js/chart.js?v=5"></script>
 <script src="/static/js/dashboard.js?v=17"></script>
 {% endblock %}
