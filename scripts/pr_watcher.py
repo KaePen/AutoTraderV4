@@ -95,7 +95,7 @@ CLAUDE_CMD = _find_claude_executable()
 
 # 設定
 REPO = "KaePen/AutoTraderV4"
-POLL_INTERVAL_SEC = 30
+POLL_INTERVAL_SEC = 5
 MAX_PARALLEL_MERGES = 3
 CLEANUP_EVERY_N_CYCLES = 10  # N周期ごとにフルクリーンアップ実行
 PROJECT_DIR = Path(os.environ.get("PROJECT_DIR", Path(__file__).parent.parent))
