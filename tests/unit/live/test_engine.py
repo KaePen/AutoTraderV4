@@ -277,6 +277,233 @@ class TestLiveTradingEngine:
         engine._executor.modify_position_async.assert_called_once()
 
 
+class TestCloseGhostDbRecords:
+    """_close_ghost_db_records テスト"""
+
+    def test_ゴーストレコードをis_open_falseに更新(
+        self, engine: LiveTradingEngine
+    ) -> None:
+        """MT5に存在しないDBレコードが決済済みになる"""
+        mock_ghost = MagicMock()
+        mock_ghost.ticket = 99999
+        mock_ghost.trade_id = "ghost-001"
+        mock_ghost.is_open = True
+
+        mock_active = MagicMock()
+        mock_active.ticket = 12345
+        mock_active.trade_id = "active-001"
+        mock_active.is_open = True
+
+        mock_query = MagicMock()
+        mock_query.filter.return_value.all.return_value = [
+            mock_ghost, mock_active,
+        ]
+        mock_session = MagicMock()
+        mock_session.query.return_value = mock_query
+
+        with (
+            patch(
+                "autotrader.config.settings.get_settings"
+            ) as mock_settings,
+            patch(
+                "autotrader.adapters.database.connection"
+                ".get_session"
+            ) as mock_get_session,
+        ):
+            mock_settings.return_value.database_url = (
+                "sqlite://"
+            )
+            mock_get_session.return_value.__enter__ = (
+                MagicMock(return_value=mock_session)
+            )
+            mock_get_session.return_value.__exit__ = (
+                MagicMock(return_value=False)
+            )
+
+            # ticket=12345のみMT5に存在
+            engine._close_ghost_db_records({12345})
+
+        # ゴーストのみ更新される
+        assert mock_ghost.is_open is False
+        assert mock_ghost.exit_reason == "GHOST_CLEANUP"
+        assert mock_ghost.closed_at is not None
+        # アクティブは変更なし
+        assert mock_active.is_open is True
+        mock_session.flush.assert_called_once()
+
+    def test_ゴーストなしの場合flushされない(
+        self, engine: LiveTradingEngine
+    ) -> None:
+        """全レコードがMT5に存在する場合はflushなし"""
+        mock_record = MagicMock()
+        mock_record.ticket = 12345
+        mock_record.is_open = True
+
+        mock_query = MagicMock()
+        mock_query.filter.return_value.all.return_value = [
+            mock_record,
+        ]
+        mock_session = MagicMock()
+        mock_session.query.return_value = mock_query
+
+        with (
+            patch(
+                "autotrader.config.settings.get_settings"
+            ) as mock_settings,
+            patch(
+                "autotrader.adapters.database.connection"
+                ".get_session"
+            ) as mock_get_session,
+        ):
+            mock_settings.return_value.database_url = (
+                "sqlite://"
+            )
+            mock_get_session.return_value.__enter__ = (
+                MagicMock(return_value=mock_session)
+            )
+            mock_get_session.return_value.__exit__ = (
+                MagicMock(return_value=False)
+            )
+
+            engine._close_ghost_db_records({12345})
+
+        mock_session.flush.assert_not_called()
+
+    def test_空セットで全レコードがゴーストになる(
+        self, engine: LiveTradingEngine
+    ) -> None:
+        """MT5にポジション0件→全DBレコードがゴースト"""
+        mock_r1 = MagicMock()
+        mock_r1.ticket = 11111
+        mock_r1.trade_id = "ghost-a"
+        mock_r1.is_open = True
+
+        mock_r2 = MagicMock()
+        mock_r2.ticket = 22222
+        mock_r2.trade_id = "ghost-b"
+        mock_r2.is_open = True
+
+        mock_query = MagicMock()
+        mock_query.filter.return_value.all.return_value = [
+            mock_r1, mock_r2,
+        ]
+        mock_session = MagicMock()
+        mock_session.query.return_value = mock_query
+
+        with (
+            patch(
+                "autotrader.config.settings.get_settings"
+            ) as mock_settings,
+            patch(
+                "autotrader.adapters.database.connection"
+                ".get_session"
+            ) as mock_get_session,
+        ):
+            mock_settings.return_value.database_url = (
+                "sqlite://"
+            )
+            mock_get_session.return_value.__enter__ = (
+                MagicMock(return_value=mock_session)
+            )
+            mock_get_session.return_value.__exit__ = (
+                MagicMock(return_value=False)
+            )
+
+            engine._close_ghost_db_records(set())
+
+        assert mock_r1.is_open is False
+        assert mock_r2.is_open is False
+        mock_session.flush.assert_called_once()
+
+    def test_DB例外時にログ出力しスキップ(
+        self, engine: LiveTradingEngine
+    ) -> None:
+        """DB接続エラーでも例外は伝播しない"""
+        with (
+            patch(
+                "autotrader.config.settings.get_settings",
+                side_effect=Exception("DB接続失敗"),
+            ),
+        ):
+            # 例外が伝播しないことを確認
+            engine._close_ghost_db_records({12345})
+
+
+class TestWriteCloseToDbPopTiming:
+    """_write_close_to_db popタイミング修正テスト"""
+
+    def test_DB書き込み失敗時にtrade_idが保持される(
+        self, engine: LiveTradingEngine
+    ) -> None:
+        """DB書き込みエラー時、_open_tradesにtrade_idが残る"""
+        engine._open_trades[12345] = "test-trade-id"
+        engine._pm.get_position = MagicMock(
+            return_value=None
+        )
+
+        with (
+            patch(
+                "autotrader.config.settings.get_settings",
+                side_effect=Exception("DB接続失敗"),
+            ),
+        ):
+            engine._write_close_to_db(
+                ticket=12345,
+                current_price=150.0,
+                action_reason="SL_HIT",
+            )
+
+        # DB書き込み失敗時もtrade_idが残る
+        assert 12345 in engine._open_trades
+        assert engine._open_trades[12345] == "test-trade-id"
+
+    def test_DB書き込み成功時にtrade_idがpopされる(
+        self, engine: LiveTradingEngine
+    ) -> None:
+        """DB書き込み成功後、_open_tradesからtrade_idが除去"""
+        engine._open_trades[12345] = "test-trade-id"
+        engine._pm.get_position = MagicMock(
+            return_value=None
+        )
+
+        mock_repo = MagicMock()
+        mock_repo.get_by_id.return_value = None
+        mock_session = MagicMock()
+
+        with (
+            patch(
+                "autotrader.config.settings.get_settings"
+            ) as mock_settings,
+            patch(
+                "autotrader.adapters.database.connection"
+                ".get_session"
+            ) as mock_get_session,
+            patch(
+                "autotrader.adapters.database.repositories"
+                ".TradeRepository",
+                return_value=mock_repo,
+            ),
+        ):
+            mock_settings.return_value.database_url = (
+                "sqlite://"
+            )
+            mock_get_session.return_value.__enter__ = (
+                MagicMock(return_value=mock_session)
+            )
+            mock_get_session.return_value.__exit__ = (
+                MagicMock(return_value=False)
+            )
+
+            engine._write_close_to_db(
+                ticket=12345,
+                current_price=150.0,
+                action_reason="SL_HIT",
+            )
+
+        # DB書き込み成功後にpopされる
+        assert 12345 not in engine._open_trades
+
+
 class TestChangeSymbol:
     """change_symbol() テスト"""
 
