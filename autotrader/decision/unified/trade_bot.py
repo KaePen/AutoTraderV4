@@ -25,6 +25,12 @@ from autotrader.constraint.soft_guard import (
 from autotrader.core.enums import MarketRegime, SignalType
 from autotrader.core.interfaces.position_sizing import SizingContext
 
+from .adaptive import (
+    AdaptiveOverrides,
+    AdaptiveParameterTuner,
+    TradeRecord,
+    TunerConfig,
+)
 from .config import RiskConfig, UnifiedBotConfig
 from .mode_aware_consensus import (
     ConsensusConfig,
@@ -183,11 +189,16 @@ class UnifiedTradeBot:
     ポジションサイジングを統合。
     """
 
-    def __init__(self, config: UnifiedBotConfig | None = None):
+    def __init__(
+        self,
+        config: UnifiedBotConfig | None = None,
+        adaptive_config: TunerConfig | None = None,
+    ):
         """初期化
 
         Args:
             config: ボット設定
+            adaptive_config: アダプティブ調整設定（Noneで無効）
         """
         self.config = config or UnifiedBotConfig()
         self.timeframes = self.config.timeframes
@@ -212,6 +223,13 @@ class UnifiedTradeBot:
 
         # フロー分析（オプション）
         self._flow_analyzer: Any = None
+
+        # アダプティブパラメータ調整（オプション）
+        self._adaptive_tuner: AdaptiveParameterTuner | None = (
+            AdaptiveParameterTuner(adaptive_config)
+            if adaptive_config is not None
+            else None
+        )
 
     def _init_new_components(self) -> None:
         """新アーキテクチャコンポーネントを初期化"""
@@ -468,8 +486,24 @@ class UnifiedTradeBot:
                 tp_pips=signal.tp_pips,
             )
 
-        # コンセンサス統合
-        consensus = self.consensus.consolidate(consensus_signals, plan)
+        # アダプティブオーバーライド取得
+        _overrides = (
+            self._adaptive_tuner.get_overrides()
+            if self._adaptive_tuner
+            else AdaptiveOverrides()
+        )
+
+        # コンセンサス統合（閾値オーバーライド適用）
+        _threshold_override = None
+        if _overrides.consensus_threshold_delta != 0.0:
+            _threshold_override = (
+                self.consensus.threshold
+                + _overrides.consensus_threshold_delta
+            )
+        consensus = self.consensus.consolidate(
+            consensus_signals, plan,
+            threshold_override=_threshold_override,
+        )
 
         if consensus.direction == SignalType.HOLD:
             if self._flow_analyzer:
@@ -599,16 +633,20 @@ class UnifiedTradeBot:
                     f"{sg_result.total_penalty:.2f}"
                 )
 
-            # ペナルティ上限フィルター（設定可能）
+            # ペナルティ上限フィルター（アダプティブ調整対応）
+            _eff_penalty_cap = (
+                self.config.penalty_cap
+                - _overrides.penalty_cap_delta
+            )
             if (
-                self.config.penalty_cap < 0.8
+                _eff_penalty_cap < 0.8
                 and sg_result.total_penalty
-                >= self.config.penalty_cap
+                >= _eff_penalty_cap
             ):
                 return _filt_hold(
                     f"ペナルティ上限: "
                     f"{sg_result.total_penalty:.2f}"
-                    f" >= {self.config.penalty_cap}"
+                    f" >= {_eff_penalty_cap:.2f}"
                 )
 
             # トレンド強度上限フィルター
@@ -785,7 +823,7 @@ class UnifiedTradeBot:
                 ))
             return _filt_hold("primary_tfデータなし")
 
-        sl_pips = primary_signal.sl_pips
+        sl_pips = primary_signal.sl_pips * _overrides.sl_multiplier
         tp_sl_ratio = (
             plan.get_recommended_tp_sl_ratio()
             * self.config.tp_sl_ratio
@@ -1303,17 +1341,21 @@ class UnifiedTradeBot:
         self,
         timestamp: datetime,
         pnl: float | None = None,
+        trade_record: TradeRecord | None = None,
     ) -> None:
         """取引実行時コールバック
 
         Args:
             timestamp: 取引時刻
             pnl: 損益（決済時のみ）
+            trade_record: アダプティブ調整用トレード記録
         """
         self.risk_manager.record_trade(timestamp)
         if pnl is not None:
             self.risk_manager.update_pnl(pnl)
             self.state.update_pnl(pnl)
+        if trade_record is not None and self._adaptive_tuner:
+            self._adaptive_tuner.record_trade(trade_record)
 
     def get_timeframe_signals(
         self,

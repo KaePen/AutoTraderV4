@@ -566,6 +566,24 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="セッション別スプレッド有効化",
     )
+    # --- アダプティブパラメータ調整 ---
+    parser.add_argument(
+        "--adaptive",
+        action="store_true",
+        help="アダプティブパラメータ調整を有効化",
+    )
+    parser.add_argument(
+        "--adaptive-window",
+        type=int,
+        default=30,
+        help="アダプティブ調整ウィンドウサイズ（デフォルト: 30）",
+    )
+    parser.add_argument(
+        "--adaptive-interval",
+        type=int,
+        default=5,
+        help="アダプティブ再評価間隔（デフォルト: 5）",
+    )
     # その他
     parser.add_argument(
         "--data-dir",
@@ -1128,6 +1146,19 @@ def run_single_backtest(args: argparse.Namespace):
             )
             _fundamental_csvs = None
 
+    # アダプティブパラメータ調整設定
+    _adaptive_config = None
+    if args.adaptive:
+        from autotrader.decision.unified.adaptive import TunerConfig
+        _adaptive_config = TunerConfig(
+            window_size=args.adaptive_window,
+            eval_interval=args.adaptive_interval,
+        )
+        logging.info(
+            "[Adaptive] 有効: window=%d, interval=%d",
+            args.adaptive_window, args.adaptive_interval,
+        )
+
     result = runner.run_unified(
         start_year,
         end_year,
@@ -1141,6 +1172,7 @@ def run_single_backtest(args: argparse.Namespace):
         fundamental_csv_list=_fundamental_csvs,
         fundamental_guard_minutes=args.fundamental_guard,
         max_year_workers=args.max_year_workers,
+        adaptive_config=_adaptive_config,
     )
 
     print_results(result)
