@@ -95,6 +95,7 @@ class TestMt5PositionToEntity:
             "sl": 149.800,
             "tp": 150.500,
             "time": 1700000000,
+            "time_msc": 1700000000000,
             "profit": 3750.0,
         }
         result = mt5_position_to_entity(data)
@@ -125,8 +126,25 @@ class TestMt5PositionToEntity:
         assert result.stop_loss is None  # sl=0 → None
         assert result.take_profit is None
 
-    def test_タイムスタンプUTC変換(self) -> None:
-        """UNIXタイムスタンプがUTC datetimeに変換される"""
+    def test_タイムスタンプUTC変換_time_msc優先(self) -> None:
+        """time_mscがあればUTCミリ秒エポックから変換される"""
+        data = {
+            "ticket": 1,
+            "type": 0,
+            "symbol": "USDJPY",
+            "volume": 0.1,
+            "price_open": 150.0,
+            "time": 9999999999,  # ブローカーTZ（不正確）
+            "time_msc": 1700000000000,  # UTCミリ秒（正確）
+            "profit": 0,
+        }
+        result = mt5_position_to_entity(data)
+        assert result.opened_at.tzinfo == timezone.utc
+        # time_mscが優先される（timeの値は無視）
+        assert result.opened_at.timestamp() == 1700000000.0
+
+    def test_タイムスタンプUTC変換_timeフォールバック(self) -> None:
+        """time_mscがない場合はtimeフィールドから変換"""
         data = {
             "ticket": 1,
             "type": 0,
@@ -138,6 +156,7 @@ class TestMt5PositionToEntity:
         }
         result = mt5_position_to_entity(data)
         assert result.opened_at.tzinfo == timezone.utc
+        assert result.opened_at.timestamp() == 1700000000.0
 
 
 class TestMt5RatesToDataframe:

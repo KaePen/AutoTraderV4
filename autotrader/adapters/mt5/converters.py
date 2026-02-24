@@ -89,11 +89,18 @@ def mt5_position_to_entity(data: dict) -> Position:
         else SignalType.SELL
     )
 
-    # MT5のタイムスタンプはUNIXエポック秒
-    time_val = data.get("time", 0)
-    opened_at = datetime.fromtimestamp(
-        int(time_val), tz=timezone.utc
-    )
+    # time_msc: UTCエポックミリ秒（正確）
+    # time: ブローカーサーバー時間のエポック秒（TZオフセットあり、不正確）
+    time_msc = data.get("time_msc", 0)
+    if time_msc:
+        opened_at = datetime.fromtimestamp(
+            int(time_msc) / 1000, tz=timezone.utc
+        )
+    else:
+        time_val = data.get("time", 0)
+        opened_at = datetime.fromtimestamp(
+            int(time_val), tz=timezone.utc
+        )
 
     return Position(
         position_id=str(data.get("ticket", 0)),
