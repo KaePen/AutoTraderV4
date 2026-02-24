@@ -2,12 +2,9 @@
 
 const ChartManager = {
   chart: null,
-  rsiChart: null,
   candleSeries: null,
   volumeSeries: null,
-  rsiSeries: null,
   containerEl: null,
-  rsiContainerEl: null,
   timeframe: 'M15',
   symbol: 'USDJPY',
   signals: [],
@@ -18,7 +15,6 @@ const ChartManager = {
 
   isLoading: false,
   resizeObserver: null,
-  rsiResizeObserver: null,
   // 最新バーキャッシュ（price_update高速更新用）
   _lastBarData: null,
   // 遅延読み込み用状態
@@ -26,8 +22,6 @@ const ChartManager = {
   _isLoadingMore: false,   // 追加読み込み中フラグ
   _hasMoreData: true,      // 過去データがまだある
   _loadBatchSize: 500,     // 1回の取得本数
-  _rsiDataCount: 0,        // RSIデータ数（メインとの同期オフセット計算用）
-  _rsiSyncLock: false,     // RSI同期を一時停止するフラグ
   // 指標シリーズ（オーバーレイ）
   _indicatorSeries: {
     ema12: null,
@@ -43,7 +37,6 @@ const ChartManager = {
   _indVisible: {
     ema: true,
     bb: true,
-    rsi: true,
     ema50: false,
     ema200: false,
     vwap: false,
@@ -207,9 +200,6 @@ const ChartManager = {
       this._onCrosshairMove(param);
     });
 
-    // RSIサブチャート
-    this._createRsiChart();
-
     // スクロール時の遅延読み込み
     this._setupLazyLoading();
 
@@ -221,90 +211,6 @@ const ChartManager = {
       }
     });
     this.resizeObserver.observe(this.containerEl);
-  },
-
-  /** RSIサブチャート作成 */
-  _createRsiChart() {
-    this.rsiContainerEl = document.getElementById('rsi-container');
-    if (!this.rsiContainerEl) return;
-
-    this.rsiChart = LightweightCharts.createChart(this.rsiContainerEl, {
-      layout: {
-        background: { type: 'solid', color: '#1f2937' },
-        textColor: '#9ca3af',
-      },
-      grid: {
-        vertLines: { color: '#374151' },
-        horzLines: { color: '#374151' },
-      },
-      crosshair: { mode: 1 },
-      rightPriceScale: {
-        borderColor: '#374151',
-        scaleMargins: { top: 0.1, bottom: 0.1 },
-      },
-      timeScale: {
-        borderColor: '#374151',
-        timeVisible: true,
-        secondsVisible: false,
-        tickMarkFormatter: (time, type) => this._jstTickMarkFormatter(time, type),
-      },
-    });
-
-    // RSI ライン
-    this.rsiSeries = this.rsiChart.addSeries(LightweightCharts.LineSeries, {
-      color: '#facc15',
-      lineWidth: 1.5,
-      priceLineVisible: false,
-      lastValueVisible: true,
-    });
-
-    // 70ライン
-    this._rsiLine70 = this.rsiChart.addSeries(LightweightCharts.LineSeries, {
-      color: '#ef4444',
-      lineWidth: 1,
-      lineStyle: 2,
-      priceLineVisible: false,
-      lastValueVisible: false,
-      crosshairMarkerVisible: false,
-    });
-
-    // 30ライン
-    this._rsiLine30 = this.rsiChart.addSeries(LightweightCharts.LineSeries, {
-      color: '#22c55e',
-      lineWidth: 1,
-      lineStyle: 2,
-      priceLineVisible: false,
-      lastValueVisible: false,
-      crosshairMarkerVisible: false,
-    });
-
-    // RSIリサイズ対応
-    this.rsiResizeObserver = new ResizeObserver((entries) => {
-      for (const entry of entries) {
-        const { width, height } = entry.contentRect;
-        if (this.rsiChart) this.rsiChart.applyOptions({ width, height });
-      }
-    });
-    this.rsiResizeObserver.observe(this.rsiContainerEl);
-
-    // タイムスケール同期（メイン→RSI）
-    // RSIはcandleデータからクライアント計算するためデータ数差は
-    // RSI期間（14）のみ。常に安定したオフセットで同期できる。
-    this.chart.timeScale().subscribeVisibleLogicalRangeChange(
-      (logicalRange) => {
-        if (!this.rsiChart || !logicalRange) return;
-        if (this._rsiSyncLock) return;
-        try {
-          const offset = this._rawCandles.length - this._rsiDataCount;
-          this.rsiChart.timeScale().setVisibleLogicalRange({
-            from: logicalRange.from - offset,
-            to: logicalRange.to - offset,
-          });
-        } catch (_e) {
-          // 範囲外やデータなしの場合は無視
-        }
-      }
-    );
   },
 
   /**
@@ -375,7 +281,6 @@ const ChartManager = {
       }
 
       this._rawCandles = [...newCandles, ...this._rawCandles];
-      // RSIはcandleから直接計算するので同期ズレなし
       this._renderAllData(newCandles.length);
     } catch (_e) {
       // 読み込み失敗時は次回スクロールで再試行
@@ -392,10 +297,6 @@ const ChartManager = {
    */
   _renderAllData(prependedCount = 0) {
     if (!this.candleSeries) return;
-
-    // 同期ロック: candle/RSI両方のsetDataが完了するまで
-    // subscribeVisibleLogicalRangeChange の発火を無視する
-    this._rsiSyncLock = true;
 
     // 現在の表示範囲を保存（追加読み込み時のみ）
     let savedRange = null;
@@ -432,13 +333,7 @@ const ChartManager = {
       this.volumeSeries.setData(volData);
     }
 
-    // RSI: candleデータからクライアントサイドで計算
-    // サーバーAPIに依存しないため遅延読み込み後も完全同期
-    this._updateRsiFromCandles();
-
     // 表示範囲を復元（追加分だけシフト）
-    // ロック解除後に設定して同期ハンドラが正しいオフセットで動作
-    this._rsiSyncLock = false;
     if (savedRange && prependedCount > 0) {
       this.chart.timeScale().setVisibleLogicalRange({
         from: savedRange.from + prependedCount,
@@ -487,7 +382,6 @@ const ChartManager = {
       { key: 'ema200', label: 'E200', color: '#e2e8f0' },
       { key: 'bb', label: 'BB', color: '#a78bfa' },
       { key: 'vwap', label: 'VWAP', color: '#4ade80' },
-      { key: 'rsi', label: 'RSI', color: '#facc15' },
     ];
 
     container.innerHTML = toggles.map(({ key, label, color }) => {
@@ -511,79 +405,10 @@ const ChartManager = {
     });
   },
 
-  /**
-   * RSIをcandleデータからクライアントサイドで計算（Wilder's RSI）
-   * サーバーAPI不要でcandleデータと完全同期する
-   *
-   * @param {number} period - RSI期間（デフォルト14）
-   * @returns {Array<{time: number, value: number}>} RSIデータポイント
-   */
-  _computeRSI(period = 14) {
-    const candles = this._rawCandles;
-    if (!candles || candles.length < period + 1) return [];
-
-    const closes = candles.map((c) => c.close);
-
-    // 価格変化量
-    const changes = [];
-    for (let i = 1; i < closes.length; i++) {
-      changes.push(closes[i] - closes[i - 1]);
-    }
-
-    // 初期平均（SMA）
-    let avgGain = 0;
-    let avgLoss = 0;
-    for (let i = 0; i < period; i++) {
-      if (changes[i] > 0) avgGain += changes[i];
-      else avgLoss += Math.abs(changes[i]);
-    }
-    avgGain /= period;
-    avgLoss /= period;
-
-    const rsi = [];
-    // 最初のRSI
-    rsi.push(avgLoss === 0 ? 100 : 100 - 100 / (1 + avgGain / avgLoss));
-
-    // Wilder's exponential smoothing
-    for (let i = period; i < changes.length; i++) {
-      const gain = changes[i] > 0 ? changes[i] : 0;
-      const loss = changes[i] < 0 ? Math.abs(changes[i]) : 0;
-      avgGain = (avgGain * (period - 1) + gain) / period;
-      avgLoss = (avgLoss * (period - 1) + loss) / period;
-      rsi.push(avgLoss === 0 ? 100 : 100 - 100 / (1 + avgGain / avgLoss));
-    }
-
-    // candle[period] 以降にRSI値をマッピング
-    return rsi.map((val, i) => ({
-      time: new Date(candles[i + period].time).getTime() / 1000,
-      value: val,
-    }));
-  },
-
-  /**
-   * candleデータからRSIを計算してRSIチャートを更新
-   * _renderAllData()から呼ばれる。candleと常に同じ時間範囲を持つ。
-   */
-  _updateRsiFromCandles() {
-    if (!this.rsiSeries) return;
-    const rsiData = this._computeRSI(14);
-    if (rsiData.length === 0) return;
-
-    this.rsiSeries.setData(rsiData);
-    this._rsiDataCount = rsiData.length;
-
-    // 70/30ライン（RSIデータと同じ時間範囲）
-    const line70 = rsiData.map((p) => ({ time: p.time, value: 70 }));
-    const line30 = rsiData.map((p) => ({ time: p.time, value: 30 }));
-    if (this._rsiLine70) this._rsiLine70.setData(line70);
-    if (this._rsiLine30) this._rsiLine30.setData(line30);
-  },
-
   /** 指標の表示/非表示を適用 */
   _applyIndicatorVisibility() {
     const showEma = this._indVisible.ema;
     const showBb = this._indVisible.bb;
-    const showRsi = this._indVisible.rsi;
     const showEma50 = this._indVisible.ema50;
     const showEma200 = this._indVisible.ema200;
     const showVwap = this._indVisible.vwap;
@@ -611,13 +436,6 @@ const ChartManager = {
     }
     if (this._indicatorSeries.vwap) {
       this._indicatorSeries.vwap.applyOptions({ visible: showVwap });
-    }
-
-    // RSIサブチャートの表示/非表示
-    if (this.rsiContainerEl) {
-      this.rsiContainerEl.parentElement.classList.toggle(
-        'hidden', !showRsi
-      );
     }
   },
 
@@ -725,7 +543,6 @@ const ChartManager = {
     this._rawCandles = [];
     this._hasMoreData = true;
     this._isLoadingMore = false;
-    this._rsiDataCount = 0;
     try {
       const [candleData, indData] = await Promise.allSettled([
         getCandles(this.symbol, this.timeframe, this._loadBatchSize),
@@ -793,9 +610,6 @@ const ChartManager = {
     if (this._indicatorSeries.bbLower) {
       this._indicatorSeries.bbLower.setData(toPoints(data.bb_lower));
     }
-
-    // RSIはcandleデータからクライアント計算するため
-    // _updateRsiFromCandles() で管理（_renderAllData内で呼び出し）
 
     this._applyIndicatorVisibility();
   },
@@ -1041,9 +855,6 @@ const ChartManager = {
     if (this.resizeObserver) {
       this.resizeObserver.disconnect();
     }
-    if (this.rsiResizeObserver) {
-      this.rsiResizeObserver.disconnect();
-    }
     if (this.chart) {
       // トレードライン・マーカーは chart.remove() で一括破棄される
       this._tradeLines = [];
@@ -1053,11 +864,6 @@ const ChartManager = {
       this.chart = null;
       this.candleSeries = null;
       this.volumeSeries = null;
-    }
-    if (this.rsiChart) {
-      this.rsiChart.remove();
-      this.rsiChart = null;
-      this.rsiSeries = null;
     }
   },
 };
