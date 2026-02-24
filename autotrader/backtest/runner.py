@@ -195,10 +195,14 @@ class BacktestRunner:
             )
 
         # ファイルログリスナー追加
+        # ログも通貨ペア別サブディレクトリに出力
+        # 例: logs/backtest_log/USDJPY/
         self._file_listener: FileEventListener | None = None
         if log_to_file:
+            _log_base = Path(log_dir)
+            _symbol_log_dir = _log_base / self.config.symbol
             self._file_listener = FileEventListener(
-                log_dir=log_dir, verbose=verbose
+                log_dir=_symbol_log_dir, verbose=verbose
             )
             self._emitter.add_listener(self._file_listener)
 
