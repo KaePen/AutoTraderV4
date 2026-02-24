@@ -294,7 +294,9 @@ const DashboardApp = {
       } else {
         barColor = 'bg-gray-500';
       }
-      scoreBar.className = 'absolute top-0 h-full rounded-full transition-all duration-500 ' + barColor;
+      // 中央起点のバー: 外側の端のみ丸め、中央側は角を立てる
+      const roundedCls = barDir === 'BUY' ? 'rounded-r-full' : barDir === 'SELL' ? 'rounded-l-full' : 'rounded-full';
+      scoreBar.className = 'absolute top-0 h-full ' + roundedCls + ' transition-all duration-500 ' + barColor;
     }
     // 閾値マーカー（左右対称に配置）
     if (thSell || thBuy) {
