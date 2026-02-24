@@ -27,6 +27,7 @@ const ChartManager = {
   _hasMoreData: true,      // 過去データがまだある
   _loadBatchSize: 500,     // 1回の取得本数
   _rsiDataCount: 0,        // RSIデータ数（メインとの同期オフセット計算用）
+  _rsiSyncLock: false,     // RSI同期を一時停止するフラグ
   // 指標シリーズ（オーバーレイ）
   _indicatorSeries: {
     ema12: null,
@@ -286,16 +287,15 @@ const ChartManager = {
     });
     this.rsiResizeObserver.observe(this.rsiContainerEl);
 
-    // タイムスケール同期（メイン→RSI オフセット補正付き論理範囲）
-    // 遅延読み込みでメインのデータ数が増えるとRSIとの差分が生じるため、
-    // 論理範囲をオフセット補正して正確に同期する
+    // タイムスケール同期（メイン→RSI）
+    // RSIはcandleデータからクライアント計算するためデータ数差は
+    // RSI期間（14）のみ。常に安定したオフセットで同期できる。
     this.chart.timeScale().subscribeVisibleLogicalRangeChange(
       (logicalRange) => {
         if (!this.rsiChart || !logicalRange) return;
+        if (this._rsiSyncLock) return;
         try {
-          const mainCount = this._rawCandles.length;
-          const rsiCount = this._rsiDataCount || mainCount;
-          const offset = mainCount - rsiCount;
+          const offset = this._rawCandles.length - this._rsiDataCount;
           this.rsiChart.timeScale().setVisibleLogicalRange({
             from: logicalRange.from - offset,
             to: logicalRange.to - offset,
@@ -375,23 +375,7 @@ const ChartManager = {
       }
 
       this._rawCandles = [...newCandles, ...this._rawCandles];
-
-      // インジケータを先に取得（_rsiDataCountを更新してから描画しないと
-      // オフセット計算が狂いRSIが先頭にジャンプする）
-      const totalCount = Math.min(this._rawCandles.length, 1000);
-      try {
-        const indData = await getIndicatorSeries(
-          this.symbol, this.timeframe, totalCount
-        );
-        // TF/シンボル変更チェック（await後）
-        if (this.symbol === symbolBefore && this.timeframe === tfBefore && indData) {
-          this._updateIndicators(indData);
-        }
-      } catch (_ie) {
-        // インジケータ取得失敗はnon-critical
-      }
-
-      // _rsiDataCount更新後にレンダリング（同期オフセットが正確）
+      // RSIはcandleから直接計算するので同期ズレなし
       this._renderAllData(newCandles.length);
     } catch (_e) {
       // 読み込み失敗時は次回スクロールで再試行
@@ -408,6 +392,10 @@ const ChartManager = {
    */
   _renderAllData(prependedCount = 0) {
     if (!this.candleSeries) return;
+
+    // 同期ロック: candle/RSI両方のsetDataが完了するまで
+    // subscribeVisibleLogicalRangeChange の発火を無視する
+    this._rsiSyncLock = true;
 
     // 現在の表示範囲を保存（追加読み込み時のみ）
     let savedRange = null;
@@ -444,7 +432,13 @@ const ChartManager = {
       this.volumeSeries.setData(volData);
     }
 
+    // RSI: candleデータからクライアントサイドで計算
+    // サーバーAPIに依存しないため遅延読み込み後も完全同期
+    this._updateRsiFromCandles();
+
     // 表示範囲を復元（追加分だけシフト）
+    // ロック解除後に設定して同期ハンドラが正しいオフセットで動作
+    this._rsiSyncLock = false;
     if (savedRange && prependedCount > 0) {
       this.chart.timeScale().setVisibleLogicalRange({
         from: savedRange.from + prependedCount,
@@ -515,6 +509,74 @@ const ChartManager = {
         this.renderIndicatorToggles();
       });
     });
+  },
+
+  /**
+   * RSIをcandleデータからクライアントサイドで計算（Wilder's RSI）
+   * サーバーAPI不要でcandleデータと完全同期する
+   *
+   * @param {number} period - RSI期間（デフォルト14）
+   * @returns {Array<{time: number, value: number}>} RSIデータポイント
+   */
+  _computeRSI(period = 14) {
+    const candles = this._rawCandles;
+    if (!candles || candles.length < period + 1) return [];
+
+    const closes = candles.map((c) => c.close);
+
+    // 価格変化量
+    const changes = [];
+    for (let i = 1; i < closes.length; i++) {
+      changes.push(closes[i] - closes[i - 1]);
+    }
+
+    // 初期平均（SMA）
+    let avgGain = 0;
+    let avgLoss = 0;
+    for (let i = 0; i < period; i++) {
+      if (changes[i] > 0) avgGain += changes[i];
+      else avgLoss += Math.abs(changes[i]);
+    }
+    avgGain /= period;
+    avgLoss /= period;
+
+    const rsi = [];
+    // 最初のRSI
+    rsi.push(avgLoss === 0 ? 100 : 100 - 100 / (1 + avgGain / avgLoss));
+
+    // Wilder's exponential smoothing
+    for (let i = period; i < changes.length; i++) {
+      const gain = changes[i] > 0 ? changes[i] : 0;
+      const loss = changes[i] < 0 ? Math.abs(changes[i]) : 0;
+      avgGain = (avgGain * (period - 1) + gain) / period;
+      avgLoss = (avgLoss * (period - 1) + loss) / period;
+      rsi.push(avgLoss === 0 ? 100 : 100 - 100 / (1 + avgGain / avgLoss));
+    }
+
+    // candle[period] 以降にRSI値をマッピング
+    return rsi.map((val, i) => ({
+      time: new Date(candles[i + period].time).getTime() / 1000,
+      value: val,
+    }));
+  },
+
+  /**
+   * candleデータからRSIを計算してRSIチャートを更新
+   * _renderAllData()から呼ばれる。candleと常に同じ時間範囲を持つ。
+   */
+  _updateRsiFromCandles() {
+    if (!this.rsiSeries) return;
+    const rsiData = this._computeRSI(14);
+    if (rsiData.length === 0) return;
+
+    this.rsiSeries.setData(rsiData);
+    this._rsiDataCount = rsiData.length;
+
+    // 70/30ライン（RSIデータと同じ時間範囲）
+    const line70 = rsiData.map((p) => ({ time: p.time, value: 70 }));
+    const line30 = rsiData.map((p) => ({ time: p.time, value: 30 }));
+    if (this._rsiLine70) this._rsiLine70.setData(line70);
+    if (this._rsiLine30) this._rsiLine30.setData(line30);
   },
 
   /** 指標の表示/非表示を適用 */
@@ -732,18 +794,8 @@ const ChartManager = {
       this._indicatorSeries.bbLower.setData(toPoints(data.bb_lower));
     }
 
-    // RSIサブチャート
-    if (this.rsiSeries && data.rsi && data.rsi.length > 0) {
-      const rsiPoints = toPoints(data.rsi);
-      this.rsiSeries.setData(rsiPoints);
-      this._rsiDataCount = rsiPoints.length;
-
-      // 70/30 ライン（RSIデータと同じ時間範囲）
-      const line70 = rsiPoints.map((p) => ({ time: p.time, value: 70 }));
-      const line30 = rsiPoints.map((p) => ({ time: p.time, value: 30 }));
-      if (this._rsiLine70) this._rsiLine70.setData(line70);
-      if (this._rsiLine30) this._rsiLine30.setData(line30);
-    }
+    // RSIはcandleデータからクライアント計算するため
+    // _updateRsiFromCandles() で管理（_renderAllData内で呼び出し）
 
     this._applyIndicatorVisibility();
   },
