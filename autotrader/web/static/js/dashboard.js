@@ -6,14 +6,12 @@ const DashboardApp = {
   positions: [],
   trades: [],
   tradeSummary: null,
-  currentSignals: [],
   isLoading: true,
   tradeHistoryExpanded: true,
   // トレード履歴フィルター
   tradeFilterSymbol: null,   // null = 全通貨ペア
   tradeFilterDays: null,     // null = 全期間
   pollInterval: null,
-  signalWs: null,
   // WebSocket駆動フラグ（接続中はpollingを停止）
   wsActive: false,
   // トレーディングコントロール状態
@@ -76,7 +74,6 @@ const DashboardApp = {
 
     // データ取得
     this.fetchAll();
-    this.fetchSignals();
     this.fetchTradingMode();
     this.fetchAnalysis();
 
@@ -94,23 +91,6 @@ const DashboardApp = {
         this.fetchTradingMode();
       }
     }, 10000);
-
-    // シグナルWebSocket（チャートマーカー更新）
-    this.signalWs = createWebSocketClient('/ws/signals');
-    this.signalWs.on('signal_update', (msg) => {
-      const signal = msg.data;
-      if (signal.symbol === this.symbol) {
-        const idx = this.currentSignals.findIndex((s) => s.signal_id === signal.signal_id);
-        if (idx >= 0) {
-          this.currentSignals[idx] = signal;
-        } else {
-          this.currentSignals.unshift(signal);
-          if (this.currentSignals.length > 3) this.currentSignals.length = 3;
-        }
-        ChartManager.setSignals(this.currentSignals);
-      }
-    });
-    this.signalWs.connect();
 
     // ダッシュボードWebSocket（price_update + tick_update で全UI駆動）
     this.dashWs = createWebSocketClient('/ws/dashboard');
@@ -816,7 +796,6 @@ const DashboardApp = {
     this.fetchAnalysis();
     this.renderTradingControl();
     this.fetchAll();
-    this.fetchSignals();
   },
 
   /** シンボルごとの自動トレードON/OFFトグル */
@@ -915,16 +894,6 @@ const DashboardApp = {
     this.renderMetrics();
     this.renderPositions();
     this.renderTradeHistory();
-  },
-
-  /** シグナル取得（チャートマーカー更新用） */
-  async fetchSignals() {
-    try {
-      this.currentSignals = await getCurrentSignals(this.symbol);
-      ChartManager.setSignals(this.currentSignals);
-    } catch (e) {
-      this.currentSignals = [];
-    }
   },
 
   // ── 描画メソッド ──

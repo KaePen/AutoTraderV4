@@ -7,7 +7,6 @@ const ChartManager = {
   containerEl: null,
   timeframe: 'M15',
   symbol: 'USDJPY',
-  signals: [],
   _trades: [],
   _tradeLines: [],        // トレードライン LineSeries のリスト
   _openTradeLineRefs: [], // オープン中ポジションのラインシリーズ（tick更新用）
@@ -405,12 +404,6 @@ const ChartManager = {
     this._renderAllData(0);
   },
 
-  /** シグナル設定 */
-  setSignals(signals) {
-    this.signals = signals;
-    this._applyMarkers();
-  },
-
   /** トレード設定（エントリー/エグジットマーカー更新） */
   setTrades(trades) {
     this._trades = trades || [];
@@ -419,28 +412,13 @@ const ChartManager = {
   },
 
   /**
-   * シグナルマーカーとトレードマーカーを統合してチャートに描画
+   * トレードマーカーをチャートに描画
    * v5: createSeriesMarkers プリミティブで管理
-   * トレードマーカーはエントリー/エグジット価格位置に正確に表示
+   * エントリー/エグジット価格位置に正確に表示
    */
   _applyMarkers() {
     if (!this.candleSeries) return;
     const markers = [];
-
-    // シグナルマーカー（価格情報なし → belowBar/aboveBar）
-    if (this.signals && this.signals.length > 0) {
-      for (const s of this.signals) {
-        if (s.timeframe !== this.timeframe) continue;
-        if (s.signal_type === 'HOLD') continue;
-        markers.push({
-          time: this._toChartTime(s.created_at),
-          position: s.signal_type === 'BUY' ? 'belowBar' : 'aboveBar',
-          color: s.signal_type === 'BUY' ? '#60a5fa' : '#f87171',
-          shape: s.signal_type === 'BUY' ? 'arrowUp' : 'arrowDown',
-          text: s.signal_type + ' ' + (s.confidence * 100).toFixed(0) + '%',
-        });
-      }
-    }
 
     // トレードマーカー（atPriceMiddle + price で正確な価格位置に表示）
     if (this._trades && this._trades.length > 0) {
@@ -601,7 +579,6 @@ const ChartManager = {
 
     // 旧シンボルのキャッシュをクリア
     this._lastBarData = null;
-    this.signals = [];
     this._trades = [];
 
     // 旧トレードラインを即座に削除
