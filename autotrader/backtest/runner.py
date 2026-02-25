@@ -1055,6 +1055,12 @@ class BacktestRunner:
                             f"[Fundamental] イベントLLM "
                             f"{_llm_total}件読込"
                         )
+                # Phase 2b: FundamentalMemory有効化
+                if _bot_cfg.fundamental_assessor_enabled:
+                    fundamental_provider.enable_memory()
+                    logger.info(
+                        "[Fundamental] メモリ蓄積有効"
+                    )
             except Exception as e:
                 logger.warning(
                     f"[Fundamental] CSV読込失敗（無効化）: {e}"
@@ -1857,7 +1863,25 @@ class BacktestRunner:
                     continue  # 超重要指標日はスキップ
 
             # 統合ボットでシグナル生成
-            consolidated = bot.generate_signal(current_time, candle)
+            # Phase 2b: FundamentalMemoryスナップショットを渡す
+            _fund_mem_snap = None
+            if (
+                fundamental_provider is not None
+                and hasattr(fundamental_provider, "memory")
+                and fundamental_provider.memory is not None
+            ):
+                _fund_mem_snap = (
+                    fundamental_provider.memory.snapshot()
+                )
+            consolidated = bot.generate_signal(
+                current_time, candle,
+                fundamental_ctx=(
+                    _fctx
+                    if fundamental_provider is not None
+                    else None
+                ),
+                fundamental_memory=_fund_mem_snap,
+            )
 
             # シグナルイベント発行（HOLD以外）
             if consolidated.direction.value != "HOLD":
@@ -1920,9 +1944,14 @@ class BacktestRunner:
                     consolidated.buy_score,
                     consolidated.sell_score,
                 )
+            # Phase 2b: ファンダメンタル評価をPMへ渡す
+            _fund_assess = getattr(
+                bot, "_last_fundamental_assessment", None,
+            )
             simulator.process_candle(
                 candle, signal,
                 consensus_scores=_consensus_scores,
+                fundamental_assessment=_fund_assess,
             )
 
             # 新規ポジション検出
