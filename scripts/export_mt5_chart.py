@@ -69,19 +69,34 @@ def connect_mt5() -> None:
         print(f"MT5接続完了: {info.name} (build {info.build})")
 
 
+def _subtract_months(dt: datetime, months: int) -> datetime:
+    """日時からNヶ月遡った月初を返す。"""
+    m = dt.month - months
+    y = dt.year
+    while m <= 0:
+        m += 12
+        y -= 1
+    return dt.replace(year=y, month=m, day=1)
+
+
 def fetch_rates(
     symbol: str,
     timeframe_name: str,
     start: datetime,
     end: datetime,
+    target_start: datetime | None = None,
 ) -> pd.DataFrame | None:
     """MT5から指定期間のレートを取得する。
+
+    小さいタイムフレームでバー数上限に引っかかる場合、
+    lookback期間を段階的に短縮してリトライする。
 
     Args:
         symbol: 通貨ペア名（例: USDJPY）
         timeframe_name: タイムフレーム文字列（例: M5, H1）
-        start: 取得開始日時（UTC）
+        start: 取得開始日時（UTC、lookback含む）
         end: 取得終了日時（UTC）
+        target_start: 本来の対象開始日（リトライ時の下限）
 
     Returns:
         取得したDataFrame。データなしの場合はNone。
@@ -91,16 +106,38 @@ def fetch_rates(
         print(f"  不明なタイムフレーム: {timeframe_name}", file=sys.stderr)
         return None
 
-    rates = mt5.copy_rates_range(symbol, tf_const, start, end)
-    if rates is None or len(rates) == 0:
-        err = mt5.last_error()
-        print(f"  {timeframe_name}: データなし (error={err})")
-        return None
+    if target_start is None:
+        target_start = start
 
-    df = pd.DataFrame(rates)
-    # MT5のtime列はUNIXタイムスタンプ（秒）
-    df["time"] = pd.to_datetime(df["time"], unit="s", utc=True)
-    return df
+    # lookbackを段階的に短縮する候補リスト
+    fallback_starts = [start]
+    for months_back in [4, 3, 2, 1]:
+        fb = _subtract_months(end, months_back)
+        if fb > start:
+            fallback_starts.append(fb)
+    # 最低でも対象期間は確保
+    if target_start > start:
+        fallback_starts.append(target_start)
+
+    for attempt_start in fallback_starts:
+        rates = mt5.copy_rates_range(
+            symbol, tf_const, attempt_start, end,
+        )
+        if rates is not None and len(rates) > 0:
+            if attempt_start != start:
+                print(
+                    f"(lookback短縮: {attempt_start:%Y-%m-%d}~) ",
+                    end="",
+                )
+            df = pd.DataFrame(rates)
+            df["time"] = pd.to_datetime(
+                df["time"], unit="s", utc=True,
+            )
+            return df
+
+    err = mt5.last_error()
+    print(f"  {timeframe_name}: データなし (error={err})")
+    return None
 
 
 def format_mt5_csv(df: pd.DataFrame) -> str:
@@ -261,7 +298,9 @@ def main() -> None:
     saved = 0
     for tf in timeframes:
         print(f"取得中: {symbol} {tf} ...", end=" ")
-        df = fetch_rates(symbol, tf, actual_start, target_end)
+        df = fetch_rates(
+            symbol, tf, actual_start, target_end, target_start,
+        )
         if df is None or df.empty:
             continue
 
