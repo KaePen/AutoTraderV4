@@ -281,6 +281,7 @@ class TradeSimulator:
         candle: Candle,
         signal: Signal | None = None,
         consensus_scores: tuple[float, float] | None = None,
+        fundamental_assessment: object | None = None,
     ) -> list[Trade]:
         """足データを処理
 
@@ -292,6 +293,7 @@ class TradeSimulator:
             candle: 現在の足データ
             signal: トレードシグナル（任意）
             consensus_scores: (buy_score, sell_score) コンセンサス逆転exit用
+            fundamental_assessment: ファンダメンタル評価結果
 
         Returns:
             list[Trade]: この足で発生したトレード（決済含む）
@@ -319,6 +321,9 @@ class TradeSimulator:
                     close_result = self._check_exit_conditions_pm(
                         pos, candle, sig_type,
                         consensus_scores=consensus_scores,
+                        fundamental_assessment=(
+                            fundamental_assessment
+                        ),
                     )
                 else:
                     close_result = self._check_exit_conditions(
@@ -363,6 +368,9 @@ class TradeSimulator:
                     close_result = self._check_exit_conditions_pm(
                         position, candle, sig_type,
                         consensus_scores=consensus_scores,
+                        fundamental_assessment=(
+                            fundamental_assessment
+                        ),
                     )
                 else:
                     close_result = self._check_exit_conditions(
@@ -492,6 +500,7 @@ class TradeSimulator:
         candle: Candle,
         current_signal: SignalType | None = None,
         consensus_scores: tuple[float, float] | None = None,
+        fundamental_assessment: object | None = None,
     ) -> tuple[float, ExitReason, float] | None:
         """PositionManager経由の決済条件チェック
 
@@ -503,6 +512,7 @@ class TradeSimulator:
             candle: 現在の足データ
             current_signal: 現在のシグナル
             consensus_scores: (buy_score, sell_score) コンセンサス逆転exit用
+            fundamental_assessment: ファンダメンタル評価結果
 
         Returns:
             tuple | None: (fill_price, reason, trigger_price)
@@ -537,6 +547,7 @@ class TradeSimulator:
             current_signal=current_signal,
             buy_score=_buy_score,
             sell_score=_sell_score,
+            fundamental_assessment=fundamental_assessment,
         )
 
         if action.action_type == ManagementActionType.FULL_CLOSE:

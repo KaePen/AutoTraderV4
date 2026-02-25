@@ -466,6 +466,7 @@ class PositionManager:
         current_signal: SignalType | None = None,
         buy_score: float = 0.0,
         sell_score: float = 0.0,
+        fundamental_assessment: object | None = None,
     ) -> ManagementAction:
         """ポジションを評価
 
@@ -477,6 +478,7 @@ class PositionManager:
             current_signal: 現在のシグナル（反転チェック用）
             buy_score: BUY方向コンセンサススコア
             sell_score: SELL方向コンセンサススコア
+            fundamental_assessment: ファンダメンタル評価結果
 
         Returns:
             ManagementAction: 管理アクション
@@ -547,7 +549,10 @@ class PositionManager:
                 return action
 
         # 7. トレーリング更新
-        action = self._check_trailing(position, current_price, atr)
+        action = self._check_trailing(
+            position, current_price, atr,
+            fundamental_assessment=fundamental_assessment,
+        )
         if action is not None:
             return action
 
@@ -1297,6 +1302,7 @@ class PositionManager:
         position: ManagedPosition,
         current_price: float,
         atr: float,
+        fundamental_assessment: object | None = None,
     ) -> ManagementAction | None:
         """トレーリングチェック"""
         if position.current_r < self.config.trailing_start_r:
@@ -1306,6 +1312,18 @@ class PositionManager:
         if atr <= 0:
             return None
         trail_distance = atr * self.config.trailing_atr_multiplier
+
+        # Phase 2b: ファンダメンタル評価でSL距離調整
+        # 低収束時はSLを引き締め（乗数<1.0）
+        if (
+            fundamental_assessment is not None
+            and hasattr(
+                fundamental_assessment, "trailing_sl_multiplier"
+            )
+        ):
+            trail_distance *= (
+                fundamental_assessment.trailing_sl_multiplier
+            )
 
         if position.direction == SignalType.BUY:
             new_sl = position.highest_price - trail_distance

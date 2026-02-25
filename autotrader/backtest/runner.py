@@ -1944,9 +1944,14 @@ class BacktestRunner:
                     consolidated.buy_score,
                     consolidated.sell_score,
                 )
+            # Phase 2b: ファンダメンタル評価をPMへ渡す
+            _fund_assess = getattr(
+                bot, "_last_fundamental_assessment", None,
+            )
             simulator.process_candle(
                 candle, signal,
                 consensus_scores=_consensus_scores,
+                fundamental_assessment=_fund_assess,
             )
 
             # 新規ポジション検出

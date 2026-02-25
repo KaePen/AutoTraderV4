@@ -238,6 +238,9 @@ class UnifiedTradeBot:
             else None
         )
 
+        # Phase 2b: 直近のファンダメンタル評価結果
+        self._last_fundamental_assessment: Any = None
+
     def _init_new_components(self) -> None:
         """新アーキテクチャコンポーネントを初期化"""
         # レジーム検出器
@@ -618,6 +621,7 @@ class UnifiedTradeBot:
         _fund_assessment = self._assess_fundamental(
             fundamental_ctx, fundamental_memory,
         )
+        self._last_fundamental_assessment = _fund_assessment
 
         # Phase 2b: ファンダメンタル方向フィルター
         if _fund_assessment is not None:
