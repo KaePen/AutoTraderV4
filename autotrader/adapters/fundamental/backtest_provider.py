@@ -631,11 +631,10 @@ class BacktestFundamentalProvider:
                 )
                 liquidity_factor = min(liquidity_factor, liq)
 
-        # --- 注意度合成（max） ---
+        # --- 注意度合成（全アクティブイベントのmax） ---
         event_caution_level = max(
             rec.trade_caution_level
             for rec, infl in active
-            if infl > 0.1
         )
 
         # --- 収束進捗（最も未収束なもの） ---
@@ -833,10 +832,34 @@ class BacktestFundamentalProvider:
                     "trade_caution_level", ""
                 )))
             ),
-            is_holiday=bool(
-                _HOLIDAY_RE.search(event_name)
+            is_holiday=self._parse_is_holiday(
+                row, event_name,
             ),
         )
+
+    @staticmethod
+    def _parse_is_holiday(
+        row: dict, event_name: str,
+    ) -> bool:
+        """CSVの is_holiday カラムを読み取り
+
+        カラムが存在する場合はその値を使用。
+        存在しない場合はevent_nameからの正規表現判定にフォールバック。
+
+        Args:
+            row: CSV行辞書
+            event_name: イベント名称
+
+        Returns:
+            bool: 休日イベントかどうか
+        """
+        raw = row.get("is_holiday")
+        if raw is not None and raw != "":
+            return str(raw).strip().lower() in (
+                "true", "1", "yes",
+            )
+        # フォールバック: 旧CSVとの後方互換
+        return bool(_HOLIDAY_RE.search(event_name))
 
     def _get_released_events(
         self,

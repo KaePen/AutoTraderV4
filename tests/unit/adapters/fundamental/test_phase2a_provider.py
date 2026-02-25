@@ -79,7 +79,7 @@ def _make_event_llm_csv(
         "actual", "forecast", "previous",
         "surprise_score", "direction_bias",
         "convergence_hours", "expected_volatility",
-        "trade_caution_level", "summary",
+        "trade_caution_level", "is_holiday", "summary",
     ]
     tmp = tempfile.NamedTemporaryFile(
         mode="w", suffix=".csv", delete=False,
@@ -112,6 +112,7 @@ class TestLoadEventLLMCsv:
                 "convergence_hours": "24.0",
                 "expected_volatility": "1.5",
                 "trade_caution_level": "2",
+                "is_holiday": "False",
                 "summary": "NFPサプライズ",
             },
         ])
@@ -129,8 +130,8 @@ class TestLoadEventLLMCsv:
         assert rec.trade_caution_level == 2
         assert rec.is_holiday is False
 
-    def test_holiday_detection(self) -> None:
-        """休日イベントの自動判定"""
+    def test_holiday_from_csv_column(self) -> None:
+        """CSV is_holiday カラムから休日判定"""
         csv_path = _make_event_llm_csv([
             {
                 "event_time": "2024-07-04T00:00:00+00:00",
@@ -143,6 +144,7 @@ class TestLoadEventLLMCsv:
                 "convergence_hours": "24.0",
                 "expected_volatility": "0.2",
                 "trade_caution_level": "2",
+                "is_holiday": "True",
                 "summary": "米国独立記念日",
             },
         ])
@@ -166,6 +168,7 @@ class TestLoadEventLLMCsv:
                 "convergence_hours": "100.0",
                 "expected_volatility": "10.0",
                 "trade_caution_level": "5",
+                "is_holiday": "False",
                 "summary": "test",
             },
         ])
@@ -200,6 +203,7 @@ class TestLoadEventLLMCsv:
                 "convergence_hours": "8.0",
                 "expected_volatility": "1.2",
                 "trade_caution_level": "1",
+                "is_holiday": "False",
                 "summary": "ISM",
             },
         ])
@@ -214,6 +218,7 @@ class TestLoadEventLLMCsv:
                 "convergence_hours": "24.0",
                 "expected_volatility": "1.5",
                 "trade_caution_level": "2",
+                "is_holiday": "False",
                 "summary": "NFP",
             },
         ])
@@ -262,6 +267,7 @@ class TestGetContextSynthesis:
                 "convergence_hours": "24.0",
                 "expected_volatility": "1.5",
                 "trade_caution_level": "2",
+                "is_holiday": "False",
                 "summary": "NFP",
             },
         ])
@@ -295,6 +301,7 @@ class TestGetContextSynthesis:
                 "convergence_hours": "24.0",
                 "expected_volatility": "1.5",
                 "trade_caution_level": "2",
+                "is_holiday": "False",
                 "summary": "NFP",
             },
         ])
@@ -324,6 +331,7 @@ class TestGetContextSynthesis:
                 "convergence_hours": "24.0",
                 "expected_volatility": "0.2",
                 "trade_caution_level": "2",
+                "is_holiday": "True",
                 "summary": "米国独立記念日",
             },
         ])
@@ -353,6 +361,7 @@ class TestGetContextSynthesis:
                 "convergence_hours": "24.0",
                 "expected_volatility": "1.5",
                 "trade_caution_level": "2",
+                "is_holiday": "False",
                 "summary": "NFP strong",
             },
             {
@@ -366,6 +375,7 @@ class TestGetContextSynthesis:
                 "convergence_hours": "8.0",
                 "expected_volatility": "1.2",
                 "trade_caution_level": "1",
+                "is_holiday": "False",
                 "summary": "ISM weak",
             },
         ])
@@ -397,6 +407,7 @@ class TestGetContextSynthesis:
                 "convergence_hours": "24.0",
                 "expected_volatility": "1.3",
                 "trade_caution_level": "1",
+                "is_holiday": "False",
                 "summary": "A",
             },
             {
@@ -410,6 +421,7 @@ class TestGetContextSynthesis:
                 "convergence_hours": "24.0",
                 "expected_volatility": "1.3",
                 "trade_caution_level": "1",
+                "is_holiday": "False",
                 "summary": "B",
             },
         ])
@@ -449,6 +461,7 @@ class TestGetContextSynthesis:
                 "convergence_hours": "24.0",
                 "expected_volatility": "0.2",
                 "trade_caution_level": "2",
+                "is_holiday": "True",
                 "summary": "休日",
             },
             {
@@ -462,6 +475,7 @@ class TestGetContextSynthesis:
                 "convergence_hours": "4.0",
                 "expected_volatility": "1.2",
                 "trade_caution_level": "1",
+                "is_holiday": "False",
                 "summary": "受注",
             },
         ])
