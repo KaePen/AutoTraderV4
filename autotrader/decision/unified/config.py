@@ -204,6 +204,13 @@ class UnifiedBotConfig:
     # レジーム別閾値調整（TRENDレジームでスコア要求引き上げ）
     regime_threshold_enabled: bool = False
     regime_trend_threshold_add: float = 1.5
+    # --- Phase 2a: ファンダメンタル統合設定 ---
+    # ハードガード: 注意度がこの値以上でエントリーブロック
+    fundamental_caution_block_level: int = 2
+    # ハードガード: 休日流動性がこの値未満でブロック
+    fundamental_holiday_liquidity_block: float = 0.3
+    # 時間減衰係数（大きいほど急速に減衰）
+    fundamental_decay_coefficient: float = 2.0
 
     def get_evaluator_config(self, timeframe: str) -> EvaluatorConfig:
         """時間足別評価器設定を取得

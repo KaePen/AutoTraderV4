@@ -349,10 +349,48 @@ class PositionSizer(PositionSizerProtocol):
         if loss_adjust < 1.0:
             reasons.append(f"連敗{loss_adjust:.2f}x")
 
+        # ファンダメンタル調整（流動性・ボラティリティ）
+        fund_adjust = self._calculate_fundamental_adjust(
+            context.liquidity_factor,
+            context.volatility_multiplier,
+        )
+        adjust *= fund_adjust
+        if fund_adjust < 1.0:
+            reasons.append(f"ファンダ{fund_adjust:.2f}x")
+
         # 最終調整値を0.1〜2.0に制限
         adjust = max(0.1, min(2.0, adjust))
 
         return adjust, reasons
+
+    def _calculate_fundamental_adjust(
+        self,
+        liquidity_factor: float,
+        volatility_multiplier: float,
+    ) -> float:
+        """ファンダメンタル要因によるリスク調整
+
+        低流動性・高ボラティリティ時にロットを縮小する。
+
+        Args:
+            liquidity_factor: 流動性係数 (1.0=通常)
+            volatility_multiplier: ボラ倍率 (1.0=通常)
+
+        Returns:
+            float: 調整係数 (0.5~1.0)
+        """
+        adjust = 1.0
+
+        # 流動性が低い場合（<0.5）にロット縮小
+        if liquidity_factor < 0.5:
+            # 0.5 + liquidity_factor → 0.5~1.0
+            adjust *= 0.5 + liquidity_factor
+
+        # 高ボラティリティ時（>1.5）にロット縮小
+        if volatility_multiplier > 1.5:
+            adjust *= 0.8
+
+        return adjust
 
     def _calculate_confidence_adjust(
         self, confidence: float
