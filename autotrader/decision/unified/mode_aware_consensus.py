@@ -116,12 +116,14 @@ class ModeAwareScoreConsensus:
         self,
         tf_signals: dict[str, TimeframeSignal],
         plan: TradingPlan,
+        threshold_override: float | None = None,
     ) -> ConsensusResult:
         """シグナルを統合
 
         Args:
             tf_signals: 時間足別シグナル
             plan: トレーディングプラン
+            threshold_override: 閾値オーバーライド（アダプティブ調整用）
 
         Returns:
             ConsensusResult: コンセンサス結果
@@ -169,8 +171,12 @@ class ModeAwareScoreConsensus:
             aligned_tfs = []
             direction = SignalType.HOLD
 
-        # 閾値判定
-        threshold = self.threshold
+        # 閾値判定（アダプティブオーバーライド対応）
+        threshold = (
+            threshold_override
+            if threshold_override is not None
+            else self.threshold
+        )
 
         if final_score < threshold:
             reasoning = (

@@ -201,6 +201,9 @@ class UnifiedBotConfig:
     sg_off_hours_penalty: float = 0.25
     sg_volatility_penalty: float = 0.05
     sg_recent_loss_penalty: float = 0.1
+    # レジーム別閾値調整（TRENDレジームでスコア要求引き上げ）
+    regime_threshold_enabled: bool = False
+    regime_trend_threshold_add: float = 1.5
 
     def get_evaluator_config(self, timeframe: str) -> EvaluatorConfig:
         """時間足別評価器設定を取得

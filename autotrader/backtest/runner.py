@@ -974,6 +974,7 @@ class BacktestRunner:
         period_end: datetime | None = None,
         sequential: bool = False,
         max_year_workers: int = 5,
+        adaptive_config: "TunerConfig | None" = None,
     ) -> BacktestResult:
         """統合ボットでのバックテスト実行
 
@@ -1176,6 +1177,7 @@ class BacktestRunner:
                         fundamental_provider=fundamental_provider,
                         period_start=period_start,
                         period_end=period_end,
+                        adaptive_config=adaptive_config,
                     )
                     if yr is not None:
                         yearly_results.append(yr)
@@ -1264,6 +1266,7 @@ class BacktestRunner:
                                     ),
                                     period_start,
                                     period_end,
+                                    adaptive_config,
                                 ),
                             ): year
                             for year in years
@@ -1655,6 +1658,7 @@ class BacktestRunner:
         row_progress_callback: (
             "Callable[[int, int], None] | None"
         ) = None,
+        adaptive_config: "TunerConfig | None" = None,
     ) -> dict[str, Any] | None:
         """統合ボットで1年分のバックテスト実行（self-contained）
 
@@ -1683,7 +1687,10 @@ class BacktestRunner:
         from autotrader.decision.unified import UnifiedTradeBot, UnifiedBotConfig  # noqa: F401
 
         # 年ごとに fresh な bot を生成（状態の累積を防止）
-        bot = UnifiedTradeBot(bot_config)
+        bot = UnifiedTradeBot(
+            bot_config,
+            adaptive_config=adaptive_config,
+        )
         bot.state.initial_equity = sim_config.initial_balance
         bot.state.equity = sim_config.initial_balance
         bot.state.peak_equity = sim_config.initial_balance
@@ -1877,7 +1884,18 @@ class BacktestRunner:
                 for p in simulator.get_open_positions()
             }
             prev_trade_count = len(simulator.get_closed_trades())
-            simulator.process_candle(candle, signal)
+
+            # コンセンサススコアを渡す（逆転exit用）
+            _consensus_scores = None
+            if consolidated is not None:
+                _consensus_scores = (
+                    consolidated.buy_score,
+                    consolidated.sell_score,
+                )
+            simulator.process_candle(
+                candle, signal,
+                consensus_scores=_consensus_scores,
+            )
 
             # 新規ポジション検出
             current_positions = simulator.get_open_positions()
@@ -2003,8 +2021,17 @@ class BacktestRunner:
                 new_trade = closed_trades[-1]
                 pnl = new_trade.profit_loss or 0
 
+                # TradeRecord生成（アダプティブ調整用）
+                from autotrader.decision.unified.adaptive import (
+                    TradeRecord,
+                )
+                _trade_record = TradeRecord.from_trade(new_trade)
+
                 # リスク管理に記録（PnLを渡して複利計算に反映）
-                bot.on_trade_executed(candle_time, pnl=pnl)
+                bot.on_trade_executed(
+                    candle_time, pnl=pnl,
+                    trade_record=_trade_record,
+                )
 
                 if pnl > 0:
                     winning_trades += 1
@@ -2365,19 +2392,37 @@ def _run_year_worker(
     from autotrader.backtest.events import BacktestEventEmitter
     from autotrader.backtest.runner import BacktestRunner
 
-    (
-        data_dir_base,
-        backtest_config,
-        bot_config,
-        sim_config,
-        year,
-        year_market_data,
-        use_m1,
-        use_multi_mode,
-        fundamental_provider,
-        period_start,
-        period_end,
-    ) = task_args
+    # adaptive_config は後方互換のためオプション
+    if len(task_args) >= 12:
+        (
+            data_dir_base,
+            backtest_config,
+            bot_config,
+            sim_config,
+            year,
+            year_market_data,
+            use_m1,
+            use_multi_mode,
+            fundamental_provider,
+            period_start,
+            period_end,
+            adaptive_config,
+        ) = task_args
+    else:
+        (
+            data_dir_base,
+            backtest_config,
+            bot_config,
+            sim_config,
+            year,
+            year_market_data,
+            use_m1,
+            use_multi_mode,
+            fundamental_provider,
+            period_start,
+            period_end,
+        ) = task_args
+        adaptive_config = None
 
     # サブプロセス内でRunnerを最小設定で再構築（リスナーなし）
     runner = BacktestRunner(
@@ -2438,6 +2483,7 @@ def _run_year_worker(
         period_end=period_end,
         emitter=_emitter,
         row_progress_callback=_progress_cb,
+        adaptive_config=adaptive_config,
     )
 
     # 収集したトレードデータを結果に付加
