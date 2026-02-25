@@ -24,7 +24,7 @@ except ImportError:
     _ollama_module = None  # type: ignore[assignment]
 
 # LLMデフォルト設定
-_DEFAULT_MODEL = "qwen3:14b"
+_DEFAULT_MODEL = "erwan2/DeepSeek-R1-Distill-Qwen-14B"
 _DEFAULT_HOST = "http://localhost:11434"
 _DEFAULT_TTL_HOURS = 4
 

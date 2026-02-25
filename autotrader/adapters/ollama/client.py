@@ -63,7 +63,7 @@ class OllamaClient:
     def __init__(
         self,
         host: str = "http://localhost:11434",
-        model: str = "qwen3:14b",
+        model: str = "erwan2/DeepSeek-R1-Distill-Qwen-14B",
         temperature: float = 0.1,
         timeout: float = 30.0,
         sample_rate: float = 0.1,

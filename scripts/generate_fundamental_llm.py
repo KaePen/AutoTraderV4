@@ -112,7 +112,7 @@ def parse_args() -> argparse.Namespace:
     )
     parent.add_argument(
         "--model",
-        default="qwen3:14b",
+        default="erwan2/DeepSeek-R1-Distill-Qwen-14B",
         help="使用するOllamaモデル名",
     )
     parent.add_argument(
