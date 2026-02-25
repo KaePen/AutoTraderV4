@@ -181,15 +181,12 @@ class TestFundamentalMemoryService:
         assert ctx.upcoming_events == []
 
     def test_to_prompt_section_contains_scores(self, memory_service):
-        """プロンプトセクションにスコアが含まれる"""
-        memory_service.write_macro_bias(
-            symbol="USDJPY",
-            direction_score=0.5,
-            confidence=0.8,
-            summary="テスト",
-        )
+        """プロンプトセクションにPhase 2bフィールドが含まれる"""
         now = datetime.now(timezone.utc)
         ctx = memory_service.get_context_for_llm("USDJPY", now)
         section = ctx.to_prompt_section()
-        assert "マクロバイアス" in section
-        assert "+0.50" in section
+        # Phase 2b フォーマット確認
+        assert "方向バイアス" in section
+        assert "流動性" in section
+        assert "ボラ倍率" in section
+        assert "注意度" in section
