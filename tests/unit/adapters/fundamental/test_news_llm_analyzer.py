@@ -253,12 +253,12 @@ class TestNewsLLMAnalyzerBuildPrompt:
             source_url="https://reuters.com/0",
             currencies=["USD", "JPY"],
             source_type=NewsSource.GDELT,
-            content="Full article body text here.",
+            content="Full article body text here with additional details about the Federal Reserve policy decision and its impact on markets.",
         )
         prompt = self.analyzer._build_prompt(items, "USDJPY")
         # 本文セクションあり
         assert "## 記事本文" in prompt
-        assert "Full article body text here." in prompt
+        assert "Full article body text here" in prompt
         # タイトルのみ注記
         assert "1件は本文未取得" in prompt
 
@@ -277,7 +277,7 @@ class TestNewsLLMAnalyzerBuildPrompt:
                 source_url=f"https://reuters.com/{i}",
                 currencies=["USD"],
                 source_type=NewsSource.GDELT,
-                content=f"Article body {i}.",
+                content=f"Article body {i} with detailed analysis of market conditions and economic indicators for trading.",
             )
             for i in range(3)
         ]

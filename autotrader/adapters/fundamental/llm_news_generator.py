@@ -59,6 +59,9 @@ _FX_CONTENT_REDUCED = 150
 # 各セッション最大記事数（最終フォールバック）
 _SESSION_MAX_ARTICLES = 10
 
+# コンテンツ有効判定の最小文字数
+_MIN_USEFUL_CONTENT_LEN = 50
+
 
 class LLMNewsGenerator(LLMGeneratorBase):
     """ニュース分析LLMジェネレーター
@@ -379,16 +382,17 @@ class LLMNewsGenerator(LLMGeneratorBase):
                 f"- {time_str} | {item.source_name} | "
                 f"{item.title}"
             )
-            if item.content:
-                summary = item.content[:content_max].replace(
-                    "\n", " "
-                )
-                line += f"\n  本文抜粋: {summary}..."
+            # フォールバック: content → snippet → 見出しのみ
+            useful = self._get_useful_text(
+                item, content_max,
+            )
+            if useful:
+                line += f"\n  本文抜粋: {useful}"
             else:
                 line += "\n  [見出しのみ]"
             lines.append(line)
 
-        # 一般ソース: ソースごと最大1件、見出しのみ
+        # 一般ソース: ソースごと最大1件
         if include_general and general_items:
             seen_sources: set[str] = set()
             for item in sorted(
@@ -398,10 +402,19 @@ class LLMNewsGenerator(LLMGeneratorBase):
                     continue
                 seen_sources.add(item.source_name)
                 time_str = item.published_at.strftime("%H:%M")
-                lines.append(
+                line = (
                     f"- {time_str} | {item.source_name} | "
-                    f"{item.title}\n  [見出しのみ]"
+                    f"{item.title}"
                 )
+                # 一般ソースもsnippetフォールバック
+                useful = self._get_useful_text(
+                    item, content_max,
+                )
+                if useful:
+                    line += f"\n  本文抜粋: {useful}"
+                else:
+                    line += "\n  [見出しのみ]"
+                lines.append(line)
 
         return "\n".join(lines) if lines else "（なし）"
 
@@ -422,6 +435,41 @@ class LLMNewsGenerator(LLMGeneratorBase):
         if not text:
             return 0
         return max(1, len(text) // 3)
+
+    @staticmethod
+    def _get_useful_text(
+        item: NewsItem,
+        max_len: int,
+    ) -> str | None:
+        """記事から有用なテキストを取得
+
+        フォールバック階層:
+        1. content（50文字以上の場合のみ）
+        2. snippet
+        3. None（見出しのみ）
+
+        Args:
+            item: ニュースアイテム
+            max_len: 最大文字数
+
+        Returns:
+            str | None: 有用テキスト（なければNone）
+        """
+        # content が有効な長さなら使用
+        if (
+            item.content
+            and len(item.content.strip())
+            >= _MIN_USEFUL_CONTENT_LEN
+        ):
+            text = item.content[:max_len].replace("\n", " ")
+            return f"{text}..."
+
+        # snippet にフォールバック
+        if item.snippet and item.snippet.strip():
+            text = item.snippet[:max_len].replace("\n", " ")
+            return f"[snippet] {text}"
+
+        return None
 
     def _analyze_date(
         self,

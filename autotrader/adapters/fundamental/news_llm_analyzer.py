@@ -179,24 +179,32 @@ class NewsLLMAnalyzer:
         headlines = "\n".join(f"- {item.title}" for item in top_items)
 
         # 本文抜粋セクション（上位5件、各500文字、合計3000文字上限）
+        # フォールバック: content → snippet → 見出しのみ
         content_section = ""
-        content_items = [item for item in top_items if item.content][:5]
-        if content_items:
+        items_with_text = [
+            item for item in top_items
+            if self._get_useful_text(item)
+        ][:5]
+        if items_with_text:
             excerpts = []
             total = 0
-            for item in content_items:
-                excerpt = (item.content or "")[:500]
+            for item in items_with_text:
+                excerpt = self._get_useful_text(item) or ""
                 if total + len(excerpt) > 3000:
                     break
                 excerpts.append(f"### {item.title}\n{excerpt}")
                 total += len(excerpt)
             if excerpts:
-                content_section = "\n\n## 記事本文（抜粋）\n" + "\n\n".join(
-                    excerpts
+                content_section = (
+                    "\n\n## 記事本文（抜粋）\n"
+                    + "\n\n".join(excerpts)
                 )
 
         # タイトルのみ件数
-        title_only = sum(1 for item in top_items if not item.content)
+        title_only = sum(
+            1 for item in top_items
+            if not self._get_useful_text(item)
+        )
         title_note = ""
         if title_only > 0:
             title_note = (
@@ -216,6 +224,28 @@ class NewsLLMAnalyzer:
 {{
   "sentiment_score": <-1.0から+1.0（+は強気/買い、-は弱気/売り）>
 }}"""
+
+    @staticmethod
+    def _get_useful_text(
+        item: NewsItem,
+        max_len: int = 500,
+    ) -> str | None:
+        """記事から有用なテキストを取得
+
+        フォールバック: content → snippet → None
+
+        Args:
+            item: ニュースアイテム
+            max_len: 最大文字数
+
+        Returns:
+            str | None: 有用テキスト
+        """
+        if item.content and len(item.content.strip()) >= 50:
+            return item.content[:max_len]
+        if item.snippet and item.snippet.strip():
+            return item.snippet[:max_len]
+        return None
 
     def _parse_score(self, content: str) -> float:
         """LLMレスポンスからセンチメントスコアを抽出
