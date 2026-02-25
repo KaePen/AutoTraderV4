@@ -221,6 +221,12 @@ class TestBuildEventResult:
         assert result["convergence_hours"] == 72.0
         assert result["trade_caution_level"] == 2
 
+    def test_convergence_hours_lower_bound(self) -> None:
+        """convergence_hours < 0.5 -> 0.5にクリップ"""
+        data = {"convergence_hours": 0.3}
+        result = self.gen._build_event_result(data)
+        assert result["convergence_hours"] == 0.5
+
     def test_missing_fields_default(self) -> None:
         """欠落フィールド -> デフォルト"""
         result = self.gen._build_event_result({})

@@ -45,6 +45,18 @@ class TestParseJsonResponse:
         result = self.gen._parse_json_response(content)
         assert result == {"score": -0.2, "text": "abc"}
 
+    def test_brace_extraction_nested(self) -> None:
+        """1段ネストJSON -> 外側オブジェクト全体を抽出"""
+        content = (
+            '分析結果: {"score": 0.5, '
+            '"session_sentiment": {"asian": 0.1}} 以上'
+        )
+        result = self.gen._parse_json_response(content)
+        assert result["score"] == 0.5
+        assert result["session_sentiment"] == {
+            "asian": 0.1
+        }
+
     def test_invalid_raises(self) -> None:
         """不正JSON -> ValueError"""
         with pytest.raises(ValueError, match="JSON解析失敗"):
