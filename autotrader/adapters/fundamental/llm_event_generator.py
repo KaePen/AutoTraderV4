@@ -121,9 +121,10 @@ class LLMEventGenerator(LLMGeneratorBase):
 
         # 全日に対してLLM分析
         date_range = self._generate_date_range(year)
+        total_days = len(date_range)
         rows: list[dict] = []
 
-        for target_date in date_range:
+        for idx, target_date in enumerate(date_range, 1):
             day_events = daily_events.get(target_date, [])
             result = self._analyze_date(
                 symbol, base, quote, target_date, day_events
@@ -136,6 +137,12 @@ class LLMEventGenerator(LLMGeneratorBase):
                 if ev.impact == ImpactLevel.HIGH
             )
             rows.append(result)
+
+            if idx % 50 == 0 or idx == total_days:
+                logger.info(
+                    f"[EventGen] {symbol}/{year}: "
+                    f"{idx}/{total_days}日完了"
+                )
 
         # CSV書き込み
         self._write_csv(rows, EVENT_CSV_COLUMNS, output_path)
