@@ -510,6 +510,16 @@ class UnifiedTradeBot:
                 _base_threshold
                 + self.config.regime_trend_threshold_add
             )
+        # HTFスコア不一致フィルター（HTF整合度低→閾値引き上げ）
+        if (
+            self.config.htf_score_filter_enabled
+            and htf_alignment
+            <= self.config.htf_score_filter_min_alignment
+        ):
+            _base_threshold = (
+                _base_threshold
+                + self.config.htf_score_filter_threshold_add
+            )
         if _base_threshold != self.consensus.threshold:
             _threshold_override = _base_threshold
         consensus = self.consensus.consolidate(
@@ -810,6 +820,19 @@ class UnifiedTradeBot:
                         f"MACDスロープ逆方向: "
                         f"{_macd_slope:.1f}"
                     )
+
+            # 低ATR+TRENDフィルター（低ボラTRENDはWR低下）
+            if (
+                self.config.low_atr_trend_filter_enabled
+                and regime_result.regime == MarketRegime.TREND
+                and _atr_ratio
+                <= self.config.low_atr_trend_ratio_max
+            ):
+                return _filt_hold(
+                    f"低ATR+TREND: atr_ratio="
+                    f"{_atr_ratio:.3f}"
+                    f"<={self.config.low_atr_trend_ratio_max}"
+                )
 
         # SL/TP計算（primary_tf由来）
         primary_signal = tf_signals.get(plan.primary_tf)

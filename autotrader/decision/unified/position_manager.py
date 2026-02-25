@@ -250,6 +250,10 @@ class PositionManagerConfig:
     profit_reversal_drop_r: float = 0.25
     # current_rがこの値以下で発動
     profit_reversal_max_r: float = 0.05
+    # ユニバーサル0.5R部分利確（全レジーム対応）
+    universal_half_r_enabled: bool = False
+    universal_half_r_trigger: float = 0.5
+    universal_half_r_ratio: float = 0.25
     # 段階的STAGNATION: 3段階で早期に停滞を検出
     progressive_stagnation_enabled: bool = False
     # Stage1: 早期検出（60分 + MFE<0.05R + 含み損）
@@ -1033,6 +1037,41 @@ class PositionManager:
                 ),
                 exit_reason=ExitReason.TAKE_PROFIT_EARLY,
                 trigger_price=trig_price,
+            )
+
+        # === ユニバーサル0.5R部分利確（全レジーム対応）===
+        if (
+            self.config.universal_half_r_enabled
+            and not is_range  # RANGE用は上で処理済み
+            and position.current_r
+            >= self.config.universal_half_r_trigger
+            and pos_id not in self._half_r_partial_applied
+            and pos_id not in self._partial_closed_1r
+        ):
+            self._half_r_partial_applied.add(pos_id)
+            self._early_be_applied.add(pos_id)
+            be_price = self._get_be_price(position)
+            position.current_sl = be_price
+            _u_trig = self.config.universal_half_r_trigger
+            if position.direction == SignalType.BUY:
+                _u_price = (
+                    position.entry_price
+                    + _u_trig * position.r_value
+                )
+            else:
+                _u_price = (
+                    position.entry_price
+                    - _u_trig * position.r_value
+                )
+            return ManagementAction.partial_close(
+                ratio=self.config.universal_half_r_ratio,
+                new_sl=be_price,
+                reason=(
+                    f"ユニバーサル{_u_trig}R部分利確:"
+                    f" {position.current_r:.2f}R, BE移動"
+                ),
+                exit_reason=ExitReason.TAKE_PROFIT_EARLY,
+                trigger_price=_u_price,
             )
 
         # === RANGE×DAY 軽い保険（1Rの後、早期BEの前）===

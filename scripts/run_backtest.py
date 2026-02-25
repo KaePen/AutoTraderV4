@@ -631,6 +631,42 @@ def parse_args() -> argparse.Namespace:
         default=1.5,
         help="TREND閾値追加分（デフォルト: 1.5）",
     )
+    # --- 低ATR+TRENDフィルター ---
+    parser.add_argument(
+        "--low-atr-trend-filter",
+        action="store_true",
+        help="低ATR+TRENDフィルターを有効化",
+    )
+    parser.add_argument(
+        "--low-atr-trend-ratio",
+        type=float,
+        default=0.75,
+        help="低ATR+TRENDフィルターのATR比率閾値（デフォルト: 0.75）",
+    )
+    # --- HTFスコアフィルター ---
+    parser.add_argument(
+        "--htf-score-filter",
+        action="store_true",
+        help="HTFスコアフィルターを有効化",
+    )
+    parser.add_argument(
+        "--htf-score-threshold-add",
+        type=float,
+        default=1.0,
+        help="HTF不一致時の追加閾値（デフォルト: 1.0）",
+    )
+    # --- ユニバーサル0.5R部分利確 ---
+    parser.add_argument(
+        "--universal-half-r",
+        action="store_true",
+        help="全レジームで0.5R部分利確を有効化",
+    )
+    parser.add_argument(
+        "--universal-half-r-ratio",
+        type=float,
+        default=0.25,
+        help="0.5R部分利確比率（デフォルト: 0.25）",
+    )
     # --- アダプティブパラメータ調整 ---
     parser.add_argument(
         "--adaptive",
@@ -1154,6 +1190,12 @@ def run_single_backtest(args: argparse.Namespace):
         ],
         regime_threshold_enabled=args.regime_threshold,
         regime_trend_threshold_add=args.regime_trend_add,
+        low_atr_trend_filter_enabled=args.low_atr_trend_filter,
+        low_atr_trend_ratio_max=args.low_atr_trend_ratio,
+        htf_score_filter_enabled=args.htf_score_filter,
+        htf_score_filter_threshold_add=(
+            args.htf_score_threshold_add
+        ),
     )
 
     # PositionManagerConfig構築
@@ -1204,6 +1246,8 @@ def run_single_backtest(args: argparse.Namespace):
         profit_reversal_drop_r=args.profit_reversal_drop_r,
         profit_reversal_max_r=args.profit_reversal_max_r,
         progressive_stagnation_enabled=args.progressive_stagnation,
+        universal_half_r_enabled=args.universal_half_r,
+        universal_half_r_ratio=args.universal_half_r_ratio,
     )
 
     # ファンダメンタルCSVリスト構築
