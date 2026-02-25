@@ -326,7 +326,7 @@ class LLMEventGenerator(LLMGeneratorBase):
                 data.get("price_direction_bias")
             ),
             "convergence_hours": self._clip(
-                data.get("convergence_hours"), 0.0, 72.0, 0.0
+                data.get("convergence_hours"), 0.5, 72.0, 0.0
             ),
             "trade_caution_level": caution_val,
             "summary": str(data.get("summary", ""))[:200],

@@ -137,7 +137,9 @@ def parse_args() -> argparse.Namespace:
         help="処理件数確認のみ（LLM呼び出しなし）",
     )
 
-    subparsers = parser.add_subparsers(dest="command")
+    subparsers = parser.add_subparsers(
+        dest="command", required=True
+    )
 
     # events サブコマンド
     subparsers.add_parser(
@@ -248,6 +250,15 @@ def load_events_csv(
     events: list[EconomicEvent] = []
     fetched_at = datetime.now(timezone.utc)
 
+    def _parse_float(val: str) -> float | None:
+        """文字列をfloatに変換"""
+        if not val or val.strip() == "":
+            return None
+        try:
+            return float(val)
+        except ValueError:
+            return None
+
     with open(csv_path, "r", encoding="utf-8") as f:
         reader = csv.DictReader(f)
         for row in reader:
@@ -277,17 +288,6 @@ def load_events_csv(
                     "low": ImpactLevel.LOW,
                 }.get(impact_str, ImpactLevel.LOW)
 
-                def parse_float(
-                    val: str,
-                ) -> float | None:
-                    """文字列をfloatに変換"""
-                    if not val or val.strip() == "":
-                        return None
-                    try:
-                        return float(val)
-                    except ValueError:
-                        return None
-
                 events.append(
                     EconomicEvent(
                         event_id=row.get(
@@ -300,13 +300,13 @@ def load_events_csv(
                         impact=impact,
                         source=EventSource.MT5,
                         fetched_at=fetched_at,
-                        actual=parse_float(
+                        actual=_parse_float(
                             row.get("actual", "")
                         ),
-                        forecast=parse_float(
+                        forecast=_parse_float(
                             row.get("forecast", "")
                         ),
-                        previous=parse_float(
+                        previous=_parse_float(
                             row.get("previous", "")
                         ),
                     )
@@ -749,14 +749,13 @@ def main() -> int:
         int: 終了コード（0=成功、1=エラー）
     """
     args = parse_args()
-    command = args.command or "legacy"
 
     try:
-        if command == "events":
+        if args.command == "events":
             return run_events(args)
-        elif command == "news":
+        elif args.command == "news":
             return run_news(args)
-        elif command == "all":
+        elif args.command == "all":
             code = run_events(args)
             if code != 0:
                 return code
