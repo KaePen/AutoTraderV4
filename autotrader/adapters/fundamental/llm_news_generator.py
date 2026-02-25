@@ -189,21 +189,17 @@ class LLMNewsGenerator(LLMGeneratorBase):
             result["article_count"] = len(day_news)
             rows.append(result)
 
+            # 毎日保存（resume対応）
+            self._write_csv(
+                rows, NEWS_CSV_COLUMNS, output_path
+            )
+
             if idx % 50 == 0 or idx == total_days:
                 logger.info(
                     f"[NewsGen] {symbol}/{year}: "
                     f"{idx}/{total_days}日完了 "
                     f"(LLM:{llm_calls})"
                 )
-
-            # 50日ごとに中間保存（resume用）
-            if idx % 50 == 0:
-                self._write_csv(
-                    rows, NEWS_CSV_COLUMNS, output_path
-                )
-
-        # 最終書き込み
-        self._write_csv(rows, NEWS_CSV_COLUMNS, output_path)
         logger.info(
             f"[NewsGen] 完了: {output_path} ({len(rows)}日)"
         )

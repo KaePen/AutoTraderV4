@@ -1,15 +1,18 @@
 """イベント分析LLMジェネレーター
 
-経済指標CSVからシンボル関連イベントを日次抽出し、
+経済指標CSVからシンボル関連イベントを個別抽出し、
 LLMで短期インパクト分析を行い、
 llm_events_SYMBOL_YYYY.csv に出力する。
+
+1行 = 1イベント（event_time で秒単位の時系列）。
+HIGH/MEDIUMはLLM分析、LOWはデフォルト値を使用。
+休日イベントは固定デフォルト値で出力（LLMスキップ）。
 """
 
 from __future__ import annotations
 
+import csv
 import re
-from collections import defaultdict
-from datetime import date
 from pathlib import Path
 
 from loguru import logger
@@ -26,17 +29,19 @@ from autotrader.config.llm_settings import OllamaSettings
 # 休日判定パターン
 _HOLIDAY_RE = re.compile(r"holiday", re.IGNORECASE)
 
-# イベントCSVカラム定義
+# イベントCSVカラム定義（1行=1イベント）
 EVENT_CSV_COLUMNS = [
-    "date",
-    "event_count",
-    "high_impact_count",
-    "net_surprise_score",
-    "dominant_event_name",
-    "dominant_surprise_pct",
-    "expected_volatility",
-    "price_direction_bias",
+    "event_time",
+    "currency",
+    "event_name",
+    "impact",
+    "actual",
+    "forecast",
+    "previous",
+    "surprise_score",
+    "direction_bias",
     "convergence_hours",
+    "expected_volatility",
     "trade_caution_level",
     "summary",
 ]
@@ -52,8 +57,12 @@ _IMPACT_LABELS: dict[ImpactLevel, str] = {
 class LLMEventGenerator(LLMGeneratorBase):
     """イベント分析LLMジェネレーター
 
-    events_YYYY.csv からシンボル関連イベントを日次抽出し、
+    events_YYYY.csv からシンボル関連イベントを個別抽出し、
     LLM分析結果を llm_events_SYMBOL_YYYY.csv に出力する。
+
+    HIGH/MEDIUMイベントはLLMで個別分析、
+    LOWイベントはサプライズ計算のみでLLMスキップ。
+    休日イベントは固定デフォルト値で出力。
 
     Args:
         ollama_settings: Ollama接続設定
@@ -90,6 +99,9 @@ class LLMEventGenerator(LLMGeneratorBase):
     ) -> Path:
         """指定シンボル・年のイベントLLM CSVを生成
 
+        1行 = 1イベント。発表済みイベントのみ出力。
+        1件処理ごとにCSV保存（resume対応）。
+
         Args:
             symbol: 対象シンボル（例: USDJPY）
             year: 対象年
@@ -101,127 +113,120 @@ class LLMEventGenerator(LLMGeneratorBase):
             Path: 生成したCSVパス
         """
         output_path = (
-            Path(output_dir) / f"llm_events_{symbol}_{year}.csv"
+            Path(output_dir)
+            / f"llm_events_{symbol}_{year}.csv"
         )
-
-        # resume: 既存CSVから処理済み行を読み込み
-        existing_rows: list[dict] = []
-        resume_from: date | None = None
-        if output_path.exists() and not overwrite:
-            existing_rows = self._read_existing_csv(
-                output_path, EVENT_CSV_COLUMNS
-            )
-            if existing_rows:
-                last_date_str = existing_rows[-1].get("date")
-                if last_date_str:
-                    resume_from = date.fromisoformat(
-                        last_date_str
-                    )
-
-        # 全日処理済みならスキップ
-        full_range = self._generate_date_range(year)
-        if resume_from and resume_from >= full_range[-1]:
-            logger.info(
-                f"[EventGen] スキップ（完了済み）: "
-                f"{output_path}"
-            )
-            return output_path
 
         base, quote = self.get_symbol_currencies(symbol)
 
-        # 対象通貨・年のイベント抽出
-        relevant = self._filter_events(
-            events, (base, quote), year
+        # 対象通貨・年のイベント抽出（時系列ソート）
+        relevant = sorted(
+            self._filter_events(
+                events, (base, quote), year
+            ),
+            key=lambda ev: ev.event_time,
         )
 
-        # 日付ごとにグループ化
-        daily_events = self._group_by_date(relevant)
-
-        # 休日日付セットを構築
-        holiday_dates = self._detect_holidays(
-            relevant, (base, quote)
-        )
-
-        # resume位置を決定
-        if resume_from:
-            date_range = [
-                d for d in full_range if d > resume_from
-            ]
-            rows: list[dict] = list(existing_rows)
-            logger.info(
-                f"[EventGen] {symbol}/{year}: "
-                f"resume {resume_from} から "
-                f"残り{len(date_range)}日"
-            )
-        else:
-            date_range = full_range
-            rows = []
+        # 発表済みイベント + 休日イベントを対象
+        targets = [
+            ev
+            for ev in relevant
+            if ev.is_released
+            or _HOLIDAY_RE.search(ev.event_name)
+        ]
 
         logger.info(
             f"[EventGen] {symbol}/{year}: "
-            f"全{len(events)}件→{len(relevant)}件, "
-            f"休日{len(holiday_dates)}日"
+            f"全{len(events)}件→関連{len(relevant)}件"
+            f"→分析対象{len(targets)}件"
         )
 
-        total_days = len(full_range)
+        # resume: 既存CSVの処理済み件数を取得
+        existing_rows = self._read_existing_rows(
+            output_path, overwrite
+        )
+        resume_idx = len(existing_rows)
+
+        if resume_idx >= len(targets):
+            # 0件でもCSVを作成（ヘッダーのみ）
+            if not output_path.exists():
+                self._write_csv(
+                    [], EVENT_CSV_COLUMNS, output_path
+                )
+            logger.info(
+                f"[EventGen] スキップ（完了済み）: "
+                f"{output_path} ({resume_idx}件)"
+            )
+            return output_path
+
+        if resume_idx > 0:
+            logger.info(
+                f"[EventGen] resume: {resume_idx}件処理済み"
+                f"→残り{len(targets) - resume_idx}件"
+            )
+
+        rows = list(existing_rows)
+        total = len(targets)
         llm_calls = 0
         skipped = 0
 
-        for target_date in date_range:
-            idx = (target_date - full_range[0]).days + 1
-            day_events = daily_events.get(target_date, [])
-
-            # 休日: LLMスキップでデフォルト値
-            if target_date in holiday_dates and not any(
-                ev.is_released for ev in day_events
-            ):
-                result = self._holiday_result()
-                skipped += 1
-            else:
-                result = self._analyze_date(
-                    symbol,
-                    base,
-                    quote,
-                    target_date,
-                    day_events,
-                )
-                # LLM呼び出しがあった場合のみカウント
-                released = [
-                    ev for ev in day_events if ev.is_released
-                ]
-                if released:
-                    llm_calls += 1
-
-            result["date"] = target_date.isoformat()
-            result["event_count"] = len(day_events)
-            result["high_impact_count"] = sum(
-                1
-                for ev in day_events
-                if ev.impact == ImpactLevel.HIGH
+        for idx in range(resume_idx, total):
+            ev = targets[idx]
+            row = self._analyze_event(
+                symbol, base, quote, ev
             )
-            rows.append(result)
 
-            if idx % 50 == 0 or idx == total_days:
+            if _HOLIDAY_RE.search(ev.event_name):
+                skipped += 1
+            elif ev.impact in (
+                ImpactLevel.HIGH,
+                ImpactLevel.MEDIUM,
+            ):
+                llm_calls += 1
+            else:
+                skipped += 1
+
+            rows.append(row)
+
+            # 毎回保存（resume対応）
+            self._write_csv(
+                rows, EVENT_CSV_COLUMNS, output_path
+            )
+
+            done = idx + 1
+            if done % 10 == 0 or done == total:
                 logger.info(
                     f"[EventGen] {symbol}/{year}: "
-                    f"{idx}/{total_days}日完了 "
+                    f"{done}/{total}件完了 "
                     f"(LLM:{llm_calls}, skip:{skipped})"
                 )
 
-            # 50日ごとに中間保存（resume用）
-            if idx % 50 == 0:
-                self._write_csv(
-                    rows, EVENT_CSV_COLUMNS, output_path
-                )
-
-        # 最終書き込み
-        self._write_csv(rows, EVENT_CSV_COLUMNS, output_path)
         logger.info(
             f"[EventGen] 完了: {output_path} "
-            f"({len(rows)}日, LLM:{llm_calls}, "
+            f"({len(rows)}件, LLM:{llm_calls}, "
             f"skip:{skipped})"
         )
         return output_path
+
+    def _read_existing_rows(
+        self,
+        output_path: Path,
+        overwrite: bool,
+    ) -> list[dict]:
+        """既存CSVの処理済み行を読み込み
+
+        Args:
+            output_path: CSVパス
+            overwrite: 上書きモード
+
+        Returns:
+            list[dict]: 処理済み行
+        """
+        if overwrite:
+            return []
+        return self._read_existing_csv(
+            output_path, EVENT_CSV_COLUMNS
+        )
 
     def _filter_events(
         self,
@@ -246,124 +251,133 @@ class LLMEventGenerator(LLMGeneratorBase):
             and ev.event_time.year == year
         ]
 
-    def _group_by_date(
-        self,
-        events: list[EconomicEvent],
-    ) -> dict[date, list[EconomicEvent]]:
-        """イベントを日付ごとにグループ化
-
-        Args:
-            events: フィルタ済みイベント
-
-        Returns:
-            dict[date, list[EconomicEvent]]
-        """
-        result: dict[date, list[EconomicEvent]] = defaultdict(
-            list
-        )
-        for ev in events:
-            result[ev.event_time.date()].append(ev)
-        return dict(result)
-
-    def _analyze_date(
+    def _analyze_event(
         self,
         symbol: str,
         base: str,
         quote: str,
-        target_date: date,
-        events: list[EconomicEvent],
+        event: EconomicEvent,
     ) -> dict:
-        """1日分のイベントをLLM分析
+        """単一イベントをLLM分析
 
-        イベントが0件の場合はLLM呼び出しをスキップし
-        デフォルト値を返す。
+        HIGH/MEDIUM: LLMで個別分析
+        LOW: サプライズ計算のみ（LLMスキップ）
 
         Args:
             symbol: シンボル
             base: 基軸通貨
             quote: 決済通貨
-            target_date: 分析対象日
-            events: 当日イベント
+            event: 対象イベント
 
         Returns:
-            dict: 分析結果
+            dict: 分析結果行
         """
-        # 発表済みイベントのみ
-        released = [ev for ev in events if ev.is_released]
+        # 共通カラム
+        base_row = {
+            "event_time": event.event_time.isoformat(),
+            "currency": event.currency,
+            "event_name": event.event_name,
+            "impact": event.impact.value,
+            "actual": event.actual,
+            "forecast": event.forecast,
+            "previous": event.previous,
+        }
 
-        if not released:
-            # 未発表の高インパクト指標がある場合は注意度を設定
-            high_unreleased = sum(
-                1
-                for ev in events
-                if ev.impact == ImpactLevel.HIGH
-                and not ev.is_released
-            )
-            result = self._default_event_result()
-            if high_unreleased >= 2:
-                result["trade_caution_level"] = 2
-                result["summary"] = (
-                    f"未発表高インパクト指標{high_unreleased}件"
-                )
-            elif high_unreleased == 1:
-                result["trade_caution_level"] = 1
-                result["summary"] = "未発表高インパクト指標1件"
-            return result
+        # 休日イベント: 固定デフォルト値（LLMスキップ）
+        if _HOLIDAY_RE.search(event.event_name):
+            result = self._holiday_result()
+            base_row.update(result)
+            return base_row
 
+        if event.impact == ImpactLevel.LOW:
+            # LOWインパクト: LLMスキップ
+            result = self._low_impact_result(event)
+            base_row.update(result)
+            return base_row
+
+        # HIGH/MEDIUM: LLM分析
         prompt = self._build_event_prompt(
-            symbol, base, quote, target_date, released
+            symbol, base, quote, event
         )
-        raw = self._call_ollama_with_retry(
-            prompt, self._default_event_result()
-        )
-        return self._build_event_result(raw)
+        default = self._default_event_result()
+        raw = self._call_ollama_with_retry(prompt, default)
+        result = self._build_event_result(raw)
+        base_row.update(result)
+        return base_row
 
     def _build_event_prompt(
         self,
         symbol: str,
         base: str,
         quote: str,
-        target_date: date,
-        events: list[EconomicEvent],
+        event: EconomicEvent,
     ) -> str:
-        """イベント分析プロンプトを構築
+        """単一イベント分析プロンプトを構築
 
         Args:
             symbol: シンボル
             base: 基軸通貨
             quote: 決済通貨
-            target_date: 対象日
-            events: 当日の発表済みイベント
+            event: 対象イベント
 
         Returns:
             str: プロンプト文字列
         """
-        events_text = self._format_events_for_prompt(events)
+        impact_label = _IMPACT_LABELS.get(
+            event.impact, event.impact.value
+        )
+        time_str = event.event_time.strftime(
+            "%Y-%m-%d %H:%M"
+        )
+        actual = (
+            f"{event.actual:.2f}"
+            if event.actual is not None
+            else "未発表"
+        )
+        forecast = (
+            f"{event.forecast:.2f}"
+            if event.forecast is not None
+            else "予測なし"
+        )
+        previous = (
+            f"{event.previous:.2f}"
+            if event.previous is not None
+            else "前回なし"
+        )
+        surprise = event.surprise_magnitude
+        surprise_str = (
+            f"\n- サプライズ率: {surprise:+.1%}"
+            if surprise is not None
+            else ""
+        )
 
         return f"""あなたはFXトレードの経済指標アナリストです。
 以下の経済指標発表結果に基づき、{symbol}への短期的インパクトを分析してください。
 
 ## 分析対象
 - シンボル: {symbol} ({base}/{quote})
-- 分析日: {target_date.year}年{target_date.month}月{target_date.day}日
+- 発表時刻: {time_str} UTC
 
-## 当日の発表済み経済指標（{len(events)}件）
-{events_text}
+## 経済指標
+- 指標名: {event.event_name}
+- 通貨: {event.currency}
+- インパクト: {impact_label}
+- 実績値: {actual}
+- 予測値: {forecast}
+- 前回値: {previous}{surprise_str}
 
 ## 分析指示
-1. 各指標のサプライズ方向と大きさを評価
-2. {base}と{quote}への相対的な影響を判断
-3. 複数指標の相互関係（矛盾・補強）を考慮
-4. インパクトの持続時間を推定（即時収束型 vs 持続型）
+1. サプライズの方向と大きさを評価
+2. {base}と{quote}への影響を判断（{event.currency}の指標が{symbol}に与える影響）
+3. インパクトの持続時間を推定（即時収束型 vs 持続型）
+4. この指標の市場への影響度合いを評価
 
 ## 出力形式（JSONのみで回答）
 {{
-  "net_surprise_score": <-1.0~+1.0: 加重サプライズ合計。+は{base}高方向>,
-  "dominant_event_name": "<最大影響イベント名>",
-  "dominant_surprise_pct": <最大影響イベントのサプライズ率>,
-  "expected_volatility": <0.0~2.0: 通常比ボラティリティ倍率>,
-  "price_direction_bias": <-1.0~+1.0: 短期価格方向。+は{symbol}上昇>,
+  "surprise_score": <-1.0~+1.0: サプライズ方向と大きさ。+は{base}高方向>,
+  "direction_bias": <-1.0~+1.0: 短期価格方向。+は{symbol}上昇>,
   "convergence_hours": <0.5~72.0: インパクト収束までの推定時間>,
+  "expected_volatility": <0.0~2.0: 通常比ボラティリティ倍率>,
   "trade_caution_level": <0/1/2: 0=通常, 1=注意, 2=回避推奨>,
   "summary": "<分析要約（日本語、200文字以内）>"
 }}"""
@@ -378,159 +392,101 @@ class LLMEventGenerator(LLMGeneratorBase):
             dict: バリデーション済み結果
         """
         caution = data.get("trade_caution_level")
-        if caution is None or not isinstance(caution, (int, float)):
+        if caution is None or not isinstance(
+            caution, (int, float)
+        ):
             caution_val = 0
         else:
             caution_val = max(0, min(2, int(caution)))
 
         return {
-            "net_surprise_score": self._clip_score(
-                data.get("net_surprise_score")
+            "surprise_score": self._clip_score(
+                data.get("surprise_score")
             ),
-            "dominant_event_name": str(
-                data.get("dominant_event_name", "")
-            )[:200],
-            "dominant_surprise_pct": float(
-                data.get("dominant_surprise_pct", 0.0)
-                if isinstance(
-                    data.get("dominant_surprise_pct"),
-                    (int, float),
-                )
-                else 0.0
-            ),
-            "expected_volatility": self._clip(
-                data.get("expected_volatility"), 0.0, 2.0, 1.0
-            ),
-            "price_direction_bias": self._clip_score(
-                data.get("price_direction_bias")
+            "direction_bias": self._clip_score(
+                data.get("direction_bias")
             ),
             "convergence_hours": self._clip(
-                data.get("convergence_hours"), 0.5, 72.0, 0.0
+                data.get("convergence_hours"),
+                0.5,
+                72.0,
+                0.0,
+            ),
+            "expected_volatility": self._clip(
+                data.get("expected_volatility"),
+                0.0,
+                2.0,
+                1.0,
             ),
             "trade_caution_level": caution_val,
-            "summary": str(data.get("summary", ""))[:200],
+            "summary": str(
+                data.get("summary", "")
+            )[:200],
         }
 
     @staticmethod
-    def _detect_holidays(
-        events: list[EconomicEvent],
-        currencies: tuple[str, str],
-    ) -> set[date]:
-        """休日日付セットを構築
-
-        Bank Holiday イベントのみで構成される日を
-        休日として検出する。
-
-        Args:
-            events: フィルタ済みイベント
-            currencies: (base, quote)
-
-        Returns:
-            set[date]: 休日日付セット
-        """
-        # 日付→イベントリスト
-        by_date: dict[date, list[EconomicEvent]] = (
-            defaultdict(list)
-        )
-        for ev in events:
-            if ev.currency in currencies:
-                by_date[ev.event_time.date()].append(ev)
-
-        holidays: set[date] = set()
-        for d, day_events in by_date.items():
-            # 全イベントが休日系のみの場合
-            if all(
-                _HOLIDAY_RE.search(ev.event_name)
-                for ev in day_events
-            ):
-                holidays.add(d)
-        return holidays
-
-    @staticmethod
     def _default_event_result() -> dict:
-        """イベントなし日のデフォルト結果
+        """LLM失敗時のデフォルト結果
 
         Returns:
             dict: デフォルト値辞書
         """
         return {
-            "net_surprise_score": 0.0,
-            "dominant_event_name": "",
-            "dominant_surprise_pct": 0.0,
-            "expected_volatility": 1.0,
-            "price_direction_bias": 0.0,
+            "surprise_score": 0.0,
+            "direction_bias": 0.0,
             "convergence_hours": 0.0,
+            "expected_volatility": 1.0,
             "trade_caution_level": 0,
-            "summary": "関連経済指標の発表なし",
+            "summary": "",
         }
 
     @staticmethod
     def _holiday_result() -> dict:
-        """休日のデフォルト結果
+        """市場休日イベントの固定デフォルト値
+
+        休日は流動性低下・スプレッド拡大が特徴。
+        - サプライズなし（経済指標発表ではない）
+        - 方向バイアスなし
+        - 流動性正常化まで約24時間
+        - ボラティリティは通常の30%程度に低下
+        - 薄商いのためスリッページリスクあり→注意
 
         Returns:
-            dict: 休日用デフォルト値辞書
+            dict: 休日固定値辞書
         """
         return {
-            "net_surprise_score": 0.0,
-            "dominant_event_name": "",
-            "dominant_surprise_pct": 0.0,
-            "expected_volatility": 0.5,
-            "price_direction_bias": 0.0,
-            "convergence_hours": 0.0,
-            "trade_caution_level": 0,
-            "summary": "市場休場",
+            "surprise_score": 0.0,
+            "direction_bias": 0.0,
+            "convergence_hours": 24.0,
+            "expected_volatility": 0.3,
+            "trade_caution_level": 1,
+            "summary": "市場休日 - 流動性低下"
+            "・スプレッド拡大に注意",
         }
 
-    def _format_events_for_prompt(
-        self,
-        events: list[EconomicEvent],
-    ) -> str:
-        """イベントリストをプロンプト用テキストに変換
+    @staticmethod
+    def _low_impact_result(event: EconomicEvent) -> dict:
+        """LOWインパクトイベントのデフォルト結果
+
+        サプライズ率から簡易計算。LLMスキップ。
 
         Args:
-            events: イベントリスト
+            event: イベント
 
         Returns:
-            str: フォーマット済みテキスト
+            dict: 計算結果辞書
         """
-        if not events:
-            return "（なし）"
+        surprise = event.surprise_magnitude
+        score = 0.0
+        if surprise is not None:
+            # サプライズ率を[-1, 1]にクリップ
+            score = max(-1.0, min(1.0, surprise))
 
-        lines = []
-        sorted_events = sorted(
-            events, key=lambda e: e.event_time
-        )
-        for ev in sorted_events:
-            impact_label = _IMPACT_LABELS.get(
-                ev.impact, ev.impact.value
-            )
-            time_str = ev.event_time.strftime("%H:%M")
-            actual = (
-                f"{ev.actual:.2f}"
-                if ev.actual is not None
-                else "未発表"
-            )
-            forecast = (
-                f"{ev.forecast:.2f}"
-                if ev.forecast is not None
-                else "予測なし"
-            )
-            previous = (
-                f"{ev.previous:.2f}"
-                if ev.previous is not None
-                else "前回なし"
-            )
-            surprise = ev.surprise_magnitude
-            surprise_str = (
-                f" サプライズ={surprise:+.1%}"
-                if surprise is not None
-                else ""
-            )
-            lines.append(
-                f"- {time_str} [{impact_label}] "
-                f"{ev.currency} {ev.event_name}: "
-                f"実績={actual} 予測={forecast} "
-                f"前回={previous}{surprise_str}"
-            )
-        return "\n".join(lines)
+        return {
+            "surprise_score": score,
+            "direction_bias": score * 0.3,
+            "convergence_hours": 1.0,
+            "expected_volatility": 0.5,
+            "trade_caution_level": 0,
+            "summary": "低インパクト指標",
+        }
