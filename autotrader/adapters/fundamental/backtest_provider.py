@@ -33,6 +33,7 @@ from autotrader.adapters.fundamental.schemas import (
     EconomicEvent,
     EventSource,
     FundamentalContext,
+    FundamentalMemory,
     ImpactLevel,
 )
 
@@ -204,6 +205,9 @@ class BacktestFundamentalProvider:
 
         # ニュースアイテム（published_at 昇順ソート）
         self._news_items: list[NewsItem] = []
+
+        # Phase 2b: FundamentalMemory（バイアス蓄積）
+        self.memory: FundamentalMemory | None = None
 
     def load_news_csv(self, csv_path: str | Path) -> int:
         """ニュースCSVを読み込み
@@ -479,16 +483,69 @@ class BacktestFundamentalProvider:
         # 優先度1: イベントLLMデータがある場合
         records = self._event_llm_records.get(symbol, [])
         if records:
-            return self._synthesize_event_llm_context(
+            ctx = self._synthesize_event_llm_context(
                 current_time, symbol,
                 upcoming_dicts, high_impact_soon,
             )
+            self._update_memory(ctx, current_time)
+            return ctx
 
         # 優先度2-3: 旧ロジック（月次LLM or events計算）
-        return self._fallback_context(
+        ctx = self._fallback_context(
             current_time, symbol,
             upcoming_dicts, high_impact_soon,
         )
+        self._update_memory(ctx, current_time)
+        return ctx
+
+    def enable_memory(self) -> None:
+        """FundamentalMemoryを有効化する
+
+        Phase 2b: バイアス蓄積メモリを初期化。
+        Runner側で呼び出す。
+        """
+        self.memory = FundamentalMemory()
+
+    def _update_memory(
+        self,
+        ctx: FundamentalContext,
+        current_time: datetime,
+    ) -> None:
+        """メモリをContextのイベント情報で更新
+
+        - direction_biasとsurprise_scoreが有意なら更新
+        - 日付変更時に日次減衰を適用
+
+        Args:
+            ctx: 生成されたコンテキスト
+            current_time: 現在時刻
+        """
+        if self.memory is None:
+            return
+
+        current_date = current_time.date()
+
+        # 日次減衰
+        if (
+            self.memory.last_event_date is not None
+            and current_date > self.memory.last_event_date
+        ):
+            days = (
+                current_date - self.memory.last_event_date
+            ).days
+            self.memory.apply_daily_decay(days)
+
+        # イベントバイアス更新（有意なイベントのみ）
+        if (
+            abs(ctx.direction_bias) > 0.05
+            and abs(ctx.surprise_score) > 0.05
+        ):
+            self.memory.update_event(
+                ctx.direction_bias, ctx.surprise_score,
+            )
+            self.memory.last_event_date = current_date
+        elif self.memory.last_event_date is None:
+            self.memory.last_event_date = current_date
 
     # --------------------------------------------------
     # プライベート: 共通ヘルパー
