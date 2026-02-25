@@ -1,5 +1,10 @@
 """LLMによるファンダメンタルコンテキスト事前生成
 
+.. deprecated::
+    このモジュールは非推奨です。代わりに以下を使用してください:
+    - llm_event_generator.LLMEventGenerator (日次イベント分析)
+    - llm_news_generator.LLMNewsGenerator (日次ニュース分析)
+
 Ollamaを使って月次バッチで経済指標データを分析し、
 バックテスト用のマクロバイアスCSVを事前生成する。
 
