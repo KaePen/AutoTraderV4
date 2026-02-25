@@ -204,6 +204,16 @@ class UnifiedBotConfig:
     # レジーム別閾値調整（TRENDレジームでスコア要求引き上げ）
     regime_threshold_enabled: bool = False
     regime_trend_threshold_add: float = 1.5
+    # 低ATR+TRENDフィルター（低ボラTRENDはWR低下）
+    low_atr_trend_filter_enabled: bool = False
+    # ATR/ATR_MA比率がこの値以下で発動
+    low_atr_trend_ratio_max: float = 0.75
+    # HTFスコア最低要件（score_htf=0はWR低下）
+    htf_score_filter_enabled: bool = False
+    # HTF整合度がこの値以下のとき閾値を追加
+    htf_score_filter_min_alignment: float = 0.1
+    # HTF不一致時の追加閾値
+    htf_score_filter_threshold_add: float = 1.0
 
     def get_evaluator_config(self, timeframe: str) -> EvaluatorConfig:
         """時間足別評価器設定を取得

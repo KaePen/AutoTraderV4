@@ -295,3 +295,61 @@ class TestConsensusExit:
             sell_score=2.0,  # SELL方向が弱い（自方向）
         )
         assert action.action_type == ManagementActionType.FULL_CLOSE
+
+
+class TestUniversalHalfR:
+    """ユニバーサル0.5R部分利確テスト"""
+
+    def test_universal_half_r_triggers(self) -> None:
+        """0.5R到達時に部分利確+BE移動"""
+        config = PositionManagerConfig(
+            universal_half_r_enabled=True,
+            universal_half_r_trigger=0.5,
+            universal_half_r_ratio=0.25,
+        )
+        pm = PositionManager(config)
+        pid = _register_buy_pos(pm, entry=150.0, sl=149.8)
+
+        # 0.5R = 150.10到達
+        action = pm.evaluate(
+            position_id=pid,
+            current_price=150.11,
+            current_time=datetime(2024, 1, 1, 12, 30),
+            atr=0.002,
+        )
+        assert action.action_type == ManagementActionType.PARTIAL_CLOSE
+        assert action.close_ratio == 0.25
+
+    def test_universal_half_r_no_trigger_below(self) -> None:
+        """0.5R未到達では不発動"""
+        config = PositionManagerConfig(
+            universal_half_r_enabled=True,
+            universal_half_r_trigger=0.5,
+        )
+        pm = PositionManager(config)
+        pid = _register_buy_pos(pm, entry=150.0, sl=149.8)
+
+        action = pm.evaluate(
+            position_id=pid,
+            current_price=150.08,  # 0.4R
+            current_time=datetime(2024, 1, 1, 12, 30),
+            atr=0.002,
+        )
+        assert action.action_type != ManagementActionType.PARTIAL_CLOSE
+
+    def test_universal_half_r_disabled(self) -> None:
+        """無効時は不発動"""
+        config = PositionManagerConfig(
+            universal_half_r_enabled=False,
+        )
+        pm = PositionManager(config)
+        pid = _register_buy_pos(pm, entry=150.0, sl=149.8)
+
+        action = pm.evaluate(
+            position_id=pid,
+            current_price=150.15,
+            current_time=datetime(2024, 1, 1, 12, 30),
+            atr=0.002,
+        )
+        # 0.5R部分利確は発動しない（1R未満なのでPARTIAL_CLOSEにならない）
+        assert action.action_type != ManagementActionType.PARTIAL_CLOSE
