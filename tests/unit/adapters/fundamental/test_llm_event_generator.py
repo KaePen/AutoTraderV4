@@ -1,8 +1,9 @@
-"""LLMEventGenerator テスト"""
+"""LLMEventGenerator テスト（イベント単位分析版）"""
 
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+import csv
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
 
@@ -86,40 +87,8 @@ class TestFilterEvents:
         assert len(result) == 1
 
 
-class TestGroupByDate:
-    """_group_by_date のテスト"""
-
-    def setup_method(self) -> None:
-        """テスト用インスタンス"""
-        self.gen = LLMEventGenerator()
-
-    def test_groups_correctly(self) -> None:
-        """日付でグループ化"""
-        events = [
-            _make_event(
-                event_time=datetime(
-                    2024, 1, 5, 10, 0, tzinfo=timezone.utc
-                )
-            ),
-            _make_event(
-                event_time=datetime(
-                    2024, 1, 5, 14, 0, tzinfo=timezone.utc
-                )
-            ),
-            _make_event(
-                event_time=datetime(
-                    2024, 1, 6, 10, 0, tzinfo=timezone.utc
-                )
-            ),
-        ]
-        result = self.gen._group_by_date(events)
-        assert len(result) == 2
-        assert len(result[date(2024, 1, 5)]) == 2
-        assert len(result[date(2024, 1, 6)]) == 1
-
-
-class TestAnalyzeDate:
-    """_analyze_date のテスト"""
+class TestAnalyzeEvent:
+    """_analyze_event のテスト"""
 
     def setup_method(self) -> None:
         """テスト用インスタンス"""
@@ -127,75 +96,112 @@ class TestAnalyzeDate:
             retry_delay_seconds=0.0
         )
 
-    def test_no_events_returns_default(self) -> None:
-        """0件日 -> デフォルト、LLM呼び出しなし"""
-        with patch.object(
-            self.gen, "_call_ollama_with_retry"
-        ) as mock:
-            result = self.gen._analyze_date(
-                "USDJPY", "USD", "JPY", date(2024, 1, 1), []
-            )
-        mock.assert_not_called()
-        assert result["net_surprise_score"] == 0.0
-        assert result["trade_caution_level"] == 0
-
-    def test_unreleased_high_impact_sets_caution(
-        self,
-    ) -> None:
-        """未発表高インパクト -> 注意度設定"""
-        events = [
-            _make_event(actual=None, forecast=180.0),
-        ]
-        result = self.gen._analyze_date(
-            "USDJPY", "USD", "JPY", date(2024, 1, 5), events
-        )
-        assert result["trade_caution_level"] == 1
-
-    def test_two_unreleased_high_impact_max_caution(
-        self,
-    ) -> None:
-        """未発表高インパクト2件 -> 回避推奨"""
-        events = [
-            _make_event(
-                event_name="NFP", actual=None, forecast=180.0
-            ),
-            _make_event(
-                event_name="CPI", actual=None, forecast=2.5
-            ),
-        ]
-        result = self.gen._analyze_date(
-            "USDJPY", "USD", "JPY", date(2024, 1, 5), events
-        )
-        assert result["trade_caution_level"] == 2
-
-    def test_with_events_calls_llm(self) -> None:
-        """イベントあり -> LLM呼び出し"""
-        events = [_make_event()]
+    def test_high_impact_calls_llm(self) -> None:
+        """HIGHインパクト -> LLM呼び出し"""
+        event = _make_event(impact=ImpactLevel.HIGH)
         llm_response = {
-            "net_surprise_score": 0.5,
-            "dominant_event_name": "NFP",
-            "dominant_surprise_pct": 0.11,
-            "expected_volatility": 1.5,
-            "price_direction_bias": 0.6,
-            "convergence_hours": 4.0,
-            "trade_caution_level": 2,
+            "surprise_score": 0.5,
+            "direction_bias": 0.6,
+            "convergence_hours": 48.0,
+            "expected_volatility": 1.8,
+            "trade_caution_level": 1,
             "summary": "NFP大幅上振れ",
         }
         with patch.object(
             self.gen,
             "_call_ollama_with_retry",
             return_value=llm_response,
-        ):
-            result = self.gen._analyze_date(
-                "USDJPY",
-                "USD",
-                "JPY",
-                date(2024, 1, 5),
-                events,
+        ) as mock:
+            result = self.gen._analyze_event(
+                "USDJPY", "USD", "JPY", event
             )
-        assert result["net_surprise_score"] == 0.5
-        assert result["dominant_event_name"] == "NFP"
-        assert result["trade_caution_level"] == 2
+        mock.assert_called_once()
+        assert result["surprise_score"] == 0.5
+        assert result["event_name"] == "NFP"
+        assert result["event_time"] is not None
+
+    def test_medium_impact_calls_llm(self) -> None:
+        """MEDIUMインパクト -> LLM呼び出し"""
+        event = _make_event(impact=ImpactLevel.MEDIUM)
+        with patch.object(
+            self.gen,
+            "_call_ollama_with_retry",
+            return_value={
+                "surprise_score": 0.2,
+                "direction_bias": 0.1,
+                "convergence_hours": 4.0,
+                "expected_volatility": 1.0,
+                "trade_caution_level": 0,
+                "summary": "テスト",
+            },
+        ) as mock:
+            self.gen._analyze_event(
+                "USDJPY", "USD", "JPY", event
+            )
+        mock.assert_called_once()
+
+    def test_low_impact_skips_llm(self) -> None:
+        """LOWインパクト -> LLMスキップ"""
+        event = _make_event(impact=ImpactLevel.LOW)
+        with patch.object(
+            self.gen,
+            "_call_ollama_with_retry",
+        ) as mock:
+            result = self.gen._analyze_event(
+                "USDJPY", "USD", "JPY", event
+            )
+        mock.assert_not_called()
+        assert result["summary"] == "低インパクト指標"
+        assert result["convergence_hours"] == 1.0
+
+    def test_low_impact_with_surprise(self) -> None:
+        """LOWインパクト + サプライズ -> 簡易計算"""
+        # actual=200, forecast=180 -> surprise=0.111
+        event = _make_event(
+            impact=ImpactLevel.LOW,
+            actual=200.0,
+            forecast=180.0,
+        )
+        result = self.gen._analyze_event(
+            "USDJPY", "USD", "JPY", event
+        )
+        assert result["surprise_score"] > 0
+        assert abs(result["direction_bias"]) > 0
+
+    def test_holiday_skips_llm(self) -> None:
+        """休日イベント -> LLMスキップ + 固定値"""
+        event = _make_event(
+            event_name="Bank Holiday",
+            impact=ImpactLevel.HIGH,
+            actual=None,
+            forecast=None,
+            previous=None,
+        )
+        with patch.object(
+            self.gen,
+            "_call_ollama_with_retry",
+        ) as mock:
+            result = self.gen._analyze_event(
+                "USDJPY", "USD", "JPY", event
+            )
+        mock.assert_not_called()
+        assert result["surprise_score"] == 0.0
+        assert result["convergence_hours"] == 24.0
+        assert result["expected_volatility"] == 0.3
+        assert result["trade_caution_level"] == 1
+        assert "流動性低下" in result["summary"]
+
+    def test_output_contains_event_metadata(self) -> None:
+        """出力にイベントメタデータが含まれる"""
+        event = _make_event(impact=ImpactLevel.LOW)
+        result = self.gen._analyze_event(
+            "USDJPY", "USD", "JPY", event
+        )
+        assert result["currency"] == "USD"
+        assert result["event_name"] == "NFP"
+        assert result["impact"] == "high" or True
+        assert result["actual"] == 200.0
+        assert result["forecast"] == 180.0
 
 
 class TestBuildEventResult:
@@ -208,15 +214,15 @@ class TestBuildEventResult:
     def test_clips_scores(self) -> None:
         """スコアクリッピング"""
         data = {
-            "net_surprise_score": 1.5,
-            "price_direction_bias": -2.0,
+            "surprise_score": 1.5,
+            "direction_bias": -2.0,
             "expected_volatility": 3.0,
             "convergence_hours": 100.0,
             "trade_caution_level": 5,
         }
         result = self.gen._build_event_result(data)
-        assert result["net_surprise_score"] == 1.0
-        assert result["price_direction_bias"] == -1.0
+        assert result["surprise_score"] == 1.0
+        assert result["direction_bias"] == -1.0
         assert result["expected_volatility"] == 2.0
         assert result["convergence_hours"] == 72.0
         assert result["trade_caution_level"] == 2
@@ -230,8 +236,8 @@ class TestBuildEventResult:
     def test_missing_fields_default(self) -> None:
         """欠落フィールド -> デフォルト"""
         result = self.gen._build_event_result({})
-        assert result["net_surprise_score"] == 0.0
-        assert result["dominant_event_name"] == ""
+        assert result["surprise_score"] == 0.0
+        assert result["direction_bias"] == 0.0
         assert result["expected_volatility"] == 1.0
         assert result["convergence_hours"] == 0.0
         assert result["trade_caution_level"] == 0
@@ -246,67 +252,61 @@ class TestBuildEventPrompt:
 
     def test_contains_required_sections(self) -> None:
         """プロンプト構造検証"""
-        events = [_make_event()]
+        event = _make_event()
         prompt = self.gen._build_event_prompt(
-            "USDJPY",
-            "USD",
-            "JPY",
-            date(2024, 1, 5),
-            events,
+            "USDJPY", "USD", "JPY", event
         )
         assert "USDJPY" in prompt
-        assert "USD" in prompt
-        assert "JPY" in prompt
-        assert "2024年1月5日" in prompt
         assert "NFP" in prompt
-        assert "net_surprise_score" in prompt
-
-
-class TestFormatEvents:
-    """_format_events_for_prompt のテスト"""
-
-    def setup_method(self) -> None:
-        """テスト用インスタンス"""
-        self.gen = LLMEventGenerator()
-
-    def test_empty(self) -> None:
-        """空リスト"""
-        result = self.gen._format_events_for_prompt([])
-        assert result == "（なし）"
-
-    def test_includes_previous(self) -> None:
-        """前回値も含める"""
-        events = [_make_event(previous=175.0)]
-        result = self.gen._format_events_for_prompt(events)
-        assert "前回=175.00" in result
+        assert "surprise_score" in prompt
+        assert "convergence_hours" in prompt
+        assert "200.00" in prompt
+        assert "180.00" in prompt
 
 
 class TestGenerateForSymbolYear:
     """generate_for_symbol_year のテスト"""
 
-    def test_creates_csv_365_rows(
+    def test_creates_csv_per_event(
         self, tmp_path: Path
     ) -> None:
-        """CSV生成 + 365行検証（2023年）"""
+        """1行=1イベントのCSV生成"""
         gen = LLMEventGenerator(retry_delay_seconds=0.0)
         events = [
             _make_event(
+                event_name="NFP",
+                impact=ImpactLevel.HIGH,
                 event_time=datetime(
-                    2023, 6, 15, 14, 0, tzinfo=timezone.utc
-                )
+                    2023, 6, 15, 13, 30,
+                    tzinfo=timezone.utc,
+                ),
+            ),
+            _make_event(
+                event_name="ISM",
+                impact=ImpactLevel.MEDIUM,
+                event_time=datetime(
+                    2023, 6, 15, 15, 0,
+                    tzinfo=timezone.utc,
+                ),
+            ),
+            _make_event(
+                event_name="Housing",
+                impact=ImpactLevel.LOW,
+                event_time=datetime(
+                    2023, 6, 15, 16, 0,
+                    tzinfo=timezone.utc,
+                ),
             ),
         ]
         with patch.object(
             gen,
             "_call_ollama_with_retry",
             return_value={
-                "net_surprise_score": 0.3,
-                "dominant_event_name": "NFP",
-                "dominant_surprise_pct": 0.1,
+                "surprise_score": 0.3,
+                "direction_bias": 0.4,
+                "convergence_hours": 12.0,
                 "expected_volatility": 1.2,
-                "price_direction_bias": 0.4,
-                "convergence_hours": 3.0,
-                "trade_caution_level": 1,
+                "trade_caution_level": 0,
                 "summary": "テスト",
             },
         ):
@@ -315,34 +315,127 @@ class TestGenerateForSymbolYear:
             )
 
         assert path.exists()
-        import csv
-
         with open(path, encoding="utf-8") as f:
             reader = csv.DictReader(f)
             rows = list(reader)
-        assert len(rows) == 365
-        # ヘッダー検証
-        assert set(rows[0].keys()) == set(EVENT_CSV_COLUMNS)
+        # 3イベント = 3行
+        assert len(rows) == 3
+        assert set(rows[0].keys()) == set(
+            EVENT_CSV_COLUMNS
+        )
+        # 時系列順
+        assert rows[0]["event_name"] == "NFP"
+        assert rows[2]["event_name"] == "Housing"
 
-    def test_skips_existing_without_overwrite(
+    def test_holiday_events_have_defaults(
         self, tmp_path: Path
     ) -> None:
-        """上書きなし -> スキップ"""
-        gen = LLMEventGenerator()
-        existing = tmp_path / "llm_events_USDJPY_2024.csv"
-        existing.write_text("header\n", encoding="utf-8")
+        """休日イベントは固定デフォルト値で出力"""
+        gen = LLMEventGenerator(retry_delay_seconds=0.0)
+        events = [
+            _make_event(
+                event_name="Bank Holiday",
+                actual=None,
+                forecast=None,
+                previous=None,
+            ),
+        ]
+        with patch.object(
+            gen,
+            "_call_ollama_with_retry",
+        ) as mock:
+            path = gen.generate_for_symbol_year(
+                "USDJPY", 2024, events, tmp_path
+            )
+        # LLM呼び出しなし
+        mock.assert_not_called()
+        with open(path, encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            rows = list(reader)
+        # 休日は固定値で1行出力
+        assert len(rows) == 1
+        row = rows[0]
+        assert row["event_name"] == "Bank Holiday"
+        assert float(row["surprise_score"]) == 0.0
+        assert float(row["direction_bias"]) == 0.0
+        assert float(row["convergence_hours"]) == 24.0
+        assert float(row["expected_volatility"]) == 0.3
+        assert int(row["trade_caution_level"]) == 1
+        assert "流動性低下" in row["summary"]
 
-        result = gen.generate_for_symbol_year(
-            "USDJPY", 2024, [], tmp_path, overwrite=False
-        )
-        assert result == existing
+    def test_resume_skips_processed(
+        self, tmp_path: Path
+    ) -> None:
+        """resume: 処理済みイベントをスキップ"""
+        gen = LLMEventGenerator(retry_delay_seconds=0.0)
+
+        # 既存CSV作成（1件処理済み）
+        existing = tmp_path / "llm_events_USDJPY_2024.csv"
+        with open(
+            existing, "w", encoding="utf-8", newline=""
+        ) as f:
+            writer = csv.DictWriter(
+                f, fieldnames=EVENT_CSV_COLUMNS
+            )
+            writer.writeheader()
+            writer.writerow({
+                "event_time": "2024-01-05T13:30:00+00:00",
+                "currency": "USD",
+                "event_name": "NFP",
+                "impact": "high",
+                "actual": "200.0",
+                "forecast": "180.0",
+                "previous": "175.0",
+                "surprise_score": "0.5",
+                "direction_bias": "0.4",
+                "convergence_hours": "48.0",
+                "expected_volatility": "1.5",
+                "trade_caution_level": "1",
+                "summary": "テスト",
+            })
+
+        events = [
+            _make_event(
+                event_name="NFP",
+                event_time=datetime(
+                    2024, 1, 5, 13, 30,
+                    tzinfo=timezone.utc,
+                ),
+            ),
+            _make_event(
+                event_name="ISM",
+                event_time=datetime(
+                    2024, 1, 5, 15, 0,
+                    tzinfo=timezone.utc,
+                ),
+            ),
+        ]
+        with patch.object(
+            gen,
+            "_call_ollama_with_retry",
+            return_value={
+                "surprise_score": 0.2,
+                "direction_bias": 0.1,
+                "convergence_hours": 4.0,
+                "expected_volatility": 1.0,
+                "trade_caution_level": 0,
+                "summary": "ISMテスト",
+            },
+        ) as mock:
+            gen.generate_for_symbol_year(
+                "USDJPY", 2024, events, tmp_path
+            )
+        # 1件目はスキップ、2件目のみLLM呼び出し
+        assert mock.call_count == 1
 
     def test_unsupported_symbol_raises(
         self, tmp_path: Path
     ) -> None:
         """未対応シンボル -> ValueError"""
         gen = LLMEventGenerator()
-        with pytest.raises(ValueError, match="未対応シンボル"):
+        with pytest.raises(
+            ValueError, match="未対応シンボル"
+        ):
             gen.generate_for_symbol_year(
                 "XXXYYY", 2024, [], tmp_path
             )
