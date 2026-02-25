@@ -214,6 +214,13 @@ class UnifiedBotConfig:
     htf_score_filter_min_alignment: float = 0.1
     # HTF不一致時の追加閾値
     htf_score_filter_threshold_add: float = 1.0
+    # --- Phase 2a: ファンダメンタル統合設定 ---
+    # ハードガード: 注意度がこの値以上でエントリーブロック
+    fundamental_caution_block_level: int = 2
+    # ハードガード: 休日流動性がこの値未満でブロック
+    fundamental_holiday_liquidity_block: float = 0.3
+    # 時間減衰係数（大きいほど急速に減衰）
+    fundamental_decay_coefficient: float = 2.0
 
     def get_evaluator_config(self, timeframe: str) -> EvaluatorConfig:
         """時間足別評価器設定を取得

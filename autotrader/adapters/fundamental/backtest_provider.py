@@ -3,14 +3,20 @@
 CSVファイルから過去の経済イベントを読み込み、
 バックテスト時刻に合わせてFundamentalContextを提供する。
 
-事前生成済みLLMコンテキストCSVがある場合はそちらを優先し、
-マクロバイアス・センチメントスコアを正確に再現する。
+フォールバック階層:
+1. イベントLLM CSV（llm_events_SYMBOL_YYYY.csv）→ 合成アルゴリズム
+2. 月次LLM CSV（llm_context_SYMBOL_YYYY.csv）→ 旧ロジック
+3. events CSV のみ → _estimate_bias_from_events
+4. 何もなし → FundamentalContext.neutral()
 """
 
 from __future__ import annotations
 
 import bisect
 import csv
+import math
+import re
+from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -76,6 +82,79 @@ _DEFAULT_LLM_CONTEXT = {
     "sentiment_score": 0.0,
 }
 
+# 休日イベント判定パターン
+_HOLIDAY_RE = re.compile(r"(?i)holiday|bank\s+holiday")
+
+# インパクトレベル別重み（合成時に使用）
+_IMPACT_WEIGHT: dict[str, float] = {
+    "high": 3.0,
+    "medium": 1.0,
+    "low": 0.3,
+}
+
+# 影響度の最小閾値（これ未満は無視）
+_INFLUENCE_THRESHOLD = 0.05
+
+# 過去イベント検索の最大時間（時間）
+_MAX_LOOKBACK_HOURS = 72
+
+
+@dataclass(frozen=True)
+class EventLLMRecord:
+    """イベントLLM分析結果（CSV1行に対応）
+
+    Attributes:
+        event_time: イベント発表時刻（UTC）
+        currency: 対象通貨
+        event_name: イベント名称
+        impact: インパクトレベル
+        surprise_score: サプライズスコア
+        direction_bias: 方向バイアス
+        convergence_hours: 影響収束推定時間
+        expected_volatility: ボラティリティ倍率
+        trade_caution_level: 取引注意度
+        is_holiday: 休日イベントフラグ
+    """
+
+    event_time: datetime
+    currency: str
+    event_name: str
+    impact: str
+    surprise_score: float
+    direction_bias: float
+    convergence_hours: float
+    expected_volatility: float
+    trade_caution_level: int
+    is_holiday: bool
+
+
+def compute_influence(
+    elapsed_hours: float,
+    convergence_hours: float,
+    decay_coefficient: float = 2.0,
+) -> float:
+    """時間減衰による残存影響度を計算
+
+    指数減衰モデル: exp(-decay_coeff * elapsed / convergence)
+    convergence_hours の約35%で影響半減。
+
+    Args:
+        elapsed_hours: イベントからの経過時間
+        convergence_hours: 影響収束推定時間
+        decay_coefficient: 減衰係数（大きいほど急速に減衰）
+
+    Returns:
+        float: 残存影響度 (0.0~1.0)
+    """
+    if convergence_hours <= 0:
+        return 0.0
+    if elapsed_hours < 0:
+        return 0.0
+    if elapsed_hours >= convergence_hours:
+        return 0.0
+    ratio = elapsed_hours / convergence_hours
+    return math.exp(-decay_coefficient * ratio)
+
 
 class BacktestFundamentalProvider:
     """バックテスト用ファンダメンタルプロバイダー
@@ -83,36 +162,45 @@ class BacktestFundamentalProvider:
     MT5の過去データCSVを読み込み、バックテスト時刻に
     合わせてFundamentalContextを提供する。
 
-    事前生成済みLLMコンテキストCSV（`llm_context_SYMBOL_YYYY.csv`）が
-    あれば `load_llm_context_csv()` で読み込む。
-    LLMコンテキストがある場合はそちらのバイアス値を優先する。
-
-    使用するCSVフォーマット（`data/fundamental/events_YYYY.csv`）:
-    ```
-    event_id,event_time,currency,event_name,impact,actual,forecast,previous
-    mt5_12345,2024-01-15T08:30:00+00:00,USD,NFP,high,256000,180000,185000
-    ```
+    フォールバック階層:
+    1. イベントLLM CSV → 合成アルゴリズム（Phase 2）
+    2. 月次LLM CSV → 旧ロジック
+    3. events CSV のみ → バイアス計算
+    4. 何もなし → FundamentalContext.neutral()
 
     Args:
         event_guard_minutes: 重要指標前の取引停止分数
+        decay_coefficient: 時間減衰係数
     """
 
-    def __init__(self, event_guard_minutes: int = 30) -> None:
+    def __init__(
+        self,
+        event_guard_minutes: int = 30,
+        decay_coefficient: float = 2.0,
+    ) -> None:
         """初期化
 
         Args:
             event_guard_minutes: 重要指標前の取引停止分数
+            decay_coefficient: 時間減衰係数
         """
         self._guard_minutes = event_guard_minutes
+        self._decay_coefficient = decay_coefficient
         self._events: list[EconomicEvent] = []
         self._events_sorted_ts: list[float] = []
         self._normalizer = EconomicEventNormalizer()
         self._loaded_files: list[str] = []
 
-        # LLMコンテキスト: symbol → (period_start_ts一覧, コンテキスト一覧)
-        # bisect用にUNIXタイムスタンプのソート済みリストを保持
+        # 月次LLMコンテキスト: symbol → (ts一覧, コンテキスト一覧)
         self._llm_ts: dict[str, list[float]] = {}
         self._llm_data: dict[str, list[dict]] = {}
+
+        # イベントLLMレコード: symbol → レコード一覧
+        self._event_llm_records: dict[
+            str, list[EventLLMRecord]
+        ] = {}
+        # bisect用: symbol → タイムスタンプ一覧
+        self._event_llm_ts: dict[str, list[float]] = {}
 
         # ニュースアイテム（published_at 昇順ソート）
         self._news_items: list[NewsItem] = []
@@ -304,13 +392,77 @@ class BacktestFundamentalProvider:
             )
             return 0
 
+    def load_event_llm_csv(
+        self,
+        csv_path: str | Path,
+        symbol: str,
+    ) -> int:
+        """イベントLLM分析結果CSVを読み込み
+
+        Phase 1 で生成した `llm_events_SYMBOL_YYYY.csv` を
+        読み込み、内部リストに追記する。
+
+        Args:
+            csv_path: イベントLLM CSVファイルパス
+            symbol: 対象シンボル
+
+        Returns:
+            int: 読み込んだレコード数
+        """
+        path = Path(csv_path)
+        if not path.exists():
+            logger.warning(
+                f"[BacktestFundamental] イベントLLM CSV"
+                f"が見つかりません: {path}"
+            )
+            return 0
+
+        loaded: list[EventLLMRecord] = []
+
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    rec = self._parse_event_llm_row(row)
+                    if rec is not None:
+                        loaded.append(rec)
+
+            if not loaded:
+                return 0
+
+            # 既存データとマージしてソート
+            existing = self._event_llm_records.get(symbol, [])
+            merged = existing + loaded
+            merged.sort(key=lambda r: r.event_time)
+
+            self._event_llm_records[symbol] = merged
+            self._event_llm_ts[symbol] = [
+                r.event_time.timestamp() for r in merged
+            ]
+
+            logger.info(
+                f"[BacktestFundamental] イベントLLM "
+                f"{len(loaded)}件読込: {path.name} ({symbol})"
+            )
+            return len(loaded)
+
+        except Exception as e:
+            logger.error(
+                f"[BacktestFundamental] イベントLLM CSV"
+                f"読込エラー: {e}"
+            )
+            return 0
+
     def get_context(
         self, current_time: datetime, symbol: str
     ) -> FundamentalContext:
         """指定時刻のファンダメンタルコンテキストを取得
 
-        事前生成済みLLMコンテキストがあればそちらを使用。
-        ない場合はイベントベースのバイアス計算にフォールバック。
+        フォールバック階層:
+        1. イベントLLM CSV → 合成アルゴリズム
+        2. 月次LLM CSV → 旧ロジック
+        3. events CSV のみ → バイアス計算
+        4. 何もなし → FundamentalContext.neutral()
 
         Args:
             current_time: バックテスト現在時刻（UTC）
@@ -319,35 +471,52 @@ class BacktestFundamentalProvider:
         Returns:
             FundamentalContext: ファンダメンタルコンテキスト
         """
-        # LLMコンテキストの取得（bisectで O(log n)）
-        llm_ctx = self._get_llm_context(current_time, symbol)
+        # 共通: upcoming events / high impact check
+        upcoming_dicts, high_impact_soon = (
+            self._compute_upcoming(current_time, symbol)
+        )
 
-        # 経済イベントがない場合はLLMコンテキストだけ返す
-        if not self._events:
-            return FundamentalContext(
-                macro_bias_score=llm_ctx["macro_bias_score"],
-                macro_bias_summary=llm_ctx["macro_bias_summary"],
-                post_event_bias_score=llm_ctx[
-                    "post_event_bias_score"
-                ],
-                post_event_summary=llm_ctx[
-                    "post_event_summary"
-                ],
-                sentiment_score=llm_ctx["sentiment_score"],
-                upcoming_events=[],
-                has_high_impact_within_30min=False,
+        # 優先度1: イベントLLMデータがある場合
+        records = self._event_llm_records.get(symbol, [])
+        if records:
+            return self._synthesize_event_llm_context(
+                current_time, symbol,
+                upcoming_dicts, high_impact_soon,
             )
 
-        # シンボル関連イベントにフィルタリング
+        # 優先度2-3: 旧ロジック（月次LLM or events計算）
+        return self._fallback_context(
+            current_time, symbol,
+            upcoming_dicts, high_impact_soon,
+        )
+
+    # --------------------------------------------------
+    # プライベート: 共通ヘルパー
+    # --------------------------------------------------
+
+    def _compute_upcoming(
+        self,
+        current_time: datetime,
+        symbol: str,
+    ) -> tuple[list[dict], bool]:
+        """直近イベント情報と高インパクトフラグを計算
+
+        Args:
+            current_time: 現在時刻
+            symbol: 対象シンボル
+
+        Returns:
+            tuple[list[dict], bool]: (upcoming_dicts, high_impact)
+        """
+        if not self._events:
+            return [], False
+
         symbol_events = self._normalizer.filter_by_symbol(
             self._events, symbol
         )
-
-        # 直近1時間のイベントを取得
         upcoming = self._normalizer.get_upcoming_events(
             symbol_events, current_time, window_minutes=60
         )
-
         upcoming_dicts = [
             {
                 "name": ev.event_name,
@@ -356,33 +525,210 @@ class BacktestFundamentalProvider:
             }
             for ev in upcoming
         ]
-
-        # 30分以内の高インパクト指標チェック
         high_impact_soon = any(
             ev.impact == ImpactLevel.HIGH
             and 0 <= ev.minutes_until(current_time)
             <= self._guard_minutes
             for ev in upcoming
         )
+        return upcoming_dicts, high_impact_soon
 
-        # 直前24時間の発表済みイベントからマクロバイアスを計算
+    # --------------------------------------------------
+    # プライベート: イベントLLM合成（Phase 2）
+    # --------------------------------------------------
+
+    def _synthesize_event_llm_context(
+        self,
+        current_time: datetime,
+        symbol: str,
+        upcoming_dicts: list[dict],
+        high_impact_soon: bool,
+    ) -> FundamentalContext:
+        """イベントLLMデータから合成コンテキストを生成
+
+        Args:
+            current_time: 現在時刻
+            symbol: 対象シンボル
+            upcoming_dicts: 直近イベント情報
+            high_impact_soon: 高インパクトフラグ
+
+        Returns:
+            FundamentalContext: 合成コンテキスト
+        """
+        records = self._event_llm_records[symbol]
+        ts_list = self._event_llm_ts[symbol]
+        current_ts = current_time.timestamp()
+
+        # 過去72時間のイベントを候補に（bisect検索）
+        cutoff_ts = (
+            current_time - timedelta(hours=_MAX_LOOKBACK_HOURS)
+        ).timestamp()
+        lo = bisect.bisect_left(ts_list, cutoff_ts)
+        hi = bisect.bisect_right(ts_list, current_ts)
+        candidates = records[lo:hi]
+
+        # 各候補の影響度を計算
+        active: list[tuple[EventLLMRecord, float]] = []
+        for rec in candidates:
+            elapsed_h = (
+                current_time - rec.event_time
+            ).total_seconds() / 3600
+            infl = compute_influence(
+                elapsed_h,
+                rec.convergence_hours,
+                self._decay_coefficient,
+            )
+            if infl > _INFLUENCE_THRESHOLD:
+                active.append((rec, infl))
+
+        # アクティブイベントがなければニュートラル
+        if not active:
+            return FundamentalContext(
+                upcoming_events=upcoming_dicts,
+                has_high_impact_within_30min=high_impact_soon,
+            )
+
+        # --- 方向性合成（重み付き平均） ---
+        total_w = 0.0
+        w_bias = 0.0
+        w_surprise = 0.0
+        for rec, infl in active:
+            w = infl * _IMPACT_WEIGHT.get(rec.impact, 0.3)
+            w_bias += rec.direction_bias * w
+            w_surprise += rec.surprise_score * w
+            total_w += w
+
+        direction_bias = 0.0
+        surprise_score = 0.0
+        if total_w > 0:
+            direction_bias = max(
+                -1.0, min(1.0, w_bias / total_w)
+            )
+            surprise_score = max(
+                -1.0, min(1.0, w_surprise / total_w)
+            )
+
+        # --- ボラティリティ合成（通常イベントのmax） ---
+        normal_vols = [
+            1.0 + (rec.expected_volatility - 1.0) * infl
+            for rec, infl in active
+            if not rec.is_holiday
+        ]
+        volatility_multiplier = (
+            max(normal_vols) if normal_vols else 1.0
+        )
+
+        # --- 流動性合成（休日イベントのmin） ---
+        liquidity_factor = 1.0
+        is_holiday = False
+        for rec, infl in active:
+            if rec.is_holiday:
+                is_holiday = True
+                # 減衰適用: 流動性は時間とともに正常化
+                liq = (
+                    rec.expected_volatility * infl
+                    + (1.0 - infl)
+                )
+                liquidity_factor = min(liquidity_factor, liq)
+
+        # --- 注意度合成（max） ---
+        event_caution_level = max(
+            rec.trade_caution_level
+            for rec, infl in active
+            if infl > 0.1
+        )
+
+        # --- 収束進捗（最も未収束なもの） ---
+        convergence_progress = min(
+            1.0 - infl for _, infl in active
+        )
+
+        # --- アクティブイベント数 ---
+        active_event_count = len(active)
+
+        return FundamentalContext(
+            has_high_impact_within_30min=high_impact_soon,
+            event_caution_level=event_caution_level,
+            is_holiday=is_holiday,
+            liquidity_factor=liquidity_factor,
+            volatility_multiplier=volatility_multiplier,
+            active_event_count=active_event_count,
+            direction_bias=direction_bias,
+            surprise_score=surprise_score,
+            convergence_progress=convergence_progress,
+            upcoming_events=upcoming_dicts,
+        )
+
+    # --------------------------------------------------
+    # プライベート: フォールバック（旧ロジック）
+    # --------------------------------------------------
+
+    def _fallback_context(
+        self,
+        current_time: datetime,
+        symbol: str,
+        upcoming_dicts: list[dict],
+        high_impact_soon: bool,
+    ) -> FundamentalContext:
+        """旧ロジックによるフォールバックコンテキスト
+
+        月次LLMデータまたはイベントベース計算で
+        後方互換フィールドを設定する。
+
+        Args:
+            current_time: 現在時刻
+            symbol: 対象シンボル
+            upcoming_dicts: 直近イベント情報
+            high_impact_soon: 高インパクトフラグ
+
+        Returns:
+            FundamentalContext: フォールバックコンテキスト
+        """
+        llm_ctx = self._get_llm_context(current_time, symbol)
+
+        if not self._events:
+            return FundamentalContext(
+                macro_bias_score=llm_ctx["macro_bias_score"],
+                macro_bias_summary=llm_ctx[
+                    "macro_bias_summary"
+                ],
+                post_event_bias_score=llm_ctx[
+                    "post_event_bias_score"
+                ],
+                post_event_summary=llm_ctx[
+                    "post_event_summary"
+                ],
+                sentiment_score=llm_ctx["sentiment_score"],
+                upcoming_events=upcoming_dicts,
+                has_high_impact_within_30min=high_impact_soon,
+            )
+
+        # シンボル関連イベントにフィルタリング
+        symbol_events = self._normalizer.filter_by_symbol(
+            self._events, symbol
+        )
+
+        # 24hマクロバイアス計算
         released_24h = self._get_released_events(
             symbol_events, current_time, hours=24
         )
-        macro_bias, macro_summary = self._estimate_bias_from_events(
-            released_24h, symbol
+        macro_bias, macro_summary = (
+            self._estimate_bias_from_events(
+                released_24h, symbol
+            )
         )
 
-        # 直前4時間の発表済みイベントから指標後バイアスを計算
+        # 4h指標後バイアス計算
         released_4h = self._get_released_events(
             symbol_events, current_time, hours=4
         )
-        post_bias, post_summary = self._estimate_bias_from_events(
-            released_4h, symbol
+        post_bias, post_summary = (
+            self._estimate_bias_from_events(
+                released_4h, symbol
+            )
         )
 
-        # LLMコンテキストがあればそちらを優先、
-        # なければイベントベースの計算結果を使用
+        # LLMコンテキスト優先
         has_llm = (
             symbol in self._llm_ts
             and len(self._llm_ts[symbol]) > 0
@@ -408,6 +754,88 @@ class BacktestFundamentalProvider:
             sentiment_score=s_score,
             upcoming_events=upcoming_dicts,
             has_high_impact_within_30min=high_impact_soon,
+            # Phase 2 フィールドは direction_bias に旧バイアスを反映
+            direction_bias=p_score,
+        )
+
+    # --------------------------------------------------
+    # プライベート: ユーティリティ
+    # --------------------------------------------------
+
+    def _parse_event_llm_row(
+        self, row: dict
+    ) -> EventLLMRecord | None:
+        """CSV行をEventLLMRecordに変換
+
+        Args:
+            row: CSV行辞書
+
+        Returns:
+            EventLLMRecord | None: 変換済みレコード
+        """
+        event_time_str = row.get("event_time", "")
+        if not event_time_str:
+            return None
+
+        try:
+            event_time = datetime.fromisoformat(event_time_str)
+            if event_time.tzinfo is None:
+                event_time = event_time.replace(
+                    tzinfo=timezone.utc
+                )
+        except ValueError:
+            return None
+
+        currency = row.get("currency", "").upper()
+        event_name = row.get("event_name", "")
+        if not currency or not event_name:
+            return None
+
+        def _f(val: str, default: float = 0.0) -> float:
+            try:
+                return float(val) if val else default
+            except ValueError:
+                return default
+
+        def _i(val: str, default: int = 0) -> int:
+            try:
+                return int(float(val)) if val else default
+            except ValueError:
+                return default
+
+        return EventLLMRecord(
+            event_time=event_time,
+            currency=currency,
+            event_name=event_name,
+            impact=row.get("impact", "low").lower(),
+            surprise_score=max(
+                -1.0, min(1.0, _f(row.get(
+                    "surprise_score", ""
+                )))
+            ),
+            direction_bias=max(
+                -1.0, min(1.0, _f(row.get(
+                    "direction_bias", ""
+                )))
+            ),
+            convergence_hours=max(
+                0.0, min(72.0, _f(row.get(
+                    "convergence_hours", ""
+                )))
+            ),
+            expected_volatility=max(
+                0.0, min(2.0, _f(row.get(
+                    "expected_volatility", ""
+                )))
+            ),
+            trade_caution_level=max(
+                0, min(2, _i(row.get(
+                    "trade_caution_level", ""
+                )))
+            ),
+            is_holiday=bool(
+                _HOLIDAY_RE.search(event_name)
+            ),
         )
 
     def _get_released_events(
@@ -417,9 +845,6 @@ class BacktestFundamentalProvider:
         hours: int,
     ) -> list[EconomicEvent]:
         """指定時間内の発表済みイベントを取得
-
-        イベントリストは event_time 昇順ソート済みを前提として
-        bisect による O(log n) 検索を使用する。
 
         Args:
             events: 時刻昇順ソート済みイベントリスト
@@ -448,14 +873,6 @@ class BacktestFundamentalProvider:
     ) -> tuple[float, str]:
         """発表済みイベントからバイアスを計算
 
-        surprise_magnitude（実績/予測乖離）から
-        symbol の通貨方向バイアスを計算する。
-
-        実績 > 予測 → 発表通貨にポジティブバイアス（先行通貨なら+、後続通貨なら-）
-        実績 < 予測 → 発表通貨にネガティブバイアス
-        高インパクト指標は乗数3倍で適用。
-        バイアスは -1.0〜+1.0 にクリップ。
-
         Args:
             released_events: 発表済みイベントリスト
             symbol: 対象シンボル
@@ -466,7 +883,6 @@ class BacktestFundamentalProvider:
         if not released_events:
             return 0.0, "発表済み指標なし"
 
-        # シンボル→通貨ペア取得
         sym_upper = symbol.upper()
         base_cur, quote_cur = _SYMBOL_CURRENCIES.get(
             sym_upper, (sym_upper[:3], sym_upper[3:])
@@ -479,7 +895,6 @@ class BacktestFundamentalProvider:
             if ev.actual is None:
                 continue
             if ev.forecast is None:
-                # 予測なしの場合は前回値を参照
                 if ev.previous is None:
                     continue
                 reference = ev.previous
@@ -489,22 +904,17 @@ class BacktestFundamentalProvider:
             if reference == 0.0:
                 continue
 
-            # サプライズ幅（実績 - 予測）の正規化
             surprise = (ev.actual - reference) / abs(reference)
 
-            # インパクト乗数
             multiplier = (
                 _HIGH_IMPACT_MULTIPLIER
                 if ev.impact == ImpactLevel.HIGH
                 else 1.0
             )
 
-            # 通貨方向でバイアス符号を決定
             if ev.currency == base_cur:
-                # 先行通貨の強さ → ペアにとってポジティブ
                 bias = surprise * multiplier
             elif ev.currency == quote_cur:
-                # 後続通貨の強さ → ペアにとってネガティブ
                 bias = -surprise * multiplier
             else:
                 continue
@@ -515,7 +925,6 @@ class BacktestFundamentalProvider:
                 f"{ev.currency}/{ev.event_name}{direction}"
             )
 
-        # -1.0〜+1.0 にクリップ
         clipped = max(-1.0, min(1.0, total_bias))
 
         if event_summaries:
@@ -532,8 +941,6 @@ class BacktestFundamentalProvider:
     ) -> dict:
         """指定時刻のLLMコンテキストをbisectで取得
 
-        直前の月次コンテキストを O(log n) で探索。
-
         Args:
             current_time: バックテスト現在時刻
             symbol: トレード対象シンボル
@@ -547,12 +954,10 @@ class BacktestFundamentalProvider:
             return _DEFAULT_LLM_CONTEXT.copy()
 
         current_ts = current_time.timestamp()
-        # bisect_right で current_ts より大きい最初のインデックス
         idx = bisect.bisect_right(ts_list, current_ts) - 1
         if idx < 0:
             return _DEFAULT_LLM_CONTEXT.copy()
 
-        # .copy() でイミュータブル保証（外部による変更防止）
         return data_list[idx].copy()
 
     def _parse_row(
@@ -572,7 +977,6 @@ class BacktestFundamentalProvider:
             return None
 
         try:
-            # ISO8601形式でパース
             event_time = datetime.fromisoformat(event_time_str)
             if event_time.tzinfo is None:
                 event_time = event_time.replace(

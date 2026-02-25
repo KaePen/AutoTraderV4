@@ -969,6 +969,7 @@ class BacktestRunner:
         pm_config: "PositionManagerConfig | None" = None,
         fundamental_csv: str | None = None,
         fundamental_csv_list: list[str] | None = None,
+        event_llm_csv_list: list[str] | None = None,
         fundamental_guard_minutes: int = 30,
         period_start: datetime | None = None,
         period_end: datetime | None = None,
@@ -1020,8 +1021,12 @@ class BacktestRunner:
                 from autotrader.adapters.fundamental.backtest_provider import (
                     BacktestFundamentalProvider,
                 )
+                _bot_cfg = config or UnifiedBotConfig()
                 fundamental_provider = BacktestFundamentalProvider(
-                    event_guard_minutes=fundamental_guard_minutes
+                    event_guard_minutes=fundamental_guard_minutes,
+                    decay_coefficient=(
+                        _bot_cfg.fundamental_decay_coefficient
+                    ),
                 )
                 total_count = 0
                 for _csv in _csv_paths:
@@ -1031,6 +1036,20 @@ class BacktestRunner:
                     f"[Fundamental] バックテスト用CSV読込: "
                     f"{total_count}件 ({len(_csv_paths)}ファイル)"
                 )
+                # イベントLLM CSV読み込み（Phase 2）
+                if event_llm_csv_list:
+                    _sym = self.config.symbol
+                    _llm_total = 0
+                    for _csv in event_llm_csv_list:
+                        _n = fundamental_provider.load_event_llm_csv(
+                            _csv, _sym,
+                        )
+                        _llm_total += _n
+                    if _llm_total > 0:
+                        logger.info(
+                            f"[Fundamental] イベントLLM "
+                            f"{_llm_total}件読込"
+                        )
             except Exception as e:
                 logger.warning(
                     f"[Fundamental] CSV読込失敗（無効化）: {e}"
@@ -1827,6 +1846,8 @@ class BacktestRunner:
                 )
                 if _fctx.has_high_impact_within_30min:
                     continue  # 重要指標直前はスキップ
+                if _fctx.event_caution_level >= 2:
+                    continue  # 超重要指標日はスキップ
 
             # 統合ボットでシグナル生成
             consolidated = bot.generate_signal(current_time, candle)

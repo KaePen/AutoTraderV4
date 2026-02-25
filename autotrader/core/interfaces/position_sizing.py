@@ -35,6 +35,8 @@ class SizingContext:
     initial_equity: float = 1_000_000.0
     open_exposure_lot: float = 0.0
     open_same_direction_lot: float = 0.0
+    liquidity_factor: float = 1.0
+    volatility_multiplier: float = 1.0
 
 
 @dataclass(frozen=True)
