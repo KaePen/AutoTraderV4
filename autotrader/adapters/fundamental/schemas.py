@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import date, datetime
 from enum import Enum
 
 
@@ -182,3 +182,188 @@ class FundamentalContext:
                 "WARNING: 30分以内に高インパクト指標あり"
             )
         return "\n".join(lines)
+
+
+@dataclass(frozen=True)
+class FundamentalMemorySnapshot:
+    """FundamentalMemory の不変スナップショット
+
+    トレードロジックへの受け渡し用。
+    FundamentalMemory.snapshot() で生成する。
+
+    Attributes:
+        event_bias: イベントバイアス蓄積値
+        event_strength: イベント強度
+        news_bias: ニュースバイアス蓄積値
+        news_strength: ニュース強度
+        composite_bias: 統合バイアス（加重平均）
+        composite_confidence: 統合確信度
+        disagreement: イベント/ニュース矛盾度
+    """
+
+    event_bias: float = 0.0
+    event_strength: float = 0.0
+    news_bias: float = 0.0
+    news_strength: float = 0.0
+    composite_bias: float = 0.0
+    composite_confidence: float = 0.0
+    disagreement: float = 0.0
+
+
+class FundamentalMemory:
+    """ファンダメンタルバイアスの蓄積記憶
+
+    イベント/ニュースのバイアスをEMA方式で蓄積し、
+    日次減衰で新陳代謝する。
+
+    設計原則（破綻1修正）:
+    - αは固定学習率。サプライズは信号強度に掛ける
+    - 単一イベントで蓄積記憶が破壊されない
+
+    Args:
+        event_alpha: イベントEMA学習率
+        news_alpha: ニュースEMA学習率
+        event_daily_decay: イベント日次減衰率
+        news_daily_decay: ニュース日次減衰率
+    """
+
+    def __init__(
+        self,
+        event_alpha: float = 0.25,
+        news_alpha: float = 0.15,
+        event_daily_decay: float = 0.95,
+        news_daily_decay: float = 0.90,
+    ) -> None:
+        self._event_alpha = event_alpha
+        self._news_alpha = news_alpha
+        self._event_daily_decay = event_daily_decay
+        self._news_daily_decay = news_daily_decay
+
+        # 蓄積状態
+        self.event_bias: float = 0.0
+        self.event_strength: float = 0.0
+        self.news_bias: float = 0.0
+        self.news_strength: float = 0.0
+
+        # 最終更新日（重複更新防止用）
+        self.last_event_date: date | None = None
+        self.last_news_date: date | None = None
+
+    def update_event(
+        self,
+        direction_bias: float,
+        surprise_score: float,
+    ) -> None:
+        """イベントでバイアスを更新
+
+        signal = direction_bias × |surprise_score| として
+        EMA方式で蓄積する。
+
+        Args:
+            direction_bias: 方向バイアス (-1~+1)
+            surprise_score: サプライズスコア (-1~+1)
+        """
+        signal = direction_bias * abs(surprise_score)
+        self.event_bias = (
+            (1.0 - self._event_alpha) * self.event_bias
+            + self._event_alpha * signal
+        )
+        # 強度は蓄積的に増加（上限1.0）
+        self.event_strength = min(
+            self.event_strength
+            + abs(surprise_score) * 0.3,
+            1.0,
+        )
+
+    def update_news(
+        self,
+        sentiment_score: float,
+        confidence: float,
+    ) -> None:
+        """ニュースでバイアスを更新
+
+        signal = sentiment_score × confidence として
+        EMA方式で蓄積。低信頼度ニュースは自動的に
+        弱い信号になる。
+
+        Args:
+            sentiment_score: センチメント (-1~+1)
+            confidence: LLM信頼度 (0~1)
+        """
+        signal = sentiment_score * confidence
+        self.news_bias = (
+            (1.0 - self._news_alpha) * self.news_bias
+            + self._news_alpha * signal
+        )
+        self.news_strength = min(
+            self.news_strength + confidence * 0.1,
+            1.0,
+        )
+
+    def apply_daily_decay(self, days: int = 1) -> None:
+        """日次減衰を適用
+
+        Args:
+            days: 経過日数
+        """
+        event_factor = self._event_daily_decay ** days
+        news_factor = self._news_daily_decay ** days
+
+        self.event_strength *= event_factor
+        self.news_strength *= news_factor
+
+        # 十分小さくなったらリセット
+        _RESET_THRESHOLD = 0.01
+        if self.event_strength < _RESET_THRESHOLD:
+            self.event_bias = 0.0
+            self.event_strength = 0.0
+        if self.news_strength < _RESET_THRESHOLD:
+            self.news_bias = 0.0
+            self.news_strength = 0.0
+
+    @property
+    def composite_bias(self) -> float:
+        """統合バイアス（イベント+ニュースの強度加重平均）"""
+        total = self.event_strength + self.news_strength
+        if total < 0.01:
+            return 0.0
+        return (
+            self.event_bias * self.event_strength
+            + self.news_bias * self.news_strength
+        ) / total
+
+    @property
+    def composite_confidence(self) -> float:
+        """統合確信度"""
+        return min(
+            self.event_strength + self.news_strength, 1.0,
+        )
+
+    @property
+    def disagreement(self) -> float:
+        """イベントとニュースの矛盾度
+
+        両ソースとも十分な強度がある場合のみ計算。
+        """
+        if (
+            self.event_strength < 0.1
+            or self.news_strength < 0.1
+        ):
+            return 0.0
+        return abs(self.event_bias - self.news_bias)
+
+    def snapshot(self) -> FundamentalMemorySnapshot:
+        """不変スナップショットを生成
+
+        Returns:
+            FundamentalMemorySnapshot: 不変コピー
+        """
+        return FundamentalMemorySnapshot(
+            event_bias=self.event_bias,
+            event_strength=self.event_strength,
+            news_bias=self.news_bias,
+            news_strength=self.news_strength,
+            composite_bias=self.composite_bias,
+            composite_confidence=self.composite_confidence,
+            disagreement=self.disagreement,
+        )
