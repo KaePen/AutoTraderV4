@@ -242,6 +242,24 @@ class PositionManagerConfig:
     consensus_exit_own_max: float = 3.0
     # 含み損時のみ発動（含み益時はトレーリングに任せる）
     consensus_exit_loss_only: bool = False
+    # 利益反転ガード: MFE到達後の利益急落で早期退出
+    profit_reversal_enabled: bool = False
+    # MFEがこのR値以上に達した後に発動対象
+    profit_reversal_mfe_r: float = 0.3
+    # highest_rからの下落がこの値以上で発動
+    profit_reversal_drop_r: float = 0.25
+    # current_rがこの値以下で発動
+    profit_reversal_max_r: float = 0.05
+    # 段階的STAGNATION: 3段階で早期に停滞を検出
+    progressive_stagnation_enabled: bool = False
+    # Stage1: 早期検出（60分 + MFE<0.05R + 含み損）
+    stagnation_stage1_minutes: float = 60.0
+    stagnation_stage1_mfe_r: float = 0.05
+    stagnation_stage1_max_r: float = -0.15
+    # Stage2: 中期検出（90分 + MFE<0.10R + 含み損）
+    stagnation_stage2_minutes: float = 90.0
+    stagnation_stage2_mfe_r: float = 0.10
+    stagnation_stage2_max_r: float = -0.10
 
 
 class PositionManager:
@@ -484,6 +502,14 @@ class PositionManager:
         if action is not None:
             return action
 
+        # 3.5 利益反転ガード
+        if self.config.profit_reversal_enabled:
+            action = self._check_profit_reversal(
+                position, current_price,
+            )
+            if action is not None:
+                return action
+
         # 4. 進捗なしExitチェック
         action = self._check_stagnation_exit(
             position, current_time, current_price,
@@ -673,6 +699,40 @@ class PositionManager:
                 )
             return None
 
+        # 段階的STAGNATION（有効時）
+        if self.config.progressive_stagnation_enabled:
+            cfg = self.config
+            # Stage1: 60分 + MFE<0.05R + 含み損(-0.15R以下)
+            if (
+                elapsed >= cfg.stagnation_stage1_minutes
+                and position.highest_r
+                < cfg.stagnation_stage1_mfe_r
+                and position.current_r
+                <= cfg.stagnation_stage1_max_r
+            ):
+                return ManagementAction.full_close(
+                    f"進捗なし(S1): {elapsed:.0f}分,"
+                    f" MFE={position.highest_r:.2f}R,"
+                    f" R={position.current_r:.2f}",
+                    ExitReason.STAGNATION,
+                    trigger_price=current_price,
+                )
+            # Stage2: 90分 + MFE<0.10R + 含み損(-0.10R以下)
+            if (
+                elapsed >= cfg.stagnation_stage2_minutes
+                and position.highest_r
+                < cfg.stagnation_stage2_mfe_r
+                and position.current_r
+                <= cfg.stagnation_stage2_max_r
+            ):
+                return ManagementAction.full_close(
+                    f"進捗なし(S2): {elapsed:.0f}分,"
+                    f" MFE={position.highest_r:.2f}R,"
+                    f" R={position.current_r:.2f}",
+                    ExitReason.STAGNATION,
+                    trigger_price=current_price,
+                )
+
         # UNIVERSALモード: stagnation設定を使用
         stag_minutes = self.config.stagnation_exit_minutes
         stag_mfe = self.config.stagnation_min_mfe_r
@@ -810,6 +870,41 @@ class PositionManager:
                 trigger_price=current_price,
             )
 
+        return None
+
+    def _check_profit_reversal(
+        self,
+        position: ManagedPosition,
+        current_price: float,
+    ) -> ManagementAction | None:
+        """利益反転ガード
+
+        MFEが一定以上に到達した後、利益が急速に低下した場合に
+        SL到達前に早期退出し損失を最小限に抑える。
+
+        SL_HITトレードの60%は一度5pips以上の利益が乗っていた。
+        この機能により利益→損失の転換を検出し保護する。
+        """
+        cfg = self.config
+        # MFEが閾値に達していない場合はスキップ
+        if position.highest_r < cfg.profit_reversal_mfe_r:
+            return None
+
+        # highest_rからの下落幅を計算
+        r_drop = position.highest_r - position.current_r
+        if (
+            r_drop >= cfg.profit_reversal_drop_r
+            and position.current_r <= cfg.profit_reversal_max_r
+        ):
+            return ManagementAction.full_close(
+                reason=(
+                    f"利益反転ガード: MFE={position.highest_r:.2f}R"
+                    f"→現在{position.current_r:.2f}R"
+                    f" (下落{r_drop:.2f}R)"
+                ),
+                exit_reason=ExitReason.STAGNATION,
+                trigger_price=current_price,
+            )
         return None
 
     def _check_partial_close(

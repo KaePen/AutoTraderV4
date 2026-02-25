@@ -589,6 +589,48 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="含み損時のみコンセンサス逆転exitを発動",
     )
+    # --- 利益反転ガード ---
+    parser.add_argument(
+        "--profit-reversal",
+        action="store_true",
+        help="利益反転ガードを有効化",
+    )
+    parser.add_argument(
+        "--profit-reversal-mfe-r",
+        type=float,
+        default=0.3,
+        help="MFE閾値（R値、デフォルト: 0.3）",
+    )
+    parser.add_argument(
+        "--profit-reversal-drop-r",
+        type=float,
+        default=0.25,
+        help="下落閾値（R値、デフォルト: 0.25）",
+    )
+    parser.add_argument(
+        "--profit-reversal-max-r",
+        type=float,
+        default=0.05,
+        help="現在R上限（デフォルト: 0.05）",
+    )
+    # --- 段階的STAGNATION ---
+    parser.add_argument(
+        "--progressive-stagnation",
+        action="store_true",
+        help="段階的STAGNATIONを有効化",
+    )
+    # --- レジーム別閾値調整 ---
+    parser.add_argument(
+        "--regime-threshold",
+        action="store_true",
+        help="レジーム別閾値調整を有効化",
+    )
+    parser.add_argument(
+        "--regime-trend-add",
+        type=float,
+        default=1.5,
+        help="TREND閾値追加分（デフォルト: 1.5）",
+    )
     # --- アダプティブパラメータ調整 ---
     parser.add_argument(
         "--adaptive",
@@ -1110,6 +1152,8 @@ def run_single_backtest(args: argparse.Namespace):
         timeframes=_tf_list or [
             "M1", "M5", "M15", "M30", "H1", "H4", "H8", "D1"
         ],
+        regime_threshold_enabled=args.regime_threshold,
+        regime_trend_threshold_add=args.regime_trend_add,
     )
 
     # PositionManagerConfig構築
@@ -1155,6 +1199,11 @@ def run_single_backtest(args: argparse.Namespace):
         consensus_exit_threshold=args.consensus_exit_threshold,
         consensus_exit_own_max=args.consensus_exit_own_max,
         consensus_exit_loss_only=args.consensus_exit_loss_only,
+        profit_reversal_enabled=args.profit_reversal,
+        profit_reversal_mfe_r=args.profit_reversal_mfe_r,
+        profit_reversal_drop_r=args.profit_reversal_drop_r,
+        profit_reversal_max_r=args.profit_reversal_max_r,
+        progressive_stagnation_enabled=args.progressive_stagnation,
     )
 
     # ファンダメンタルCSVリスト構築

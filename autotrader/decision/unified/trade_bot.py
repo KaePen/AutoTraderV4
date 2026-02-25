@@ -495,11 +495,23 @@ class UnifiedTradeBot:
 
         # コンセンサス統合（閾値オーバーライド適用）
         _threshold_override = None
+        _base_threshold = self.consensus.threshold
         if _overrides.consensus_threshold_delta != 0.0:
-            _threshold_override = (
-                self.consensus.threshold
+            _base_threshold = (
+                _base_threshold
                 + _overrides.consensus_threshold_delta
             )
+        # レジーム別閾値調整（TREND勝率41%→閾値引き上げ）
+        if (
+            self.config.regime_threshold_enabled
+            and regime_result.regime == MarketRegime.TREND
+        ):
+            _base_threshold = (
+                _base_threshold
+                + self.config.regime_trend_threshold_add
+            )
+        if _base_threshold != self.consensus.threshold:
+            _threshold_override = _base_threshold
         consensus = self.consensus.consolidate(
             consensus_signals, plan,
             threshold_override=_threshold_override,
