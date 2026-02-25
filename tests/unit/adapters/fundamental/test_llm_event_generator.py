@@ -218,6 +218,7 @@ class TestAnalyzeEvent:
         assert result["expected_volatility"] == 0.4
         assert result["trade_caution_level"] == 1
         assert result["convergence_hours"] == 16.0
+        assert result["is_holiday"] is True
         assert "流動性低下" in result["summary"]
 
     def test_output_contains_event_metadata(self) -> None:
@@ -270,6 +271,7 @@ class TestBuildEventResult:
         assert result["expected_volatility"] == 1.0
         assert result["convergence_hours"] == 0.0
         assert result["trade_caution_level"] == 0
+        assert result["is_holiday"] is False
 
 
 class TestBuildEventPrompt:
@@ -398,11 +400,13 @@ class TestGenerateForSymbolYear:
         assert usd_row["currency"] == "USD"
         assert float(usd_row["expected_volatility"]) == 0.2
         assert int(usd_row["trade_caution_level"]) == 2
+        assert usd_row["is_holiday"] == "True"
         # JPY休日: 注意レベル
         jpy_row = rows[1]
         assert jpy_row["currency"] == "JPY"
         assert float(jpy_row["expected_volatility"]) == 0.5
         assert int(jpy_row["trade_caution_level"]) == 1
+        assert jpy_row["is_holiday"] == "True"
 
     def test_resume_skips_processed(
         self, tmp_path: Path
@@ -432,6 +436,7 @@ class TestGenerateForSymbolYear:
                 "convergence_hours": "48.0",
                 "expected_volatility": "1.5",
                 "trade_caution_level": "1",
+                "is_holiday": "False",
                 "summary": "テスト",
             })
 

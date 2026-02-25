@@ -43,6 +43,7 @@ EVENT_CSV_COLUMNS = [
     "convergence_hours",
     "expected_volatility",
     "trade_caution_level",
+    "is_holiday",
     "summary",
 ]
 
@@ -480,6 +481,7 @@ class LLMEventGenerator(LLMGeneratorBase):
                 1.0,
             ),
             "trade_caution_level": caution_val,
+            "is_holiday": False,
             "summary": str(
                 data.get("summary", "")
             )[:200],
@@ -498,6 +500,7 @@ class LLMEventGenerator(LLMGeneratorBase):
             "convergence_hours": 0.0,
             "expected_volatility": 1.0,
             "trade_caution_level": 0,
+            "is_holiday": False,
             "summary": "",
         }
 
@@ -540,6 +543,7 @@ class LLMEventGenerator(LLMGeneratorBase):
             "convergence_hours": conv_h,
             "expected_volatility": vol,
             "trade_caution_level": caution,
+            "is_holiday": True,
             "summary": summary,
         }
 
@@ -567,5 +571,6 @@ class LLMEventGenerator(LLMGeneratorBase):
             "convergence_hours": 1.0,
             "expected_volatility": 0.5,
             "trade_caution_level": 0,
+            "is_holiday": False,
             "summary": "低インパクト指標",
         }

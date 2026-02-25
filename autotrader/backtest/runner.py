@@ -1008,7 +1008,8 @@ class BacktestRunner:
             self.load_data()
 
         # ファンダメンタルプロバイダー初期化
-        # fundamental_csv_list を優先し、次に fundamental_csv を使用
+        # fundamental_csv_list / fundamental_csv / event_llm_csv_list
+        # のいずれかがあればプロバイダーを作成
         fundamental_provider = None
         _csv_paths: list[str] = []
         if fundamental_csv_list:
@@ -1016,7 +1017,8 @@ class BacktestRunner:
         elif fundamental_csv:
             _csv_paths = [fundamental_csv]
 
-        if _csv_paths:
+        _has_data = bool(_csv_paths) or bool(event_llm_csv_list)
+        if _has_data:
             try:
                 from autotrader.adapters.fundamental.backtest_provider import (
                     BacktestFundamentalProvider,
@@ -1028,14 +1030,17 @@ class BacktestRunner:
                         _bot_cfg.fundamental_decay_coefficient
                     ),
                 )
-                total_count = 0
-                for _csv in _csv_paths:
-                    count = fundamental_provider.load_csv(_csv)
-                    total_count += count
-                logger.info(
-                    f"[Fundamental] バックテスト用CSV読込: "
-                    f"{total_count}件 ({len(_csv_paths)}ファイル)"
-                )
+                # 経済イベントCSV読み込み
+                if _csv_paths:
+                    total_count = 0
+                    for _csv in _csv_paths:
+                        count = fundamental_provider.load_csv(_csv)
+                        total_count += count
+                    logger.info(
+                        f"[Fundamental] バックテスト用CSV読込: "
+                        f"{total_count}件 "
+                        f"({len(_csv_paths)}ファイル)"
+                    )
                 # イベントLLM CSV読み込み（Phase 2）
                 if event_llm_csv_list:
                     _sym = self.config.symbol
@@ -1846,7 +1851,9 @@ class BacktestRunner:
                 )
                 if _fctx.has_high_impact_within_30min:
                     continue  # 重要指標直前はスキップ
-                if _fctx.event_caution_level >= 2:
+                if _fctx.event_caution_level >= (
+                    bot_config.fundamental_caution_block_level
+                ):
                     continue  # 超重要指標日はスキップ
 
             # 統合ボットでシグナル生成

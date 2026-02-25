@@ -722,6 +722,15 @@ def parse_args() -> argparse.Namespace:
         default=30,
         help="重要指標前の取引停止分数（デフォルト: 30）",
     )
+    parser.add_argument(
+        "--event-llm",
+        action="store_true",
+        help=(
+            "イベントLLM分析CSVを自動読み込み。"
+            "--fundamental-dir 配下の "
+            "llm_events_SYMBOL_YYYY.csv を使用。"
+        ),
+    )
 
     return parser.parse_args()
 
@@ -1266,6 +1275,24 @@ def run_single_backtest(args: argparse.Namespace):
             )
             _fundamental_csvs = None
 
+    # イベントLLM CSVリスト構築
+    _event_llm_csvs: list[str] | None = None
+    if args.event_llm:
+        _fund_dir = Path(args.fundamental_dir)
+        _event_llm_csvs = []
+        _sym = args.symbol
+        for _yr in range(start_year, end_year + 1):
+            _csv = _fund_dir / f"llm_events_{_sym}_{_yr}.csv"
+            if _csv.exists():
+                _event_llm_csvs.append(str(_csv))
+        if not _event_llm_csvs:
+            logging.warning(
+                "[EventLLM] %s に llm_events_%s_YYYY.csv "
+                "が見つかりません",
+                args.fundamental_dir, _sym,
+            )
+            _event_llm_csvs = None
+
     # アダプティブパラメータ調整設定
     _adaptive_config = None
     if args.adaptive:
@@ -1290,6 +1317,7 @@ def run_single_backtest(args: argparse.Namespace):
         period_end=period_end,
         sequential=args.sequential,
         fundamental_csv_list=_fundamental_csvs,
+        event_llm_csv_list=_event_llm_csvs,
         fundamental_guard_minutes=args.fundamental_guard,
         max_year_workers=args.max_year_workers,
         adaptive_config=_adaptive_config,
