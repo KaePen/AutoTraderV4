@@ -7,6 +7,7 @@ llm_events_SYMBOL_YYYY.csv に出力する。
 
 from __future__ import annotations
 
+import re
 from collections import defaultdict
 from datetime import date
 from pathlib import Path
@@ -21,6 +22,9 @@ from autotrader.adapters.fundamental.schemas import (
     ImpactLevel,
 )
 from autotrader.config.llm_settings import OllamaSettings
+
+# 休日判定パターン
+_HOLIDAY_RE = re.compile(r"holiday", re.IGNORECASE)
 
 # イベントCSVカラム定義
 EVENT_CSV_COLUMNS = [
@@ -99,9 +103,27 @@ class LLMEventGenerator(LLMGeneratorBase):
         output_path = (
             Path(output_dir) / f"llm_events_{symbol}_{year}.csv"
         )
+
+        # resume: 既存CSVから処理済み行を読み込み
+        existing_rows: list[dict] = []
+        resume_from: date | None = None
         if output_path.exists() and not overwrite:
+            existing_rows = self._read_existing_csv(
+                output_path, EVENT_CSV_COLUMNS
+            )
+            if existing_rows:
+                last_date_str = existing_rows[-1].get("date")
+                if last_date_str:
+                    resume_from = date.fromisoformat(
+                        last_date_str
+                    )
+
+        # 全日処理済みならスキップ
+        full_range = self._generate_date_range(year)
+        if resume_from and resume_from >= full_range[-1]:
             logger.info(
-                f"[EventGen] スキップ（既存）: {output_path}"
+                f"[EventGen] スキップ（完了済み）: "
+                f"{output_path}"
             )
             return output_path
 
@@ -111,24 +133,65 @@ class LLMEventGenerator(LLMGeneratorBase):
         relevant = self._filter_events(
             events, (base, quote), year
         )
-        logger.info(
-            f"[EventGen] {symbol}/{year}: "
-            f"全{len(events)}件→{len(relevant)}件"
-        )
 
         # 日付ごとにグループ化
         daily_events = self._group_by_date(relevant)
 
-        # 全日に対してLLM分析
-        date_range = self._generate_date_range(year)
-        total_days = len(date_range)
-        rows: list[dict] = []
+        # 休日日付セットを構築
+        holiday_dates = self._detect_holidays(
+            relevant, (base, quote)
+        )
 
-        for idx, target_date in enumerate(date_range, 1):
-            day_events = daily_events.get(target_date, [])
-            result = self._analyze_date(
-                symbol, base, quote, target_date, day_events
+        # resume位置を決定
+        if resume_from:
+            date_range = [
+                d for d in full_range if d > resume_from
+            ]
+            rows: list[dict] = list(existing_rows)
+            logger.info(
+                f"[EventGen] {symbol}/{year}: "
+                f"resume {resume_from} から "
+                f"残り{len(date_range)}日"
             )
+        else:
+            date_range = full_range
+            rows = []
+
+        logger.info(
+            f"[EventGen] {symbol}/{year}: "
+            f"全{len(events)}件→{len(relevant)}件, "
+            f"休日{len(holiday_dates)}日"
+        )
+
+        total_days = len(full_range)
+        llm_calls = 0
+        skipped = 0
+
+        for target_date in date_range:
+            idx = (target_date - full_range[0]).days + 1
+            day_events = daily_events.get(target_date, [])
+
+            # 休日: LLMスキップでデフォルト値
+            if target_date in holiday_dates and not any(
+                ev.is_released for ev in day_events
+            ):
+                result = self._holiday_result()
+                skipped += 1
+            else:
+                result = self._analyze_date(
+                    symbol,
+                    base,
+                    quote,
+                    target_date,
+                    day_events,
+                )
+                # LLM呼び出しがあった場合のみカウント
+                released = [
+                    ev for ev in day_events if ev.is_released
+                ]
+                if released:
+                    llm_calls += 1
+
             result["date"] = target_date.isoformat()
             result["event_count"] = len(day_events)
             result["high_impact_count"] = sum(
@@ -141,13 +204,22 @@ class LLMEventGenerator(LLMGeneratorBase):
             if idx % 50 == 0 or idx == total_days:
                 logger.info(
                     f"[EventGen] {symbol}/{year}: "
-                    f"{idx}/{total_days}日完了"
+                    f"{idx}/{total_days}日完了 "
+                    f"(LLM:{llm_calls}, skip:{skipped})"
                 )
 
-        # CSV書き込み
+            # 50日ごとに中間保存（resume用）
+            if idx % 50 == 0:
+                self._write_csv(
+                    rows, EVENT_CSV_COLUMNS, output_path
+                )
+
+        # 最終書き込み
         self._write_csv(rows, EVENT_CSV_COLUMNS, output_path)
         logger.info(
-            f"[EventGen] 完了: {output_path} ({len(rows)}日)"
+            f"[EventGen] 完了: {output_path} "
+            f"({len(rows)}日, LLM:{llm_calls}, "
+            f"skip:{skipped})"
         )
         return output_path
 
@@ -340,6 +412,41 @@ class LLMEventGenerator(LLMGeneratorBase):
         }
 
     @staticmethod
+    def _detect_holidays(
+        events: list[EconomicEvent],
+        currencies: tuple[str, str],
+    ) -> set[date]:
+        """休日日付セットを構築
+
+        Bank Holiday イベントのみで構成される日を
+        休日として検出する。
+
+        Args:
+            events: フィルタ済みイベント
+            currencies: (base, quote)
+
+        Returns:
+            set[date]: 休日日付セット
+        """
+        # 日付→イベントリスト
+        by_date: dict[date, list[EconomicEvent]] = (
+            defaultdict(list)
+        )
+        for ev in events:
+            if ev.currency in currencies:
+                by_date[ev.event_time.date()].append(ev)
+
+        holidays: set[date] = set()
+        for d, day_events in by_date.items():
+            # 全イベントが休日系のみの場合
+            if all(
+                _HOLIDAY_RE.search(ev.event_name)
+                for ev in day_events
+            ):
+                holidays.add(d)
+        return holidays
+
+    @staticmethod
     def _default_event_result() -> dict:
         """イベントなし日のデフォルト結果
 
@@ -355,6 +462,24 @@ class LLMEventGenerator(LLMGeneratorBase):
             "convergence_hours": 0.0,
             "trade_caution_level": 0,
             "summary": "関連経済指標の発表なし",
+        }
+
+    @staticmethod
+    def _holiday_result() -> dict:
+        """休日のデフォルト結果
+
+        Returns:
+            dict: 休日用デフォルト値辞書
+        """
+        return {
+            "net_surprise_score": 0.0,
+            "dominant_event_name": "",
+            "dominant_surprise_pct": 0.0,
+            "expected_volatility": 0.5,
+            "price_direction_bias": 0.0,
+            "convergence_hours": 0.0,
+            "trade_caution_level": 0,
+            "summary": "市場休場",
         }
 
     def _format_events_for_prompt(
