@@ -119,9 +119,27 @@ class LLMNewsGenerator(LLMGeneratorBase):
         output_path = (
             Path(output_dir) / f"llm_news_{symbol}_{year}.csv"
         )
+
+        # resume: 既存CSVから処理済み行を読み込み
+        existing_rows: list[dict] = []
+        resume_from: date | None = None
         if output_path.exists() and not overwrite:
+            existing_rows = self._read_existing_csv(
+                output_path, NEWS_CSV_COLUMNS
+            )
+            if existing_rows:
+                last_date_str = existing_rows[-1].get("date")
+                if last_date_str:
+                    resume_from = date.fromisoformat(
+                        last_date_str
+                    )
+
+        # 全日処理済みならスキップ
+        full_range = self._generate_date_range(year)
+        if resume_from and resume_from >= full_range[-1]:
             logger.info(
-                f"[NewsGen] スキップ（既存）: {output_path}"
+                f"[NewsGen] スキップ（完了済み）: "
+                f"{output_path}"
             )
             return output_path
 
@@ -131,24 +149,42 @@ class LLMNewsGenerator(LLMGeneratorBase):
         relevant = self._filter_news(
             news_items, (base, quote), year
         )
+
+        # 日付ごとにグループ化
+        daily_news = self._group_by_date(relevant)
+
+        # resume位置を決定
+        if resume_from:
+            date_range = [
+                d for d in full_range if d > resume_from
+            ]
+            rows: list[dict] = list(existing_rows)
+            logger.info(
+                f"[NewsGen] {symbol}/{year}: "
+                f"resume {resume_from} から "
+                f"残り{len(date_range)}日"
+            )
+        else:
+            date_range = full_range
+            rows = []
+
         logger.info(
             f"[NewsGen] {symbol}/{year}: "
             f"全{len(news_items)}件→{len(relevant)}件"
         )
 
-        # 日付ごとにグループ化
-        daily_news = self._group_by_date(relevant)
+        total_days = len(full_range)
+        llm_calls = 0
 
-        # 全日に対してLLM分析
-        date_range = self._generate_date_range(year)
-        total_days = len(date_range)
-        rows: list[dict] = []
-
-        for idx, target_date in enumerate(date_range, 1):
+        for target_date in date_range:
+            idx = (target_date - full_range[0]).days + 1
             day_news = daily_news.get(target_date, [])
             result = self._analyze_date(
                 symbol, base, quote, target_date, day_news
             )
+            if day_news:
+                llm_calls += 1
+
             result["date"] = target_date.isoformat()
             result["article_count"] = len(day_news)
             rows.append(result)
@@ -156,10 +192,17 @@ class LLMNewsGenerator(LLMGeneratorBase):
             if idx % 50 == 0 or idx == total_days:
                 logger.info(
                     f"[NewsGen] {symbol}/{year}: "
-                    f"{idx}/{total_days}日完了"
+                    f"{idx}/{total_days}日完了 "
+                    f"(LLM:{llm_calls})"
                 )
 
-        # CSV書き込み
+            # 50日ごとに中間保存（resume用）
+            if idx % 50 == 0:
+                self._write_csv(
+                    rows, NEWS_CSV_COLUMNS, output_path
+                )
+
+        # 最終書き込み
         self._write_csv(rows, NEWS_CSV_COLUMNS, output_path)
         logger.info(
             f"[NewsGen] 完了: {output_path} ({len(rows)}日)"

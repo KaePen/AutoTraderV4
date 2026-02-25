@@ -244,6 +244,34 @@ class LLMGeneratorBase:
             writer.writerows(rows)
 
     @staticmethod
+    def _read_existing_csv(
+        output_path: Path,
+        columns: list[str],
+    ) -> list[dict]:
+        """既存CSVから処理済み行を読み込み（resume用）
+
+        Args:
+            output_path: CSVパス
+            columns: 期待するカラムリスト
+
+        Returns:
+            list[dict]: 読み込んだ行。ファイル不在や
+            ヘッダー不一致時は空リスト
+        """
+        if not output_path.exists():
+            return []
+        try:
+            with open(
+                output_path, "r", encoding="utf-8"
+            ) as f:
+                reader = csv.DictReader(f)
+                if reader.fieldnames != columns:
+                    return []
+                return list(reader)
+        except Exception:
+            return []
+
+    @staticmethod
     def _generate_date_range(year: int) -> list[date]:
         """指定年の全日リストを生成
 
