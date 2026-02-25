@@ -168,8 +168,12 @@ class LLMGeneratorBase:
             except json.JSONDecodeError:
                 pass
 
-        # { ... } の最初の出現を抽出
-        brace_match = re.search(r"\{[^{}]*\}", content, re.DOTALL)
+        # { ... } の最初の出現を抽出（1段ネスト対応）
+        brace_match = re.search(
+            r"\{(?:[^{}]|\{[^{}]*\})*\}",
+            content,
+            re.DOTALL,
+        )
         if brace_match:
             try:
                 return json.loads(brace_match.group(0))
