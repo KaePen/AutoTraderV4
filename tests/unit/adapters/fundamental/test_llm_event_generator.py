@@ -210,6 +210,16 @@ class TestAnalyzeEvent:
         assert result["convergence_hours"] == 12.0
         assert "日本" in result["summary"]
 
+    def test_unknown_currency_holiday_fallback(
+        self,
+    ) -> None:
+        """未知通貨の休日 -> フォールバック値"""
+        result = LLMEventGenerator._holiday_result("SGD")
+        assert result["expected_volatility"] == 0.4
+        assert result["trade_caution_level"] == 1
+        assert result["convergence_hours"] == 16.0
+        assert "流動性低下" in result["summary"]
+
     def test_output_contains_event_metadata(self) -> None:
         """出力にイベントメタデータが含まれる"""
         event = _make_event(impact=ImpactLevel.LOW)
