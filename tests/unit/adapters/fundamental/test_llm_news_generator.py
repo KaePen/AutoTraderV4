@@ -210,13 +210,13 @@ class TestCompressForPrompt:
         self.gen = LLMNewsGenerator(max_prompt_tokens=2500)
 
     def test_fx_source_priority(self) -> None:
-        """FX専門ソース優先"""
+        """FX専門ソースは本文付き、一般ソースはsnippetフォールバック"""
         items = {
             "tokyo": [
                 _make_news(
                     source_name="fxstreet.com",
                     title="FX news",
-                    content="Full article about USD",
+                    content="Full article about USD " * 5,
                 ),
                 _make_news(
                     source_name="random.com",
@@ -228,7 +228,8 @@ class TestCompressForPrompt:
         }
         result = self.gen._compress_for_prompt(items)
         assert "本文抜粋" in result["tokyo"]
-        assert "[見出しのみ]" in result["tokyo"]
+        # snippet があるので [snippet] フォールバックが使われる
+        assert "[snippet]" in result["tokyo"]
 
     def test_empty_session(self) -> None:
         """空セッション"""
