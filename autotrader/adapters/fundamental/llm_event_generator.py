@@ -53,6 +53,67 @@ _IMPACT_LABELS: dict[ImpactLevel, str] = {
     ImpactLevel.LOW: "低インパクト",
 }
 
+# 通貨別休日パラメータ
+# (expected_volatility, trade_caution_level,
+#  convergence_hours, summary)
+_HOLIDAY_PARAMS: dict[
+    str, tuple[float, int, float, str]
+] = {
+    "USD": (
+        0.2,
+        2,
+        24.0,
+        "米国市場休日 - 流動性激減・取引回避推奨",
+    ),
+    "GBP": (
+        0.3,
+        2,
+        20.0,
+        "英国市場休日 - ロンドンFXハブ不在"
+        "・流動性大幅低下",
+    ),
+    "JPY": (
+        0.5,
+        1,
+        12.0,
+        "日本市場休日 - アジアセッション薄商い"
+        "・ロンドン以降正常化",
+    ),
+    "EUR": (
+        0.4,
+        1,
+        16.0,
+        "欧州市場休日 - 欧州セッション"
+        "流動性低下",
+    ),
+    "AUD": (
+        0.6,
+        1,
+        8.0,
+        "豪州市場休日 - 影響軽微",
+    ),
+    "NZD": (
+        0.6,
+        1,
+        8.0,
+        "NZ市場休日 - 影響軽微",
+    ),
+    "CAD": (
+        0.5,
+        1,
+        12.0,
+        "加国市場休日 - NY重複セッション"
+        "流動性低下",
+    ),
+    "CHF": (
+        0.4,
+        1,
+        16.0,
+        "スイス市場休日 - 欧州セッション"
+        "流動性低下",
+    ),
+}
+
 
 class LLMEventGenerator(LLMGeneratorBase):
     """イベント分析LLMジェネレーター
@@ -283,9 +344,9 @@ class LLMEventGenerator(LLMGeneratorBase):
             "previous": event.previous,
         }
 
-        # 休日イベント: 固定デフォルト値（LLMスキップ）
+        # 休日イベント: 通貨別固定値（LLMスキップ）
         if _HOLIDAY_RE.search(event.event_name):
-            result = self._holiday_result()
+            result = self._holiday_result(event.currency)
             base_row.update(result)
             return base_row
 
@@ -441,27 +502,45 @@ class LLMEventGenerator(LLMGeneratorBase):
         }
 
     @staticmethod
-    def _holiday_result() -> dict:
-        """市場休日イベントの固定デフォルト値
+    def _holiday_result(currency: str) -> dict:
+        """市場休日の通貨別固定デフォルト値
 
-        休日は流動性低下・スプレッド拡大が特徴。
-        - サプライズなし（経済指標発表ではない）
-        - 方向バイアスなし
-        - 流動性正常化まで約24時間
-        - ボラティリティは通常の30%程度に低下
-        - 薄商いのためスリッページリスクあり→注意
+        各市場の休日特性に基づく分析済みデフォルト値。
+        FX取引シェアと各セッションの重要度を考慮。
+
+        - USD: NY市場閉鎖。全FX取引の88%にUSD関与。
+          流動性激減→回避推奨(caution=2)。
+        - GBP: ロンドン市場閉鎖。世界最大FXハブ
+          (取引シェア38%)不在→回避推奨。
+        - JPY: 東京市場閉鎖。アジアセッション薄商い
+          だがロンドン/NYで補完→注意(caution=1)。
+        - EUR: 欧州セッション部分閉鎖。ロンドンと
+          重複するためGBPほどではないが流動性低下。
+        - AUD/NZD: 太平洋セッションは比較的小規模。
+          他セッションで十分補完→影響軽微。
+        - CAD: NY重複セッション。USD休日と同時が
+          多く、単独では中程度の影響。
+        - CHF: 欧州セッション。EURと同様の影響度。
+
+        Args:
+            currency: 休日対象の通貨コード
 
         Returns:
-            dict: 休日固定値辞書
+            dict: 通貨別休日固定値辞書
         """
+        # (volatility, caution, convergence_h, summary)
+        params = _HOLIDAY_PARAMS.get(
+            currency,
+            (0.4, 1, 16.0, "市場休日 - 流動性低下に注意"),
+        )
+        vol, caution, conv_h, summary = params
         return {
             "surprise_score": 0.0,
             "direction_bias": 0.0,
-            "convergence_hours": 24.0,
-            "expected_volatility": 0.3,
-            "trade_caution_level": 1,
-            "summary": "市場休日 - 流動性低下"
-            "・スプレッド拡大に注意",
+            "convergence_hours": conv_h,
+            "expected_volatility": vol,
+            "trade_caution_level": caution,
+            "summary": summary,
         }
 
     @staticmethod

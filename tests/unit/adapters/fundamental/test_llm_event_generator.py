@@ -168,9 +168,10 @@ class TestAnalyzeEvent:
         assert result["surprise_score"] > 0
         assert abs(result["direction_bias"]) > 0
 
-    def test_holiday_skips_llm(self) -> None:
-        """休日イベント -> LLMスキップ + 固定値"""
+    def test_usd_holiday_skips_llm(self) -> None:
+        """USD休日 -> LLMスキップ + 回避推奨"""
         event = _make_event(
+            currency="USD",
             event_name="Bank Holiday",
             impact=ImpactLevel.HIGH,
             actual=None,
@@ -187,9 +188,27 @@ class TestAnalyzeEvent:
         mock.assert_not_called()
         assert result["surprise_score"] == 0.0
         assert result["convergence_hours"] == 24.0
-        assert result["expected_volatility"] == 0.3
+        assert result["expected_volatility"] == 0.2
+        assert result["trade_caution_level"] == 2
+        assert "米国" in result["summary"]
+
+    def test_jpy_holiday_differs_from_usd(self) -> None:
+        """JPY休日 -> USD休日より軽度の影響"""
+        event = _make_event(
+            currency="JPY",
+            event_name="Bank Holiday",
+            impact=ImpactLevel.HIGH,
+            actual=None,
+            forecast=None,
+            previous=None,
+        )
+        result = self.gen._analyze_event(
+            "USDJPY", "USD", "JPY", event
+        )
+        assert result["expected_volatility"] == 0.5
         assert result["trade_caution_level"] == 1
-        assert "流動性低下" in result["summary"]
+        assert result["convergence_hours"] == 12.0
+        assert "日本" in result["summary"]
 
     def test_output_contains_event_metadata(self) -> None:
         """出力にイベントメタデータが含まれる"""
@@ -327,17 +346,29 @@ class TestGenerateForSymbolYear:
         assert rows[0]["event_name"] == "NFP"
         assert rows[2]["event_name"] == "Housing"
 
-    def test_holiday_events_have_defaults(
+    def test_holiday_events_have_currency_defaults(
         self, tmp_path: Path
     ) -> None:
-        """休日イベントは固定デフォルト値で出力"""
+        """休日イベントは通貨別固定デフォルト値で出力"""
         gen = LLMEventGenerator(retry_delay_seconds=0.0)
         events = [
             _make_event(
+                currency="USD",
                 event_name="Bank Holiday",
                 actual=None,
                 forecast=None,
                 previous=None,
+            ),
+            _make_event(
+                currency="JPY",
+                event_name="Bank Holiday",
+                actual=None,
+                forecast=None,
+                previous=None,
+                event_time=datetime(
+                    2024, 1, 8, 0, 0,
+                    tzinfo=timezone.utc,
+                ),
             ),
         ]
         with patch.object(
@@ -347,21 +378,21 @@ class TestGenerateForSymbolYear:
             path = gen.generate_for_symbol_year(
                 "USDJPY", 2024, events, tmp_path
             )
-        # LLM呼び出しなし
         mock.assert_not_called()
         with open(path, encoding="utf-8") as f:
             reader = csv.DictReader(f)
             rows = list(reader)
-        # 休日は固定値で1行出力
-        assert len(rows) == 1
-        row = rows[0]
-        assert row["event_name"] == "Bank Holiday"
-        assert float(row["surprise_score"]) == 0.0
-        assert float(row["direction_bias"]) == 0.0
-        assert float(row["convergence_hours"]) == 24.0
-        assert float(row["expected_volatility"]) == 0.3
-        assert int(row["trade_caution_level"]) == 1
-        assert "流動性低下" in row["summary"]
+        assert len(rows) == 2
+        # USD休日: 回避推奨
+        usd_row = rows[0]
+        assert usd_row["currency"] == "USD"
+        assert float(usd_row["expected_volatility"]) == 0.2
+        assert int(usd_row["trade_caution_level"]) == 2
+        # JPY休日: 注意レベル
+        jpy_row = rows[1]
+        assert jpy_row["currency"] == "JPY"
+        assert float(jpy_row["expected_volatility"]) == 0.5
+        assert int(jpy_row["trade_caution_level"]) == 1
 
     def test_resume_skips_processed(
         self, tmp_path: Path
