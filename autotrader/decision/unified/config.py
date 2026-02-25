@@ -221,6 +221,13 @@ class UnifiedBotConfig:
     fundamental_holiday_liquidity_block: float = 0.3
     # 時間減衰係数（大きいほど急速に減衰）
     fundamental_decay_coefficient: float = 2.0
+    # --- Phase 2b: ファンダメンタルロジック統合 ---
+    # リスクアセッサー有効化
+    fundamental_assessor_enabled: bool = False
+    # SoftGuardファンダメンタルペナルティ有効化
+    fundamental_softguard_enabled: bool = False
+    # PositionManagerファンダメンタル管理有効化
+    fundamental_pm_enabled: bool = False
 
     def get_evaluator_config(self, timeframe: str) -> EvaluatorConfig:
         """時間足別評価器設定を取得

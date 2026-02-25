@@ -45,10 +45,17 @@ from .timeframe_evaluator import TimeframeEvaluator, TimeframeSignal
 from .timeframe_router import TimeframeRouter
 
 if TYPE_CHECKING:
+    from autotrader.adapters.fundamental.schemas import (
+        FundamentalContext,
+        FundamentalMemorySnapshot,
+    )
     from autotrader.calculator.features.regime_detector import (
         RegimeResult,
     )
     from autotrader.core.entities import Candle
+    from autotrader.decision.unified.fundamental_assessor import (
+        FundamentalAssessment,
+    )
 
 
 @dataclass
@@ -371,28 +378,74 @@ class UnifiedTradeBot:
         self,
         current_time: pd.Timestamp,
         candle: Candle | None = None,
+        fundamental_ctx: FundamentalContext | None = None,
+        fundamental_memory: FundamentalMemorySnapshot | None = None,
     ) -> ConsolidatedSignal:
         """毎分呼び出し：全時間足評価→統合シグナル生成
 
         Args:
             current_time: 現在時刻
             candle: 現在のローソク足
+            fundamental_ctx: ファンダメンタルコンテキスト
+            fundamental_memory: ファンダメンタルメモリ
 
         Returns:
             ConsolidatedSignal: 統合シグナル
         """
-        return self._generate_signal_new(current_time, candle)
+        return self._generate_signal_new(
+            current_time, candle,
+            fundamental_ctx, fundamental_memory,
+        )
+
+    def _assess_fundamental(
+        self,
+        fundamental_ctx: FundamentalContext | None,
+        fundamental_memory: FundamentalMemorySnapshot | None,
+    ) -> FundamentalAssessment | None:
+        """ファンダメンタル評価を実行
+
+        Args:
+            fundamental_ctx: ファンダメンタルコンテキスト
+            fundamental_memory: メモリスナップショット
+
+        Returns:
+            FundamentalAssessment | None: 評価結果
+        """
+        if (
+            not self.config.fundamental_assessor_enabled
+            or fundamental_ctx is None
+            or fundamental_memory is None
+        ):
+            return None
+
+        from autotrader.adapters.fundamental.schemas import (
+            FundamentalMemory,
+        )
+        from autotrader.decision.unified.fundamental_assessor import (
+            FundamentalRiskAssessor,
+        )
+
+        if not hasattr(self, "_fund_assessor"):
+            self._fund_assessor = FundamentalRiskAssessor()
+
+        return self._fund_assessor.assess(
+            fundamental_ctx, fundamental_memory,
+        )
 
     def _generate_signal_new(
         self,
         current_time: pd.Timestamp,
         candle: Candle | None = None,
+        fundamental_ctx: FundamentalContext | None = None,
+        fundamental_memory: FundamentalMemorySnapshot | None = None,
     ) -> ConsolidatedSignal:
         """新アーキテクチャでのシグナル生成
 
         Args:
             current_time: 現在時刻
             candle: 現在のローソク足
+            fundamental_ctx: ファンダメンタルコンテキスト
+            fundamental_memory: メモリスナップショット
 
         Returns:
             ConsolidatedSignal: 統合シグナル
@@ -561,6 +614,37 @@ class UnifiedTradeBot:
                 regime_result, htf_alignment,
             )
 
+        # Phase 2b: ファンダメンタル評価
+        _fund_assessment = self._assess_fundamental(
+            fundamental_ctx, fundamental_memory,
+        )
+
+        # Phase 2b: ファンダメンタル方向フィルター
+        if _fund_assessment is not None:
+            _dir_sign = (
+                1.0
+                if consensus.direction == SignalType.BUY
+                else -1.0
+            )
+            _fund_adj = _fund_assessment.get_threshold_adjustment(
+                signal_direction=_dir_sign,
+            )
+            if _fund_adj > 0:
+                # 閾値を実効的に引き上げ
+                _effective_threshold = (
+                    consensus.threshold + _fund_adj
+                )
+                if consensus.score < _effective_threshold:
+                    return self._hold_with_analysis(
+                        f"ファンダフィルター: "
+                        f"bias={_fund_assessment.effective_bias:+.2f}"
+                        f", adj=+{_fund_adj:.1f}"
+                        f", score={consensus.score:.1f}"
+                        f"<{_effective_threshold:.1f}",
+                        plan, tf_signals, consensus,
+                        regime_result, htf_alignment,
+                    )
+
         # SoftGuardチェック（デモモードでも情報取得: 出力データに使用）
         # ATR比率・絶対ATRを計算してボラティリティ状態をSoftGuardに渡す
         _primary_atr_row = self._get_current_row(
@@ -599,7 +683,15 @@ class UnifiedTradeBot:
                 "aligned" if htf_alignment >= 0.3 else "mixed"
             ),
         }
-        sg_result = self.soft_guard.check(sg_context, is_entry=True)
+        sg_result = self.soft_guard.check(
+            sg_context,
+            is_entry=True,
+            fundamental_assessment=(
+                _fund_assessment
+                if self.config.fundamental_softguard_enabled
+                else None
+            ),
+        )
 
         # セッションフィルター
         hour_utc = current_time.hour if hasattr(
@@ -871,6 +963,18 @@ class UnifiedTradeBot:
             confidence = (
                 consensus.score / consensus.threshold
             )
+            # Phase 2b: ファンダメンタル値をSizingContextに反映
+            _liq_factor = 1.0
+            _vol_mult = 1.0
+            if fundamental_ctx is not None:
+                _liq_factor = fundamental_ctx.liquidity_factor
+                _vol_mult = fundamental_ctx.volatility_multiplier
+            # ファンダメンタルアセッサーのロット倍率も反映
+            if _fund_assessment is not None:
+                _liq_factor = min(
+                    _liq_factor,
+                    _fund_assessment.lot_multiplier,
+                )
             sizing_context = SizingContext(
                 equity=self.state.equity,
                 sl_pips=sl_pips,
@@ -883,6 +987,8 @@ class UnifiedTradeBot:
                 open_same_direction_lot=(
                     self.state.open_same_direction_lot
                 ),
+                liquidity_factor=_liq_factor,
+                volatility_multiplier=_vol_mult,
             )
             sizing_result = self.position_sizer.calculate(sizing_context)
             if sizing_result.blocked:

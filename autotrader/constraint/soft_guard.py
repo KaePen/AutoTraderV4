@@ -8,6 +8,12 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from autotrader.decision.unified.fundamental_assessor import (
+        FundamentalAssessment,
+    )
 
 
 class SoftGuardReason(Enum):
@@ -20,6 +26,8 @@ class SoftGuardReason(Enum):
     RECENT_LOSS = "recent_loss"
     MTF_CONFLICT = "mtf_conflict"
     WEAK_TREND = "weak_trend"
+    # Phase 2b: ファンダメンタル
+    FUNDAMENTAL_RISK = "fundamental_risk"
 
 
 @dataclass(frozen=True)
@@ -195,13 +203,17 @@ class SoftGuard:
         return 0.0, None
 
     def check(
-        self, context: dict, is_entry: bool = True
+        self,
+        context: dict,
+        is_entry: bool = True,
+        fundamental_assessment: FundamentalAssessment | None = None,
     ) -> SoftGuardResult:
         """全ソフトガードチェックを実行
 
         Args:
             context: コンテキスト情報
             is_entry: エントリー時のチェックか
+            fundamental_assessment: ファンダメンタル評価結果
 
         Returns:
             SoftGuardResult: チェック結果
@@ -230,6 +242,20 @@ class SoftGuard:
                 reasons.append(reason)
                 reason_codes.append(reason_code)
 
+        # Phase 2b: ファンダメンタルリスクペナルティ
+        if fundamental_assessment is not None:
+            fund_pen, fund_reason = (
+                self._check_fundamental(fundamental_assessment)
+            )
+            if fund_pen > 0 and fund_reason:
+                penalties[SoftGuardReason.FUNDAMENTAL_RISK] = (
+                    fund_pen
+                )
+                reasons.append(fund_reason)
+                reason_codes.append(
+                    SoftGuardReason.FUNDAMENTAL_RISK,
+                )
+
         total_penalty = min(sum(penalties.values()), 0.8)
 
         return SoftGuardResult(
@@ -237,6 +263,43 @@ class SoftGuard:
             penalties=penalties,
             reasons=reasons,
             reason_codes=reason_codes,
+        )
+
+    @staticmethod
+    def _check_fundamental(
+        assessment: FundamentalAssessment,
+    ) -> tuple[float, str | None]:
+        """ファンダメンタルリスクチェック
+
+        FundamentalAssessmentのリスクレベルを
+        SoftGuardペナルティに変換する。
+
+        Args:
+            assessment: ファンダメンタル評価結果
+
+        Returns:
+            tuple[float, str | None]: (ペナルティ, 理由)
+        """
+        from autotrader.decision.unified.fundamental_assessor import (
+            RiskCategory,
+        )
+
+        if assessment.risk_category == RiskCategory.NORMAL:
+            return 0.0, None
+
+        if assessment.risk_category == RiskCategory.BLOCK:
+            return 0.5, (
+                f"ファンダBLOCK: risk={assessment.risk_level:.2f}"
+            )
+
+        if assessment.risk_category == RiskCategory.HIGH:
+            return 0.3, (
+                f"ファンダHIGH: risk={assessment.risk_level:.2f}"
+            )
+
+        # CAUTION
+        return 0.1, (
+            f"ファンダCAUTION: risk={assessment.risk_level:.2f}"
         )
 
     def create_empty_result(self) -> SoftGuardResult:
