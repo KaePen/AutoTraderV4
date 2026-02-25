@@ -4,20 +4,24 @@
 インジケータ計算用のlookback期間にも対応。
 
 使用例:
-    # USDJPY 2026年1月 全タイムフレーム（lookback 6ヶ月）
+    # USDJPY 2026年1月 全タイムフレーム（自動lookback）
     python scripts/export_mt5_chart.py
 
     # 通貨ペア・期間を指定
     python scripts/export_mt5_chart.py --symbol EURUSD \
-        --start 2026-01-01 --end 2026-02-01 --lookback-months 3
+        --start 2026-01-01 --end 2026-02-01
 
     # 特定タイムフレームのみ
     python scripts/export_mt5_chart.py --timeframes M5 H1 D1
+
+    # lookback月数を手動指定（自動計算より小さい場合は自動値が優先）
+    python scripts/export_mt5_chart.py --lookback-months 12
 """
 
 from __future__ import annotations
 
 import argparse
+import math
 import sys
 from datetime import datetime, timezone
 from pathlib import Path
@@ -58,11 +62,54 @@ DEFAULT_TIMEFRAMES = [
     "D1", "W1", "Monthly",
 ]
 
+# 各時間足の1営業日あたりの平均バー数（Forex 24h市場）
+_BARS_PER_TRADING_DAY: dict[str, float] = {
+    "M1": 1440.0, "M2": 720.0, "M3": 480.0,
+    "M4": 360.0, "M5": 288.0, "M6": 240.0,
+    "M10": 144.0, "M12": 120.0, "M15": 96.0,
+    "M20": 72.0, "M30": 48.0,
+    "H1": 24.0, "H2": 12.0, "H3": 8.0,
+    "H4": 6.0, "H6": 4.0, "H8": 3.0, "H12": 2.0,
+    "D1": 1.0, "W1": 0.2, "Monthly": 1.0 / 22.0,
+}
+
+# インジケータの最長周期（SMA200）
+_MAX_INDICATOR_PERIOD = 200
+
+# 1ヶ月あたりの平均営業日数
+_TRADING_DAYS_PER_MONTH = 22
+
+
+def _min_lookback_months(
+    timeframe: str,
+    max_period: int = _MAX_INDICATOR_PERIOD,
+    buffer: float = 1.2,
+) -> int:
+    """インジケータ計算に必要な最小lookback月数を算出する。
+
+    SMA200等の長周期インジケータが対象期間の初日から
+    有効値を持てるよう、十分なバー数を確保する。
+
+    Args:
+        timeframe: タイムフレーム文字列（例: M5, D1）
+        max_period: インジケータの最長周期（デフォルト: 200）
+        buffer: 安全マージン倍率（デフォルト: 1.2 = 20%余裕）
+
+    Returns:
+        必要な最小lookback月数（1以上）
+    """
+    bars_per_day = _BARS_PER_TRADING_DAY.get(timeframe, 1.0)
+    bars_per_month = bars_per_day * _TRADING_DAYS_PER_MONTH
+    months_needed = (max_period * buffer) / bars_per_month
+    return max(1, math.ceil(months_needed))
+
 
 def connect_mt5() -> None:
     """MT5に接続する。失敗時はエラー終了。"""
     if not mt5.initialize():
-        print(f"MT5初期化失敗: {mt5.last_error()}", file=sys.stderr)
+        print(
+            f"MT5初期化失敗: {mt5.last_error()}", file=sys.stderr,
+        )
         sys.exit(1)
     info = mt5.terminal_info()
     if info is not None:
@@ -84,40 +131,52 @@ def fetch_rates(
     timeframe_name: str,
     start: datetime,
     end: datetime,
-    target_start: datetime | None = None,
+    min_start: datetime | None = None,
 ) -> pd.DataFrame | None:
     """MT5から指定期間のレートを取得する。
 
     小さいタイムフレームでバー数上限に引っかかる場合、
     lookback期間を段階的に短縮してリトライする。
+    ただし min_start（インジケータ計算に必要な最小開始日）
+    より前には短縮しない。
 
     Args:
         symbol: 通貨ペア名（例: USDJPY）
         timeframe_name: タイムフレーム文字列（例: M5, H1）
         start: 取得開始日時（UTC、lookback含む）
         end: 取得終了日時（UTC）
-        target_start: 本来の対象開始日（リトライ時の下限）
+        min_start: インジケータ計算に必要な最小開始日。
+            フォールバック時にこの日付より後には短縮しない。
 
     Returns:
         取得したDataFrame。データなしの場合はNone。
     """
     tf_const = MT5_TIMEFRAMES.get(timeframe_name)
     if tf_const is None:
-        print(f"  不明なタイムフレーム: {timeframe_name}", file=sys.stderr)
+        print(
+            f"  不明なタイムフレーム: {timeframe_name}",
+            file=sys.stderr,
+        )
         return None
 
-    if target_start is None:
-        target_start = start
+    if min_start is None:
+        min_start = start
 
     # lookbackを段階的に短縮する候補リスト
+    # min_start を下限としてフィルタリング
     fallback_starts = [start]
     for months_back in [4, 3, 2, 1]:
         fb = _subtract_months(end, months_back)
-        if fb > start:
+        if fb > start and fb <= min_start:
+            # min_start以前なら候補に追加
             fallback_starts.append(fb)
-    # 最低でも対象期間は確保
-    if target_start > start:
-        fallback_starts.append(target_start)
+        elif fb > start and fb > min_start:
+            # min_startより後は追加しない（lookback不足）
+            pass
+
+    # min_startが明示的にstartより後なら最終候補として追加
+    if min_start > start and min_start not in fallback_starts:
+        fallback_starts.append(min_start)
 
     for attempt_start in fallback_starts:
         rates = mt5.copy_rates_range(
@@ -126,7 +185,8 @@ def fetch_rates(
         if rates is not None and len(rates) > 0:
             if attempt_start != start:
                 print(
-                    f"(lookback短縮: {attempt_start:%Y-%m-%d}~) ",
+                    f"(lookback短縮: "
+                    f"{attempt_start:%Y-%m-%d}~) ",
                     end="",
                 )
             df = pd.DataFrame(rates)
@@ -222,7 +282,10 @@ def parse_args() -> argparse.Namespace:
         "--lookback-months",
         type=int,
         default=6,
-        help="インジケータ計算用lookback月数（デフォルト: 6）",
+        help=(
+            "インジケータ計算用lookback月数（デフォルト: 6）。"
+            "各TFの最小必要量より小さい場合は自動で増加。"
+        ),
     )
     parser.add_argument(
         "--timeframes",
@@ -251,19 +314,7 @@ def main() -> None:
         args.end, "%Y-%m-%d",
     ).replace(tzinfo=timezone.utc)
 
-    # lookback分を遡った実際の取得開始日
-    lookback = args.lookback_months
-    actual_start_month = target_start.month - lookback
-    actual_start_year = target_start.year
-    while actual_start_month <= 0:
-        actual_start_month += 12
-        actual_start_year -= 1
-    actual_start = target_start.replace(
-        year=actual_start_year,
-        month=actual_start_month,
-        day=1,
-    )
-
+    user_lookback = args.lookback_months
     timeframes = args.timeframes or DEFAULT_TIMEFRAMES
     symbol = args.symbol
 
@@ -275,11 +326,29 @@ def main() -> None:
         output_dir = project_root / "data" / symbol
     output_dir.mkdir(parents=True, exist_ok=True)
 
+    # 各TFの必要lookbackを表示
     print(f"通貨ペア:   {symbol}")
-    print(f"対象期間:   {target_start:%Y-%m-%d} ~ {target_end:%Y-%m-%d}")
-    print(f"lookback:   {lookback}ヶ月 → 実際の取得開始: {actual_start:%Y-%m-%d}")
+    print(
+        f"対象期間:   "
+        f"{target_start:%Y-%m-%d} ~ {target_end:%Y-%m-%d}",
+    )
     print(f"タイムフレーム: {', '.join(timeframes)}")
     print(f"出力先:     {output_dir}")
+    print()
+
+    # 時間足ごとのlookback計画を表示
+    print("lookback計画（SMA200基準）:")
+    for tf in timeframes:
+        min_lb = _min_lookback_months(tf)
+        effective = max(user_lookback, min_lb)
+        start_dt = _subtract_months(target_start, effective)
+        marker = ""
+        if effective > user_lookback:
+            marker = f" (自動増加: {user_lookback}→{effective})"
+        print(
+            f"  {tf:>7s}: {effective:>2d}ヶ月 "
+            f"→ {start_dt:%Y-%m-%d}~{marker}",
+        )
     print()
 
     # MT5接続
@@ -288,7 +357,10 @@ def main() -> None:
     # シンボル存在確認
     symbol_info = mt5.symbol_info(symbol)
     if symbol_info is None:
-        print(f"シンボル '{symbol}' が見つかりません", file=sys.stderr)
+        print(
+            f"シンボル '{symbol}' が見つかりません",
+            file=sys.stderr,
+        )
         mt5.shutdown()
         sys.exit(1)
     if not symbol_info.visible:
@@ -297,9 +369,22 @@ def main() -> None:
     # 各タイムフレームでデータ取得・保存
     saved = 0
     for tf in timeframes:
-        print(f"取得中: {symbol} {tf} ...", end=" ")
+        # TFごとに最適なlookbackを計算
+        min_lb = _min_lookback_months(tf)
+        effective_lb = max(user_lookback, min_lb)
+        actual_start = _subtract_months(
+            target_start, effective_lb,
+        )
+        # インジケータ計算に必要な最小開始日
+        min_start = _subtract_months(target_start, min_lb)
+
+        print(
+            f"取得中: {symbol} {tf} "
+            f"({actual_start:%Y-%m-%d}~) ...",
+            end=" ",
+        )
         df = fetch_rates(
-            symbol, tf, actual_start, target_end, target_start,
+            symbol, tf, actual_start, target_end, min_start,
         )
         if df is None or df.empty:
             continue
