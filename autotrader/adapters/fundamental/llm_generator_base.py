@@ -72,6 +72,14 @@ class LLMGeneratorBase:
         self._retry_delay = retry_delay_seconds
         self._max_retries = max_retries
 
+    # システムプロンプト: JSON出力を強制
+    _SYSTEM_PROMPT = (
+        "あなたはFX市場の専門アナリストです。"
+        "回答は必ず指定されたJSON形式のみで出力してください。"
+        "説明文やコードブロックは不要です。"
+        "JSONオブジェクトだけを返してください。"
+    )
+
     def _call_ollama(self, prompt: str) -> dict:
         """OllamaでLLM推論を実行しJSONをパース
 
@@ -92,7 +100,13 @@ class LLMGeneratorBase:
         client = _ollama_module.Client(host=self._settings.host)
         response = client.chat(
             model=self._settings.model,
-            messages=[{"role": "user", "content": prompt}],
+            messages=[
+                {
+                    "role": "system",
+                    "content": self._SYSTEM_PROMPT,
+                },
+                {"role": "user", "content": prompt},
+            ],
             format="json",
             options={
                 "temperature": self._settings.temperature,
