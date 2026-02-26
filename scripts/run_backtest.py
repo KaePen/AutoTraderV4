@@ -1224,6 +1224,18 @@ def run_single_backtest(args: argparse.Namespace):
         htf_score_filter_threshold_add=(
             args.htf_score_threshold_add
         ),
+        fundamental_assessor_enabled=(
+            args.fundamental_phase2b
+        ),
+        fundamental_softguard_enabled=(
+            args.fundamental_phase2b
+        ),
+        fundamental_pm_enabled=(
+            args.fundamental_phase2b
+        ),
+        fundamental_post_event_lag_seconds=(
+            args.fundamental_lag
+        ),
     )
 
     # PositionManagerConfig構築
@@ -1276,18 +1288,6 @@ def run_single_backtest(args: argparse.Namespace):
         progressive_stagnation_enabled=args.progressive_stagnation,
         universal_half_r_enabled=args.universal_half_r,
         universal_half_r_ratio=args.universal_half_r_ratio,
-        fundamental_assessor_enabled=(
-            args.fundamental_phase2b
-        ),
-        fundamental_softguard_enabled=(
-            args.fundamental_phase2b
-        ),
-        fundamental_pm_enabled=(
-            args.fundamental_phase2b
-        ),
-        fundamental_post_event_lag_seconds=(
-            args.fundamental_lag
-        ),
     )
 
     # ファンダメンタルCSVリスト構築

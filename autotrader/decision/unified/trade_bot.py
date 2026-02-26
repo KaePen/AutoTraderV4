@@ -542,6 +542,14 @@ class UnifiedTradeBot:
                 tp_pips=signal.tp_pips,
             )
 
+        # Phase 2b: ファンダメンタル評価（consolidate前に実行）
+        # conviction boost適用のため方向判定前に評価する
+        _fund_assessment = self._assess_fundamental(
+            fundamental_ctx, fundamental_memory,
+        )
+        self._last_fundamental_assessment = _fund_assessment
+        _fund_boosted = False
+
         # アダプティブオーバーライド取得
         _overrides = (
             self._adaptive_tuner.get_overrides()
@@ -583,6 +591,71 @@ class UnifiedTradeBot:
             threshold_override=_threshold_override,
         )
 
+        # Phase 2b: コンビクションブースト救済
+        # 閾値不足でHOLDでも、ファンダメンタルが方向を
+        # 支持する場合は閾値引き下げで救済
+        if (
+            consensus.direction == SignalType.HOLD
+            and _fund_assessment is not None
+            and consensus.score > 0
+        ):
+            _prelim_dir = (
+                SignalType.BUY
+                if consensus.buy_score
+                > consensus.sell_score
+                else (
+                    SignalType.SELL
+                    if consensus.sell_score
+                    > consensus.buy_score
+                    else SignalType.HOLD
+                )
+            )
+            if _prelim_dir != SignalType.HOLD:
+                _boost_sign = (
+                    1.0
+                    if _prelim_dir == SignalType.BUY
+                    else -1.0
+                )
+                _boost_adj = (
+                    _fund_assessment
+                    .get_threshold_adjustment(
+                        signal_direction=_boost_sign,
+                    )
+                )
+                # ブーストのみ適用（adj < 0 = 閾値引下げ）
+                if _boost_adj < 0:
+                    _boosted_th = (
+                        consensus.threshold + _boost_adj
+                    )
+                    if consensus.score >= _boosted_th:
+                        _fund_boosted = True
+                        consensus = ConsensusResult(
+                            direction=_prelim_dir,
+                            score=consensus.score,
+                            threshold=_boosted_th,
+                            aligned_tfs=(
+                                consensus.aligned_tfs
+                            ),
+                            reasoning=(
+                                "ファンダブースト: "
+                                f"score="
+                                f"{consensus.score:.2f}"
+                                f"≥{_boosted_th:.2f}"
+                                f"(adj="
+                                f"{_boost_adj:+.2f})"
+                            ),
+                            buy_score=(
+                                consensus.buy_score
+                            ),
+                            sell_score=(
+                                consensus.sell_score
+                            ),
+                            dynamic_entry_tf=(
+                                consensus
+                                .dynamic_entry_tf
+                            ),
+                        )
+
         if consensus.direction == SignalType.HOLD:
             if self._flow_analyzer:
                 from autotrader.core.diagnostics import (
@@ -617,14 +690,9 @@ class UnifiedTradeBot:
                 regime_result, htf_alignment,
             )
 
-        # Phase 2b: ファンダメンタル評価
-        _fund_assessment = self._assess_fundamental(
-            fundamental_ctx, fundamental_memory,
-        )
-        self._last_fundamental_assessment = _fund_assessment
-
-        # Phase 2b: ファンダメンタル方向フィルター
-        if _fund_assessment is not None:
+        # Phase 2b: ファンダメンタル方向フィルター（ペナルティ）
+        # ブーストで救済されたトレードはスキップ（方向一致確認済み）
+        if _fund_assessment is not None and not _fund_boosted:
             _dir_sign = (
                 1.0
                 if consensus.direction == SignalType.BUY
@@ -633,21 +701,19 @@ class UnifiedTradeBot:
             _fund_adj = _fund_assessment.get_threshold_adjustment(
                 signal_direction=_dir_sign,
             )
-            if _fund_adj > 0:
-                # 閾値を実効的に引き上げ
-                _effective_threshold = (
-                    consensus.threshold + _fund_adj
+            _effective_threshold = (
+                consensus.threshold + _fund_adj
+            )
+            if consensus.score < _effective_threshold:
+                return self._hold_with_analysis(
+                    f"ファンダフィルター: "
+                    f"bias={_fund_assessment.effective_bias:+.2f}"
+                    f", adj={_fund_adj:+.1f}"
+                    f", score={consensus.score:.1f}"
+                    f"<{_effective_threshold:.1f}",
+                    plan, tf_signals, consensus,
+                    regime_result, htf_alignment,
                 )
-                if consensus.score < _effective_threshold:
-                    return self._hold_with_analysis(
-                        f"ファンダフィルター: "
-                        f"bias={_fund_assessment.effective_bias:+.2f}"
-                        f", adj=+{_fund_adj:.1f}"
-                        f", score={consensus.score:.1f}"
-                        f"<{_effective_threshold:.1f}",
-                        plan, tf_signals, consensus,
-                        regime_result, htf_alignment,
-                    )
 
         # SoftGuardチェック（デモモードでも情報取得: 出力データに使用）
         # ATR比率・絶対ATRを計算してボラティリティ状態をSoftGuardに渡す
