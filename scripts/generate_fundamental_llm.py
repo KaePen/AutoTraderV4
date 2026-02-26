@@ -7,11 +7,14 @@
   python scripts/generate_fundamental_llm.py events \\
       --symbol USDJPY --years 2020-2024
 
-  # 日次ニュースCSV生成
+  # 日次ニュースCSV生成（news_rss_*.csv のみ使用）
+  python scripts/generate_fundamental_llm.py news \\
+      --symbol USDJPY --years 2020-2024
+
+  # GDELT生データも併用する場合（重複排除あり）
   python scripts/generate_fundamental_llm.py news \\
       --symbol USDJPY --years 2020-2024 \\
-      --news-dir data/fundamental/news \\
-      --rss-dir data/fundamental
+      --news-dir data/fundamental/news
 
   # 両方生成
   python scripts/generate_fundamental_llm.py all \\
@@ -61,7 +64,8 @@ from autotrader.config.llm_settings import OllamaSettings
 
 # デフォルト入力ディレクトリ
 _DEFAULT_INPUT_DIR = "data/fundamental"
-_DEFAULT_NEWS_DIR = "data/fundamental/news"
+# GDELT生データはnews_rss_*.csvに統合済みのため不要
+_DEFAULT_NEWS_DIR = None
 
 
 def parse_args() -> argparse.Namespace:
@@ -157,7 +161,10 @@ def parse_args() -> argparse.Namespace:
     news_parser.add_argument(
         "--news-dir",
         default=_DEFAULT_NEWS_DIR,
-        help="GDELTニュースCSVディレクトリ（news/）",
+        help=(
+            "GDELT生データCSVディレクトリ（news/）。"
+            "デフォルト無効（news_rss_*.csvに統合済み）"
+        ),
     )
     news_parser.add_argument(
         "--rss-dir",
@@ -174,7 +181,10 @@ def parse_args() -> argparse.Namespace:
     all_parser.add_argument(
         "--news-dir",
         default=_DEFAULT_NEWS_DIR,
-        help="GDELTニュースCSVディレクトリ（news/）",
+        help=(
+            "GDELT生データCSVディレクトリ（news/）。"
+            "デフォルト無効（news_rss_*.csvに統合済み）"
+        ),
     )
     all_parser.add_argument(
         "--rss-dir",
@@ -326,7 +336,13 @@ def load_all_news(
     news_dir: Path | None,
     year: int,
 ) -> list[NewsItem]:
-    """RSSとGDELTの両方のニュースCSVを読み込みマージ
+    """RSSとGDELTのニュースCSVを読み込み
+
+    news_rss_*.csv を優先使用する。
+    news/news_*.csv（GDELT生データ）はnews_rss_*.csvに
+    統合済みのため、デフォルトでは読み込まない。
+    --news-dir を明示指定した場合のみGDELTも読み込み、
+    news_id による重複排除を行う。
 
     Args:
         rss_dir: news_rss_YYYY.csv のディレクトリ
@@ -334,11 +350,12 @@ def load_all_news(
         year: 対象年
 
     Returns:
-        list[NewsItem]: マージ済みニュースリスト
+        list[NewsItem]: ニュースリスト（重複排除済み）
     """
     items: list[NewsItem] = []
+    seen_ids: set[str] = set()
 
-    # RSS ニュース
+    # RSS ニュース（優先）
     if rss_dir:
         rss_path = Path(rss_dir) / f"news_rss_{year}.csv"
         if rss_path.exists():
@@ -346,19 +363,30 @@ def load_all_news(
             logger.info(
                 f"[RSS] {year}: {len(rss_items)}件読込"
             )
+            for item in rss_items:
+                seen_ids.add(item.news_id)
             items.extend(rss_items)
         else:
             logger.warning(f"[RSS] 未存在: {rss_path}")
 
-    # GDELT ニュース
+    # GDELT ニュース（明示指定時のみ、重複排除）
     if news_dir:
         news_path = Path(news_dir) / f"news_{year}.csv"
         if news_path.exists():
             news_items = read_news_csv(news_path)
+            # RSS既読のIDを除外
+            new_items = [
+                item
+                for item in news_items
+                if item.news_id not in seen_ids
+            ]
             logger.info(
                 f"[GDELT] {year}: {len(news_items)}件読込"
+                f"→{len(new_items)}件追加"
+                f"（{len(news_items) - len(new_items)}"
+                f"件はRSSと重複）"
             )
-            items.extend(news_items)
+            items.extend(new_items)
         else:
             logger.warning(f"[GDELT] 未存在: {news_path}")
 
