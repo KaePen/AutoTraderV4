@@ -1,7 +1,7 @@
 """ニュース分析LLMジェネレーター
 
 ニュースCSVからシンボル関連記事を日次抽出し、
-セッション別にLLM分析を行い、
+Map-Reduceパターンでバッチ分割→中間要約→統合分析を行い、
 llm_news_SYMBOL_YYYY.csv に出力する。
 """
 
@@ -38,26 +38,12 @@ NEWS_CSV_COLUMNS = [
     "session_detail",
 ]
 
-# セッション時間帯定義（UTC基準、時の範囲 [start, end)）
-SESSION_RANGES: dict[str, tuple[int, int]] = {
-    "tokyo": (0, 8),
-    "london": (8, 14),
-    "ny": (14, 24),
-}
-
-# セッション名の表示用ラベル
-_SESSION_LABELS: dict[str, str] = {
-    "tokyo": "東京セッション（UTC 00:00-08:00）",
-    "london": "ロンドンセッション（UTC 08:00-14:00）",
-    "ny": "NYセッション（UTC 14:00-24:00）",
-}
+# Map-Reduceバッチサイズ（これ以下なら単一呼び出し）
+_MAP_BATCH_SIZE = 12
 
 # FX専門ソースの本文抜粋最大文字数
 _FX_CONTENT_MAX = 300
 _FX_CONTENT_REDUCED = 150
-
-# 各セッション最大記事数（最終フォールバック）
-_SESSION_MAX_ARTICLES = 10
 
 # コンテンツ有効判定の最小文字数
 _MIN_USEFUL_CONTENT_LEN = 50
@@ -66,15 +52,17 @@ _MIN_USEFUL_CONTENT_LEN = 50
 class LLMNewsGenerator(LLMGeneratorBase):
     """ニュース分析LLMジェネレーター
 
-    news_rss_YYYY.csv / news/news_YYYY.csv からシンボル関連
-    ニュースを日次抽出し、セッション別にLLM分析して
+    news_rss_YYYY.csv からシンボル関連ニュースを日次抽出し、
+    Map-ReduceパターンでLLM分析して
     llm_news_SYMBOL_YYYY.csv に出力する。
+
+    記事数 <= _MAP_BATCH_SIZE: 単一LLM呼び出し
+    記事数 > _MAP_BATCH_SIZE: バッチ分割→中間要約→統合分析
 
     Args:
         ollama_settings: Ollama接続設定
         retry_delay_seconds: リトライ待機秒数
         max_retries: LLM呼び出し最大リトライ回数
-        max_prompt_tokens: プロンプト最大トークン見積もり
     """
 
     def __init__(
@@ -90,14 +78,13 @@ class LLMNewsGenerator(LLMGeneratorBase):
             ollama_settings: Ollama接続設定
             retry_delay_seconds: リトライ待機秒数
             max_retries: LLM呼び出し最大リトライ回数
-            max_prompt_tokens: プロンプト最大トークン見積もり
+            max_prompt_tokens: 未使用（後方互換用）
         """
         super().__init__(
             ollama_settings=ollama_settings,
             retry_delay_seconds=retry_delay_seconds,
             max_retries=max_retries,
         )
-        self._max_prompt_tokens = max_prompt_tokens
 
     def generate_for_symbol_year(
         self,
@@ -208,6 +195,8 @@ class LLMNewsGenerator(LLMGeneratorBase):
         )
         return output_path
 
+    # ── フィルタリング・グループ化 ──
+
     def _filter_news(
         self,
         news_items: list[NewsItem],
@@ -248,175 +237,403 @@ class LLMNewsGenerator(LLMGeneratorBase):
             result[item.published_at.date()].append(item)
         return dict(result)
 
-    def _split_by_session(
+    # ── 分析ディスパッチ ──
+
+    def _analyze_date(
         self,
+        symbol: str,
+        base: str,
+        quote: str,
+        target_date: date,
         news_items: list[NewsItem],
-    ) -> dict[str, list[NewsItem]]:
-        """ニュースをセッション別にグループ化
+    ) -> dict:
+        """1日分のニュースをLLM分析（Map-Reduce対応）
 
-        tokyo:  00:00-07:59 UTC
-        london: 08:00-13:59 UTC
-        ny:     14:00-23:59 UTC
-
-        Args:
-            news_items: 当日のニュースリスト
-
-        Returns:
-            dict[str, list[NewsItem]]
-        """
-        result: dict[str, list[NewsItem]] = {
-            "tokyo": [],
-            "london": [],
-            "ny": [],
-        }
-        for item in news_items:
-            hour = item.published_at.hour
-            if hour < 8:
-                result["tokyo"].append(item)
-            elif hour < 14:
-                result["london"].append(item)
-            else:
-                result["ny"].append(item)
-        return result
-
-    def _compress_for_prompt(
-        self,
-        session_groups: dict[str, list[NewsItem]],
-    ) -> dict[str, str]:
-        """セッション別ニュースをプロンプト用テキストに圧縮
-
-        圧縮戦略:
-        1. FX専門ソース記事: 全件（本文300文字まで）
-        2. 一般ソース記事: ソースごと最大1件、見出しのみ
-        3. トークン超過時: 一般ソース除外 + 本文150文字短縮
-        4. それでも超過: 各セッション最大10件、見出しのみ
+        記事数が _MAP_BATCH_SIZE 以下なら単一呼び出し、
+        超える場合はMap-Reduceパターンで分析する。
 
         Args:
-            session_groups: セッション別ニュースリスト
+            symbol: シンボル
+            base: 基軸通貨
+            quote: 決済通貨
+            target_date: 分析対象日
+            news_items: 当日ニュース
 
         Returns:
-            dict[str, str]: セッション別テキスト
+            dict: 分析結果
         """
-        session_texts: dict[str, str] = {}
+        if not news_items:
+            return self._default_news_result()
 
-        for session_name, items in session_groups.items():
-            if not items:
-                session_texts[session_name] = "（なし）"
-                continue
-
-            # FX専門ソースと一般ソースに分類
-            fx_items = [
-                i
-                for i in items
-                if i.source_name in FX_RSS_SOURCES
-            ]
-            general_items = [
-                i
-                for i in items
-                if i.source_name not in FX_RSS_SOURCES
-            ]
-
-            # レベル1: FX全件（本文300字）+ 一般ソースごと1件
-            text = self._format_session_articles(
-                fx_items,
-                general_items,
-                content_max=_FX_CONTENT_MAX,
-                include_general=True,
+        if len(news_items) <= _MAP_BATCH_SIZE:
+            return self._analyze_single(
+                symbol, base, quote, target_date, news_items
             )
-            if self._estimate_tokens(text) <= self._max_prompt_tokens:
-                session_texts[session_name] = text
-                continue
+        return self._analyze_map_reduce(
+            symbol, base, quote, target_date, news_items
+        )
 
-            # レベル2: FX全件（本文150字）+ 一般除外
-            text = self._format_session_articles(
-                fx_items,
-                [],
-                content_max=_FX_CONTENT_REDUCED,
-                include_general=False,
-            )
-            if self._estimate_tokens(text) <= self._max_prompt_tokens:
-                session_texts[session_name] = text
-                continue
-
-            # レベル3: 先頭10件、見出しのみ
-            limited = sorted(
-                items, key=lambda i: i.published_at
-            )[:_SESSION_MAX_ARTICLES]
-            lines = []
-            for item in limited:
-                time_str = item.published_at.strftime("%H:%M")
-                lines.append(
-                    f"- {time_str} | {item.source_name} | "
-                    f"{item.title}\n  [見出しのみ]"
-                )
-            session_texts[session_name] = "\n".join(lines)
-
-        return session_texts
-
-    def _format_session_articles(
+    def _analyze_single(
         self,
-        fx_items: list[NewsItem],
-        general_items: list[NewsItem],
-        content_max: int,
-        include_general: bool,
+        symbol: str,
+        base: str,
+        quote: str,
+        target_date: date,
+        news_items: list[NewsItem],
+    ) -> dict:
+        """少記事日の単一LLM分析
+
+        Args:
+            symbol: シンボル
+            base: 基軸通貨
+            quote: 決済通貨
+            target_date: 分析対象日
+            news_items: 当日ニュース（<= _MAP_BATCH_SIZE件）
+
+        Returns:
+            dict: 分析結果
+        """
+        articles_text = self._format_articles_for_batch(
+            news_items
+        )
+        prompt = self._build_single_prompt(
+            symbol, base, quote, target_date,
+            articles_text, len(news_items),
+        )
+        raw = self._call_ollama_with_retry(
+            prompt, self._default_news_result_raw()
+        )
+        return self._build_final_result(raw)
+
+    def _analyze_map_reduce(
+        self,
+        symbol: str,
+        base: str,
+        quote: str,
+        target_date: date,
+        news_items: list[NewsItem],
+    ) -> dict:
+        """多記事日のMap-Reduce LLM分析
+
+        Args:
+            symbol: シンボル
+            base: 基軸通貨
+            quote: 決済通貨
+            target_date: 分析対象日
+            news_items: 当日ニュース（> _MAP_BATCH_SIZE件）
+
+        Returns:
+            dict: 分析結果
+        """
+        batches = self._split_into_batches(
+            news_items, _MAP_BATCH_SIZE
+        )
+        logger.debug(
+            f"[NewsGen] Map-Reduce: {len(news_items)}件"
+            f"→{len(batches)}バッチ"
+        )
+
+        # MAP フェーズ
+        batch_summaries: list[dict] = []
+        map_default = self._default_map_result()
+        for i, batch in enumerate(batches):
+            batch_text = self._format_articles_for_batch(
+                batch
+            )
+            prompt = self._build_map_prompt(
+                symbol, base, quote, target_date,
+                batch_text, i + 1, len(batches),
+            )
+            result = self._call_ollama_with_retry(
+                prompt, map_default
+            )
+            batch_summaries.append(result)
+
+        # REDUCE フェーズ
+        prompt = self._build_reduce_prompt(
+            symbol, base, quote, target_date,
+            batch_summaries, len(news_items),
+        )
+        raw = self._call_ollama_with_retry(
+            prompt, self._default_news_result_raw()
+        )
+        return self._build_final_result(raw)
+
+    # ── バッチ分割・記事フォーマット ──
+
+    @staticmethod
+    def _split_into_batches(
+        items: list[NewsItem],
+        batch_size: int,
+    ) -> list[list[NewsItem]]:
+        """記事リストをバッチに分割
+
+        時系列順にソートしてからバッチ分割する。
+
+        Args:
+            items: ニュースアイテムリスト
+            batch_size: バッチサイズ
+
+        Returns:
+            list[list[NewsItem]]: バッチリスト
+        """
+        sorted_items = sorted(
+            items, key=lambda i: i.published_at
+        )
+        return [
+            sorted_items[i:i + batch_size]
+            for i in range(0, len(sorted_items), batch_size)
+        ]
+
+    def _format_articles_for_batch(
+        self,
+        items: list[NewsItem],
+        content_max: int = _FX_CONTENT_MAX,
     ) -> str:
-        """セッション内記事をテキストに変換
+        """記事バッチをプロンプト用テキストに変換
+
+        FX専門ソースは本文抜粋付き、一般ソースは見出し+snippet。
 
         Args:
-            fx_items: FX専門ソース記事
-            general_items: 一般ソース記事
+            items: ニュースアイテムリスト
             content_max: 本文抜粋の最大文字数
-            include_general: 一般ソースを含めるか
 
         Returns:
             str: フォーマット済みテキスト
         """
         lines = []
-
-        # FX専門ソース: 全件（本文付き）
         for item in sorted(
-            fx_items, key=lambda i: i.published_at
+            items, key=lambda i: i.published_at
         ):
-            time_str = item.published_at.strftime("%H:%M")
-            line = (
-                f"- {time_str} | {item.source_name} | "
-                f"{item.title}"
-            )
-            # フォールバック: content → snippet → 見出しのみ
-            useful = self._get_useful_text(
-                item, content_max,
-            )
-            if useful:
-                line += f"\n  本文抜粋: {useful}"
-            else:
-                line += "\n  [見出しのみ]"
-            lines.append(line)
-
-        # 一般ソース: ソースごと最大1件
-        if include_general and general_items:
-            seen_sources: set[str] = set()
-            for item in sorted(
-                general_items, key=lambda i: i.published_at
-            ):
-                if item.source_name in seen_sources:
-                    continue
-                seen_sources.add(item.source_name)
-                time_str = item.published_at.strftime("%H:%M")
-                line = (
-                    f"- {time_str} | {item.source_name} | "
-                    f"{item.title}"
-                )
-                # 一般ソースもsnippetフォールバック
+            line = f"- {item.source_name} | {item.title}"
+            if item.source_name in FX_RSS_SOURCES:
                 useful = self._get_useful_text(
-                    item, content_max,
+                    item, content_max
                 )
-                if useful:
-                    line += f"\n  本文抜粋: {useful}"
-                else:
-                    line += "\n  [見出しのみ]"
-                lines.append(line)
-
+            else:
+                # 一般ソースはsnippetのみ
+                useful = self._get_useful_text(
+                    item, _FX_CONTENT_REDUCED
+                )
+            if useful:
+                line += f"\n  {useful}"
+            lines.append(line)
         return "\n".join(lines) if lines else "（なし）"
+
+    # ── プロンプト構築 ──
+
+    def _build_single_prompt(
+        self,
+        symbol: str,
+        base: str,
+        quote: str,
+        target_date: date,
+        articles_text: str,
+        article_count: int,
+    ) -> str:
+        """少記事日用の単一プロンプトを構築
+
+        Args:
+            symbol: シンボル
+            base: 基軸通貨
+            quote: 決済通貨
+            target_date: 対象日
+            articles_text: フォーマット済み記事テキスト
+            article_count: 記事数
+
+        Returns:
+            str: プロンプト文字列
+        """
+        y = target_date.year
+        m = target_date.month
+        d = target_date.day
+        return f"""{symbol}のニュース分析を行ってください。
+
+対象: {symbol} ({base}/{quote})
+日付: {y}年{m}月{d}日
+記事数: {article_count}件
+
+{articles_text}
+
+分析指示:
+1. {base}と{quote}に関するニュースの方向性を区別
+2. 金融政策に関する言及（利上げ/利下げ観測等）を重視
+3. 地政学リスク要因の有無と影響度を評価
+4. リスク選好/回避の傾向を判断
+5. センチメントの一貫性に基づき確信度を設定
+
+以下のJSONを返してください:
+{{"sentiment_score": 0.0, "sentiment_confidence": 0.0, "macro_bias_score": 0.0, "policy_divergence_score": 0.0, "risk_appetite_score": 0.0, "geopolitical_risk_level": 0, "dominant_theme": "", "summary": ""}}
+
+sentiment_score: {symbol}の総合センチメント。-1.0=弱気、+1.0=強気
+sentiment_confidence: 確信度。0.0=低、1.0=高
+macro_bias_score: マクロ経済バイアス。-1.0~+1.0
+policy_divergence_score: 金融政策乖離。+は{base}引締め優位。-1.0~+1.0
+risk_appetite_score: リスク選好度。+はリスクオン。-1.0~+1.0
+geopolitical_risk_level: 地政学リスク。0=なし、1=低、2=中、3=高
+dominant_theme: 支配的テーマ。日本語100文字以内
+summary: 分析要約。日本語200文字以内"""
+
+    def _build_map_prompt(
+        self,
+        symbol: str,
+        base: str,
+        quote: str,
+        target_date: date,
+        batch_text: str,
+        batch_num: int,
+        total_batches: int,
+    ) -> str:
+        """Mapフェーズのプロンプトを構築
+
+        Args:
+            symbol: シンボル
+            base: 基軸通貨
+            quote: 決済通貨
+            target_date: 対象日
+            batch_text: バッチ内記事テキスト
+            batch_num: バッチ番号（1-based）
+            total_batches: 全バッチ数
+
+        Returns:
+            str: プロンプト文字列
+        """
+        y = target_date.year
+        m = target_date.month
+        d = target_date.day
+        return f"""{symbol}ニュースバッチ分析（{batch_num}/{total_batches}）
+
+対象: {symbol} ({base}/{quote})
+日付: {y}年{m}月{d}日
+
+ニュース:
+{batch_text}
+
+以下のJSONで要約してください:
+{{"sentiment_score": 0.0, "macro_bias_score": 0.0, "policy_divergence_score": 0.0, "risk_appetite_score": 0.0, "geopolitical_risk_level": 0, "key_themes": "", "summary": ""}}
+
+sentiment_score: {symbol}センチメント。-1.0=弱気、+1.0=強気
+macro_bias_score: マクロ経済バイアス。-1.0~+1.0
+policy_divergence_score: 金融政策乖離。+は{base}引締め優位。-1.0~+1.0
+risk_appetite_score: リスク選好度。+はリスクオン。-1.0~+1.0
+geopolitical_risk_level: 地政学リスク。0=なし~3=高
+key_themes: 主要テーマ。日本語50文字以内
+summary: 要約。日本語100文字以内"""
+
+    def _build_reduce_prompt(
+        self,
+        symbol: str,
+        base: str,
+        quote: str,
+        target_date: date,
+        batch_summaries: list[dict],
+        total_articles: int,
+    ) -> str:
+        """Reduceフェーズのプロンプトを構築
+
+        Args:
+            symbol: シンボル
+            base: 基軸通貨
+            quote: 決済通貨
+            target_date: 対象日
+            batch_summaries: Map結果のリスト
+            total_articles: 元記事の総数
+
+        Returns:
+            str: プロンプト文字列
+        """
+        y = target_date.year
+        m = target_date.month
+        d = target_date.day
+
+        # バッチ要約をテキスト化
+        summaries_block = ""
+        for i, s in enumerate(batch_summaries, 1):
+            sent = s.get("sentiment_score", 0.0)
+            macro = s.get("macro_bias_score", 0.0)
+            policy = s.get("policy_divergence_score", 0.0)
+            risk = s.get("risk_appetite_score", 0.0)
+            geo = s.get("geopolitical_risk_level", 0)
+            themes = s.get("key_themes", "")
+            summary = s.get("summary", "")
+            summaries_block += (
+                f"\nグループ{i}:\n"
+                f"  センチメント: {sent}, "
+                f"マクロ: {macro}, "
+                f"政策: {policy}, "
+                f"リスク選好: {risk}, "
+                f"地政学: {geo}\n"
+                f"  テーマ: {themes}\n"
+                f"  要約: {summary}\n"
+            )
+
+        return f"""{symbol}ニュース総合分析
+
+対象: {symbol} ({base}/{quote})
+日付: {y}年{m}月{d}日
+記事総数: {total_articles}件
+
+以下は{len(batch_summaries)}グループの分析結果です:
+{summaries_block}
+これらを統合して以下のJSONで回答してください:
+{{"sentiment_score": 0.0, "sentiment_confidence": 0.0, "macro_bias_score": 0.0, "policy_divergence_score": 0.0, "risk_appetite_score": 0.0, "geopolitical_risk_level": 0, "dominant_theme": "", "summary": ""}}
+
+sentiment_score: {symbol}の総合センチメント。-1.0=弱気、+1.0=強気
+sentiment_confidence: 確信度。グループ間の一致度を考慮。0.0=低、1.0=高
+macro_bias_score: マクロ経済バイアス。-1.0~+1.0
+policy_divergence_score: 金融政策乖離。+は{base}引締め優位。-1.0~+1.0
+risk_appetite_score: リスク選好度。+はリスクオン。-1.0~+1.0
+geopolitical_risk_level: 地政学リスク。0=なし、1=低、2=中、3=高
+dominant_theme: 支配的テーマ。日本語100文字以内
+summary: 分析要約。日本語200文字以内"""
+
+    # ── 結果構築 ──
+
+    def _build_final_result(self, data: dict) -> dict:
+        """LLMレスポンスからニュース結果dictを構築
+
+        Args:
+            data: LLMレスポンスdict
+
+        Returns:
+            dict: バリデーション済み結果
+        """
+        geo_risk = data.get("geopolitical_risk_level")
+        if geo_risk is None or not isinstance(
+            geo_risk, (int, float)
+        ):
+            geo_risk_val = 0
+        else:
+            geo_risk_val = max(0, min(3, int(geo_risk)))
+
+        return {
+            "sentiment_score": self._clip_score(
+                data.get("sentiment_score")
+            ),
+            "sentiment_confidence": self._clip(
+                data.get("sentiment_confidence"),
+                0.0,
+                1.0,
+                0.0,
+            ),
+            "macro_bias_score": self._clip_score(
+                data.get("macro_bias_score")
+            ),
+            "policy_divergence_score": self._clip_score(
+                data.get("policy_divergence_score")
+            ),
+            "risk_appetite_score": self._clip_score(
+                data.get("risk_appetite_score")
+            ),
+            "geopolitical_risk_level": geo_risk_val,
+            "dominant_theme": str(
+                data.get("dominant_theme", "")
+            )[:100],
+            "summary": str(data.get("summary", ""))[:200],
+            "session_detail": "{}",
+        }
+
+    # ── ユーティリティ ──
 
     @staticmethod
     def _estimate_tokens(text: str) -> int:
@@ -471,181 +688,7 @@ class LLMNewsGenerator(LLMGeneratorBase):
 
         return None
 
-    def _analyze_date(
-        self,
-        symbol: str,
-        base: str,
-        quote: str,
-        target_date: date,
-        news_items: list[NewsItem],
-    ) -> dict:
-        """1日分のニュースをLLM分析
-
-        ニュースが0件の場合はLLM呼び出しをスキップし
-        デフォルト値を返す。
-
-        Args:
-            symbol: シンボル
-            base: 基軸通貨
-            quote: 決済通貨
-            target_date: 分析対象日
-            news_items: 当日ニュース
-
-        Returns:
-            dict: 分析結果
-        """
-        if not news_items:
-            return self._default_news_result()
-
-        # セッション別グループ化
-        session_groups = self._split_by_session(news_items)
-
-        # プロンプト用テキストに圧縮
-        session_texts = self._compress_for_prompt(
-            session_groups
-        )
-        session_counts = {
-            s: len(items)
-            for s, items in session_groups.items()
-        }
-
-        prompt = self._build_news_prompt(
-            symbol,
-            base,
-            quote,
-            target_date,
-            session_texts,
-            session_counts,
-        )
-        raw = self._call_ollama_with_retry(
-            prompt, self._default_news_result_raw()
-        )
-        return self._build_news_result(raw, session_groups)
-
-    def _build_news_prompt(
-        self,
-        symbol: str,
-        base: str,
-        quote: str,
-        target_date: date,
-        session_texts: dict[str, str],
-        session_counts: dict[str, int],
-    ) -> str:
-        """ニュース分析プロンプトを構築
-
-        Args:
-            symbol: シンボル
-            base: 基軸通貨
-            quote: 決済通貨
-            target_date: 対象日
-            session_texts: セッション別テキスト
-            session_counts: セッション別記事数
-
-        Returns:
-            str: プロンプト文字列
-        """
-        sessions_block = ""
-        for session_key in ("tokyo", "london", "ny"):
-            label = _SESSION_LABELS[session_key]
-            count = session_counts.get(session_key, 0)
-            text = session_texts.get(session_key, "（なし）")
-            sessions_block += (
-                f"\n## {label}のニュース（{count}件）\n"
-                f"{text}\n"
-            )
-
-        return f"""{symbol}のニュース分析を行ってください。
-
-分析対象: {symbol} ({base}/{quote})
-分析日: {target_date.year}年{target_date.month}月{target_date.day}日
-{sessions_block}
-分析指示:
-1. {base}と{quote}に関するニュースの方向性を区別
-2. 金融政策に関する言及（利上げ/利下げ観測等）を特に重視
-3. 地政学リスク要因の有無と影響度を評価
-4. リスク選好/回避の傾向を判断
-5. センチメントの一貫性に基づき確信度を設定
-
-以下のJSONを返してください:
-{{"sentiment_score": 0.0, "sentiment_confidence": 0.0, "macro_bias_score": 0.0, "policy_divergence_score": 0.0, "risk_appetite_score": 0.0, "geopolitical_risk_level": 0, "dominant_theme": "", "summary": "", "session_sentiment": {{"tokyo": 0.0, "london": 0.0, "ny": 0.0}}}}
-
-各値の意味:
-sentiment_score: {symbol}の総合センチメント。-1.0=弱気、+1.0=強気
-sentiment_confidence: 確信度。0.0=低、1.0=高
-macro_bias_score: マクロ経済バイアス。-1.0~+1.0
-policy_divergence_score: 金融政策乖離。+は{base}引締め優位。-1.0~+1.0
-risk_appetite_score: リスク選好度。+はリスクオン。-1.0~+1.0
-geopolitical_risk_level: 地政学リスク。0=なし、1=低、2=中、3=高
-dominant_theme: 支配的テーマ。日本語100文字以内
-summary: 分析要約。日本語200文字以内
-session_sentiment: 各セッションのセンチメント。-1.0~+1.0"""
-
-    def _build_news_result(
-        self,
-        data: dict,
-        session_groups: dict[str, list[NewsItem]],
-    ) -> dict:
-        """LLMレスポンスからニュース結果dictを構築
-
-        Args:
-            data: LLMレスポンスdict
-            session_groups: セッション別ニュース（件数取得用）
-
-        Returns:
-            dict: バリデーション済み結果
-        """
-        geo_risk = data.get("geopolitical_risk_level")
-        if geo_risk is None or not isinstance(
-            geo_risk, (int, float)
-        ):
-            geo_risk_val = 0
-        else:
-            geo_risk_val = max(0, min(3, int(geo_risk)))
-
-        # session_detail を構築
-        session_sentiment = data.get("session_sentiment", {})
-        if not isinstance(session_sentiment, dict):
-            session_sentiment = {}
-
-        session_detail = {}
-        for session_key in ("tokyo", "london", "ny"):
-            session_detail[session_key] = {
-                "count": len(
-                    session_groups.get(session_key, [])
-                ),
-                "sentiment": self._clip_score(
-                    session_sentiment.get(session_key)
-                ),
-            }
-
-        return {
-            "sentiment_score": self._clip_score(
-                data.get("sentiment_score")
-            ),
-            "sentiment_confidence": self._clip(
-                data.get("sentiment_confidence"),
-                0.0,
-                1.0,
-                0.0,
-            ),
-            "macro_bias_score": self._clip_score(
-                data.get("macro_bias_score")
-            ),
-            "policy_divergence_score": self._clip_score(
-                data.get("policy_divergence_score")
-            ),
-            "risk_appetite_score": self._clip_score(
-                data.get("risk_appetite_score")
-            ),
-            "geopolitical_risk_level": geo_risk_val,
-            "dominant_theme": str(
-                data.get("dominant_theme", "")
-            )[:100],
-            "summary": str(data.get("summary", ""))[:200],
-            "session_detail": json.dumps(
-                session_detail, ensure_ascii=False
-            ),
-        }
+    # ── デフォルト値 ──
 
     @staticmethod
     def _default_news_result() -> dict:
@@ -663,22 +706,12 @@ session_sentiment: 各セッションのセンチメント。-1.0~+1.0"""
             "geopolitical_risk_level": 0,
             "dominant_theme": "",
             "summary": "関連ニュースなし",
-            "session_detail": json.dumps(
-                {
-                    "tokyo": {"count": 0, "sentiment": 0.0},
-                    "london": {"count": 0, "sentiment": 0.0},
-                    "ny": {"count": 0, "sentiment": 0.0},
-                },
-                ensure_ascii=False,
-            ),
+            "session_detail": "{}",
         }
 
     @staticmethod
     def _default_news_result_raw() -> dict:
         """LLMリトライ全失敗時の生デフォルト値
-
-        _build_news_result に渡されるため、
-        LLMレスポンス形式に合わせる。
 
         Returns:
             dict: デフォルト値辞書
@@ -692,9 +725,21 @@ session_sentiment: 各セッションのセンチメント。-1.0~+1.0"""
             "geopolitical_risk_level": 0,
             "dominant_theme": "",
             "summary": "分析失敗",
-            "session_sentiment": {
-                "tokyo": 0.0,
-                "london": 0.0,
-                "ny": 0.0,
-            },
+        }
+
+    @staticmethod
+    def _default_map_result() -> dict:
+        """Mapフェーズ失敗時のデフォルト結果
+
+        Returns:
+            dict: デフォルト値辞書
+        """
+        return {
+            "sentiment_score": 0.0,
+            "macro_bias_score": 0.0,
+            "policy_divergence_score": 0.0,
+            "risk_appetite_score": 0.0,
+            "geopolitical_risk_level": 0,
+            "key_themes": "",
+            "summary": "分析失敗",
         }
