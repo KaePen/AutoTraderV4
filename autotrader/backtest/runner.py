@@ -1029,6 +1029,9 @@ class BacktestRunner:
                     decay_coefficient=(
                         _bot_cfg.fundamental_decay_coefficient
                     ),
+                    post_event_lag_seconds=(
+                        _bot_cfg.fundamental_post_event_lag_seconds
+                    ),
                 )
                 # 経済イベントCSV読み込み
                 if _csv_paths:
