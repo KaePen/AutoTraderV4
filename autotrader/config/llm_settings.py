@@ -26,12 +26,11 @@ class OllamaSettings:
     """
 
     host: str = "http://localhost:11434"
-    model: str = "erwan2/DeepSeek-R1-Distill-Qwen-14B"
+    model: str = "qwen2.5:7b"
     temperature: float = 0.1
     timeout_seconds: float = 120.0
     max_retries: int = 3
-    # R1モデルは<think>推論でトークンを消費するため余裕が必要
-    num_ctx: int = 8192
+    num_ctx: int = 4096
     keep_alive: str = "5m"
     num_gpu: int = -1  # -1: 全GPU使用、0: CPUのみ
     use_mmap: bool = True

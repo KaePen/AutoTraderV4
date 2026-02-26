@@ -154,7 +154,6 @@ class NewsLLMAnalyzer:
             )
 
         prompt = self._build_prompt(news_items, symbol)
-        # format="json"不使用（R1モデルの<think>と競合）
         response = self._client.chat(
             model=self._model,
             messages=[
@@ -167,10 +166,11 @@ class NewsLLMAnalyzer:
                 },
                 {"role": "user", "content": prompt},
             ],
+            format="json",
             options={"temperature": 0.1},
         )
         content = response.message.content
-        # <think>ブロック除去
+        # 安全策: <think>ブロックが含まれる場合は除去
         cleaned = re.sub(
             r"<think>.*?</think>", "", content, flags=re.DOTALL,
         ).strip()
