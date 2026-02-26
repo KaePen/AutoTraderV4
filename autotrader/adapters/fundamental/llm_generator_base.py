@@ -82,11 +82,6 @@ class LLMGeneratorBase:
     def _call_ollama(self, prompt: str) -> dict:
         """OllamaでLLM推論を実行しJSONをパース
 
-        DeepSeek-R1等の推論モデルに対応するため、
-        format="json"は使用しない（<think>ブロックと競合）。
-        代わりにsystem promptとプロンプト内の指示で
-        JSON出力を誘導し、パーサーで抽出する。
-
         Args:
             prompt: プロンプト文字列
 
@@ -106,8 +101,6 @@ class LLMGeneratorBase:
             host=self._settings.host,
             timeout=timeout,
         )
-        # format="json" を使わない（R1モデルの<think>と競合）
-        # パーサー側で<think>除去→JSON抽出を行う
         response = client.chat(
             model=self._settings.model,
             messages=[
@@ -117,6 +110,7 @@ class LLMGeneratorBase:
                 },
                 {"role": "user", "content": prompt},
             ],
+            format="json",
             options={
                 "temperature": self._settings.temperature,
                 "num_ctx": self._settings.num_ctx,
@@ -158,7 +152,7 @@ class LLMGeneratorBase:
                     return default_result
         return default_result
 
-    # DeepSeek-R1の<think>ブロック除去パターン
+    # 安全策: <think>ブロック除去パターン
     _THINK_RE = re.compile(
         r"<think>.*?</think>", re.DOTALL
     )
@@ -166,9 +160,8 @@ class LLMGeneratorBase:
     def _parse_json_response(self, content: str) -> dict:
         """LLMレスポンスからJSONを抽出
 
-        DeepSeek-R1の<think>ブロック除去 →
-        直接パース → コードブロック → ブレース抽出 の
-        4段階フォールバック。
+        <think>ブロック除去 → 直接パース →
+        コードブロック → ブレース抽出 の4段階フォールバック。
 
         Args:
             content: LLMのレスポンス文字列
@@ -179,7 +172,7 @@ class LLMGeneratorBase:
         Raises:
             ValueError: パース失敗時
         """
-        # DeepSeek-R1: <think>...</think> ブロックを除去
+        # 安全策: <think>ブロックが含まれる場合は除去
         cleaned = self._THINK_RE.sub("", content).strip()
         if not cleaned:
             cleaned = content
