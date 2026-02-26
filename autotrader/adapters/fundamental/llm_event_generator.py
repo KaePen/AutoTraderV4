@@ -413,14 +413,12 @@ class LLMEventGenerator(LLMGeneratorBase):
             else ""
         )
 
-        return f"""あなたはFXトレードの経済指標アナリストです。
-以下の経済指標発表結果に基づき、{symbol}への短期的インパクトを分析してください。
+        return f"""{symbol}への経済指標インパクトを分析してください。
 
-## 分析対象
-- シンボル: {symbol} ({base}/{quote})
-- 発表時刻: {time_str} UTC
+分析対象: {symbol} ({base}/{quote})
+発表時刻: {time_str} UTC
 
-## 経済指標
+経済指標:
 - 指標名: {event.event_name}
 - 通貨: {event.currency}
 - インパクト: {impact_label}
@@ -428,21 +426,22 @@ class LLMEventGenerator(LLMGeneratorBase):
 - 予測値: {forecast}
 - 前回値: {previous}{surprise_str}
 
-## 分析指示
+分析指示:
 1. サプライズの方向と大きさを評価
 2. {base}と{quote}への影響を判断（{event.currency}の指標が{symbol}に与える影響）
 3. インパクトの持続時間を推定（即時収束型 vs 持続型）
 4. この指標の市場への影響度合いを評価
 
-## 出力形式（JSONのみで回答）
-{{
-  "surprise_score": <-1.0~+1.0: サプライズ方向と大きさ。+は{base}高方向>,
-  "direction_bias": <-1.0~+1.0: 短期価格方向。+は{symbol}上昇>,
-  "convergence_hours": <0.5~72.0: インパクト収束までの推定時間>,
-  "expected_volatility": <0.0~2.0: 通常比ボラティリティ倍率>,
-  "trade_caution_level": <0/1/2: 0=通常, 1=注意, 2=回避推奨>,
-  "summary": "<分析要約（日本語、200文字以内）>"
-}}"""
+以下のJSON形式で回答してください。各フィールドの意味:
+- surprise_score: サプライズ方向と大きさ（+は{base}高方向、-1.0 ~ +1.0）
+- direction_bias: 短期価格方向（+は{symbol}上昇、-1.0 ~ +1.0）
+- convergence_hours: インパクト収束までの推定時間（0.5 ~ 72.0）
+- expected_volatility: 通常比ボラティリティ倍率（0.0 ~ 2.0）
+- trade_caution_level: 取引注意度（0=通常, 1=注意, 2=回避推奨）
+- summary: 分析要約（日本語、200文字以内）
+
+回答例:
+{{"surprise_score": 0.6, "direction_bias": 0.4, "convergence_hours": 12.0, "expected_volatility": 1.3, "trade_caution_level": 1, "summary": "雇用統計が予想を大幅に上回りドル買い優勢"}}"""
 
     def _build_event_result(self, data: dict) -> dict:
         """LLMレスポンスからイベント結果dictを構築
