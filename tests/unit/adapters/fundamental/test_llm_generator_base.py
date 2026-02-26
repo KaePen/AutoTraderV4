@@ -57,6 +57,35 @@ class TestParseJsonResponse:
             "asian": 0.1
         }
 
+    def test_deepseek_think_block(self) -> None:
+        """DeepSeek-R1の<think>ブロックを除去してパース"""
+        content = (
+            "<think>ここは推論部分です。"
+            "JSONを生成します。</think>"
+            '{"score": 0.4, "summary": "分析結果"}'
+        )
+        result = self.gen._parse_json_response(content)
+        assert result == {
+            "score": 0.4,
+            "summary": "分析結果",
+        }
+
+    def test_deepseek_think_multiline(self) -> None:
+        """<think>ブロックが複数行の場合"""
+        content = (
+            "<think>\nニュースを分析中...\n"
+            "センチメントは強気。\n</think>\n"
+            '{"score": -0.3}'
+        )
+        result = self.gen._parse_json_response(content)
+        assert result == {"score": -0.3}
+
+    def test_deepseek_think_only(self) -> None:
+        """<think>のみでJSONなし -> ValueError"""
+        content = "<think>推論のみ</think>"
+        with pytest.raises(ValueError, match="JSON解析失敗"):
+            self.gen._parse_json_response(content)
+
     def test_invalid_raises(self) -> None:
         """不正JSON -> ValueError"""
         with pytest.raises(ValueError, match="JSON解析失敗"):

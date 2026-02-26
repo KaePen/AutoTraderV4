@@ -149,11 +149,17 @@ class LLMGeneratorBase:
                     return default_result
         return default_result
 
+    # DeepSeek-R1の<think>ブロック除去パターン
+    _THINK_RE = re.compile(
+        r"<think>.*?</think>", re.DOTALL
+    )
+
     def _parse_json_response(self, content: str) -> dict:
         """LLMレスポンスからJSONを抽出
 
+        DeepSeek-R1の<think>ブロック除去 →
         直接パース → コードブロック → ブレース抽出 の
-        3段階フォールバック。
+        4段階フォールバック。
 
         Args:
             content: LLMのレスポンス文字列
@@ -164,16 +170,21 @@ class LLMGeneratorBase:
         Raises:
             ValueError: パース失敗時
         """
+        # DeepSeek-R1: <think>...</think> ブロックを除去
+        cleaned = self._THINK_RE.sub("", content).strip()
+        if not cleaned:
+            cleaned = content
+
         # 直接パース
         try:
-            return json.loads(content)
+            return json.loads(cleaned)
         except json.JSONDecodeError:
             pass
 
         # ```json ... ``` コードブロック抽出
         json_match = re.search(
             r"```(?:json)?\s*(\{.*?\})\s*```",
-            content,
+            cleaned,
             re.DOTALL,
         )
         if json_match:
@@ -185,7 +196,7 @@ class LLMGeneratorBase:
         # { ... } の最初の出現を抽出（1段ネスト対応）
         brace_match = re.search(
             r"\{(?:[^{}]|\{[^{}]*\})*\}",
-            content,
+            cleaned,
             re.DOTALL,
         )
         if brace_match:
