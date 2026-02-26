@@ -12,6 +12,7 @@ import pytest
 from autotrader.adapters.fundamental.llm_news_generator import (
     NEWS_CSV_COLUMNS,
     LLMNewsGenerator,
+    _MAP_BATCH_SIZE,
 )
 from autotrader.adapters.fundamental.news_schemas import (
     NewsItem,
@@ -44,6 +45,20 @@ def _make_news(
         snippet="Tone:1.0",
         content=content,
     )
+
+
+def _make_news_list(count: int) -> list[NewsItem]:
+    """指定件数のテスト用ニュースリスト生成"""
+    return [
+        _make_news(
+            title=f"News article {i}",
+            published_at=datetime(
+                2024, 1, 15, 0, i % 60,
+                tzinfo=timezone.utc,
+            ),
+        )
+        for i in range(count)
+    ]
 
 
 class TestFilterNews:
@@ -116,130 +131,97 @@ class TestGroupByDate:
         assert len(result[date(2024, 1, 15)]) == 2
 
 
-class TestSplitBySession:
-    """_split_by_session のテスト"""
+class TestSplitIntoBatches:
+    """_split_into_batches のテスト"""
+
+    def test_exact_division(self) -> None:
+        """割り切れる場合"""
+        items = _make_news_list(12)
+        batches = LLMNewsGenerator._split_into_batches(
+            items, 4
+        )
+        assert len(batches) == 3
+        assert all(len(b) == 4 for b in batches)
+
+    def test_remainder(self) -> None:
+        """余りがある場合"""
+        items = _make_news_list(7)
+        batches = LLMNewsGenerator._split_into_batches(
+            items, 3
+        )
+        assert len(batches) == 3
+        assert len(batches[0]) == 3
+        assert len(batches[1]) == 3
+        assert len(batches[2]) == 1
+
+    def test_sorted_by_time(self) -> None:
+        """時系列順にソート"""
+        items = [
+            _make_news(
+                title="late",
+                published_at=datetime(
+                    2024, 1, 15, 23, 0, tzinfo=timezone.utc
+                ),
+            ),
+            _make_news(
+                title="early",
+                published_at=datetime(
+                    2024, 1, 15, 1, 0, tzinfo=timezone.utc
+                ),
+            ),
+        ]
+        batches = LLMNewsGenerator._split_into_batches(
+            items, 10
+        )
+        assert batches[0][0].title == "early"
+        assert batches[0][1].title == "late"
+
+    def test_single_item(self) -> None:
+        """1件のみ"""
+        items = _make_news_list(1)
+        batches = LLMNewsGenerator._split_into_batches(
+            items, 12
+        )
+        assert len(batches) == 1
+        assert len(batches[0]) == 1
+
+
+class TestFormatArticlesForBatch:
+    """_format_articles_for_batch のテスト"""
 
     def setup_method(self) -> None:
         """テスト用インスタンス"""
         self.gen = LLMNewsGenerator()
 
-    def test_session_split(self) -> None:
-        """セッション分割"""
+    def test_fx_source_with_content(self) -> None:
+        """FXソースは本文抜粋付き"""
         items = [
             _make_news(
-                published_at=datetime(
-                    2024, 1, 15, 3, 0, tzinfo=timezone.utc
-                ),
-                title="tokyo",
-            ),
-            _make_news(
-                published_at=datetime(
-                    2024, 1, 15, 10, 0, tzinfo=timezone.utc
-                ),
-                title="london",
-            ),
-            _make_news(
-                published_at=datetime(
-                    2024, 1, 15, 16, 0, tzinfo=timezone.utc
-                ),
-                title="ny",
+                source_name="fxstreet.com",
+                title="FX news",
+                content="A" * 100,
             ),
         ]
-        result = self.gen._split_by_session(items)
-        assert len(result["tokyo"]) == 1
-        assert len(result["london"]) == 1
-        assert len(result["ny"]) == 1
+        result = self.gen._format_articles_for_batch(items)
+        assert "fxstreet.com" in result
+        assert "FX news" in result
+        assert "..." in result  # content 抜粋
 
-    def test_boundary_hours(self) -> None:
-        """境界時間のテスト"""
+    def test_general_source_snippet(self) -> None:
+        """一般ソースはsnippetフォールバック"""
         items = [
-            # 00:00 -> tokyo
             _make_news(
-                published_at=datetime(
-                    2024, 1, 15, 0, 0, tzinfo=timezone.utc
-                ),
-                title="midnight",
-            ),
-            # 07:59 -> tokyo
-            _make_news(
-                published_at=datetime(
-                    2024, 1, 15, 7, 59, tzinfo=timezone.utc
-                ),
-                title="early",
-            ),
-            # 08:00 -> london
-            _make_news(
-                published_at=datetime(
-                    2024, 1, 15, 8, 0, tzinfo=timezone.utc
-                ),
-                title="london_start",
-            ),
-            # 13:59 -> london
-            _make_news(
-                published_at=datetime(
-                    2024, 1, 15, 13, 59, tzinfo=timezone.utc
-                ),
-                title="london_end",
-            ),
-            # 14:00 -> ny
-            _make_news(
-                published_at=datetime(
-                    2024, 1, 15, 14, 0, tzinfo=timezone.utc
-                ),
-                title="ny_start",
-            ),
-            # 23:59 -> ny
-            _make_news(
-                published_at=datetime(
-                    2024, 1, 15, 23, 59, tzinfo=timezone.utc
-                ),
-                title="ny_end",
+                source_name="random.com",
+                title="General news",
             ),
         ]
-        result = self.gen._split_by_session(items)
-        assert len(result["tokyo"]) == 2
-        assert len(result["london"]) == 2
-        assert len(result["ny"]) == 2
+        result = self.gen._format_articles_for_batch(items)
+        assert "[snippet]" in result
 
-
-class TestCompressForPrompt:
-    """_compress_for_prompt のテスト"""
-
-    def setup_method(self) -> None:
-        """テスト用インスタンス"""
-        self.gen = LLMNewsGenerator(max_prompt_tokens=2500)
-
-    def test_fx_source_priority(self) -> None:
-        """FX専門ソースは本文付き、一般ソースはsnippetフォールバック"""
-        items = {
-            "tokyo": [
-                _make_news(
-                    source_name="fxstreet.com",
-                    title="FX news",
-                    content="Full article about USD " * 5,
-                ),
-                _make_news(
-                    source_name="random.com",
-                    title="General news",
-                ),
-            ],
-            "london": [],
-            "ny": [],
-        }
-        result = self.gen._compress_for_prompt(items)
-        assert "本文抜粋" in result["tokyo"]
-        # snippet があるので [snippet] フォールバックが使われる
-        assert "[snippet]" in result["tokyo"]
-
-    def test_empty_session(self) -> None:
-        """空セッション"""
-        items = {
-            "tokyo": [],
-            "london": [],
-            "ny": [],
-        }
-        result = self.gen._compress_for_prompt(items)
-        assert result["tokyo"] == "（なし）"
+    def test_empty_returns_nashi(self) -> None:
+        """空リスト"""
+        result = self.gen._format_articles_for_batch([])
+        assert result == "（なし）"
 
 
 class TestEstimateTokens:
@@ -285,14 +267,11 @@ class TestAnalyzeDate:
             )
         mock.assert_not_called()
         assert result["sentiment_score"] == 0.0
-        assert result["sentiment_confidence"] == 0.0
-        # session_detail はJSON文字列
-        detail = json.loads(result["session_detail"])
-        assert detail["tokyo"]["count"] == 0
+        assert result["session_detail"] == "{}"
 
-    def test_with_news_calls_llm(self) -> None:
-        """ニュースあり -> LLM呼び出し"""
-        items = [_make_news()]
+    def test_few_news_single_call(self) -> None:
+        """少記事 -> 単一呼び出し"""
+        items = _make_news_list(5)
         llm_response = {
             "sentiment_score": 0.4,
             "sentiment_confidence": 0.7,
@@ -302,17 +281,12 @@ class TestAnalyzeDate:
             "geopolitical_risk_level": 1,
             "dominant_theme": "FRB利下げ観測",
             "summary": "ドル買い優勢",
-            "session_sentiment": {
-                "tokyo": 0.2,
-                "london": 0.4,
-                "ny": 0.5,
-            },
         }
         with patch.object(
             self.gen,
             "_call_ollama_with_retry",
             return_value=llm_response,
-        ):
+        ) as mock:
             result = self.gen._analyze_date(
                 "USDJPY",
                 "USD",
@@ -320,14 +294,54 @@ class TestAnalyzeDate:
                 date(2024, 1, 15),
                 items,
             )
+        # 単一呼び出し: 1回のみ
+        assert mock.call_count == 1
         assert result["sentiment_score"] == 0.4
-        assert result["sentiment_confidence"] == 0.7
-        detail = json.loads(result["session_detail"])
-        assert detail["london"]["sentiment"] == 0.4
+        assert result["session_detail"] == "{}"
+
+    def test_many_news_map_reduce(self) -> None:
+        """多記事 -> Map-Reduce"""
+        items = _make_news_list(_MAP_BATCH_SIZE + 5)
+        map_response = {
+            "sentiment_score": 0.3,
+            "macro_bias_score": 0.2,
+            "policy_divergence_score": 0.1,
+            "risk_appetite_score": 0.0,
+            "geopolitical_risk_level": 0,
+            "key_themes": "テストテーマ",
+            "summary": "テスト要約",
+        }
+        reduce_response = {
+            "sentiment_score": 0.5,
+            "sentiment_confidence": 0.8,
+            "macro_bias_score": 0.3,
+            "policy_divergence_score": 0.2,
+            "risk_appetite_score": 0.1,
+            "geopolitical_risk_level": 1,
+            "dominant_theme": "統合テーマ",
+            "summary": "統合要約",
+        }
+        # 2バッチ + 1 reduce = 3回
+        responses = [map_response, map_response, reduce_response]
+        with patch.object(
+            self.gen,
+            "_call_ollama_with_retry",
+            side_effect=responses,
+        ) as mock:
+            result = self.gen._analyze_date(
+                "USDJPY",
+                "USD",
+                "JPY",
+                date(2024, 1, 15),
+                items,
+            )
+        assert mock.call_count == 3
+        assert result["sentiment_score"] == 0.5
+        assert result["dominant_theme"] == "統合テーマ"
 
 
-class TestBuildNewsResult:
-    """_build_news_result のテスト"""
+class TestBuildFinalResult:
+    """_build_final_result のテスト"""
 
     def setup_method(self) -> None:
         """テスト用インスタンス"""
@@ -341,78 +355,92 @@ class TestBuildNewsResult:
             "macro_bias_score": -2.0,
             "geopolitical_risk_level": 5,
         }
-        session_groups = {
-            "tokyo": [],
-            "london": [],
-            "ny": [],
-        }
-        result = self.gen._build_news_result(
-            data, session_groups
-        )
+        result = self.gen._build_final_result(data)
         assert result["sentiment_score"] == 1.0
         assert result["sentiment_confidence"] == 1.0
         assert result["macro_bias_score"] == -1.0
         assert result["geopolitical_risk_level"] == 3
 
-    def test_session_detail_json(self) -> None:
-        """session_detail JSON構造"""
-        data = {
-            "session_sentiment": {
-                "tokyo": 0.2,
-                "london": -0.1,
-                "ny": 0.5,
-            },
-        }
-        session_groups = {
-            "tokyo": [_make_news(title="a")],
-            "london": [
-                _make_news(title="b"),
-                _make_news(title="c"),
-            ],
-            "ny": [],
-        }
-        result = self.gen._build_news_result(
-            data, session_groups
-        )
-        detail = json.loads(result["session_detail"])
-        assert detail["tokyo"]["count"] == 1
-        assert detail["tokyo"]["sentiment"] == 0.2
-        assert detail["london"]["count"] == 2
-        assert detail["ny"]["count"] == 0
+    def test_session_detail_empty(self) -> None:
+        """session_detail は空JSON"""
+        data = {"sentiment_score": 0.3}
+        result = self.gen._build_final_result(data)
+        assert result["session_detail"] == "{}"
+
+    def test_theme_truncation(self) -> None:
+        """テーマ100文字制限"""
+        data = {"dominant_theme": "あ" * 200}
+        result = self.gen._build_final_result(data)
+        assert len(result["dominant_theme"]) == 100
+
+    def test_summary_truncation(self) -> None:
+        """要約200文字制限"""
+        data = {"summary": "い" * 300}
+        result = self.gen._build_final_result(data)
+        assert len(result["summary"]) == 200
 
 
-class TestBuildNewsPrompt:
-    """_build_news_prompt のテスト"""
+class TestBuildPrompts:
+    """プロンプトビルダーのテスト"""
 
     def setup_method(self) -> None:
         """テスト用インスタンス"""
         self.gen = LLMNewsGenerator()
 
-    def test_contains_sessions(self) -> None:
-        """プロンプトにセッション別ニュース"""
-        session_texts = {
-            "tokyo": "- 03:00 | fxstreet | test",
-            "london": "（なし）",
-            "ny": "（なし）",
-        }
-        session_counts = {
-            "tokyo": 1,
-            "london": 0,
-            "ny": 0,
-        }
-        prompt = self.gen._build_news_prompt(
-            "USDJPY",
-            "USD",
-            "JPY",
+    def test_single_prompt_contains_symbol(self) -> None:
+        """単一プロンプトにシンボル情報"""
+        prompt = self.gen._build_single_prompt(
+            "USDJPY", "USD", "JPY",
             date(2024, 1, 15),
-            session_texts,
-            session_counts,
+            "- test article", 1,
         )
-        assert "東京セッション" in prompt
-        assert "ロンドンセッション" in prompt
-        assert "NYセッション" in prompt
         assert "USDJPY" in prompt
         assert "sentiment_score" in prompt
+        assert "test article" in prompt
+
+    def test_map_prompt_contains_batch_info(self) -> None:
+        """Mapプロンプトにバッチ情報"""
+        prompt = self.gen._build_map_prompt(
+            "USDJPY", "USD", "JPY",
+            date(2024, 1, 15),
+            "- test article", 2, 5,
+        )
+        assert "2/5" in prompt
+        assert "key_themes" in prompt
+
+    def test_reduce_prompt_contains_summaries(self) -> None:
+        """Reduceプロンプトにバッチ要約"""
+        summaries = [
+            {
+                "sentiment_score": 0.3,
+                "macro_bias_score": 0.2,
+                "policy_divergence_score": 0.1,
+                "risk_appetite_score": 0.0,
+                "geopolitical_risk_level": 0,
+                "key_themes": "テーマA",
+                "summary": "要約A",
+            },
+            {
+                "sentiment_score": -0.2,
+                "macro_bias_score": -0.1,
+                "policy_divergence_score": 0.3,
+                "risk_appetite_score": -0.5,
+                "geopolitical_risk_level": 1,
+                "key_themes": "テーマB",
+                "summary": "要約B",
+            },
+        ]
+        prompt = self.gen._build_reduce_prompt(
+            "USDJPY", "USD", "JPY",
+            date(2024, 1, 15),
+            summaries, 24,
+        )
+        assert "グループ1" in prompt
+        assert "グループ2" in prompt
+        assert "テーマA" in prompt
+        assert "テーマB" in prompt
+        assert "24件" in prompt
+        assert "sentiment_confidence" in prompt
 
 
 class TestGenerateForSymbolYear:
@@ -439,11 +467,6 @@ class TestGenerateForSymbolYear:
             "geopolitical_risk_level": 0,
             "dominant_theme": "テスト",
             "summary": "テスト要約",
-            "session_sentiment": {
-                "tokyo": 0.0,
-                "london": 0.3,
-                "ny": 0.0,
-            },
         }
         with patch.object(
             gen,
