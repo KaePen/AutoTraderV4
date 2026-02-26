@@ -165,18 +165,59 @@ class LLMNewsGenerator(LLMGeneratorBase):
 
         total_days = len(full_range)
         llm_calls = 0
+        fail_count = 0
 
         for target_date in date_range:
             idx = (target_date - full_range[0]).days + 1
             day_news = daily_news.get(target_date, [])
+
+            # 記事がある日はログ出力
+            n = len(day_news)
+            if n > 0:
+                date_str = target_date.strftime("%m/%d")
+                if n <= _MAP_BATCH_SIZE:
+                    logger.info(
+                        f"[NewsGen] {symbol} "
+                        f"{date_str}: "
+                        f"{n}件→単一分析"
+                    )
+                else:
+                    batch_cnt = (
+                        (n + _MAP_BATCH_SIZE - 1)
+                        // _MAP_BATCH_SIZE
+                    )
+                    logger.info(
+                        f"[NewsGen] {symbol} "
+                        f"{date_str}: "
+                        f"{n}件→Map-Reduce"
+                        f"({batch_cnt}バッチ)"
+                    )
+
             result = self._analyze_date(
                 symbol, base, quote, target_date, day_news
             )
             if day_news:
                 llm_calls += 1
+                # デフォルト値返却（全スコア0）の検出
+                if (
+                    result.get("summary") == "分析失敗"
+                    or (
+                        n > 0
+                        and result.get(
+                            "sentiment_score"
+                        ) == 0.0
+                        and result.get(
+                            "macro_bias_score"
+                        ) == 0.0
+                        and result.get(
+                            "policy_divergence_score"
+                        ) == 0.0
+                    )
+                ):
+                    fail_count += 1
 
             result["date"] = target_date.isoformat()
-            result["article_count"] = len(day_news)
+            result["article_count"] = n
             rows.append(result)
 
             # 毎日保存（resume対応）
@@ -185,10 +226,15 @@ class LLMNewsGenerator(LLMGeneratorBase):
             )
 
             if idx % 50 == 0 or idx == total_days:
+                fail_info = (
+                    f" 失敗:{fail_count}"
+                    if fail_count > 0
+                    else ""
+                )
                 logger.info(
                     f"[NewsGen] {symbol}/{year}: "
                     f"{idx}/{total_days}日完了 "
-                    f"(LLM:{llm_calls})"
+                    f"(LLM:{llm_calls}{fail_info})"
                 )
         logger.info(
             f"[NewsGen] 完了: {output_path} ({len(rows)}日)"
@@ -328,10 +374,8 @@ class LLMNewsGenerator(LLMGeneratorBase):
         batches = self._split_into_batches(
             news_items, _MAP_BATCH_SIZE
         )
-        logger.debug(
-            f"[NewsGen] Map-Reduce: {len(news_items)}件"
-            f"→{len(batches)}バッチ"
-        )
+        date_str = target_date.strftime("%m/%d")
+        n_batches = len(batches)
 
         # MAP フェーズ
         batch_summaries: list[dict] = []
@@ -342,14 +386,23 @@ class LLMNewsGenerator(LLMGeneratorBase):
             )
             prompt = self._build_map_prompt(
                 symbol, base, quote, target_date,
-                batch_text, i + 1, len(batches),
+                batch_text, i + 1, n_batches,
             )
             result = self._call_ollama_with_retry(
                 prompt, map_default
             )
             batch_summaries.append(result)
+            logger.info(
+                f"[NewsGen]   Map "
+                f"{i + 1}/{n_batches}完了 "
+                f"({len(batch)}件)"
+            )
 
         # REDUCE フェーズ
+        logger.info(
+            f"[NewsGen]   Reduce開始 "
+            f"({n_batches}バッチ統合)"
+        )
         prompt = self._build_reduce_prompt(
             symbol, base, quote, target_date,
             batch_summaries, len(news_items),

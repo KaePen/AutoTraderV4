@@ -139,22 +139,40 @@ class LLMGeneratorBase:
             try:
                 return self._call_ollama(prompt)
             except Exception as e:
+                err_msg = str(e)
+                # <think>截断エラーは簡潔に表示
+                if "<think>" in err_msg:
+                    err_short = (
+                        "JSON解析失敗（<think>截断: "
+                        "コンテキスト超過の可能性）"
+                    )
+                else:
+                    err_short = err_msg[:120]
                 if attempt < self._max_retries - 1:
                     logger.warning(
-                        f"[LLMBase] リトライ {attempt + 1}"
-                        f"/{self._max_retries}: {e}"
+                        f"[LLMBase] リトライ "
+                        f"{attempt + 1}"
+                        f"/{self._max_retries}: "
+                        f"{err_short}"
                     )
                     time.sleep(self._retry_delay)
                 else:
-                    logger.error(
-                        f"[LLMBase] LLM呼び出し失敗: {e}"
+                    logger.warning(
+                        f"[LLMBase] LLM呼び出し"
+                        f"{self._max_retries}回失敗"
+                        f"→デフォルト値使用: "
+                        f"{err_short}"
                     )
                     return default_result
         return default_result
 
-    # R1モデルの<think>ブロック除去パターン
+    # R1モデルの<think>ブロック除去パターン（閉じタグあり）
     _THINK_RE = re.compile(
         r"<think>.*?</think>", re.DOTALL
+    )
+    # 未閉じ<think>ブロック（コンテキスト超過時）
+    _THINK_OPEN_RE = re.compile(
+        r"<think>.*", re.DOTALL
     )
 
     def _parse_json_response(self, content: str) -> dict:
@@ -172,8 +190,13 @@ class LLMGeneratorBase:
         Raises:
             ValueError: パース失敗時
         """
-        # R1モデル: <think>ブロックを除去
+        # R1モデル: 閉じた<think>ブロックを除去
         cleaned = self._THINK_RE.sub("", content).strip()
+        # 未閉じ<think>ブロックも除去（コンテキスト超過時）
+        if "<think>" in cleaned:
+            cleaned = self._THINK_OPEN_RE.sub(
+                "", cleaned
+            ).strip()
         if not cleaned:
             cleaned = content
 
