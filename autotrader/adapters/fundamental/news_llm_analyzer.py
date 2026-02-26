@@ -149,17 +149,32 @@ class NewsLLMAnalyzer:
 
         # 遅延初期化: 初回呼び出し時のみ Client を生成
         if self._client is None:
-            self._client = _ollama_module.Client(host=self._host)
+            self._client = _ollama_module.Client(
+                host=self._host, timeout=120.0,
+            )
 
         prompt = self._build_prompt(news_items, symbol)
+        # format="json"不使用（R1モデルの<think>と競合）
         response = self._client.chat(
             model=self._model,
-            messages=[{"role": "user", "content": prompt}],
-            format="json",
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "FXアナリストとして回答してください。"
+                        "JSONのみで回答してください。"
+                    ),
+                },
+                {"role": "user", "content": prompt},
+            ],
             options={"temperature": 0.1},
         )
         content = response.message.content
-        return self._parse_score(content)
+        # <think>ブロック除去
+        cleaned = re.sub(
+            r"<think>.*?</think>", "", content, flags=re.DOTALL,
+        ).strip()
+        return self._parse_score(cleaned or content)
 
     def _build_prompt(
         self,

@@ -72,16 +72,20 @@ class LLMGeneratorBase:
         self._retry_delay = retry_delay_seconds
         self._max_retries = max_retries
 
-    # システムプロンプト: JSON出力を強制
+    # システムプロンプト: JSON出力を指示
     _SYSTEM_PROMPT = (
         "あなたはFX市場の専門アナリストです。"
-        "回答は必ず指定されたJSON形式のみで出力してください。"
-        "説明文やコードブロックは不要です。"
-        "JSONオブジェクトだけを返してください。"
+        "分析後、指定されたJSON形式のみで回答してください。"
+        "JSONオブジェクト以外は出力しないでください。"
     )
 
     def _call_ollama(self, prompt: str) -> dict:
         """OllamaでLLM推論を実行しJSONをパース
+
+        DeepSeek-R1等の推論モデルに対応するため、
+        format="json"は使用しない（<think>ブロックと競合）。
+        代わりにsystem promptとプロンプト内の指示で
+        JSON出力を誘導し、パーサーで抽出する。
 
         Args:
             prompt: プロンプト文字列
@@ -97,7 +101,13 @@ class LLMGeneratorBase:
             raise RuntimeError(
                 "ollama パッケージが必要です: pip install ollama"
             )
-        client = _ollama_module.Client(host=self._settings.host)
+        timeout = self._settings.timeout_seconds
+        client = _ollama_module.Client(
+            host=self._settings.host,
+            timeout=timeout,
+        )
+        # format="json" を使わない（R1モデルの<think>と競合）
+        # パーサー側で<think>除去→JSON抽出を行う
         response = client.chat(
             model=self._settings.model,
             messages=[
@@ -107,7 +117,6 @@ class LLMGeneratorBase:
                 },
                 {"role": "user", "content": prompt},
             ],
-            format="json",
             options={
                 "temperature": self._settings.temperature,
                 "num_ctx": self._settings.num_ctx,
