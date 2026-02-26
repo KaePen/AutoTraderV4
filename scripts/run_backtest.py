@@ -727,8 +727,27 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help=(
             "イベントLLM分析CSVを自動読み込み。"
-            "--fundamental-dir 配下の "
+            "data/{symbol}/llm_events/ 配下の "
             "llm_events_SYMBOL_YYYY.csv を使用。"
+        ),
+    )
+    # Phase 2b: ファンダメンタルロジック統合
+    parser.add_argument(
+        "--fundamental-phase2b",
+        action="store_true",
+        help=(
+            "Phase 2b ファンダメンタル統合を有効化。"
+            "--fundamental --event-llm を暗黙的に有効化し、"
+            "assessor/softguard/pm を全てONにする。"
+        ),
+    )
+    parser.add_argument(
+        "--fundamental-lag",
+        type=int,
+        default=30,
+        help=(
+            "LLM処理ラグ秒数（デフォルト: 30）。"
+            "イベント発表後bias/surpriseが利用可能になるまでの遅延。"
         ),
     )
 
@@ -1205,6 +1224,18 @@ def run_single_backtest(args: argparse.Namespace):
         htf_score_filter_threshold_add=(
             args.htf_score_threshold_add
         ),
+        fundamental_assessor_enabled=(
+            args.fundamental_phase2b
+        ),
+        fundamental_softguard_enabled=(
+            args.fundamental_phase2b
+        ),
+        fundamental_pm_enabled=(
+            args.fundamental_phase2b
+        ),
+        fundamental_post_event_lag_seconds=(
+            args.fundamental_lag
+        ),
     )
 
     # PositionManagerConfig構築
@@ -1260,38 +1291,58 @@ def run_single_backtest(args: argparse.Namespace):
     )
 
     # ファンダメンタルCSVリスト構築
+    # 検索順: data/fundamental/events/ → data/fundamental/
     _fundamental_csvs: list[str] | None = None
     if args.fundamental:
         _fund_dir = Path(args.fundamental_dir)
+        _events_dir = _fund_dir / "events"
+        if not _events_dir.exists():
+            _events_dir = _fund_dir
         _fundamental_csvs = []
         for _yr in range(start_year, end_year + 1):
-            _csv = _fund_dir / f"events_{_yr}.csv"
+            _csv = _events_dir / f"events_{_yr}.csv"
             if _csv.exists():
                 _fundamental_csvs.append(str(_csv))
         if not _fundamental_csvs:
             logging.warning(
                 "[Fundamental] %s に events_YYYY.csv が見つかりません",
-                args.fundamental_dir,
+                _events_dir,
             )
             _fundamental_csvs = None
 
+    # Phase 2b: --fundamental-phase2b で暗黙的に有効化
+    if args.fundamental_phase2b:
+        args.fundamental = True
+        args.event_llm = True
+
     # イベントLLM CSVリスト構築
+    # 検索順: data/{symbol}/llm_events/ → data/fundamental/
     _event_llm_csvs: list[str] | None = None
     if args.event_llm:
-        _fund_dir = Path(args.fundamental_dir)
-        _event_llm_csvs = []
         _sym = args.symbol
+        _data_base = Path(args.data_dir)
+        # 新構造: data/{symbol}/llm_events/
+        _llm_dir = _data_base / _sym / "llm_events"
+        if not _llm_dir.exists():
+            # フォールバック: data/fundamental/
+            _llm_dir = Path(args.fundamental_dir)
+        _event_llm_csvs = []
         for _yr in range(start_year, end_year + 1):
-            _csv = _fund_dir / f"llm_events_{_sym}_{_yr}.csv"
+            _csv = _llm_dir / f"llm_events_{_sym}_{_yr}.csv"
             if _csv.exists():
                 _event_llm_csvs.append(str(_csv))
         if not _event_llm_csvs:
             logging.warning(
                 "[EventLLM] %s に llm_events_%s_YYYY.csv "
                 "が見つかりません",
-                args.fundamental_dir, _sym,
+                _llm_dir, _sym,
             )
             _event_llm_csvs = None
+        else:
+            logging.info(
+                "[EventLLM] %d年分のCSV検出: %s",
+                len(_event_llm_csvs), _llm_dir,
+            )
 
     # アダプティブパラメータ調整設定
     _adaptive_config = None

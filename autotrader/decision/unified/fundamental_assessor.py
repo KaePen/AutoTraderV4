@@ -64,34 +64,35 @@ class FundamentalAssessorConfig:
     """
 
     # リスクレベル閾値
-    caution_threshold: float = 0.3
-    high_threshold: float = 0.6
-    block_threshold: float = 0.8
+    caution_threshold: float = 0.4
+    high_threshold: float = 0.7
+    block_threshold: float = 0.9
 
     # 相関グループ: イベントリスク（max()で統合）
-    caution_base: float = 0.35
+    # caution_level=1: 中程度注意（閾値未達でも意識する程度）
+    caution_base: float = 0.2
     vol_high_threshold: float = 1.5
-    vol_risk_scale: float = 0.2
+    vol_risk_scale: float = 0.15
     convergence_risk_threshold: float = 0.8
-    convergence_risk_scale: float = 0.35
+    convergence_risk_scale: float = 0.25
 
     # 独立: イベント密集リスク
-    cluster_risk_per_event: float = 0.07
-    cluster_min_count: int = 2
+    cluster_risk_per_event: float = 0.05
+    cluster_min_count: int = 3
 
     # 独立: 祝日リスク
     holiday_risk_scale: float = 0.25
 
     # 独立: 矛盾リスク
     disagreement_threshold: float = 0.8
-    disagreement_risk: float = 0.15
+    disagreement_risk: float = 0.1
     disagreement_confidence_scale: float = 0.5
 
-    # 閾値調整
-    conviction_boost_max: float = 1.0
-    max_threshold_raise: float = 5.0
-    max_threshold_lower: float = 1.0
-    direction_penalty_scale: float = 5.0
+    # 閾値調整（控えめに: max +2.0, -0.5）
+    conviction_boost_max: float = 0.5
+    max_threshold_raise: float = 2.0
+    max_threshold_lower: float = 0.5
+    direction_penalty_scale: float = 2.0
 
 
 @dataclass(frozen=True)
@@ -144,17 +145,17 @@ class FundamentalAssessment:
         if self.risk_category == RiskCategory.NORMAL:
             risk_adj = 0.0
         elif self.risk_category == RiskCategory.CAUTION:
-            # 0.3-0.6 → 1.0-2.0
+            # 0.4-0.7 → 0.1-0.3（控えめ: 方向調整を主因子にする）
             t = (self.risk_level - cfg.caution_threshold) / (
                 cfg.high_threshold - cfg.caution_threshold
             )
-            risk_adj = 1.0 + t * 1.0
+            risk_adj = 0.1 + t * 0.2
         elif self.risk_category == RiskCategory.HIGH:
-            # 0.6-0.8 → 3.0-5.0
+            # 0.7-0.9 → 0.5-1.0
             t = (self.risk_level - cfg.high_threshold) / (
                 cfg.block_threshold - cfg.high_threshold
             )
-            risk_adj = 3.0 + t * 2.0
+            risk_adj = 0.5 + t * 0.5
         else:
             # BLOCK: 事実上エントリー不可
             return cfg.max_threshold_raise
@@ -175,7 +176,11 @@ class FundamentalAssessment:
                     * cfg.direction_penalty_scale
                 )
             else:
-                # 一致: コンビクションブースト
+                # 一致: risk_adjを方向一致度で軽減
+                risk_adj *= max(
+                    1.0 - alignment * 0.7, 0.0,
+                )
+                # コンビクションブースト
                 direction_adj = -(
                     min(alignment, 1.0)
                     * self.bias_confidence
@@ -434,18 +439,18 @@ class FundamentalRiskAssessor:
             return 0.0  # エントリーなし
 
         if risk >= cfg.high_threshold:
-            # 0.6-0.8 → 0.2-0.5
+            # 0.7-0.9 → 0.3-0.6
             t = (risk - cfg.high_threshold) / (
                 cfg.block_threshold - cfg.high_threshold
             )
-            return 0.5 - t * 0.3
+            return 0.6 - t * 0.3
 
         if risk >= cfg.caution_threshold:
-            # 0.3-0.6 → 0.5-0.8
+            # 0.4-0.7 → 0.7-0.9（控えめな削減）
             t = (risk - cfg.caution_threshold) / (
                 cfg.high_threshold - cfg.caution_threshold
             )
-            return 0.8 - t * 0.3
+            return 0.9 - t * 0.2
 
         return 1.0
 

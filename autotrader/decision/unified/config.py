@@ -228,6 +228,8 @@ class UnifiedBotConfig:
     fundamental_softguard_enabled: bool = False
     # PositionManagerファンダメンタル管理有効化
     fundamental_pm_enabled: bool = False
+    # LLM処理ラグ（秒）: 発表後bias/surpriseが利用可能になるまでの遅延
+    fundamental_post_event_lag_seconds: int = 30
 
     def get_evaluator_config(self, timeframe: str) -> EvaluatorConfig:
         """時間足別評価器設定を取得

@@ -183,6 +183,11 @@ class BacktestRunner:
         # 例: data/USDJPY/ (data_dir="data", symbol="USDJPY")
         _base = Path(data_dir)
         self.data_dir = _base / self.config.symbol
+        # チャートCSVが chart/ 配下の場合はそちらを優先
+        _chart_dir = self.data_dir / "chart"
+        self.chart_dir = (
+            _chart_dir if _chart_dir.exists() else self.data_dir
+        )
         # TFデータを統合dict管理
         self._tf_data: dict[str, pd.DataFrame] = {}
         self._cancel_callback: Callable[[], bool] | None = None
@@ -339,10 +344,10 @@ class BacktestRunner:
         _loaded = 0
 
         # メイン時間足
-        main_files = list(self.data_dir.glob(f"{symbol}_{tf}_*.csv"))
+        main_files = list(self.chart_dir.glob(f"{symbol}_{tf}_*.csv"))
         if not main_files:
             # H1、M15などのパターン
-            main_files = list(self.data_dir.glob(f"{symbol}_H1_*.csv"))
+            main_files = list(self.chart_dir.glob(f"{symbol}_H1_*.csv"))
         if main_files:
             self._h1_df = DataLoader.load_mt5_csv(main_files[0])
             self._h1_df = self._calculate_indicators(self._h1_df)
@@ -351,7 +356,7 @@ class BacktestRunner:
             on_tf_loaded("H1", _loaded, _total)
 
         # 上位足（H4）
-        h4_files = list(self.data_dir.glob(f"{symbol}_H4_*.csv"))
+        h4_files = list(self.chart_dir.glob(f"{symbol}_H4_*.csv"))
         if h4_files:
             self._h4_df = DataLoader.load_mt5_csv(h4_files[0])
             self._h4_df = self._calculate_indicators(self._h4_df)
@@ -360,9 +365,9 @@ class BacktestRunner:
             on_tf_loaded("H4", _loaded, _total)
 
         # 日足
-        d1_files = list(self.data_dir.glob(f"{symbol}_Daily_*.csv"))
+        d1_files = list(self.chart_dir.glob(f"{symbol}_Daily_*.csv"))
         if not d1_files:
-            d1_files = list(self.data_dir.glob(f"{symbol}_D1_*.csv"))
+            d1_files = list(self.chart_dir.glob(f"{symbol}_D1_*.csv"))
         if d1_files:
             self._d1_df = DataLoader.load_mt5_csv(d1_files[0])
             self._d1_df = self._calculate_indicators(self._d1_df)
@@ -371,7 +376,7 @@ class BacktestRunner:
             on_tf_loaded("D1", _loaded, _total)
 
         # M15（マルチ戦略用）
-        m15_files = list(self.data_dir.glob(f"{symbol}_M15_*.csv"))
+        m15_files = list(self.chart_dir.glob(f"{symbol}_M15_*.csv"))
         if m15_files:
             self._m15_df = DataLoader.load_mt5_csv(m15_files[0])
             self._m15_df = self._calculate_indicators(self._m15_df)
@@ -1018,6 +1023,7 @@ class BacktestRunner:
             _csv_paths = [fundamental_csv]
 
         _has_data = bool(_csv_paths) or bool(event_llm_csv_list)
+        _log = logging.getLogger(__name__)
         if _has_data:
             try:
                 from autotrader.adapters.fundamental.backtest_provider import (
@@ -1029,6 +1035,9 @@ class BacktestRunner:
                     decay_coefficient=(
                         _bot_cfg.fundamental_decay_coefficient
                     ),
+                    post_event_lag_seconds=(
+                        _bot_cfg.fundamental_post_event_lag_seconds
+                    ),
                 )
                 # 経済イベントCSV読み込み
                 if _csv_paths:
@@ -1036,10 +1045,10 @@ class BacktestRunner:
                     for _csv in _csv_paths:
                         count = fundamental_provider.load_csv(_csv)
                         total_count += count
-                    logger.info(
-                        f"[Fundamental] バックテスト用CSV読込: "
-                        f"{total_count}件 "
-                        f"({len(_csv_paths)}ファイル)"
+                    _log.info(
+                        "[Fundamental] バックテスト用CSV読込: "
+                        "%d件 (%dファイル)",
+                        total_count, len(_csv_paths),
                     )
                 # イベントLLM CSV読み込み（Phase 2）
                 if event_llm_csv_list:
@@ -1051,19 +1060,19 @@ class BacktestRunner:
                         )
                         _llm_total += _n
                     if _llm_total > 0:
-                        logger.info(
-                            f"[Fundamental] イベントLLM "
-                            f"{_llm_total}件読込"
+                        _log.info(
+                            "[Fundamental] イベントLLM %d件読込",
+                            _llm_total,
                         )
                 # Phase 2b: FundamentalMemory有効化
                 if _bot_cfg.fundamental_assessor_enabled:
                     fundamental_provider.enable_memory()
-                    logger.info(
+                    _log.info(
                         "[Fundamental] メモリ蓄積有効"
                     )
             except Exception as e:
-                logger.warning(
-                    f"[Fundamental] CSV読込失敗（無効化）: {e}"
+                _log.warning(
+                    "[Fundamental] CSV読込失敗（無効化）: %s", e,
                 )
 
         # ボット設定（各年の bot インスタンスはこの設定から生成）
@@ -1431,7 +1440,7 @@ class BacktestRunner:
             dict[str, pd.DataFrame]: 時間足別データフレーム
         """
         _log = logging.getLogger(__name__)
-        loader = DataLoader(self.data_dir)
+        loader = DataLoader(self.chart_dir)
         data = {}
 
         # TFリストの決定:
@@ -1452,10 +1461,10 @@ class BacktestRunner:
         def _load_single_tf(tf: str) -> tuple[str, pd.DataFrame | None]:
             """単一TFのデータをロード（並列実行対象）"""
             pattern = f"{symbol}_{tf}_*.csv"
-            tf_files = list(self.data_dir.glob(pattern))
+            tf_files = list(self.chart_dir.glob(pattern))
 
             if not tf_files:
-                tf_path = self.data_dir / f"{symbol}_{tf}.csv"
+                tf_path = self.chart_dir / f"{symbol}_{tf}.csv"
                 tf_files = [tf_path] if tf_path.exists() else []
 
             if not tf_files:
@@ -1855,10 +1864,16 @@ class BacktestRunner:
                 _fctx = fundamental_provider.get_context(
                     _now_utc, self.config.symbol
                 )
+                # PRE_EVENT: 高インパクト指標30分前は常にスキップ
                 if _fctx.has_high_impact_within_30min:
-                    continue  # 重要指標直前はスキップ
-                if _fctx.event_caution_level >= (
-                    bot_config.fundamental_caution_block_level
+                    continue
+                # Phase 2b無効時: caution_levelベースの追加ブロック
+                # Phase 2b有効時: アセッサーの方向フィルターに委任
+                if (
+                    not bot_config.fundamental_assessor_enabled
+                    and _fctx.event_caution_level >= (
+                        bot_config.fundamental_caution_block_level
+                    )
                 ):
                     continue  # 超重要指標日はスキップ
 

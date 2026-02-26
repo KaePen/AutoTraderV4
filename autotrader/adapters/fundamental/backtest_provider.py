@@ -178,15 +178,21 @@ class BacktestFundamentalProvider:
         self,
         event_guard_minutes: int = 30,
         decay_coefficient: float = 2.0,
+        post_event_lag_seconds: int = 30,
     ) -> None:
         """初期化
 
         Args:
             event_guard_minutes: 重要指標前の取引停止分数
             decay_coefficient: 時間減衰係数
+            post_event_lag_seconds: LLM処理ラグ（秒）。
+                イベント発表後、LLM分析が完了するまでの時間。
+                この期間中はsurprise_score/direction_biasを
+                使用しない（先読みバイアス防止）。
         """
         self._guard_minutes = event_guard_minutes
         self._decay_coefficient = decay_coefficient
+        self._post_event_lag_seconds = post_event_lag_seconds
         self._events: list[EconomicEvent] = []
         self._events_sorted_ts: list[float] = []
         self._normalizer = EconomicEventNormalizer()
@@ -646,13 +652,23 @@ class BacktestFundamentalProvider:
             )
 
         # --- 方向性合成（重み付き平均） ---
+        # LLM処理ラグ: 発表直後はsurprise/biasが未確定
+        # FXは即座にチャートに反映されるが、LLM分析には
+        # 10-15秒かかるため、ラグ期間中はbias=0として扱う
+        lag_s = self._post_event_lag_seconds
         total_w = 0.0
         w_bias = 0.0
         w_surprise = 0.0
         for rec, infl in active:
             w = infl * _IMPACT_WEIGHT.get(rec.impact, 0.3)
-            w_bias += rec.direction_bias * w
-            w_surprise += rec.surprise_score * w
+            elapsed_s = (
+                current_time - rec.event_time
+            ).total_seconds()
+            if elapsed_s >= lag_s:
+                # ラグ経過後: LLM分析結果を使用
+                w_bias += rec.direction_bias * w
+                w_surprise += rec.surprise_score * w
+            # ラグ未経過: bias/surpriseは0（重みのみ加算）
             total_w += w
 
         direction_bias = 0.0
