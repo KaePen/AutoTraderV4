@@ -432,16 +432,16 @@ class LLMEventGenerator(LLMGeneratorBase):
 3. インパクトの持続時間を推定（即時収束型 vs 持続型）
 4. この指標の市場への影響度合いを評価
 
-以下のJSON形式で回答してください。各フィールドの意味:
-- surprise_score: サプライズ方向と大きさ（+は{base}高方向、-1.0 ~ +1.0）
-- direction_bias: 短期価格方向（+は{symbol}上昇、-1.0 ~ +1.0）
-- convergence_hours: インパクト収束までの推定時間（0.5 ~ 72.0）
-- expected_volatility: 通常比ボラティリティ倍率（0.0 ~ 2.0）
-- trade_caution_level: 取引注意度（0=通常, 1=注意, 2=回避推奨）
-- summary: 分析要約（日本語、200文字以内）
+以下のJSONを返してください:
+{{"surprise_score": 0.0, "direction_bias": 0.0, "convergence_hours": 1.0, "expected_volatility": 1.0, "trade_caution_level": 0, "summary": ""}}
 
-回答例:
-{{"surprise_score": 0.6, "direction_bias": 0.4, "convergence_hours": 12.0, "expected_volatility": 1.3, "trade_caution_level": 1, "summary": "雇用統計が予想を大幅に上回りドル買い優勢"}}"""
+各値の意味:
+surprise_score: サプライズ方向と大きさ。+は{base}高方向。-1.0~+1.0
+direction_bias: 短期価格方向。+は{symbol}上昇。-1.0~+1.0
+convergence_hours: インパクト収束推定時間。0.5~72.0
+expected_volatility: 通常比ボラティリティ倍率。0.0~2.0
+trade_caution_level: 取引注意度。0=通常、1=注意、2=回避推奨
+summary: 分析要約。日本語200文字以内"""
 
     def _build_event_result(self, data: dict) -> dict:
         """LLMレスポンスからイベント結果dictを構築

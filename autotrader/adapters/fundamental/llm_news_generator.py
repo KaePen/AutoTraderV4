@@ -566,19 +566,19 @@ class LLMNewsGenerator(LLMGeneratorBase):
 4. リスク選好/回避の傾向を判断
 5. センチメントの一貫性に基づき確信度を設定
 
-以下のJSON形式で回答してください。各フィールドの意味:
-- sentiment_score: 総合センチメント（-1.0=弱気 ~ +1.0=強気。+は{symbol}上昇方向）
-- sentiment_confidence: 確信度（0.0=低 ~ 1.0=高）
-- macro_bias_score: マクロ経済バイアス（-1.0 ~ +1.0）
-- policy_divergence_score: 金融政策乖離（+は{base}引締め優位、-1.0 ~ +1.0）
-- risk_appetite_score: リスク選好度（+はリスクオン、-1.0 ~ +1.0）
-- geopolitical_risk_level: 地政学リスク度（0=なし, 1=低, 2=中, 3=高）
-- dominant_theme: 支配的テーマ（日本語、100文字以内）
-- summary: 分析要約（日本語、200文字以内）
-- session_sentiment: セッション別センチメント（各-1.0 ~ +1.0）
+以下のJSONを返してください:
+{{"sentiment_score": 0.0, "sentiment_confidence": 0.0, "macro_bias_score": 0.0, "policy_divergence_score": 0.0, "risk_appetite_score": 0.0, "geopolitical_risk_level": 0, "dominant_theme": "", "summary": "", "session_sentiment": {{"tokyo": 0.0, "london": 0.0, "ny": 0.0}}}}
 
-回答例:
-{{"sentiment_score": 0.3, "sentiment_confidence": 0.7, "macro_bias_score": 0.2, "policy_divergence_score": 0.4, "risk_appetite_score": 0.1, "geopolitical_risk_level": 1, "dominant_theme": "FRB利上げ観測", "summary": "米雇用統計の好結果を受けドル買い優勢", "session_sentiment": {{"tokyo": 0.1, "london": 0.3, "ny": 0.5}}}}"""
+各値の意味:
+sentiment_score: {symbol}の総合センチメント。-1.0=弱気、+1.0=強気
+sentiment_confidence: 確信度。0.0=低、1.0=高
+macro_bias_score: マクロ経済バイアス。-1.0~+1.0
+policy_divergence_score: 金融政策乖離。+は{base}引締め優位。-1.0~+1.0
+risk_appetite_score: リスク選好度。+はリスクオン。-1.0~+1.0
+geopolitical_risk_level: 地政学リスク。0=なし、1=低、2=中、3=高
+dominant_theme: 支配的テーマ。日本語100文字以内
+summary: 分析要約。日本語200文字以内
+session_sentiment: 各セッションのセンチメント。-1.0~+1.0"""
 
     def _build_news_result(
         self,
