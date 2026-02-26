@@ -101,6 +101,7 @@ class LLMGeneratorBase:
             host=self._settings.host,
             timeout=timeout,
         )
+        # R1モデルはformat="json"と<think>が競合するため使わない
         response = client.chat(
             model=self._settings.model,
             messages=[
@@ -110,7 +111,6 @@ class LLMGeneratorBase:
                 },
                 {"role": "user", "content": prompt},
             ],
-            format="json",
             options={
                 "temperature": self._settings.temperature,
                 "num_ctx": self._settings.num_ctx,
@@ -152,7 +152,7 @@ class LLMGeneratorBase:
                     return default_result
         return default_result
 
-    # 安全策: <think>ブロック除去パターン
+    # R1モデルの<think>ブロック除去パターン
     _THINK_RE = re.compile(
         r"<think>.*?</think>", re.DOTALL
     )
@@ -172,7 +172,7 @@ class LLMGeneratorBase:
         Raises:
             ValueError: パース失敗時
         """
-        # 安全策: <think>ブロックが含まれる場合は除去
+        # R1モデル: <think>ブロックを除去
         cleaned = self._THINK_RE.sub("", content).strip()
         if not cleaned:
             cleaned = content

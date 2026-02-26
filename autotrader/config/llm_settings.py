@@ -26,7 +26,7 @@ class OllamaSettings:
     """
 
     host: str = "http://localhost:11434"
-    model: str = "qwen2.5:7b"
+    model: str = "erwan2/DeepSeek-R1-Distill-Qwen-14B"
     temperature: float = 0.1
     timeout_seconds: float = 120.0
     max_retries: int = 3
