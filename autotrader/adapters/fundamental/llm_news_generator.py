@@ -40,6 +40,9 @@ NEWS_CSV_COLUMNS = [
 
 # Map-Reduceバッチサイズ（これ以下なら単一呼び出し）
 _MAP_BATCH_SIZE = 12
+# 適応的リトライの最小バッチサイズ・最大試行回数
+_MIN_BATCH_SIZE = 3
+_MAX_ADAPT_RETRIES = 3
 
 # FX専門ソースの本文抜粋最大文字数
 _FX_CONTENT_MAX = 300
@@ -293,10 +296,11 @@ class LLMNewsGenerator(LLMGeneratorBase):
         target_date: date,
         news_items: list[NewsItem],
     ) -> dict:
-        """1日分のニュースをLLM分析（Map-Reduce対応）
+        """1日分のニュースをLLM分析（適応的バッチサイズ）
 
         記事数が _MAP_BATCH_SIZE 以下なら単一呼び出し、
         超える場合はMap-Reduceパターンで分析する。
+        失敗時はバッチを細分化して再試行する。
 
         Args:
             symbol: シンボル
@@ -311,12 +315,84 @@ class LLMNewsGenerator(LLMGeneratorBase):
         if not news_items:
             return self._default_news_result()
 
-        if len(news_items) <= _MAP_BATCH_SIZE:
-            return self._analyze_single(
-                symbol, base, quote, target_date, news_items
+        n = len(news_items)
+        date_str = target_date.strftime("%m/%d")
+
+        # 初回バッチ数を計算
+        num_batches = max(
+            1,
+            (n + _MAP_BATCH_SIZE - 1) // _MAP_BATCH_SIZE,
+        )
+
+        result = self._default_news_result()
+        for attempt in range(_MAX_ADAPT_RETRIES):
+            batch_size = max(
+                1, (n + num_batches - 1) // num_batches
             )
-        return self._analyze_map_reduce(
-            symbol, base, quote, target_date, news_items
+
+            if num_batches == 1:
+                result = self._analyze_single(
+                    symbol, base, quote,
+                    target_date, news_items,
+                )
+            else:
+                result = self._analyze_map_reduce(
+                    symbol, base, quote,
+                    target_date, news_items,
+                    batch_size,
+                )
+
+            if not self._is_analysis_failed(result):
+                return result
+
+            # 次のバッチサイズを計算
+            num_batches += 1
+            next_size = max(
+                1, (n + num_batches - 1) // num_batches
+            )
+
+            if next_size < _MIN_BATCH_SIZE:
+                logger.warning(
+                    f"[NewsGen] {symbol} "
+                    f"{date_str}: "
+                    f"最小バッチ到達"
+                    f"→デフォルト値使用"
+                )
+                return result
+
+            if attempt < _MAX_ADAPT_RETRIES - 1:
+                logger.info(
+                    f"[NewsGen] {symbol} "
+                    f"{date_str}: "
+                    f"分析失敗→バッチ細分化 "
+                    f"({batch_size}"
+                    f"→{next_size}件/バッチ)"
+                )
+
+        return result
+
+    @staticmethod
+    def _is_analysis_failed(result: dict) -> bool:
+        """分析結果が失敗（デフォルト値）かどうか判定
+
+        Args:
+            result: 分析結果dict
+
+        Returns:
+            bool: 失敗の場合True
+        """
+        if result.get("summary") == "分析失敗":
+            return True
+        # 全主要スコアがゼロ = LLMが応答できなかった
+        return (
+            result.get("sentiment_score") == 0.0
+            and result.get("macro_bias_score") == 0.0
+            and result.get(
+                "policy_divergence_score"
+            ) == 0.0
+            and result.get(
+                "risk_appetite_score"
+            ) == 0.0
         )
 
     def _analyze_single(
@@ -358,6 +434,7 @@ class LLMNewsGenerator(LLMGeneratorBase):
         quote: str,
         target_date: date,
         news_items: list[NewsItem],
+        batch_size: int = _MAP_BATCH_SIZE,
     ) -> dict:
         """多記事日のMap-Reduce LLM分析
 
@@ -366,13 +443,14 @@ class LLMNewsGenerator(LLMGeneratorBase):
             base: 基軸通貨
             quote: 決済通貨
             target_date: 分析対象日
-            news_items: 当日ニュース（> _MAP_BATCH_SIZE件）
+            news_items: 当日ニュース（> batch_size件）
+            batch_size: 1バッチあたりの記事数
 
         Returns:
             dict: 分析結果
         """
         batches = self._split_into_batches(
-            news_items, _MAP_BATCH_SIZE
+            news_items, batch_size
         )
         date_str = target_date.strftime("%m/%d")
         n_batches = len(batches)

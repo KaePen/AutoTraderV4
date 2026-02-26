@@ -13,6 +13,7 @@ from autotrader.adapters.fundamental.llm_news_generator import (
     NEWS_CSV_COLUMNS,
     LLMNewsGenerator,
     _MAP_BATCH_SIZE,
+    _MIN_BATCH_SIZE,
 )
 from autotrader.adapters.fundamental.news_schemas import (
     NewsItem,
@@ -508,3 +509,203 @@ class TestGenerateForSymbolYear:
             gen.generate_for_symbol_year(
                 "XXXYYY", 2024, [], tmp_path
             )
+
+
+class TestIsAnalysisFailed:
+    """_is_analysis_failed のテスト"""
+
+    def test_failed_summary(self) -> None:
+        """summary=分析失敗 → True"""
+        result = {
+            "sentiment_score": 0.0,
+            "summary": "分析失敗",
+        }
+        assert LLMNewsGenerator._is_analysis_failed(
+            result
+        ) is True
+
+    def test_all_zeros(self) -> None:
+        """全スコア0 → True"""
+        result = {
+            "sentiment_score": 0.0,
+            "macro_bias_score": 0.0,
+            "policy_divergence_score": 0.0,
+            "risk_appetite_score": 0.0,
+            "summary": "テスト",
+        }
+        assert LLMNewsGenerator._is_analysis_failed(
+            result
+        ) is True
+
+    def test_valid_result(self) -> None:
+        """有効な結果 → False"""
+        result = {
+            "sentiment_score": 0.3,
+            "macro_bias_score": 0.2,
+            "policy_divergence_score": 0.1,
+            "risk_appetite_score": 0.0,
+            "summary": "ドル買い優勢",
+        }
+        assert LLMNewsGenerator._is_analysis_failed(
+            result
+        ) is False
+
+    def test_partial_nonzero(self) -> None:
+        """1つでも非ゼロ → False"""
+        result = {
+            "sentiment_score": 0.0,
+            "macro_bias_score": 0.0,
+            "policy_divergence_score": 0.1,
+            "risk_appetite_score": 0.0,
+            "summary": "テスト",
+        }
+        assert LLMNewsGenerator._is_analysis_failed(
+            result
+        ) is False
+
+
+class TestAdaptiveBatchRetry:
+    """適応的バッチリトライのテスト"""
+
+    def setup_method(self) -> None:
+        """テスト用インスタンス"""
+        self.gen = LLMNewsGenerator(
+            retry_delay_seconds=0.0
+        )
+
+    def test_single_fails_then_map_reduce_succeeds(
+        self,
+    ) -> None:
+        """単一分析失敗→Map-Reduceで成功"""
+        items = _make_news_list(8)
+        # 1回目: 単一分析でデフォルト値（失敗）
+        failed = {
+            "sentiment_score": 0.0,
+            "sentiment_confidence": 0.0,
+            "macro_bias_score": 0.0,
+            "policy_divergence_score": 0.0,
+            "risk_appetite_score": 0.0,
+            "geopolitical_risk_level": 0,
+            "dominant_theme": "",
+            "summary": "分析失敗",
+        }
+        # 2回目: Map-Reduce（2バッチ+Reduce=3回）
+        map_ok = {
+            "sentiment_score": 0.3,
+            "macro_bias_score": 0.2,
+            "policy_divergence_score": 0.1,
+            "risk_appetite_score": 0.0,
+            "geopolitical_risk_level": 0,
+            "key_themes": "テーマ",
+            "summary": "要約",
+        }
+        reduce_ok = {
+            "sentiment_score": 0.4,
+            "sentiment_confidence": 0.7,
+            "macro_bias_score": 0.2,
+            "policy_divergence_score": 0.1,
+            "risk_appetite_score": 0.05,
+            "geopolitical_risk_level": 0,
+            "dominant_theme": "統合テーマ",
+            "summary": "統合要約",
+        }
+        # 1回目単一 + 2回Map + 1回Reduce = 4回
+        responses = [failed, map_ok, map_ok, reduce_ok]
+        with patch.object(
+            self.gen,
+            "_call_ollama_with_retry",
+            side_effect=responses,
+        ) as mock:
+            result = self.gen._analyze_date(
+                "USDJPY", "USD", "JPY",
+                date(2024, 1, 15), items,
+            )
+        assert mock.call_count == 4
+        assert result["sentiment_score"] == 0.4
+        assert result["summary"] == "統合要約"
+
+    def test_map_reduce_fails_then_smaller_batches(
+        self,
+    ) -> None:
+        """Map-Reduce失敗→より小さいバッチで成功"""
+        items = _make_news_list(25)
+        failed_reduce = {
+            "sentiment_score": 0.0,
+            "sentiment_confidence": 0.0,
+            "macro_bias_score": 0.0,
+            "policy_divergence_score": 0.0,
+            "risk_appetite_score": 0.0,
+            "geopolitical_risk_level": 0,
+            "dominant_theme": "",
+            "summary": "分析失敗",
+        }
+        map_ok = {
+            "sentiment_score": 0.2,
+            "macro_bias_score": 0.1,
+            "policy_divergence_score": 0.0,
+            "risk_appetite_score": 0.0,
+            "geopolitical_risk_level": 0,
+            "key_themes": "テーマ",
+            "summary": "要約",
+        }
+        reduce_ok = {
+            "sentiment_score": 0.5,
+            "sentiment_confidence": 0.6,
+            "macro_bias_score": 0.3,
+            "policy_divergence_score": 0.2,
+            "risk_appetite_score": 0.1,
+            "geopolitical_risk_level": 1,
+            "dominant_theme": "成功テーマ",
+            "summary": "成功要約",
+        }
+        # 1回目: 3バッチ(ceil(25/12)=3) → 3Map + 1Reduce
+        #   → 全てfailed_reduce返却
+        # 2回目: 4バッチ(ceil(25/4)≒7) → 4Map + 1Reduce
+        #   → map_ok + reduce_ok
+        first_attempt = [
+            failed_reduce, failed_reduce,
+            failed_reduce, failed_reduce,
+        ]
+        # 25件÷4バッチ=7件/バッチ → 4バッチ
+        second_attempt = [
+            map_ok, map_ok, map_ok, map_ok, reduce_ok,
+        ]
+        responses = first_attempt + second_attempt
+        with patch.object(
+            self.gen,
+            "_call_ollama_with_retry",
+            side_effect=responses,
+        ):
+            result = self.gen._analyze_date(
+                "USDJPY", "USD", "JPY",
+                date(2024, 1, 15), items,
+            )
+        assert result["sentiment_score"] == 0.5
+        assert result["summary"] == "成功要約"
+
+    def test_success_on_first_try_no_retry(
+        self,
+    ) -> None:
+        """初回成功時はリトライしない"""
+        items = _make_news_list(5)
+        ok_response = {
+            "sentiment_score": 0.4,
+            "sentiment_confidence": 0.7,
+            "macro_bias_score": 0.3,
+            "policy_divergence_score": 0.5,
+            "risk_appetite_score": 0.1,
+            "geopolitical_risk_level": 1,
+            "dominant_theme": "テーマ",
+            "summary": "要約",
+        }
+        with patch.object(
+            self.gen,
+            "_call_ollama_with_retry",
+            return_value=ok_response,
+        ) as mock:
+            result = self.gen._analyze_date(
+                "USDJPY", "USD", "JPY",
+                date(2024, 1, 15), items,
+            )
+        assert mock.call_count == 1
+        assert result["sentiment_score"] == 0.4
