@@ -271,29 +271,48 @@ class V2TradeBot:
         result = df.copy()
 
         # SMC列の補完
-        if "bos_signal" not in result.columns:
+        _need_smc = (
+            "bos_signal" not in result.columns
+            or "bars_since_bos" not in result.columns
+        )
+        if _need_smc:
             try:
-                result = (
+                smc_out = (
                     self._structure_analyzer.calculate_all(
                         result,
                     )
                 )
-            except Exception:
+                # calculate_allは列を落とすので
+                # 必要列のみマージ
+                _smc_cols = [
+                    c for c in smc_out.columns
+                    if c not in result.columns
+                ]
+                for c in _smc_cols:
+                    result[c] = smc_out[c].values
+            except Exception as e:
                 logger.warning(
-                    "%s: SMC計算失敗、デフォルト値使用", tf,
+                    "%s: SMC計算失敗: %s", tf, e,
                 )
 
         # 流動性グラブの補完
         if "liquidity_grab_bullish" not in result.columns:
             try:
-                result = (
+                liq_out = (
                     self._liquidity_analyzer
                     .detect_liquidity_grab(result)
                 )
-            except Exception:
+                # detect_liquidity_grabは新DFを返すので
+                # 新規列のみマージ
+                _liq_cols = [
+                    c for c in liq_out.columns
+                    if c not in result.columns
+                ]
+                for c in _liq_cols:
+                    result[c] = liq_out[c].values
+            except Exception as e:
                 logger.warning(
-                    "%s: 流動性分析失敗、デフォルト値使用",
-                    tf,
+                    "%s: 流動性分析失敗: %s", tf, e,
                 )
 
         # PriceAction列の補完（エントリーTFのみ）
@@ -309,12 +328,20 @@ class V2TradeBot:
                     if atr_col in result.columns
                     else None
                 )
-                result = self._pa_analyzer.analyze(
+                pa_out = self._pa_analyzer.analyze(
                     result, atr=atr,
                 )
-            except Exception:
+                # analyze()は新DFを返すので
+                # 新規列のみマージ
+                _pa_cols = [
+                    c for c in pa_out.columns
+                    if c not in result.columns
+                ]
+                for c in _pa_cols:
+                    result[c] = pa_out[c].values
+            except Exception as e:
                 logger.warning(
-                    "%s: PA分析失敗、デフォルト値使用", tf,
+                    "%s: PA分析失敗: %s", tf, e,
                 )
 
         return result

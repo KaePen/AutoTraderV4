@@ -2451,9 +2451,14 @@ class BacktestRunner:
         years = list(range(start_year, end_year + 1))
 
         # V2はH1/H4/D1のみ使用
+        # ウォームアップ用に前年データも含める
+        warmup_years = sorted(
+            set(years) | {min(years) - 1},
+        )
         market_data = self._load_all_timeframes(
             include_m1=False,
-            needed_years=years,
+            needed_years=warmup_years,
+            timeframes_to_load=["H1", "H4", "D1"],
         )
 
         # シミュレーター設定
@@ -2493,8 +2498,8 @@ class BacktestRunner:
             if yr is not None:
                 yearly_results.append(yr)
 
-        return self._assemble_result(
-            yearly_results, start_year, end_year,
+        return self._aggregate_results_from_yearly(
+            yearly_results,
         )
 
     def _run_v2_year(
@@ -2629,7 +2634,7 @@ class BacktestRunner:
             )
 
             # シミュレーター更新
-            simulator.update(candle, signal)
+            simulator.process_candle(candle, signal)
 
             # 新規クローズ検出 → botの状態更新
             new_trades = simulator.get_closed_trades()[
@@ -2663,18 +2668,29 @@ class BacktestRunner:
             })
 
         closed = simulator.get_closed_trades()
-        balance = simulator.state.balance
-        pnl = balance - sim_config.initial_balance
-        pnl_pct = pnl / sim_config.initial_balance * 100
+
+        # V1互換のメトリクスを計算
+        calculator = MetricsCalculator(
+            initial_balance=sim_config.initial_balance,
+        )
+        metrics = calculator.calculate(
+            closed, simulator.state.daily_pnl,
+        )
 
         return {
             "year": year,
-            "trades": closed,
-            "pnl": pnl,
-            "pnl_pct": pnl_pct,
-            "balance": balance,
-            "winning_trades": winning_trades,
-            "losing_trades": losing_trades,
+            "trades": len(closed),
+            "win_rate": metrics.win_rate * 100,
+            "non_loss_rate": metrics.non_loss_rate * 100,
+            "profit_factor": metrics.profit_factor,
+            "net_profit": (
+                simulator.state.balance
+                - sim_config.initial_balance
+            ),
+            "max_drawdown": (
+                metrics.max_drawdown_pct * 100
+            ),
+            "sharpe": metrics.sharpe_ratio or 0,
             "monthly_results": _monthly_results,
         }
 

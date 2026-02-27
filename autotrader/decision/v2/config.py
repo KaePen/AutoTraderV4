@@ -20,10 +20,12 @@ class RegimeClassifierConfig:
 
     # --- ADX閾値 ---
     trending_adx_threshold: float = 25.0
-    ranging_adx_threshold: float = 20.0
+    ranging_adx_threshold: float = 25.0
 
     # --- MA alignment閾値 ---
-    trending_ma_align_threshold: float = 0.3
+    # USDJPY H1の実データ分布: |ma_alignment| max≈0.47
+    # 0.3では0.3%しかTRENDING判定されないため0.08に緩和
+    trending_ma_align_threshold: float = 0.08
 
     # --- 正規化ATR閾値 ---
     volatile_atr_threshold: float = 1.8
@@ -137,7 +139,8 @@ class V2RiskConfig:
     """
 
     # NoTrade条件
-    max_consecutive_losses: int = 3
+    # 低勝率戦略(~20%)では30連敗は統計的に稀
+    max_consecutive_losses: int = 30
     max_spread_pips: float = 3.0
     blocked_hours_utc: tuple[int, ...] = (22, 23, 0, 1, 2, 3)
 
