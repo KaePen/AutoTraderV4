@@ -975,6 +975,7 @@ class BacktestRunner:
         fundamental_csv: str | None = None,
         fundamental_csv_list: list[str] | None = None,
         event_llm_csv_list: list[str] | None = None,
+        news_llm_csv_list: list[str] | None = None,
         fundamental_guard_minutes: int = 30,
         period_start: datetime | None = None,
         period_end: datetime | None = None,
@@ -1022,7 +1023,11 @@ class BacktestRunner:
         elif fundamental_csv:
             _csv_paths = [fundamental_csv]
 
-        _has_data = bool(_csv_paths) or bool(event_llm_csv_list)
+        _has_data = (
+            bool(_csv_paths)
+            or bool(event_llm_csv_list)
+            or bool(news_llm_csv_list)
+        )
         _log = logging.getLogger(__name__)
         if _has_data:
             try:
@@ -1063,6 +1068,22 @@ class BacktestRunner:
                         _log.info(
                             "[Fundamental] イベントLLM %d件読込",
                             _llm_total,
+                        )
+                # ニュースLLM CSV読み込み
+                if news_llm_csv_list:
+                    _sym = self.config.symbol
+                    _news_total = 0
+                    for _csv in news_llm_csv_list:
+                        _n = (
+                            fundamental_provider
+                            .load_news_llm_csv(_csv, _sym)
+                        )
+                        _news_total += _n
+                    if _news_total > 0:
+                        _log.info(
+                            "[Fundamental] ニュースLLM "
+                            "%d日分読込",
+                            _news_total,
                         )
                 # Phase 2b: FundamentalMemory有効化
                 if _bot_cfg.fundamental_assessor_enabled:

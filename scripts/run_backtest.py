@@ -731,14 +731,31 @@ def parse_args() -> argparse.Namespace:
             "llm_events_SYMBOL_YYYY.csv を使用。"
         ),
     )
+    parser.add_argument(
+        "--news-llm",
+        action="store_true",
+        help=(
+            "ニュースLLM分析CSVを自動読み込み。"
+            "data/{symbol}/llm_news/ 配下の "
+            "llm_news_SYMBOL_YYYY.csv を使用。"
+        ),
+    )
     # Phase 2b: ファンダメンタルロジック統合
     parser.add_argument(
         "--fundamental-phase2b",
         action="store_true",
         help=(
             "Phase 2b ファンダメンタル統合を有効化。"
-            "--fundamental --event-llm を暗黙的に有効化し、"
+            "--fundamental --event-llm --news-llm を暗黙有効化し"
             "assessor/softguard/pm を全てONにする。"
+        ),
+    )
+    parser.add_argument(
+        "--no-news-llm",
+        action="store_true",
+        help=(
+            "ニュースLLMを無効化（--fundamental-phase2b 使用時"
+            "のベースライン比較用）。"
         ),
     )
     parser.add_argument(
@@ -1314,6 +1331,8 @@ def run_single_backtest(args: argparse.Namespace):
     if args.fundamental_phase2b:
         args.fundamental = True
         args.event_llm = True
+        if not args.no_news_llm:
+            args.news_llm = True
 
     # イベントLLM CSVリスト構築
     # 検索順: data/{symbol}/llm_events/ → data/fundamental/
@@ -1344,6 +1363,40 @@ def run_single_backtest(args: argparse.Namespace):
                 len(_event_llm_csvs), _llm_dir,
             )
 
+    # ニュースLLM CSVリスト構築
+    # 検索順: data/{symbol}/llm_news/
+    _news_llm_csvs: list[str] | None = None
+    if args.news_llm:
+        _sym = args.symbol
+        _data_base = Path(args.data_dir)
+        _news_dir = _data_base / _sym / "llm_news"
+        if _news_dir.exists():
+            _news_llm_csvs = []
+            for _yr in range(start_year, end_year + 1):
+                _csv = (
+                    _news_dir
+                    / f"llm_news_{_sym}_{_yr}.csv"
+                )
+                if _csv.exists():
+                    _news_llm_csvs.append(str(_csv))
+            if not _news_llm_csvs:
+                logging.warning(
+                    "[NewsLLM] %s に llm_news_%s_YYYY.csv "
+                    "が見つかりません",
+                    _news_dir, _sym,
+                )
+                _news_llm_csvs = None
+            else:
+                logging.info(
+                    "[NewsLLM] %d年分のCSV検出: %s",
+                    len(_news_llm_csvs), _news_dir,
+                )
+        else:
+            logging.warning(
+                "[NewsLLM] ディレクトリ未存在: %s",
+                _news_dir,
+            )
+
     # アダプティブパラメータ調整設定
     _adaptive_config = None
     if args.adaptive:
@@ -1369,6 +1422,7 @@ def run_single_backtest(args: argparse.Namespace):
         sequential=args.sequential,
         fundamental_csv_list=_fundamental_csvs,
         event_llm_csv_list=_event_llm_csvs,
+        news_llm_csv_list=_news_llm_csvs,
         fundamental_guard_minutes=args.fundamental_guard,
         max_year_workers=args.max_year_workers,
         adaptive_config=_adaptive_config,
