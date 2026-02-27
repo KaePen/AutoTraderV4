@@ -113,13 +113,6 @@ def parse_args() -> argparse.Namespace:
 
     # 期間設定
     parser.add_argument(
-        "--engine",
-        type=str,
-        default="v1",
-        choices=["v1", "v2"],
-        help="エンジンバージョン: v1=既存, v2=市場構造状態マシン",
-    )
-    parser.add_argument(
         "--years",
         type=str,
         default="2020-2024",
@@ -1364,40 +1357,22 @@ def run_single_backtest(args: argparse.Namespace):
             args.adaptive_window, args.adaptive_interval,
         )
 
-    # V2エンジン分岐
-    if args.engine == "v2":
-        from autotrader.decision.v2.config import V2BotConfig as _V2Cfg
-        _v2_config = _V2Cfg(
-            pip_unit=(
-                0.01 if "JPY" in args.symbol.upper()
-                else 0.0001
-            ),
-            pip_value=_preset.pip_value,
-        )
-        result = runner.run_v2(
-            start_year,
-            end_year,
-            v2_config=_v2_config,
-            period_start=period_start,
-            period_end=period_end,
-        )
-    else:
-        result = runner.run_unified(
-            start_year,
-            end_year,
-            bot_config,
-            use_m1=use_short_tf,
-            enable_scalping=args.enable_scalping,
-            pm_config=pm_config,
-            period_start=period_start,
-            period_end=period_end,
-            sequential=args.sequential,
-            fundamental_csv_list=_fundamental_csvs,
-            event_llm_csv_list=_event_llm_csvs,
-            fundamental_guard_minutes=args.fundamental_guard,
-            max_year_workers=args.max_year_workers,
-            adaptive_config=_adaptive_config,
-        )
+    result = runner.run_unified(
+        start_year,
+        end_year,
+        bot_config,
+        use_m1=use_short_tf,
+        enable_scalping=args.enable_scalping,
+        pm_config=pm_config,
+        period_start=period_start,
+        period_end=period_end,
+        sequential=args.sequential,
+        fundamental_csv_list=_fundamental_csvs,
+        event_llm_csv_list=_event_llm_csvs,
+        fundamental_guard_minutes=args.fundamental_guard,
+        max_year_workers=args.max_year_workers,
+        adaptive_config=_adaptive_config,
+    )
 
     print_results(result)
     print_yearly_results(result.yearly_results)
