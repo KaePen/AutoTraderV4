@@ -16,8 +16,8 @@ import bisect
 import csv
 import math
 import re
-from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from dataclasses import dataclass, replace
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 from loguru import logger
@@ -129,6 +129,36 @@ class EventLLMRecord:
     is_holiday: bool
 
 
+@dataclass(frozen=True)
+class NewsLLMRecord:
+    """日次ニュースLLM分析結果
+
+    llm_news_SYMBOL_YYYY.csv の1行に対応。
+    日次粒度のマクロセンチメントデータ。
+
+    Attributes:
+        record_date: 日付
+        article_count: 分析記事数
+        sentiment_score: 総合センチメント (-1~+1)
+        sentiment_confidence: LLM信頼度 (0~1)
+        macro_bias_score: マクロ方向バイアス (-1~+1)
+        policy_divergence_score: 金融政策乖離 (-1~+1)
+        risk_appetite_score: リスク選好度 (-1~+1)
+        geopolitical_risk_level: 地政学リスク (0-3)
+        dominant_theme: 主要テーマ
+    """
+
+    record_date: date
+    article_count: int
+    sentiment_score: float
+    sentiment_confidence: float
+    macro_bias_score: float
+    policy_divergence_score: float
+    risk_appetite_score: float
+    geopolitical_risk_level: int
+    dominant_theme: str
+
+
 def compute_influence(
     elapsed_hours: float,
     convergence_hours: float,
@@ -211,6 +241,11 @@ class BacktestFundamentalProvider:
 
         # ニュースアイテム（published_at 昇順ソート）
         self._news_items: list[NewsItem] = []
+
+        # ニュースLLMレコード: symbol → 日付 → レコード
+        self._news_llm_by_date: dict[
+            str, dict[date, NewsLLMRecord]
+        ] = {}
 
         # Phase 2b: FundamentalMemory（バイアス蓄積）
         self.memory: FundamentalMemory | None = None
@@ -463,6 +498,112 @@ class BacktestFundamentalProvider:
             )
             return 0
 
+    def load_news_llm_csv(
+        self,
+        csv_path: str | Path,
+        symbol: str,
+    ) -> int:
+        """ニュースLLM分析CSVを読み込み
+
+        llm_news_SYMBOL_YYYY.csv 形式の日次ニュースデータ。
+        日付をキーとして辞書に格納する。
+
+        Args:
+            csv_path: CSVファイルパス
+            symbol: 対象シンボル（ログ用）
+
+        Returns:
+            int: 読み込みレコード数
+        """
+        path = Path(csv_path)
+        if not path.exists():
+            logger.warning(
+                "[NewsLLM] ファイル未存在: %s", path
+            )
+            return 0
+
+        try:
+            count = 0
+            sym_dict = self._news_llm_by_date.setdefault(
+                symbol, {},
+            )
+            with open(path, encoding="utf-8") as f:
+                reader = csv.DictReader(f)
+                for row in reader:
+                    rec = self._parse_news_llm_row(row)
+                    if rec is not None:
+                        sym_dict[rec.record_date] = rec
+                        count += 1
+            logger.info(
+                "[NewsLLM] %s: %d日分読込",
+                path.name, count,
+            )
+            return count
+        except Exception as e:
+            logger.error(
+                "[NewsLLM] CSV読込エラー: %s", e,
+            )
+            return 0
+
+    @staticmethod
+    def _parse_news_llm_row(
+        row: dict,
+    ) -> NewsLLMRecord | None:
+        """CSV行をNewsLLMRecordに変換
+
+        Args:
+            row: CSVDictReaderの行
+
+        Returns:
+            NewsLLMRecord | None: パース結果
+        """
+        try:
+            _date_str = row.get("date", "")
+            if not _date_str:
+                return None
+            _d = date.fromisoformat(_date_str)
+
+            def _f(key: str, default: float = 0.0) -> float:
+                v = row.get(key, "")
+                if v == "":
+                    return default
+                return max(-1.0, min(1.0, float(v)))
+
+            return NewsLLMRecord(
+                record_date=_d,
+                article_count=int(
+                    row.get("article_count", "0") or "0"
+                ),
+                sentiment_score=_f("sentiment_score"),
+                sentiment_confidence=max(
+                    0.0,
+                    min(1.0, _f("sentiment_confidence", 0.5)),
+                ),
+                macro_bias_score=_f("macro_bias_score"),
+                policy_divergence_score=_f(
+                    "policy_divergence_score"
+                ),
+                risk_appetite_score=_f("risk_appetite_score"),
+                geopolitical_risk_level=max(
+                    0,
+                    min(
+                        3,
+                        int(
+                            row.get(
+                                "geopolitical_risk_level", "0"
+                            )
+                            or "0"
+                        ),
+                    ),
+                ),
+                dominant_theme=row.get(
+                    "dominant_theme", ""
+                ),
+            )
+        except (ValueError, KeyError) as e:
+            logger.debug("[NewsLLM] 行パース失敗: %s", e)
+            return None
+
     def get_context(
         self, current_time: datetime, symbol: str
     ) -> FundamentalContext:
@@ -493,15 +634,18 @@ class BacktestFundamentalProvider:
                 current_time, symbol,
                 upcoming_dicts, high_impact_soon,
             )
-            self._update_memory(ctx, current_time)
-            return ctx
+        else:
+            # 優先度2-3: 旧ロジック（月次LLM or events計算）
+            ctx = self._fallback_context(
+                current_time, symbol,
+                upcoming_dicts, high_impact_soon,
+            )
 
-        # 優先度2-3: 旧ロジック（月次LLM or events計算）
-        ctx = self._fallback_context(
-            current_time, symbol,
-            upcoming_dicts, high_impact_soon,
+        # ニュースLLMデータをコンテキストにマージ
+        ctx = self._merge_news_into_context(
+            ctx, current_time, symbol,
         )
-        self._update_memory(ctx, current_time)
+        self._update_memory(ctx, current_time, symbol)
         return ctx
 
     def enable_memory(self) -> None:
@@ -512,19 +656,71 @@ class BacktestFundamentalProvider:
         """
         self.memory = FundamentalMemory()
 
+    def _merge_news_into_context(
+        self,
+        ctx: FundamentalContext,
+        current_time: datetime,
+        symbol: str,
+        news_bias_weight: float = 0.15,
+    ) -> FundamentalContext:
+        """ニュースLLMデータをコンテキストにマージ
+
+        日次ニュースのセンチメント・マクロバイアスを
+        コンテキストのフィールドに反映する。
+        direction_biasにもニュースバイアスをブレンドし、
+        assessorの短期バイアス判定に影響を与える。
+
+        FundamentalContextはfrozenなのでreplaceで新規作成。
+
+        Args:
+            ctx: 元のFundamentalContext
+            current_time: 現在時刻
+            symbol: 対象シンボル
+            news_bias_weight: direction_biasへのブレンド比率
+
+        Returns:
+            FundamentalContext: ニュース反映済みコンテキスト
+        """
+        sym_dict = self._news_llm_by_date.get(symbol)
+        if not sym_dict:
+            return ctx
+
+        news = sym_dict.get(current_time.date())
+        if news is None:
+            return ctx
+
+        # direction_biasにニュースマクロバイアスをブレンド
+        # イベントバイアス(1-w) + ニュースバイアス(w)
+        blended_bias = (
+            ctx.direction_bias * (1.0 - news_bias_weight)
+            + news.macro_bias_score * news_bias_weight
+        )
+        # -1~+1 にクランプ
+        blended_bias = max(-1.0, min(1.0, blended_bias))
+
+        return replace(
+            ctx,
+            sentiment_score=news.sentiment_score,
+            macro_bias_score=news.macro_bias_score,
+            direction_bias=blended_bias,
+        )
+
     def _update_memory(
         self,
         ctx: FundamentalContext,
         current_time: datetime,
+        symbol: str,
     ) -> None:
-        """メモリをContextのイベント情報で更新
+        """メモリをイベント+ニュース情報で更新
 
         - direction_biasとsurprise_scoreが有意なら更新
         - 日付変更時に日次減衰を適用
+        - 日次ニュースセンチメントでニュースバイアス更新
 
         Args:
             ctx: 生成されたコンテキスト
             current_time: 現在時刻
+            symbol: 対象シンボル
         """
         if self.memory is None:
             return
@@ -552,6 +748,20 @@ class BacktestFundamentalProvider:
             self.memory.last_event_date = current_date
         elif self.memory.last_event_date is None:
             self.memory.last_event_date = current_date
+
+        # ニュースバイアス更新（日次、1日1回）
+        sym_dict = self._news_llm_by_date.get(symbol, {})
+        news = sym_dict.get(current_date)
+        if (
+            news is not None
+            and self.memory.last_news_date != current_date
+        ):
+            # macro_bias_scoreを方向バイアスとして使用
+            self.memory.update_news(
+                news.macro_bias_score,
+                news.sentiment_confidence,
+            )
+            self.memory.last_news_date = current_date
 
     # --------------------------------------------------
     # プライベート: 共通ヘルパー
