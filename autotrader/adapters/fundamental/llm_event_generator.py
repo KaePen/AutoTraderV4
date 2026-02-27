@@ -5,7 +5,8 @@ LLMで短期インパクト分析を行い、
 llm_events_SYMBOL_YYYY.csv に出力する。
 
 1行 = 1イベント（event_time で秒単位の時系列）。
-HIGH/MEDIUMはLLM分析、LOWはデフォルト値を使用。
+HIGH/MEDIUMはLLM分析（convergence_hours等）+コード計算（surprise/direction）、
+LOWはコード計算のみでLLMスキップ。
 休日イベントは固定デフォルト値で出力（LLMスキップ）。
 """
 
@@ -52,6 +53,21 @@ _IMPACT_LABELS: dict[ImpactLevel, str] = {
     ImpactLevel.HIGH: "高インパクト",
     ImpactLevel.MEDIUM: "中インパクト",
     ImpactLevel.LOW: "低インパクト",
+}
+
+# 実績が予想を上回ったとき、その通貨にとって弱気(-1)な指標
+# デフォルト: +1（大半の指標は「高い=通貨高」）
+_INVERSE_INDICATORS: dict[str, int] = {
+    "unemployment": -1,
+    "jobless": -1,
+    "claimant": -1,
+}
+
+# インパクト別スケーリング係数
+_IMPACT_SCALE: dict[ImpactLevel, float] = {
+    ImpactLevel.HIGH: 0.8,
+    ImpactLevel.MEDIUM: 0.5,
+    ImpactLevel.LOW: 0.3,
 }
 
 # 通貨別休日パラメータ
@@ -122,8 +138,11 @@ class LLMEventGenerator(LLMGeneratorBase):
     events_YYYY.csv からシンボル関連イベントを個別抽出し、
     LLM分析結果を llm_events_SYMBOL_YYYY.csv に出力する。
 
-    HIGH/MEDIUMイベントはLLMで個別分析、
-    LOWイベントはサプライズ計算のみでLLMスキップ。
+    surprise_score / direction_bias は全インパクトレベルで
+    コード計算（LLMに任せない）。
+    HIGH/MEDIUMイベントはLLMで convergence_hours,
+    expected_volatility, trade_caution_level, summary を生成。
+    LOWイベントはコード計算のみでLLMスキップ。
     休日イベントは固定デフォルト値で出力。
 
     Args:
@@ -313,6 +332,99 @@ class LLMEventGenerator(LLMGeneratorBase):
             and ev.event_time.year == year
         ]
 
+    # --------------------------------------------------
+    # コード計算メソッド（LLMに任せない統一計算）
+    # --------------------------------------------------
+
+    @staticmethod
+    def _get_indicator_direction(
+        event_name: str,
+    ) -> int:
+        """指標名から方向性を判定
+
+        実績が予想を上回ったとき、通貨にとって
+        強気(+1)か弱気(-1)かを返す。
+
+        Args:
+            event_name: 指標名
+
+        Returns:
+            int: +1（高い=通貨高）or -1（高い=通貨安）
+        """
+        name_lower = event_name.lower()
+        for keyword, direction in _INVERSE_INDICATORS.items():
+            if keyword in name_lower:
+                return direction
+        return 1
+
+    @staticmethod
+    def _compute_surprise_score(
+        event: EconomicEvent,
+    ) -> float:
+        """サプライズスコアをコード計算
+
+        EconomicEvent.surprise_magnitude を [-1, 1] に
+        クリップして返す。
+
+        Args:
+            event: 対象イベント
+
+        Returns:
+            float: サプライズスコア [-1, 1]
+        """
+        surprise = event.surprise_magnitude
+        if surprise is None:
+            return 0.0
+        return max(-1.0, min(1.0, surprise))
+
+    @staticmethod
+    def _compute_direction_bias(
+        event: EconomicEvent,
+        base: str,
+        quote: str,
+    ) -> float:
+        """方向バイアスをコード計算
+
+        surprise_score × indicator_direction で通貨方向を
+        算出し、ペア方向 × インパクトスケールで最終値を返す。
+
+        Args:
+            event: 対象イベント
+            base: 基軸通貨
+            quote: 決済通貨
+
+        Returns:
+            float: 方向バイアス [-1, 1]
+        """
+        surprise_score = LLMEventGenerator._compute_surprise_score(
+            event
+        )
+        if surprise_score == 0.0:
+            return 0.0
+
+        indicator_dir = (
+            LLMEventGenerator._get_indicator_direction(
+                event.event_name
+            )
+        )
+        # 通貨方向: サプライズ × 指標方向
+        currency_direction = surprise_score * indicator_dir
+
+        # ペア方向: 基軸通貨なら正、決済通貨なら反転
+        if event.currency == base:
+            pair_bias = currency_direction
+        else:
+            pair_bias = -currency_direction
+
+        # インパクトスケーリング
+        scale = _IMPACT_SCALE.get(event.impact, 0.3)
+        result = pair_bias * scale
+        return max(-1.0, min(1.0, result))
+
+    # --------------------------------------------------
+    # イベント分析
+    # --------------------------------------------------
+
     def _analyze_event(
         self,
         symbol: str,
@@ -320,10 +432,11 @@ class LLMEventGenerator(LLMGeneratorBase):
         quote: str,
         event: EconomicEvent,
     ) -> dict:
-        """単一イベントをLLM分析
+        """単一イベントを分析
 
-        HIGH/MEDIUM: LLMで個別分析
-        LOW: サプライズ計算のみ（LLMスキップ）
+        surprise_score / direction_bias は全レベルで
+        コード計算。HIGH/MEDIUM は LLM で残りの項目を分析。
+        LOW は LLM スキップ。
 
         Args:
             symbol: シンボル
@@ -351,19 +464,30 @@ class LLMEventGenerator(LLMGeneratorBase):
             base_row.update(result)
             return base_row
 
+        # コード計算（全インパクトレベル共通）
+        surprise_score = self._compute_surprise_score(event)
+        direction_bias = self._compute_direction_bias(
+            event, base, quote
+        )
+
         if event.impact == ImpactLevel.LOW:
             # LOWインパクト: LLMスキップ
-            result = self._low_impact_result(event)
+            result = self._low_impact_result(
+                surprise_score, direction_bias
+            )
             base_row.update(result)
             return base_row
 
-        # HIGH/MEDIUM: LLM分析
+        # HIGH/MEDIUM: LLM分析（convergence等のみ）
         prompt = self._build_event_prompt(
-            symbol, base, quote, event
+            symbol, base, quote, event,
+            surprise_score, direction_bias,
         )
         default = self._default_event_result()
         raw = self._call_ollama_with_retry(prompt, default)
-        result = self._build_event_result(raw)
+        result = self._build_event_result(
+            raw, surprise_score, direction_bias
+        )
         base_row.update(result)
         return base_row
 
@@ -373,14 +497,22 @@ class LLMEventGenerator(LLMGeneratorBase):
         base: str,
         quote: str,
         event: EconomicEvent,
+        surprise_score: float,
+        direction_bias: float,
     ) -> str:
         """単一イベント分析プロンプトを構築
+
+        surprise_score / direction_bias はコード計算済みのため
+        LLM には convergence_hours, expected_volatility,
+        trade_caution_level, summary のみ生成を依頼する。
 
         Args:
             symbol: シンボル
             base: 基軸通貨
             quote: 決済通貨
             event: 対象イベント
+            surprise_score: コード計算済みサプライズ
+            direction_bias: コード計算済み方向バイアス
 
         Returns:
             str: プロンプト文字列
@@ -406,12 +538,6 @@ class LLMEventGenerator(LLMGeneratorBase):
             if event.previous is not None
             else "前回なし"
         )
-        surprise = event.surprise_magnitude
-        surprise_str = (
-            f"\n- サプライズ率: {surprise:+.1%}"
-            if surprise is not None
-            else ""
-        )
 
         return f"""{symbol}への経済指標インパクトを分析してください。
 
@@ -424,30 +550,43 @@ class LLMEventGenerator(LLMGeneratorBase):
 - インパクト: {impact_label}
 - 実績値: {actual}
 - 予測値: {forecast}
-- 前回値: {previous}{surprise_str}
+- 前回値: {previous}
+
+コード計算済み参考値:
+- サプライズスコア: {surprise_score:+.4f}
+- 方向バイアス: {direction_bias:+.4f}
 
 分析指示:
-1. サプライズの方向と大きさを評価
-2. {base}と{quote}への影響を判断（{event.currency}の指標が{symbol}に与える影響）
-3. インパクトの持続時間を推定（即時収束型 vs 持続型）
-4. この指標の市場への影響度合いを評価
+1. 上記サプライズを踏まえ、インパクトの持続時間を推定
+2. ボラティリティへの影響度を評価
+3. トレード注意度を判定
 
 以下のJSONを返してください:
-{{"surprise_score": 0.0, "direction_bias": 0.0, "convergence_hours": 1.0, "expected_volatility": 1.0, "trade_caution_level": 0, "summary": ""}}
+{{"convergence_hours": 1.0, "expected_volatility": 1.0, "trade_caution_level": 0, "summary": ""}}
 
 各値の意味:
-surprise_score: サプライズ方向と大きさ。+は{base}高方向。-1.0~+1.0
-direction_bias: 短期価格方向。+は{symbol}上昇。-1.0~+1.0
 convergence_hours: インパクト収束推定時間。0.5~72.0
 expected_volatility: 通常比ボラティリティ倍率。0.0~2.0
 trade_caution_level: 取引注意度。0=通常、1=注意、2=回避推奨
 summary: 分析要約。日本語200文字以内"""
 
-    def _build_event_result(self, data: dict) -> dict:
-        """LLMレスポンスからイベント結果dictを構築
+    def _build_event_result(
+        self,
+        data: dict,
+        surprise_score: float,
+        direction_bias: float,
+    ) -> dict:
+        """LLMレスポンス+コード計算値からイベント結果dictを構築
+
+        surprise_score / direction_bias はコード計算値を使用。
+        LLM レスポンスからは convergence_hours,
+        expected_volatility, trade_caution_level, summary
+        のみ取得する。
 
         Args:
             data: LLMレスポンスdict
+            surprise_score: コード計算済みサプライズ
+            direction_bias: コード計算済み方向バイアス
 
         Returns:
             dict: バリデーション済み結果
@@ -461,12 +600,8 @@ summary: 分析要約。日本語200文字以内"""
             caution_val = max(0, min(2, int(caution)))
 
         return {
-            "surprise_score": self._clip_score(
-                data.get("surprise_score")
-            ),
-            "direction_bias": self._clip_score(
-                data.get("direction_bias")
-            ),
+            "surprise_score": surprise_score,
+            "direction_bias": direction_bias,
             "convergence_hours": self._clip(
                 data.get("convergence_hours"),
                 0.5,
@@ -494,8 +629,6 @@ summary: 分析要約。日本語200文字以内"""
             dict: デフォルト値辞書
         """
         return {
-            "surprise_score": 0.0,
-            "direction_bias": 0.0,
             "convergence_hours": 0.0,
             "expected_volatility": 1.0,
             "trade_caution_level": 0,
@@ -547,26 +680,25 @@ summary: 分析要約。日本語200文字以内"""
         }
 
     @staticmethod
-    def _low_impact_result(event: EconomicEvent) -> dict:
+    def _low_impact_result(
+        surprise_score: float,
+        direction_bias: float,
+    ) -> dict:
         """LOWインパクトイベントのデフォルト結果
 
-        サプライズ率から簡易計算。LLMスキップ。
+        コード計算済みの surprise_score / direction_bias を
+        使用。LLMスキップ。
 
         Args:
-            event: イベント
+            surprise_score: コード計算済みサプライズ
+            direction_bias: コード計算済み方向バイアス
 
         Returns:
             dict: 計算結果辞書
         """
-        surprise = event.surprise_magnitude
-        score = 0.0
-        if surprise is not None:
-            # サプライズ率を[-1, 1]にクリップ
-            score = max(-1.0, min(1.0, surprise))
-
         return {
-            "surprise_score": score,
-            "direction_bias": score * 0.3,
+            "surprise_score": surprise_score,
+            "direction_bias": direction_bias,
             "convergence_hours": 1.0,
             "expected_volatility": 0.5,
             "trade_caution_level": 0,
