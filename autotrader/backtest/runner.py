@@ -2413,6 +2413,343 @@ class BacktestRunner:
             )
             _log.warning(msg)
 
+    # ===================================================================
+    # V2 Trading Engine バックテスト
+    # ===================================================================
+
+    def run_v2(
+        self,
+        start_year: int,
+        end_year: int,
+        v2_config: "V2BotConfig | None" = None,
+        period_start: datetime | None = None,
+        period_end: datetime | None = None,
+        sequential: bool = True,
+    ) -> "BacktestResult":
+        """V2エンジンでバックテスト実行。
+
+        市場構造状態マシンベースのV2TradeBot を使用。
+        V1のコードには一切影響しない独立パス。
+
+        Args:
+            start_year: 開始年。
+            end_year: 終了年。
+            v2_config: V2ボット設定。Noneでデフォルト。
+            period_start: 日単位開始日時（Noneで年始）。
+            period_end: 日単位終了日時（Noneで年末）。
+            sequential: シーケンシャル実行。
+
+        Returns:
+            BacktestResult: バックテスト結果。
+        """
+        from autotrader.decision.v2.config import V2BotConfig
+
+        if self._h1_df is None:
+            self.load_data()
+
+        cfg = v2_config or V2BotConfig()
+        years = list(range(start_year, end_year + 1))
+
+        # V2はH1/H4/D1のみ使用
+        market_data = self._load_all_timeframes(
+            include_m1=False,
+            needed_years=years,
+        )
+
+        # シミュレーター設定
+        _pip_unit = (
+            0.01
+            if "JPY" in self.config.symbol.upper()
+            else 0.0001
+        )
+        sim_config = SimulatorConfig(
+            initial_balance=self.config.initial_balance,
+            spread_pips=self.config.spread_pips,
+            slippage_pips=self.config.slippage_pips,
+            pip_value=self.config.pip_value,
+            max_positions=1,
+            default_volume=1.0,
+            use_position_manager=False,
+            use_dynamic_lot=True,
+            pip_unit=_pip_unit,
+            commission_per_lot=(
+                self.config.commission_per_lot
+            ),
+        )
+
+        self._emitter.emit_backtest_start(
+            start_year=start_year,
+            end_year=end_year,
+            config={"engine": "v2", "timeframes": ["H1", "H4", "D1"]},
+        )
+
+        yearly_results: list[dict[str, Any]] = []
+        for year in years:
+            yr = self._run_v2_year(
+                cfg, sim_config, year, market_data,
+                period_start=period_start,
+                period_end=period_end,
+            )
+            if yr is not None:
+                yearly_results.append(yr)
+
+        return self._assemble_result(
+            yearly_results, start_year, end_year,
+        )
+
+    def _run_v2_year(
+        self,
+        v2_config: "V2BotConfig",
+        sim_config: SimulatorConfig,
+        year: int,
+        market_data: dict[str, pd.DataFrame],
+        period_start: datetime | None = None,
+        period_end: datetime | None = None,
+    ) -> dict[str, Any] | None:
+        """V2エンジンで1年分のバックテスト実行。
+
+        Args:
+            v2_config: V2ボット設定。
+            sim_config: シミュレーター設定。
+            year: 対象年。
+            market_data: 全時間足データ。
+            period_start: 日単位開始日時。
+            period_end: 日単位終了日時。
+
+        Returns:
+            年別結果辞書。データ不足時None。
+        """
+        from autotrader.decision.v2.config import (
+            V2BotConfig,
+        )
+        from autotrader.decision.v2.trade_bot import (
+            V2TradeBot,
+        )
+
+        _log = logging.getLogger(__name__)
+
+        # 年ごとに fresh なbotを生成
+        bot = V2TradeBot(v2_config)
+        bot.update_equity(sim_config.initial_balance)
+
+        # 年単位データにプリコンピュート適用
+        year_data = self._precompute_v2_data(
+            market_data, year,
+        )
+        bot.set_market_data(year_data)
+
+        # 期間設定
+        start_date = datetime(year, 1, 1)
+        end_date = datetime(year + 1, 1, 1)
+        if period_start is not None:
+            start_date = max(start_date, period_start)
+        if period_end is not None:
+            end_date = min(end_date, period_end)
+        if start_date >= end_date:
+            return None
+
+        # H1を基準時間足として使用
+        if self._h1_df is None:
+            return None
+        df = self._h1_df
+        period_df = df[
+            (df["time"] >= start_date)
+            & (df["time"] < end_date)
+        ].reset_index(drop=True)
+
+        if period_df.empty:
+            return None
+
+        _log.info(
+            "[V2] %d年: H1 %d行",
+            year, len(period_df),
+        )
+
+        simulator = TradeSimulator(config=sim_config)
+        _pos_evt_logger = PositionEventLogger()
+        simulator.set_position_event_logger(
+            _pos_evt_logger,
+        )
+
+        # 月別トラッキング
+        _monthly_results: list[dict[str, Any]] = []
+        current_month = None
+        month_start_balance = sim_config.initial_balance
+        month_trades = 0
+
+        winning_trades = 0
+        losing_trades = 0
+
+        arrays = CandleArrays.from_dataframe(period_df)
+        tf = Timeframe.H1
+
+        for idx in range(arrays.n_rows):
+            candle = arrays.get_candle(
+                idx, self.config.symbol, tf,
+            )
+            candle_time = arrays.get_time(idx)
+            current_time = pd.Timestamp(candle_time)
+
+            # 月変わり検出
+            candle_month = (
+                candle_time.year,
+                candle_time.month,
+            )
+            if current_month is None:
+                current_month = candle_month
+                month_start_balance = (
+                    simulator.state.balance
+                )
+            elif candle_month != current_month:
+                m_pnl = (
+                    simulator.state.balance
+                    - month_start_balance
+                )
+                m_ret = m_pnl / month_start_balance * 100
+                _monthly_results.append({
+                    "year": current_month[0],
+                    "month": current_month[1],
+                    "trades": month_trades,
+                    "pnl": m_pnl,
+                    "return_pct": m_ret,
+                })
+                current_month = candle_month
+                month_start_balance = (
+                    simulator.state.balance
+                )
+                month_trades = 0
+
+            # V2シグナル生成
+            signal = bot.generate_signal(
+                current_time, candle,
+            )
+
+            prev_trade_count = len(
+                simulator.get_closed_trades(),
+            )
+
+            # シミュレーター更新
+            simulator.update(candle, signal)
+
+            # 新規クローズ検出 → botの状態更新
+            new_trades = simulator.get_closed_trades()[
+                prev_trade_count:
+            ]
+            for trade in new_trades:
+                pnl_pips = trade.profit_loss_pips or 0.0
+                bot.update_trade_result(pnl_pips)
+                month_trades += 1
+                if pnl_pips >= 0:
+                    winning_trades += 1
+                else:
+                    losing_trades += 1
+
+            # エクイティ同期
+            bot.update_equity(simulator.state.balance)
+
+        # 最終月の結果
+        if current_month is not None:
+            m_pnl = (
+                simulator.state.balance
+                - month_start_balance
+            )
+            m_ret = m_pnl / month_start_balance * 100
+            _monthly_results.append({
+                "year": current_month[0],
+                "month": current_month[1],
+                "trades": month_trades,
+                "pnl": m_pnl,
+                "return_pct": m_ret,
+            })
+
+        closed = simulator.get_closed_trades()
+        balance = simulator.state.balance
+        pnl = balance - sim_config.initial_balance
+        pnl_pct = pnl / sim_config.initial_balance * 100
+
+        return {
+            "year": year,
+            "trades": closed,
+            "pnl": pnl,
+            "pnl_pct": pnl_pct,
+            "balance": balance,
+            "winning_trades": winning_trades,
+            "losing_trades": losing_trades,
+            "monthly_results": _monthly_results,
+        }
+
+    def _precompute_v2_data(
+        self,
+        market_data: dict[str, pd.DataFrame],
+        year: int,
+    ) -> dict[str, pd.DataFrame]:
+        """V2用にデータをプリコンピュート。
+
+        H1/H4/D1データに対してPrecomputeEngine +
+        SMC指標を事前計算する。
+        """
+        from autotrader.calculator.precompute import (
+            PrecomputeEngine,
+        )
+
+        pe = PrecomputeEngine()
+        result: dict[str, pd.DataFrame] = {}
+
+        # 年フィルタ（前年分もウォームアップ用に含む）
+        warmup_start = datetime(year - 1, 7, 1)
+        end_dt = datetime(year + 1, 1, 1)
+
+        tf_map = {"H1": Timeframe.H1, "H4": Timeframe.H4, "D1": Timeframe.D1}
+
+        for tf_str, tf_enum in tf_map.items():
+            if tf_str not in market_data:
+                continue
+            df = market_data[tf_str]
+            if df.empty:
+                result[tf_str] = df
+                continue
+
+            # 期間フィルタ
+            if "time" in df.columns:
+                mask = (
+                    (df["time"] >= warmup_start)
+                    & (df["time"] < end_dt)
+                )
+                df = df[mask].reset_index(drop=True)
+
+            if df.empty:
+                result[tf_str] = df
+                continue
+
+            # テクニカル + 特徴量
+            precomputed = pe.precompute(
+                df,
+                self.config.symbol,
+                tf_enum,
+                use_cache=False,
+            )
+
+            # SMC指標
+            try:
+                precomputed = pe.compute_smc_indicators(
+                    precomputed,
+                )
+            except Exception as e:
+                logging.getLogger(__name__).warning(
+                    "[V2] %s SMC計算失敗: %s",
+                    tf_str, e,
+                )
+
+            # タイムインデックス設定
+            if "time" in precomputed.columns:
+                precomputed = precomputed.set_index(
+                    "time",
+                )
+
+            result[tf_str] = precomputed
+
+        return result
+
 
 # ---------------------------------------------------------------------------
 # ProcessPool用モジュールレベル関数（picklable）
