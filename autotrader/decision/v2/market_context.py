@@ -189,7 +189,7 @@ def _extract_structure(row: pd.Series) -> StructureState:
     return StructureState(
         trend_state=str(
             _safe_get(row, "trend_state_smc", "CONSOLIDATION")
-        ),
+        ).upper(),
         bos_signal=int(_safe_get(row, "bos_signal", 0)),
         choch_signal=int(_safe_get(row, "choch_signal", 0)),
         bars_since_bos=int(
