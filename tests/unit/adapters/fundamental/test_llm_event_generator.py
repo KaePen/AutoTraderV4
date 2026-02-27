@@ -87,6 +87,182 @@ class TestFilterEvents:
         assert len(result) == 1
 
 
+class TestComputeSurpriseScore:
+    """_compute_surprise_score のテスト"""
+
+    def test_positive_surprise(self) -> None:
+        """正のサプライズ（実績 > 予測）"""
+        # actual=200, forecast=180 -> surprise=20/180≈0.111
+        event = _make_event(actual=200.0, forecast=180.0)
+        score = LLMEventGenerator._compute_surprise_score(
+            event
+        )
+        assert 0.10 < score < 0.12
+
+    def test_negative_surprise(self) -> None:
+        """負のサプライズ（実績 < 予測）"""
+        event = _make_event(actual=160.0, forecast=180.0)
+        score = LLMEventGenerator._compute_surprise_score(
+            event
+        )
+        assert score < 0
+
+    def test_no_surprise_data(self) -> None:
+        """実績/予測がない場合 -> 0.0"""
+        event = _make_event(actual=None, forecast=None)
+        score = LLMEventGenerator._compute_surprise_score(
+            event
+        )
+        assert score == 0.0
+
+    def test_clips_to_range(self) -> None:
+        """極端なサプライズもクリップ"""
+        # actual=1000, forecast=100 -> surprise=9.0 -> clip 1.0
+        event = _make_event(actual=1000.0, forecast=100.0)
+        score = LLMEventGenerator._compute_surprise_score(
+            event
+        )
+        assert score == 1.0
+
+    def test_negative_forecast_positive_actual(
+        self,
+    ) -> None:
+        """予測が負・実績が正 -> 正のサプライズ"""
+        event = _make_event(actual=0.5, forecast=-0.5)
+        score = LLMEventGenerator._compute_surprise_score(
+            event
+        )
+        # (0.5 - (-0.5)) / abs(-0.5) = 2.0 -> clip 1.0
+        assert score == 1.0
+
+    def test_negative_forecast_worse_actual(self) -> None:
+        """予測が負・実績がさらに悪い -> 負のサプライズ"""
+        event = _make_event(actual=-1.0, forecast=-0.5)
+        score = LLMEventGenerator._compute_surprise_score(
+            event
+        )
+        # (-1.0 - (-0.5)) / abs(-0.5) = -1.0
+        assert score == -1.0
+
+
+class TestComputeDirectionBias:
+    """_compute_direction_bias のテスト"""
+
+    def test_base_currency_positive_surprise(self) -> None:
+        """基軸通貨の正のサプライズ -> 正のバイアス"""
+        # USD指標（base）、実績>予測
+        event = _make_event(
+            currency="USD",
+            impact=ImpactLevel.HIGH,
+            actual=200.0,
+            forecast=180.0,
+        )
+        bias = LLMEventGenerator._compute_direction_bias(
+            event, "USD", "JPY"
+        )
+        # surprise≈0.111, dir=+1, pair=+, scale=0.8
+        assert bias > 0
+
+    def test_quote_currency_positive_surprise(self) -> None:
+        """決済通貨の正のサプライズ -> 負のバイアス"""
+        # JPY指標（quote）、実績>予測
+        event = _make_event(
+            currency="JPY",
+            impact=ImpactLevel.HIGH,
+            actual=200.0,
+            forecast=180.0,
+        )
+        bias = LLMEventGenerator._compute_direction_bias(
+            event, "USD", "JPY"
+        )
+        # JPY強 -> USDJPY下落
+        assert bias < 0
+
+    def test_inverse_indicator(self) -> None:
+        """逆指標（失業率等）: 高い=通貨安"""
+        event = _make_event(
+            currency="USD",
+            event_name="Unemployment Rate",
+            impact=ImpactLevel.HIGH,
+            actual=5.0,
+            forecast=4.0,
+        )
+        bias = LLMEventGenerator._compute_direction_bias(
+            event, "USD", "JPY"
+        )
+        # 失業率上昇 -> USD弱 -> USDJPY下落
+        assert bias < 0
+
+    def test_impact_scaling(self) -> None:
+        """インパクトレベルでスケーリングが変わる"""
+        event_high = _make_event(
+            impact=ImpactLevel.HIGH,
+            actual=200.0,
+            forecast=180.0,
+        )
+        event_low = _make_event(
+            impact=ImpactLevel.LOW,
+            actual=200.0,
+            forecast=180.0,
+        )
+        bias_high = LLMEventGenerator._compute_direction_bias(
+            event_high, "USD", "JPY"
+        )
+        bias_low = LLMEventGenerator._compute_direction_bias(
+            event_low, "USD", "JPY"
+        )
+        # HIGH(0.8) > LOW(0.3)
+        assert abs(bias_high) > abs(bias_low)
+
+    def test_no_surprise_zero_bias(self) -> None:
+        """サプライズなし -> バイアス0"""
+        event = _make_event(actual=None, forecast=None)
+        bias = LLMEventGenerator._compute_direction_bias(
+            event, "USD", "JPY"
+        )
+        assert bias == 0.0
+
+
+class TestGetIndicatorDirection:
+    """_get_indicator_direction のテスト"""
+
+    def test_normal_indicator(self) -> None:
+        """通常指標 -> +1"""
+        assert (
+            LLMEventGenerator._get_indicator_direction(
+                "NFP"
+            )
+            == 1
+        )
+
+    def test_unemployment(self) -> None:
+        """失業率 -> -1"""
+        assert (
+            LLMEventGenerator._get_indicator_direction(
+                "Unemployment Rate"
+            )
+            == -1
+        )
+
+    def test_jobless_claims(self) -> None:
+        """失業保険申請 -> -1"""
+        assert (
+            LLMEventGenerator._get_indicator_direction(
+                "Initial Jobless Claims"
+            )
+            == -1
+        )
+
+    def test_claimant_count(self) -> None:
+        """求職者手当申請 -> -1"""
+        assert (
+            LLMEventGenerator._get_indicator_direction(
+                "Claimant Count Change"
+            )
+            == -1
+        )
+
+
 class TestAnalyzeEvent:
     """_analyze_event のテスト"""
 
@@ -97,11 +273,10 @@ class TestAnalyzeEvent:
         )
 
     def test_high_impact_calls_llm(self) -> None:
-        """HIGHインパクト -> LLM呼び出し"""
+        """HIGHインパクト -> LLM呼び出し+コード計算surprise"""
         event = _make_event(impact=ImpactLevel.HIGH)
+        # LLMはconvergence等のみ返す
         llm_response = {
-            "surprise_score": 0.5,
-            "direction_bias": 0.6,
             "convergence_hours": 48.0,
             "expected_volatility": 1.8,
             "trade_caution_level": 1,
@@ -116,9 +291,40 @@ class TestAnalyzeEvent:
                 "USDJPY", "USD", "JPY", event
             )
         mock.assert_called_once()
-        assert result["surprise_score"] == 0.5
+        # surprise_scoreはコード計算値（≈0.111）
+        assert 0.10 < result["surprise_score"] < 0.12
+        # direction_biasもコード計算値
+        assert result["direction_bias"] > 0
         assert result["event_name"] == "NFP"
         assert result["event_time"] is not None
+        # LLM由来の値
+        assert result["convergence_hours"] == 48.0
+        assert result["expected_volatility"] == 1.8
+
+    def test_high_impact_ignores_llm_surprise(
+        self,
+    ) -> None:
+        """HIGHでLLMがsurprise_scoreを返してもコード計算値を使用"""
+        event = _make_event(impact=ImpactLevel.HIGH)
+        llm_response = {
+            "surprise_score": 0.99,
+            "direction_bias": -0.99,
+            "convergence_hours": 12.0,
+            "expected_volatility": 1.5,
+            "trade_caution_level": 0,
+            "summary": "テスト",
+        }
+        with patch.object(
+            self.gen,
+            "_call_ollama_with_retry",
+            return_value=llm_response,
+        ):
+            result = self.gen._analyze_event(
+                "USDJPY", "USD", "JPY", event
+            )
+        # LLMの0.99ではなくコード計算値（≈0.111）
+        assert result["surprise_score"] < 0.2
+        assert result["direction_bias"] > 0
 
     def test_medium_impact_calls_llm(self) -> None:
         """MEDIUMインパクト -> LLM呼び出し"""
@@ -127,8 +333,6 @@ class TestAnalyzeEvent:
             self.gen,
             "_call_ollama_with_retry",
             return_value={
-                "surprise_score": 0.2,
-                "direction_bias": 0.1,
                 "convergence_hours": 4.0,
                 "expected_volatility": 1.0,
                 "trade_caution_level": 0,
@@ -155,7 +359,7 @@ class TestAnalyzeEvent:
         assert result["convergence_hours"] == 1.0
 
     def test_low_impact_with_surprise(self) -> None:
-        """LOWインパクト + サプライズ -> 簡易計算"""
+        """LOWインパクト + サプライズ -> コード計算"""
         # actual=200, forecast=180 -> surprise=0.111
         event = _make_event(
             impact=ImpactLevel.LOW,
@@ -229,7 +433,6 @@ class TestAnalyzeEvent:
         )
         assert result["currency"] == "USD"
         assert result["event_name"] == "NFP"
-        assert result["impact"] == "high" or True
         assert result["actual"] == 200.0
         assert result["forecast"] == 180.0
 
@@ -241,18 +444,31 @@ class TestBuildEventResult:
         """テスト用インスタンス"""
         self.gen = LLMEventGenerator()
 
-    def test_clips_scores(self) -> None:
-        """スコアクリッピング"""
+    def test_uses_code_computed_scores(self) -> None:
+        """コード計算値がそのまま使われる"""
         data = {
-            "surprise_score": 1.5,
-            "direction_bias": -2.0,
+            "convergence_hours": 12.0,
+            "expected_volatility": 1.5,
+            "trade_caution_level": 1,
+            "summary": "テスト",
+        }
+        result = self.gen._build_event_result(
+            data, 0.5, -0.3
+        )
+        assert result["surprise_score"] == 0.5
+        assert result["direction_bias"] == -0.3
+        assert result["convergence_hours"] == 12.0
+
+    def test_clips_llm_fields(self) -> None:
+        """LLM由来フィールドのクリッピング"""
+        data = {
             "expected_volatility": 3.0,
             "convergence_hours": 100.0,
             "trade_caution_level": 5,
         }
-        result = self.gen._build_event_result(data)
-        assert result["surprise_score"] == 1.0
-        assert result["direction_bias"] == -1.0
+        result = self.gen._build_event_result(
+            data, 0.0, 0.0
+        )
         assert result["expected_volatility"] == 2.0
         assert result["convergence_hours"] == 72.0
         assert result["trade_caution_level"] == 2
@@ -260,14 +476,18 @@ class TestBuildEventResult:
     def test_convergence_hours_lower_bound(self) -> None:
         """convergence_hours < 0.5 -> 0.5にクリップ"""
         data = {"convergence_hours": 0.3}
-        result = self.gen._build_event_result(data)
+        result = self.gen._build_event_result(
+            data, 0.0, 0.0
+        )
         assert result["convergence_hours"] == 0.5
 
     def test_missing_fields_default(self) -> None:
         """欠落フィールド -> デフォルト"""
-        result = self.gen._build_event_result({})
-        assert result["surprise_score"] == 0.0
-        assert result["direction_bias"] == 0.0
+        result = self.gen._build_event_result(
+            {}, 0.1, -0.2
+        )
+        assert result["surprise_score"] == 0.1
+        assert result["direction_bias"] == -0.2
         assert result["expected_volatility"] == 1.0
         assert result["convergence_hours"] == 0.0
         assert result["trade_caution_level"] == 0
@@ -285,14 +505,37 @@ class TestBuildEventPrompt:
         """プロンプト構造検証"""
         event = _make_event()
         prompt = self.gen._build_event_prompt(
-            "USDJPY", "USD", "JPY", event
+            "USDJPY", "USD", "JPY", event,
+            0.111, 0.089,
         )
         assert "USDJPY" in prompt
         assert "NFP" in prompt
-        assert "surprise_score" in prompt
         assert "convergence_hours" in prompt
         assert "200.00" in prompt
         assert "180.00" in prompt
+
+    def test_no_surprise_score_in_json_template(
+        self,
+    ) -> None:
+        """JSONテンプレートにsurprise_scoreがない"""
+        event = _make_event()
+        prompt = self.gen._build_event_prompt(
+            "USDJPY", "USD", "JPY", event,
+            0.111, 0.089,
+        )
+        # JSONテンプレート部分にはsurprise_scoreがない
+        assert '"surprise_score"' not in prompt
+        assert '"direction_bias"' not in prompt
+
+    def test_contains_computed_values(self) -> None:
+        """コード計算済み参考値が含まれる"""
+        event = _make_event()
+        prompt = self.gen._build_event_prompt(
+            "USDJPY", "USD", "JPY", event,
+            0.111, 0.089,
+        )
+        assert "+0.1110" in prompt
+        assert "+0.0890" in prompt
 
 
 class TestGenerateForSymbolYear:
@@ -333,8 +576,6 @@ class TestGenerateForSymbolYear:
             gen,
             "_call_ollama_with_retry",
             return_value={
-                "surprise_score": 0.3,
-                "direction_bias": 0.4,
                 "convergence_hours": 12.0,
                 "expected_volatility": 1.2,
                 "trade_caution_level": 0,
@@ -460,8 +701,6 @@ class TestGenerateForSymbolYear:
             gen,
             "_call_ollama_with_retry",
             return_value={
-                "surprise_score": 0.2,
-                "direction_bias": 0.1,
                 "convergence_hours": 4.0,
                 "expected_volatility": 1.0,
                 "trade_caution_level": 0,
