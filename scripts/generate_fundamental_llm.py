@@ -140,6 +140,14 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="処理件数確認のみ（LLM呼び出しなし）",
     )
+    parent.add_argument(
+        "--deterministic",
+        action="store_true",
+        help=(
+            "LLMを使わず決定論的ヒューリスティックで"
+            "全フィールドを計算（高速・Ollama不要）"
+        ),
+    )
 
     subparsers = parser.add_subparsers(
         dest="command", required=True
@@ -475,19 +483,21 @@ def run_events(args: argparse.Namespace) -> int:
     Returns:
         int: 終了コード
     """
-    from autotrader.adapters.fundamental.llm_event_generator import (  # noqa: PLC0415
-        LLMEventGenerator,
-    )
-
     years = _resolve_years(args)
     symbols = args.symbol
     input_dir = Path(args.input_dir)
     output_dir = Path(args.output_dir)
+    deterministic = getattr(args, "deterministic", False)
 
+    mode_label = (
+        "決定論的（LLM不使用）"
+        if deterministic
+        else f"LLM ({args.model})"
+    )
     logger.info(
         f"[Events] シンボル: {symbols}\n"
         f"  年: {years[0]}〜{years[-1]} ({len(years)}年)\n"
-        f"  モデル: {args.model}"
+        f"  モード: {mode_label}"
     )
 
     if args.dry_run:
@@ -505,12 +515,24 @@ def run_events(args: argparse.Namespace) -> int:
             logger.info(f"  {csv_path}: {status}")
         return 0
 
-    if not check_ollama_available(args.host, args.model):
-        return 1
+    if deterministic:
+        from autotrader.adapters.fundamental.deterministic_event_analyzer import (  # noqa: PLC0415, E501
+            DeterministicEventAnalyzer,
+        )
 
-    generator = LLMEventGenerator(
-        ollama_settings=_make_settings(args)
-    )
+        generator = DeterministicEventAnalyzer()
+    else:
+        from autotrader.adapters.fundamental.llm_event_generator import (  # noqa: PLC0415, E501
+            LLMEventGenerator,
+        )
+
+        if not check_ollama_available(
+            args.host, args.model
+        ):
+            return 1
+        generator = LLMEventGenerator(
+            ollama_settings=_make_settings(args)
+        )
 
     error_count = 0
     success_count = 0
