@@ -18,6 +18,7 @@ from autotrader.web.auth import router as auth_router
 from autotrader.web.config import get_web_settings
 from autotrader.web.middleware import (
     HTTPSRedirectMiddleware,
+    SecurityHeadersMiddleware,
     configure_rate_limit,
 )
 from autotrader.web.routers import dashboard, signals, positions, trades
@@ -233,6 +234,9 @@ def create_app() -> FastAPI:
 
     # HTTPSリダイレクト（本番環境用）
     app.add_middleware(HTTPSRedirectMiddleware)
+
+    # セキュリティヘッダー
+    app.add_middleware(SecurityHeadersMiddleware)
 
     # Rate Limiting
     configure_rate_limit(app)
