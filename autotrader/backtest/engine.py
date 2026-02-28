@@ -193,9 +193,8 @@ class BacktestEngine:
             config=soft_guard_config or SoftGuardConfig()
         )
 
-        self.signal_generator = SignalGenerator(
-            min_strength_threshold=config.min_confidence,
-        )
+        # signal_generator は外部から注入（Protocol対応）
+        self.signal_generator: SignalGeneratorProtocol | None = None
 
         simulator_config = SimulatorConfig(
             initial_balance=config.initial_balance,
@@ -284,7 +283,14 @@ class BacktestEngine:
 
             # シグナル生成（指標データはrowから取得が必要）
             row = df_with_indicators.iloc[i]
-            signal = self._generate_signal(row, candle)
+            # Protocol の generate_signal を呼び出し
+            signal = None
+            if self.signal_generator:
+                signal = self.signal_generator.generate_signal(
+                    current_time=candle.time,
+                    candle=candle,
+                    data_dict=None,
+                )
 
             # シミュレーター処理
             self.simulator.process_candle(candle, signal)
@@ -316,74 +322,6 @@ class BacktestEngine:
             execution_time=execution_time,
         )
 
-    def _generate_signal(
-        self,
-        row: pd.Series,
-        candle: Candle,
-    ) -> Signal | None:
-        """シグナルを生成
-
-        Args:
-            row: データ行
-            candle: 足データ
-
-        Returns:
-            Signal | None: シグナル
-        """
-        from uuid import uuid4
-
-        # 指標データをpd.Seriesに変換
-        indicators = pd.Series(self._extract_indicators(row))
-
-        # シグナル生成（SignalResultを返す）
-        signal_result = self.signal_generator.generate(indicators)
-
-        if signal_result.signal_type == SignalType.HOLD:
-            return None
-
-        self._signals_generated += 1
-
-        # 強度から確度を計算
-        confidence = max(
-            signal_result.strength.buy_strength,
-            signal_result.strength.sell_strength,
-        )
-
-        # ハードガードチェック
-        context = self._build_context(candle, self._extract_indicators(row))
-        hard_result = self.hard_guard.check(context)
-
-        if not hard_result.is_allowed:
-            self._signals_filtered += 1
-            return None
-
-        # ソフトガードチェック（ペナルティ適用）
-        soft_result = self.soft_guard.check(context)
-        adjusted_confidence = confidence * (1 - soft_result.total_penalty)
-
-        if adjusted_confidence < self.config.min_confidence:
-            self._signals_filtered += 1
-            return None
-
-        # SL/TP設定
-        stop_loss = self._calculate_stop_loss(
-            signal_result.signal_type, candle.close
-        )
-        take_profit = self._calculate_take_profit(
-            signal_result.signal_type, candle.close
-        )
-
-        return Signal(
-            signal_id=str(uuid4()),
-            symbol=self.config.symbol,
-            timeframe=self.config.timeframe,
-            signal_type=signal_result.signal_type,
-            confidence=adjusted_confidence,
-            stop_loss=stop_loss,
-            take_profit=take_profit,
-            reasoning=signal_result.reasoning,
-            created_at=candle.time,
-        )
 
     def _row_to_candle(self, row: pd.Series) -> Candle:
         """データ行をCandleに変換
