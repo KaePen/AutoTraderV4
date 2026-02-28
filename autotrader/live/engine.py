@@ -136,6 +136,10 @@ class LiveTradingEngine:
         self._fundamental_memory = None
         self._fundamental_collector = None
         self._morning_update_done_date: datetime | None = None
+        # RSSニュース関連
+        self._rss_collector = None
+        self._news_analyzer = None
+        self._news_buffer: dict[str, list] = {}
         if config.fundamental_config.enabled:
             self._init_fundamental(config.fundamental_config)
 
@@ -451,6 +455,9 @@ class LiveTradingEngine:
         # 既存ポジション同期
         await self._sync_positions()
 
+        # ファンダメンタル収集タスク起動
+        await self._start_fundamental_tasks()
+
         # メインループ開始
         self._running = True
         self._task = asyncio.create_task(self._main_loop())
@@ -463,6 +470,7 @@ class LiveTradingEngine:
 
     async def stop(self) -> None:
         """エンジン停止"""
+        await self._stop_fundamental_tasks()
         self._running = False
 
         # ティック監視中ならキャンセル
@@ -585,6 +593,37 @@ class LiveTradingEngine:
                 return
         else:
             fundamental_ctx = None
+
+        # [NEWS] ニュースセンチメントをブレンド
+        if (
+            fundamental_ctx is not None
+            and self._news_analyzer is not None
+        ):
+            news_items = self._news_buffer.get(
+                self._active_symbol, []
+            )
+            if news_items:
+                sentiment = await self._news_analyzer.analyze(
+                    news_items, self._active_symbol
+                )
+                fundamental_ctx = self._blend_news_sentiment(
+                    fundamental_ctx, sentiment
+                )
+                # 分析済みバッファをクリア
+                self._news_buffer[self._active_symbol] = []
+            else:
+                # バッファ空でもキャッシュから取得
+                sentiment = (
+                    self._news_analyzer.get_current_sentiment(
+                        self._active_symbol
+                    )
+                )
+                if sentiment != 0.0:
+                    fundamental_ctx = (
+                        self._blend_news_sentiment(
+                            fundamental_ctx, sentiment
+                        )
+                    )
 
         # 4. シグナル生成
         current_time = pd.Timestamp.now(tz="UTC")
@@ -2269,6 +2308,35 @@ class LiveTradingEngine:
                 ),
                 analyzer=analyzer,
             )
+            # RSSニュース収集・分析（オプション）
+            if cfg.use_rss_news:
+                from autotrader.adapters.fundamental.rss_collector import (
+                    RSSCollector,
+                )
+                from autotrader.adapters.fundamental.news_llm_analyzer import (
+                    NewsLLMAnalyzer,
+                )
+
+                # シンボルから通貨コードを抽出
+                currencies = [
+                    self._active_symbol[:3],
+                    self._active_symbol[3:6],
+                ]
+                self._rss_collector = RSSCollector(
+                    currencies=currencies,
+                    poll_interval=(
+                        cfg.rss_poll_interval_minutes * 60
+                    ),
+                )
+                self._news_analyzer = NewsLLMAnalyzer(
+                    sentiment_ttl_hours=(
+                        cfg.rss_sentiment_ttl_hours
+                    ),
+                )
+                logger.info(
+                    "[Fundamental] RSSニュース機能初期化完了"
+                )
+
             logger.info(
                 "[Fundamental] ファンダメンタル機能初期化完了"
             )
@@ -2286,11 +2354,79 @@ class LiveTradingEngine:
             logger.info(
                 "[Fundamental] 収集タスク起動"
             )
+        if self._rss_collector:
+            await self._rss_collector.start(
+                callback=self._on_rss_news
+            )
+            logger.info(
+                "[Fundamental] RSSポーリング起動"
+            )
 
     async def _stop_fundamental_tasks(self) -> None:
         """ファンダメンタル収集タスクを停止"""
         if self._fundamental_collector:
             await self._fundamental_collector.stop()
+        if self._rss_collector:
+            await self._rss_collector.stop()
+        self._news_buffer.clear()
+
+    async def _on_rss_news(self, news_item) -> None:
+        """RSSニュース受信コールバック
+
+        受信したNewsItemをシンボル別バッファに蓄積する。
+        バッファは _tick() 内でLLM分析に使用後クリアされる。
+
+        Args:
+            news_item: 受信したNewsItem
+        """
+        symbol = self._active_symbol
+        base = symbol[:3].upper()
+        quote = symbol[3:6].upper()
+        if (
+            base in news_item.currencies
+            or quote in news_item.currencies
+        ):
+            if symbol not in self._news_buffer:
+                self._news_buffer[symbol] = []
+            self._news_buffer[symbol].append(news_item)
+            # バッファ上限（メモリリーク防止）
+            _MAX_BUFFER = 100
+            if len(self._news_buffer[symbol]) > _MAX_BUFFER:
+                self._news_buffer[symbol] = (
+                    self._news_buffer[symbol][-_MAX_BUFFER:]
+                )
+
+    @staticmethod
+    def _blend_news_sentiment(
+        ctx,
+        sentiment: float,
+        weight: float = 0.15,
+    ):
+        """ニュースセンチメントを FundamentalContext にブレンド
+
+        バックテストの BacktestFundamentalProvider
+        ._merge_news_into_context() と同じ重み（0.15）で
+        direction_bias にブレンドする。
+
+        Args:
+            ctx: FundamentalContext
+            sentiment: センチメントスコア (-1.0~+1.0)
+            weight: ブレンド重み（デフォルト0.15）
+
+        Returns:
+            FundamentalContext: ブレンド済みコンテキスト
+        """
+        from dataclasses import replace
+
+        blended_bias = (
+            ctx.direction_bias * (1.0 - weight)
+            + sentiment * weight
+        )
+        return replace(
+            ctx,
+            direction_bias=blended_bias,
+            sentiment_score=sentiment,
+        )
 
     async def _run_morning_update(self) -> None:
         """毎朝のLLM市場観更新
