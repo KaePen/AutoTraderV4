@@ -41,6 +41,7 @@ from .mode_aware_consensus import (
 from .mode_selector import ModeSelectorConfig, TradingModeSelector, TradingPlan
 from .position_sizer import PositionSizer, PositionSizerConfig
 from .signal_consolidator import ConsolidatedSignal
+from .directional_edge import DirectionalEdgeAssessor
 from .timeframe_evaluator import TimeframeEvaluator, TimeframeSignal
 from .timeframe_router import TimeframeRouter
 
@@ -196,6 +197,10 @@ class UnifiedTradeBot:
     ポジションサイジングを統合。
     """
 
+    # RANGEフィルタ用定数
+    _LOW_VOL_SCORE_MARGIN: float = 1.5
+    _WEAK_TREND_THRESHOLD: float = 0.3
+
     def __init__(
         self,
         config: UnifiedBotConfig | None = None,
@@ -303,9 +308,6 @@ class UnifiedTradeBot:
         # BCA: 方向性エッジ評価器（オプション）
         self._edge_assessor = None
         if self.config.bca_enabled:
-            from autotrader.decision.unified.directional_edge import (
-                DirectionalEdgeAssessor,
-            )
             self._edge_assessor = DirectionalEdgeAssessor(
                 min_edge=self.config.bca_min_edge,
                 penalty_scale=self.config.bca_penalty_scale,
@@ -704,9 +706,8 @@ class UnifiedTradeBot:
         # BCA: 方向性エッジ評価
         _bca_penalty = 0.0
         if self._edge_assessor is not None:
-            _tf_set = self.tf_router.route(plan)
             _edge_result = self._edge_assessor.assess(
-                consensus, tf_signals, _tf_set,
+                consensus, tf_signals, tf_set,
             )
             if not _edge_result.passed:
                 return self._hold_with_analysis(
@@ -1292,6 +1293,30 @@ class UnifiedTradeBot:
             return 0.0
         return sum(alignment_scores) / len(alignment_scores)
 
+    def _get_bb_width(
+        self,
+        plan: TradingPlan,
+        current_time: pd.Timestamp,
+    ) -> float | None:
+        """primary_tfのbb_width取得（None/NaN時はNone）
+
+        Args:
+            plan: トレーディングプラン
+            current_time: 現在時刻
+
+        Returns:
+            float | None: bb_width値。取得不可時はNone
+        """
+        row = self._get_current_row(
+            plan.primary_tf, current_time,
+        )
+        if row is None:
+            return None
+        val = row.get("bb_width")
+        if val is None or pd.isna(val):
+            return None
+        return float(val)
+
     def _check_range_regime_filter(
         self,
         regime_result: RegimeResult,
@@ -1344,11 +1369,16 @@ class UnifiedTradeBot:
         # 1. LOW_VOLレジーム（スプレッド影響大）
         if regime == MarketRegime.LOW_VOL:
             _margin = (
-                consensus.threshold + 1.5 - consensus.score
+                consensus.threshold
+                + self._LOW_VOL_SCORE_MARGIN
+                - consensus.score
             )
             if _margin > 0:
                 # スコア余裕度に応じて0.0-1.0
-                _s = min(_margin / 1.5, 1.0)
+                _s = min(
+                    _margin / self._LOW_VOL_SCORE_MARGIN,
+                    1.0,
+                )
                 score += _s
                 reasons.append(
                     f"LOW_VOL({_s:.2f})"
@@ -1357,10 +1387,15 @@ class UnifiedTradeBot:
         # 2. RANGE + トレンド弱（方向感欠如）
         if (
             regime == MarketRegime.RANGE
-            and regime_result.trend_strength < 0.3
+            and regime_result.trend_strength
+            < self._WEAK_TREND_THRESHOLD
         ):
-            # trend_strength=0で1.0、0.3で0.0
-            _s = 1.0 - regime_result.trend_strength / 0.3
+            # trend_strength=0で1.0、閾値で0.0
+            _s = (
+                1.0
+                - regime_result.trend_strength
+                / self._WEAK_TREND_THRESHOLD
+            )
             score += _s
             reasons.append(
                 f"弱トレンド({_s:.2f},"
@@ -1372,27 +1407,21 @@ class UnifiedTradeBot:
             regime == MarketRegime.RANGE
             and sg_result.total_penalty > 0
         ):
-            _primary_row = self._get_current_row(
-                plan.primary_tf, current_time,
+            _bb_val = self._get_bb_width(
+                plan, current_time,
             )
-            if _primary_row is not None:
-                _bb_w = _primary_row.get("bb_width")
-                if (
-                    _bb_w is not None
-                    and not pd.isna(_bb_w)
-                ):
-                    _bb_val = float(_bb_w)
-                    _thr = self.config.range_day_bbw_threshold
-                    if _bb_val < _thr:
-                        # BB幅がthreshold比でどれだけ小さいか
-                        _s = min(
-                            (_thr - _bb_val) / _thr, 1.0,
-                        )
-                        score += _s
-                        reasons.append(
-                            f"低BBW({_s:.2f},"
-                            f"bbw={_bb_val:.4f})"
-                        )
+            if _bb_val is not None:
+                _thr = self.config.range_day_bbw_threshold
+                if _bb_val < _thr:
+                    # BB幅がthreshold比でどれだけ小さいか
+                    _s = min(
+                        (_thr - _bb_val) / _thr, 1.0,
+                    )
+                    score += _s
+                    reasons.append(
+                        f"低BBW({_s:.2f},"
+                        f"bbw={_bb_val:.4f})"
+                    )
 
         # 4. Weak Hours（JST 18-21 = UTC 9-12）
         if (
@@ -1469,21 +1498,23 @@ class UnifiedTradeBot:
             str | None: ブロック理由。Noneなら通過
         """
         # LOW_VOL制限
+        _lv_margin = self._LOW_VOL_SCORE_MARGIN
         if (
             regime_result.regime == MarketRegime.LOW_VOL
             and consensus.score
-            < consensus.threshold + 1.5
+            < consensus.threshold + _lv_margin
         ):
             return (
                 f"LOW_VOL制限: score={consensus.score:.2f}"
-                f" < threshold+1.5="
-                f"{consensus.threshold + 1.5:.2f}"
+                f" < threshold+{_lv_margin}="
+                f"{consensus.threshold + _lv_margin:.2f}"
             )
 
         # RANGE + トレンド弱制限
         if (
             regime_result.regime == MarketRegime.RANGE
-            and regime_result.trend_strength < 0.3
+            and regime_result.trend_strength
+            < self._WEAK_TREND_THRESHOLD
         ):
             return (
                 f"RANGE制限: trend_strength="
@@ -1495,26 +1526,23 @@ class UnifiedTradeBot:
             regime_result.regime == MarketRegime.RANGE
             and sg_result.total_penalty > 0
         ):
-            _primary_row = self._get_current_row(
-                plan.primary_tf, current_time,
+            _bb_val = self._get_bb_width(
+                plan, current_time,
             )
-            if _primary_row is not None:
-                _bb_w = _primary_row.get("bb_width")
-                if (
-                    _bb_w is not None
-                    and not pd.isna(_bb_w)
-                    and float(_bb_w)
-                    < self.config.range_day_bbw_threshold
-                ):
-                    return (
-                        f"RANGE低ボラ制限: "
-                        f"penalty="
-                        f"{sg_result.total_penalty:.2f}"
-                        f", bb_width="
-                        f"{float(_bb_w):.4f}"
-                        f"<"
-                        f"{self.config.range_day_bbw_threshold}"
-                    )
+            if (
+                _bb_val is not None
+                and _bb_val
+                < self.config.range_day_bbw_threshold
+            ):
+                return (
+                    f"RANGE低ボラ制限: "
+                    f"penalty="
+                    f"{sg_result.total_penalty:.2f}"
+                    f", bb_width="
+                    f"{_bb_val:.4f}"
+                    f"<"
+                    f"{self.config.range_day_bbw_threshold}"
+                )
 
         # Weak Hours RANGEフィルター
         if (
