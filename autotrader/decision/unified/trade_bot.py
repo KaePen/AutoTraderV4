@@ -1731,7 +1731,7 @@ class UnifiedTradeBot:
         direction: SignalType,
         htf_tfs: list[str] | None = None,
     ) -> bool:
-        """上位足トレンド一致チェック
+        """上位足トレンド一致チェック + RSIフィルタ
 
         Args:
             current_time: 現在時刻
@@ -1739,10 +1739,27 @@ class UnifiedTradeBot:
             htf_tfs: HTFリスト（Noneの場合configデフォルト）
 
         Returns:
-            bool: トレンドが一致しているか
+            bool: トレンドが一致し、RSIが極端でないか
         """
         aligned_score = 0.0
         check_tfs = htf_tfs or list(self.config.htf_alignment_tfs)
+
+
+        # プライマリTF（最初のHTF）でRSIチェック
+        primary_row = None
+        if check_tfs:
+            primary_row = self._get_current_row(check_tfs[0], current_time)
+
+        # RSIフィルタ（プライマリTFで判定）
+        if primary_row is not None:
+            rsi = primary_row.get("rsi_14")
+            if rsi is not None and not pd.isna(rsi):
+                # 買いシグナルで過買（RSI > 70）は回避
+                if direction == SignalType.BUY and rsi > 70:
+                    return False
+                # 売りシグナルで過売（RSI < 30）は回避
+                if direction == SignalType.SELL and rsi < 30:
+                    return False
 
         for tf in check_tfs:
             row = self._get_current_row(tf, current_time)
@@ -1790,21 +1807,6 @@ class UnifiedTradeBot:
         # 閾値0.8（緩和）
         return aligned_score >= 0.8
 
-  # データなしは通過
-
-        rsi = row.get("rsi_14")
-        if rsi is None or pd.isna(rsi):
-            return True
-
-        # 買いシグナルで過買（RSI > 70）は回避
-        if direction == SignalType.BUY and rsi > 70:
-            return False
-
-        # 売りシグナルで過売（RSI < 30）は回避
-        if direction == SignalType.SELL and rsi < 30:
-            return False
-
-        return True
 
     def on_trade_executed(
         self,
