@@ -14,7 +14,12 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 
+from autotrader.web.auth import router as auth_router
 from autotrader.web.config import get_web_settings
+from autotrader.web.middleware import (
+    HTTPSRedirectMiddleware,
+    configure_rate_limit,
+)
 from autotrader.web.routers import dashboard, signals, positions, trades
 from autotrader.web.routers import indicators, candles
 from autotrader.web.routers import settings as settings_router
@@ -226,6 +231,12 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
+    # HTTPSリダイレクト（本番環境用）
+    app.add_middleware(HTTPSRedirectMiddleware)
+
+    # Rate Limiting
+    configure_rate_limit(app)
+
     # 静的ファイルマウント
     app.mount(
         "/static",
@@ -234,6 +245,9 @@ def create_app() -> FastAPI:
     )
 
     # ルーター登録
+    app.include_router(
+        auth_router.router, prefix="/api/v1", tags=["auth"]
+    )
     app.include_router(
         dashboard.router, prefix="/api/v1", tags=["dashboard"]
     )
