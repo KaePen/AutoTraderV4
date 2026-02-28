@@ -5,6 +5,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from datetime import date, datetime
 from enum import Enum
@@ -367,3 +368,76 @@ class FundamentalMemory:
             composite_confidence=self.composite_confidence,
             disagreement=self.disagreement,
         )
+
+
+# ── イベントLLM分析レコード ──────────────────────────
+
+# インパクトレベル別重み（合成時に使用）
+IMPACT_WEIGHT: dict[str, float] = {
+    "high": 3.0,
+    "medium": 1.0,
+    "low": 0.3,
+}
+
+# 影響度の最小閾値（これ未満は無視）
+INFLUENCE_THRESHOLD = 0.05
+
+# 過去イベント検索の最大時間（時間）
+MAX_LOOKBACK_HOURS = 72
+
+
+@dataclass(frozen=True)
+class EventLLMRecord:
+    """イベントLLM分析結果（CSV1行に対応）
+
+    Attributes:
+        event_time: イベント発表時刻（UTC）
+        currency: 対象通貨
+        event_name: イベント名称
+        impact: インパクトレベル
+        surprise_score: サプライズスコア
+        direction_bias: 方向バイアス
+        convergence_hours: 影響収束推定時間
+        expected_volatility: ボラティリティ倍率
+        trade_caution_level: 取引注意度
+        is_holiday: 休日イベントフラグ
+    """
+
+    event_time: datetime
+    currency: str
+    event_name: str
+    impact: str
+    surprise_score: float
+    direction_bias: float
+    convergence_hours: float
+    expected_volatility: float
+    trade_caution_level: int
+    is_holiday: bool
+
+
+def compute_influence(
+    elapsed_hours: float,
+    convergence_hours: float,
+    decay_coefficient: float = 2.0,
+) -> float:
+    """時間減衰による残存影響度を計算
+
+    指数減衰モデル: exp(-decay_coeff * elapsed / convergence)
+    convergence_hours の約35%で影響半減。
+
+    Args:
+        elapsed_hours: イベントからの経過時間
+        convergence_hours: 影響収束推定時間
+        decay_coefficient: 減衰係数（大きいほど急速に減衰）
+
+    Returns:
+        float: 残存影響度 (0.0~1.0)
+    """
+    if convergence_hours <= 0:
+        return 0.0
+    if elapsed_hours < 0:
+        return 0.0
+    if elapsed_hours >= convergence_hours:
+        return 0.0
+    ratio = elapsed_hours / convergence_hours
+    return math.exp(-decay_coefficient * ratio)

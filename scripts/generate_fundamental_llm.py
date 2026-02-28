@@ -1,33 +1,29 @@
-"""LLMによるファンダメンタルコンテキスト事前生成スクリプト
+"""ファンダメンタルコンテキスト事前生成スクリプト
 
-サブコマンドで日次イベント / 日次ニュース / 旧月次 を切り替え可能。
+サブコマンドで日次イベント / 日次ニュース を切り替え可能。
+イベント生成は決定論的ヒューリスティック（LLM不要・高速）。
 
 使用方法:
-  # 日次イベントCSV生成
-  python scripts/generate_fundamental_llm.py events \\
+  # 日次イベントCSV生成（決定論的・Ollama不要）
+  python scripts/generate_fundamental_llm.py events \
       --symbol USDJPY --years 2020-2024
 
   # 日次ニュースCSV生成（news_rss_*.csv のみ使用）
-  python scripts/generate_fundamental_llm.py news \\
+  python scripts/generate_fundamental_llm.py news \
       --symbol USDJPY --years 2020-2024
 
   # GDELT生データも併用する場合（重複排除あり）
-  python scripts/generate_fundamental_llm.py news \\
-      --symbol USDJPY --years 2020-2024 \\
+  python scripts/generate_fundamental_llm.py news \
+      --symbol USDJPY --years 2020-2024 \
       --news-dir data/fundamental/news
 
   # 両方生成
-  python scripts/generate_fundamental_llm.py all \\
+  python scripts/generate_fundamental_llm.py all \
       --symbol USDJPY --years 2020-2024
-
-  # 旧形式（月次・後方互換）
-  python scripts/generate_fundamental_llm.py legacy \\
-      --symbol USDJPY --year 2024
 
 出力先:
   events: data/fundamental/llm_events_SYMBOL_YYYY.csv
   news:   data/fundamental/llm_news_SYMBOL_YYYY.csv
-  legacy: data/fundamental/llm_context_SYMBOL_YYYY.csv
 """
 
 from __future__ import annotations
@@ -76,7 +72,7 @@ def parse_args() -> argparse.Namespace:
     """
     parser = argparse.ArgumentParser(
         description=(
-            "LLMによるファンダメンタルコンテキスト事前生成"
+            "ファンダメンタルコンテキスト事前生成"
         ),
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -117,12 +113,12 @@ def parse_args() -> argparse.Namespace:
     parent.add_argument(
         "--model",
         default="erwan2/DeepSeek-R1-Distill-Qwen-14B",
-        help="使用するOllamaモデル名",
+        help="使用するOllamaモデル名（news用）",
     )
     parent.add_argument(
         "--host",
         default="http://localhost:11434",
-        help="OllamaホストURL",
+        help="OllamaホストURL（news用）",
     )
     parent.add_argument(
         "--overwrite",
@@ -133,20 +129,12 @@ def parse_args() -> argparse.Namespace:
         "--temperature",
         type=float,
         default=0.1,
-        help="LLM温度パラメータ",
+        help="LLM温度パラメータ（news用）",
     )
     parent.add_argument(
         "--dry-run",
         action="store_true",
         help="処理件数確認のみ（LLM呼び出しなし）",
-    )
-    parent.add_argument(
-        "--deterministic",
-        action="store_true",
-        help=(
-            "LLMを使わず決定論的ヒューリスティックで"
-            "全フィールドを計算（高速・Ollama不要）"
-        ),
     )
 
     subparsers = parser.add_subparsers(
@@ -157,7 +145,7 @@ def parse_args() -> argparse.Namespace:
     subparsers.add_parser(
         "events",
         parents=[parent],
-        help="日次イベントLLM CSV生成",
+        help="日次イベントCSV生成（決定論的）",
     )
 
     # news サブコマンド
@@ -198,23 +186,6 @@ def parse_args() -> argparse.Namespace:
         "--rss-dir",
         default=_DEFAULT_INPUT_DIR,
         help="RSSニュースCSVディレクトリ（news_rss_YYYY.csv）",
-    )
-
-    # legacy サブコマンド（旧互換）
-    legacy_parser = subparsers.add_parser(
-        "legacy",
-        parents=[parent],
-        help="旧月次LLM CSV生成（後方互換）",
-    )
-    legacy_parser.add_argument(
-        "--news-dir",
-        default=None,
-        help="ニュースCSVディレクトリ",
-    )
-    legacy_parser.add_argument(
-        "--news-prefix",
-        default="news",
-        help="ニュースCSVプレフィックス",
     )
 
     return parser.parse_args()
@@ -475,7 +446,7 @@ def _make_settings(
 
 
 def run_events(args: argparse.Namespace) -> int:
-    """日次イベントLLM CSV生成
+    """日次イベントCSV生成（決定論的）
 
     Args:
         args: パース済み引数
@@ -483,21 +454,19 @@ def run_events(args: argparse.Namespace) -> int:
     Returns:
         int: 終了コード
     """
+    from autotrader.adapters.fundamental.deterministic_event_analyzer import (  # noqa: PLC0415, E501
+        DeterministicEventAnalyzer,
+    )
+
     years = _resolve_years(args)
     symbols = args.symbol
     input_dir = Path(args.input_dir)
     output_dir = Path(args.output_dir)
-    deterministic = getattr(args, "deterministic", False)
 
-    mode_label = (
-        "決定論的（LLM不使用）"
-        if deterministic
-        else f"LLM ({args.model})"
-    )
     logger.info(
         f"[Events] シンボル: {symbols}\n"
         f"  年: {years[0]}〜{years[-1]} ({len(years)}年)\n"
-        f"  モード: {mode_label}"
+        f"  モード: 決定論的（LLM不使用）"
     )
 
     if args.dry_run:
@@ -510,29 +479,12 @@ def run_events(args: argparse.Namespace) -> int:
         for year in years:
             csv_path = input_dir / f"events_{year}.csv"
             status = (
-                "✓" if csv_path.exists() else "✗ 未存在"
+                "OK" if csv_path.exists() else "未存在"
             )
             logger.info(f"  {csv_path}: {status}")
         return 0
 
-    if deterministic:
-        from autotrader.adapters.fundamental.deterministic_event_analyzer import (  # noqa: PLC0415, E501
-            DeterministicEventAnalyzer,
-        )
-
-        generator = DeterministicEventAnalyzer()
-    else:
-        from autotrader.adapters.fundamental.llm_event_generator import (  # noqa: PLC0415, E501
-            LLMEventGenerator,
-        )
-
-        if not check_ollama_available(
-            args.host, args.model
-        ):
-            return 1
-        generator = LLMEventGenerator(
-            ollama_settings=_make_settings(args)
-        )
+    generator = DeterministicEventAnalyzer()
 
     error_count = 0
     success_count = 0
@@ -624,14 +576,14 @@ def run_news(args: argparse.Namespace) -> int:
                 else None
             )
             rss_status = (
-                "✓"
+                "OK"
                 if rss_path and rss_path.exists()
-                else "✗"
+                else "未存在"
             )
             news_status = (
-                "✓"
+                "OK"
                 if news_path and news_path.exists()
-                else "✗"
+                else "未存在"
             )
             logger.info(
                 f"  {year}: RSS={rss_status} "
@@ -688,110 +640,6 @@ def run_news(args: argparse.Namespace) -> int:
     return 0 if error_count == 0 else 1
 
 
-def run_legacy(args: argparse.Namespace) -> int:
-    """旧月次LLM CSV生成（後方互換）
-
-    Args:
-        args: パース済み引数
-
-    Returns:
-        int: 終了コード
-    """
-    from autotrader.adapters.fundamental.llm_context_generator import (  # noqa: PLC0415
-        LLMContextGenerator,
-    )
-
-    years = _resolve_years(args)
-    symbols = args.symbol
-    input_dir = Path(args.input_dir)
-    output_dir = Path(args.output_dir)
-    news_dir = (
-        Path(args.news_dir) if args.news_dir else None
-    )
-    news_prefix = args.news_prefix
-
-    logger.info(
-        f"[Legacy] シンボル: {symbols}\n"
-        f"  年: {years[0]}〜{years[-1]} ({len(years)}年)\n"
-        f"  モデル: {args.model}"
-    )
-
-    if args.dry_run:
-        total_months = len(symbols) * len(years) * 12
-        logger.info(
-            f"[DryRun] 処理予定: {total_months}ヶ月分"
-        )
-        for year in years:
-            csv_path = input_dir / f"events_{year}.csv"
-            status = (
-                "✓" if csv_path.exists() else "✗ 未存在"
-            )
-            logger.info(f"  {csv_path}: {status}")
-        return 0
-
-    if not check_ollama_available(args.host, args.model):
-        return 1
-
-    generator = LLMContextGenerator(
-        ollama_settings=_make_settings(args)
-    )
-
-    error_count = 0
-    success_count = 0
-
-    for symbol in symbols:
-        for year in years:
-            csv_path = input_dir / f"events_{year}.csv"
-            events = load_events_csv(csv_path)
-            if not events:
-                logger.warning(
-                    f"[{symbol}/{year}] "
-                    f"イベントデータなし"
-                )
-                error_count += 1
-                continue
-
-            news_items: list[NewsItem] | None = None
-            if news_dir:
-                news_path = (
-                    news_dir
-                    / f"{news_prefix}_{year}.csv"
-                )
-                if news_path.exists():
-                    news_items = read_news_csv(news_path)
-                    logger.info(
-                        f"[{symbol}/{year}] ニュース"
-                        f"{len(news_items)}件読込"
-                    )
-
-            try:
-                output_path = (
-                    generator.generate_for_symbol_year(
-                        symbol=symbol,
-                        year=year,
-                        events=events,
-                        output_dir=output_dir,
-                        overwrite=args.overwrite,
-                        news_items=news_items,
-                    )
-                )
-                logger.info(
-                    f"[{symbol}/{year}] 完了: {output_path}"
-                )
-                success_count += 1
-            except Exception as e:
-                logger.error(
-                    f"[{symbol}/{year}] エラー: {e}"
-                )
-                error_count += 1
-
-    logger.info(
-        f"\n[Legacy] {success_count}件成功, "
-        f"{error_count}件エラー"
-    )
-    return 0 if error_count == 0 else 1
-
-
 def main() -> int:
     """メイン処理
 
@@ -811,7 +659,10 @@ def main() -> int:
                 return code
             return run_news(args)
         else:
-            return run_legacy(args)
+            logger.error(
+                f"不明なコマンド: {args.command}"
+            )
+            return 1
     except ValueError as e:
         logger.error(str(e))
         return 1
