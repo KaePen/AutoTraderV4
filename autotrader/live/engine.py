@@ -588,7 +588,10 @@ class LiveTradingEngine:
 
         # 4. シグナル生成
         current_time = pd.Timestamp.now(tz="UTC")
-        signal = self._bot.generate_signal(current_time)
+        signal = self._bot.generate_signal(
+            current_time,
+            fundamental_ctx=fundamental_ctx,
+        )
 
         # 分析結果を保存
         # クールダウン等で分析スキップ時（scores空）は前回の
@@ -2239,12 +2242,18 @@ class LiveTradingEngine:
             from autotrader.adapters.fundamental.collector import (
                 FundamentalDataCollector,
             )
+            from autotrader.adapters.fundamental.deterministic_event_analyzer import (  # noqa: E501
+                DeterministicEventAnalyzer,
+            )
             from autotrader.adapters.database.connection import (
                 DatabaseManager,
             )
 
             # DBセッションファクトリー取得
             db_manager = DatabaseManager.get_instance()
+
+            # 決定論的イベント分析器（リアルタイム用）
+            analyzer = DeterministicEventAnalyzer()
 
             self._fundamental_collector = FundamentalDataCollector(
                 session_factory=db_manager.get_session,
@@ -2258,6 +2267,7 @@ class LiveTradingEngine:
                 cached_events_getter=(
                     self._fundamental_collector.get_cached_events
                 ),
+                analyzer=analyzer,
             )
             logger.info(
                 "[Fundamental] ファンダメンタル機能初期化完了"

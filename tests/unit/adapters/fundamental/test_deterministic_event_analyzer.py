@@ -12,12 +12,14 @@ import pytest
 
 from autotrader.adapters.fundamental.deterministic_event_analyzer import (
     DeterministicEventAnalyzer,
+    EVENT_CSV_COLUMNS,
     _CCY_NAMES,
     _EVENT_JP,
     _INDICATOR_CATEGORIES,
 )
 from autotrader.adapters.fundamental.schemas import (
     EconomicEvent,
+    EventLLMRecord,
     EventSource,
     ImpactLevel,
 )
@@ -448,10 +450,6 @@ class TestAnalyzeEvent:
 
     def test_all_csv_columns_present(self) -> None:
         """全CSVカラムが結果に含まれる"""
-        from autotrader.adapters.fundamental.llm_event_generator import (
-            EVENT_CSV_COLUMNS,
-        )
-
         analyzer = DeterministicEventAnalyzer()
         event = _make_event(impact=ImpactLevel.HIGH)
         result = analyzer._analyze_event(
@@ -506,3 +504,98 @@ class TestDeterministic:
             )
 
         assert len(results) == 1, "結果にランダム性がある"
+
+
+class TestAnalyzeSingleEvent:
+    """analyze_single_event のテスト（リアルタイムAPI）"""
+
+    def test_returns_event_llm_record(self) -> None:
+        """EventLLMRecord を返す"""
+        analyzer = DeterministicEventAnalyzer()
+        event = _make_event(
+            event_name="Non-Farm Employment Change",
+            impact=ImpactLevel.HIGH,
+            actual=300.0,
+            forecast=200.0,
+        )
+        record = analyzer.analyze_single_event(
+            "USDJPY", event
+        )
+
+        assert isinstance(record, EventLLMRecord)
+        assert record.event_name == (
+            "Non-Farm Employment Change"
+        )
+        assert record.currency == "USD"
+        assert record.impact == "high"
+        assert record.surprise_score != 0.0
+        assert record.direction_bias != 0.0
+        assert record.convergence_hours > 0
+        assert record.expected_volatility > 0
+        assert record.is_holiday is False
+
+    def test_holiday_event(self) -> None:
+        """休日イベントの EventLLMRecord"""
+        analyzer = DeterministicEventAnalyzer()
+        event = _make_event(
+            event_name="Bank Holiday",
+            impact=ImpactLevel.LOW,
+            actual=None,
+            forecast=None,
+        )
+        record = analyzer.analyze_single_event(
+            "USDJPY", event
+        )
+
+        assert isinstance(record, EventLLMRecord)
+        assert record.is_holiday is True
+        assert record.surprise_score == 0.0
+        assert record.direction_bias == 0.0
+
+    def test_low_impact_event(self) -> None:
+        """LOW イベントの EventLLMRecord"""
+        analyzer = DeterministicEventAnalyzer()
+        event = _make_event(
+            event_name="Building Permits",
+            impact=ImpactLevel.LOW,
+            actual=1.5,
+            forecast=1.4,
+        )
+        record = analyzer.analyze_single_event(
+            "USDJPY", event
+        )
+
+        assert isinstance(record, EventLLMRecord)
+        assert record.convergence_hours == 1.0
+        assert record.expected_volatility == 0.5
+        assert record.trade_caution_level == 0
+
+    def test_consistent_with_analyze_event(self) -> None:
+        """_analyze_event と同じ結果を返す"""
+        analyzer = DeterministicEventAnalyzer()
+        event = _make_event(
+            event_name="CPI m/m",
+            impact=ImpactLevel.HIGH,
+            actual=0.5,
+            forecast=0.3,
+        )
+
+        dict_result = analyzer._analyze_event(
+            "USDJPY", "USD", "JPY", event
+        )
+        record = analyzer.analyze_single_event(
+            "USDJPY", event
+        )
+
+        assert record.surprise_score == float(
+            dict_result["surprise_score"]
+        )
+        assert record.direction_bias == float(
+            dict_result["direction_bias"]
+        )
+        assert record.convergence_hours == float(
+            dict_result["convergence_hours"]
+        )
+        assert record.expected_volatility == float(
+            dict_result["expected_volatility"]
+        )
