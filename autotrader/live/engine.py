@@ -19,8 +19,10 @@ import pandas as pd
 from autotrader.adapters.mt5.connection import MT5ConnectionManager
 from autotrader.adapters.mt5.data_provider import MT5DataProvider
 from autotrader.adapters.mt5.trade_executor import MT5TradeExecutor
+from autotrader.adapters.mt5.exceptions import MT5Error, MT5DataError
 from autotrader.core.entities import AccountInfo, Signal
 from autotrader.core.enums import MarketRegime, SignalType, Timeframe
+from autotrader.core.exceptions import TradingError
 from autotrader.core.interfaces.position_sizing import SizingContext
 from autotrader.decision.unified.config import UnifiedBotConfig
 from autotrader.decision.unified.position_manager import (
@@ -526,7 +528,7 @@ class LiveTradingEngine:
             tick = await self._data_provider.get_tick_fast(
                 self._active_symbol
             )
-        except Exception:
+        except MT5DataError:
             return
 
         if not tick:
@@ -555,7 +557,8 @@ class LiveTradingEngine:
                     "time_ms": tick_ms,
                 })
             )
-        except Exception:
+        except (ImportError, RuntimeError):
+            # WebSocketモジュール未導入時・ブロードキャスト失敗は無視
             pass
 
     async def _tick(self) -> None:
@@ -677,7 +680,7 @@ class LiveTradingEngine:
                         ),
                     })
                 )
-            except Exception:
+            except (ImportError, RuntimeError):
                 pass  # ブロードキャスト失敗は無視
 
             # 4. エントリー判定
@@ -717,7 +720,7 @@ class LiveTradingEngine:
             )
             payload = self._build_tick_payload()
             await broadcast_tick_update(payload)
-        except Exception:
+        except (ImportError, RuntimeError):
             pass  # ブロードキャスト失敗は無視
 
     def _build_tick_payload(self) -> dict:
@@ -1253,7 +1256,7 @@ class LiveTradingEngine:
                         {"symbol": self._active_symbol}
                     )
                 )
-            except Exception:
+            except (ImportError, RuntimeError):
                 pass
         else:
             logger.error("エントリー失敗: %s", result.message)
@@ -1465,7 +1468,7 @@ class LiveTradingEngine:
                     exit_price = (_bid + _ask) / 2
                 elif _bid > 0:
                     exit_price = _bid
-            except Exception:
+            except (KeyError, ValueError, TypeError):
                 pass
             profit_loss = 0.0
             exit_reason = ExitReason.EXTERNAL_CLOSE.value
@@ -1562,9 +1565,9 @@ class LiveTradingEngine:
                         {"symbol": self._active_symbol}
                     )
                 )
-            except Exception:
+            except (ImportError, RuntimeError):
                 pass
-        except Exception as e:
+        except (OSError, RuntimeError) as e:
             # trade_idは_open_tradesに残るため次回tickで再試行
             logger.error("DB書き込みエラー（決済）: %s", e)
 
@@ -1619,7 +1622,7 @@ class LiveTradingEngine:
             _l = float(latest.get("low", 0))
             atr = _h - _l if (_h > 0 and _l > 0) else _min_atr
             atr = max(atr, _min_atr)
-        except Exception:
+        except (KeyError, ValueError, TypeError, MT5DataError):
             atr = 0.3  # デフォルト（USDJPY: 約30pips）
 
         # 現在のシグナル方向（反転チェック用）
@@ -1649,7 +1652,7 @@ class LiveTradingEngine:
                 fetched = float(tick.get(price_key, 0))
                 if fetched > 0:
                     current_price = fetched
-            except Exception:
+            except (KeyError, ValueError, TypeError, MT5DataError):
                 pass
 
             # キャッシュエントリ構築（MT5全ポジションを対象）
@@ -1711,7 +1714,7 @@ class LiveTradingEngine:
                             0,
                             int(max_hold_minutes - elapsed_minutes),
                         )
-                except Exception:
+                except (KeyError, ValueError, TypeError, AttributeError):
                     pass
 
             cache_list.append({
@@ -1869,7 +1872,7 @@ class LiveTradingEngine:
                         _profit_loss = deal["profit"]
                         if deal["price"] > 0:
                             _actual_price = deal["price"]
-                except Exception:
+                except (KeyError, ValueError, TypeError, MT5DataError):
                     pass
                 if _actual_price > 0:
                     _exit_reason_str = (
@@ -1904,7 +1907,7 @@ class LiveTradingEngine:
             return
         try:
             await self._sync_positions()
-        except Exception:
+        except (MT5Error, TradingError, OSError, RuntimeError):
             logger.error(
                 "トグル時ポジション同期失敗",
                 exc_info=True,

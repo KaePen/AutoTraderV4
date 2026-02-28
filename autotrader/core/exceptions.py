@@ -73,3 +73,27 @@ class LLMResponseError(LLMError):
     """LLMレスポンス解析エラー"""
 
     pass
+
+
+class TradingError(AutoTraderError):
+    """トレード実行関連エラー"""
+
+    pass
+
+
+class BacktestError(AutoTraderError):
+    """バックテスト実行関連エラー"""
+
+    pass
+
+
+class CalculationError(AutoTraderError):
+    """計算処理関連エラー"""
+
+    pass
+
+
+class StrategyError(AutoTraderError):
+    """戦略実行関連エラー"""
+
+    pass
