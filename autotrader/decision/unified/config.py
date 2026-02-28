@@ -156,7 +156,7 @@ class UnifiedBotConfig:
     # デモモード（閾値を下げて活発にシグナルを発火させる）
     demo_mode: bool = False
     # コンセンサス閾値
-    consensus_threshold: float = 8.0
+    consensus_threshold: float = 10.0
     # 最大同時ポジション数（ライブ用）
     max_positions: int = 3
     # デモモード時の最大同時ポジション数
@@ -232,14 +232,14 @@ class UnifiedBotConfig:
     fundamental_post_event_lag_seconds: int = 30
     # --- RANGEフィルタ統合 ---
     # 統合RANGEフィルタ有効化（Falseで従来の個別フィルタを使用）
-    range_filter_consolidated: bool = True
+    range_filter_consolidated: bool = False
     # 統合RANGEフィルタのブロック閾値（合計スコアがこれ以上でHOLD）
     range_filter_block_threshold: float = 0.6
     # --- BCA: Bidirectional Conviction Assessment ---
     # BCA有効化フラグ
-    bca_enabled: bool = False
+    bca_enabled: bool = True
     # 最小方向性エッジ閾値（これ未満でブロック）
-    bca_min_edge: float = 0.25
+    bca_min_edge: float = 0.55
     # ペナルティスケール係数
     bca_penalty_scale: float = 1.0
 
