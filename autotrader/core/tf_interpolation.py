@@ -9,6 +9,7 @@ from __future__ import annotations
 import math
 
 from autotrader.core.enums import Timeframe
+from autotrader.core.exceptions import ValidationError
 
 # TF名→分数マッピング（Timeframe.minutes()と同等だが文字列キーで高速参照）
 _TF_MINUTES: dict[str, int] = {tf.value: tf.minutes() for tf in Timeframe}
@@ -30,19 +31,19 @@ def interpolate_tf_param(
         float: 補間された値
 
     Raises:
-        ValueError: 既知TFが不足している場合
+        ValidationError: 既知TFが不足している場合
     """
     if target_tf in known_values:
         return known_values[target_tf]
 
     if len(known_values) < 2:
-        raise ValueError(
+        raise ValidationError(
             f"補間には2つ以上の既知TFが必要: {len(known_values)}個"
         )
 
     target_min = _TF_MINUTES.get(target_tf)
     if target_min is None:
-        raise ValueError(f"不明なTF: {target_tf}")
+        raise ValidationError(f"不明なTF: {target_tf}")
 
     target_log = math.log(target_min)
 
@@ -57,7 +58,7 @@ def interpolate_tf_param(
     )
 
     if not sorted_known:
-        raise ValueError("既知TFが分数マッピングに存在しない")
+        raise ValidationError("既知TFが分数マッピングに存在しない")
 
     # target_logが範囲外の場合は最近接値で外挿
     if target_log <= sorted_known[0][2]:

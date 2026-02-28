@@ -14,6 +14,7 @@ from autotrader.config import DEFAULT_TRADING_PARAMS
 from autotrader.config.trading_params import get_preset
 from autotrader.core.entities import Signal, Trade, Position, Candle
 from autotrader.core.enums import SignalType, ExitReason, TradingStrategyMode
+from autotrader.core.exceptions import BacktestError
 from autotrader.decision.unified.position_manager import (
     ManagementActionType,
     PositionManager,
@@ -1089,14 +1090,14 @@ class TradeSimulator:
 
         # ガード: 異常値検出（非JPY系通貨ペアも含む正値チェック）
         if fill <= 0.0:
-            raise ValueError(
+            raise BacktestError(
                 f"異常な決済価格: fill={fill:.5f}, "
                 f"trigger={trigger_price:.5f}, "
                 f"reason={exit_reason.value}"
             )
         pips = abs(fill - trigger_price) / self._pip_unit
         if pips > 500:
-            raise ValueError(
+            raise BacktestError(
                 f"異常なスリッページ: {pips:.1f}pips, "
                 f"fill={fill:.5f}, "
                 f"trigger={trigger_price:.5f}"
