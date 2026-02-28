@@ -300,6 +300,17 @@ class UnifiedTradeBot:
             bot_config=self.config,
         )
 
+        # BCA: 方向性エッジ評価器（オプション）
+        self._edge_assessor = None
+        if self.config.bca_enabled:
+            from autotrader.decision.unified.directional_edge import (
+                DirectionalEdgeAssessor,
+            )
+            self._edge_assessor = DirectionalEdgeAssessor(
+                min_edge=self.config.bca_min_edge,
+                penalty_scale=self.config.bca_penalty_scale,
+            )
+
         # リスク管理器（デモモード時はクールダウンを排除）
         risk_config = dataclasses.replace(
             self.config.risk,
@@ -690,6 +701,21 @@ class UnifiedTradeBot:
                 regime_result, htf_alignment,
             )
 
+        # BCA: 方向性エッジ評価
+        _bca_penalty = 0.0
+        if self._edge_assessor is not None:
+            _tf_set = self.tf_router.route(plan)
+            _edge_result = self._edge_assessor.assess(
+                consensus, tf_signals, _tf_set,
+            )
+            if not _edge_result.passed:
+                return self._hold_with_analysis(
+                    _edge_result.reasoning,
+                    plan, tf_signals, consensus,
+                    regime_result, htf_alignment,
+                )
+            _bca_penalty = _edge_result.penalty
+
         # Phase 2b: ファンダメンタル方向フィルター（ペナルティ）
         # ブーストで救済されたトレードはスキップ（方向一致確認済み）
         if _fund_assessment is not None and not _fund_boosted:
@@ -762,6 +788,15 @@ class UnifiedTradeBot:
                 else None
             ),
         )
+
+        # BCAペナルティをSoftGuard結果に加算
+        if _bca_penalty > 0:
+            sg_result = dataclasses.replace(
+                sg_result,
+                total_penalty=(
+                    sg_result.total_penalty + _bca_penalty
+                ),
+            )
 
         # セッションフィルター
         hour_utc = current_time.hour if hasattr(
