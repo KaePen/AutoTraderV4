@@ -28,6 +28,7 @@ env/
 ENV/
 .venv
 .serena
+.ruff_cache
 
 # テスト・カバレッジ
 .pytest_cache/
