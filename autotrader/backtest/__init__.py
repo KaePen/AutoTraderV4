@@ -51,6 +51,18 @@ from autotrader.backtest.runner import (
     BacktestConfig,
     BacktestResult,
 )
+from autotrader.backtest.year_runner import (
+    run_unified_year,
+    validate_trade_log,
+)
+from autotrader.backtest.metrics_aggregator import (
+    aggregate_results,
+    aggregate_results_from_yearly,
+)
+from autotrader.backtest.parallel_worker import (
+    _worker_process_init,
+    _run_year_worker,
+)
 from autotrader.backtest.events import (
     BacktestEventEmitter,
     ConsoleEventListener,
@@ -149,6 +161,13 @@ __all__ = [
     "BacktestRunner",
     "BacktestConfig",
     "BacktestResult",
+    # 分割モジュール（新規）
+    "run_unified_year",
+    "validate_trade_log",
+    "aggregate_results",
+    "aggregate_results_from_yearly",
+    "_worker_process_init",
+    "_run_year_worker",
     # イベント
     "BacktestEventEmitter",
     "ConsoleEventListener",
