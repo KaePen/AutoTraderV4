@@ -1,7 +1,10 @@
 """方向性エッジ評価モジュール（BCA: Bidirectional Conviction Assessment）
 
-両方向スコアを連続的に評価し、方向性確信度が低い
-エントリーをフィルタリングする。
+個別TFのbuy_strength/sell_strengthをHTF重み付きで集約し、
+方向性確信度が低いエントリーをフィルタリングする。
+
+v2: コンセンサススコアベース → 個別TF加重ベースに変更。
+全TFの逆方向強度を考慮し、HTF重視の連続ペナルティを生成。
 """
 
 from __future__ import annotations
@@ -22,7 +25,7 @@ if TYPE_CHECKING:
         TimeframeSet,
     )
 
-# HTF重み: 上位足ほど逆方向シグナルのペナルティが大きい
+# HTF重み: 上位足ほど方向性評価で重要
 _HTF_WEIGHTS: dict[str, float] = {
     "D1": 3.5,
     "H8": 3.0,
@@ -43,10 +46,10 @@ class DirectionalEdgeResult:
     """方向性エッジ評価結果
 
     Attributes:
-        directional_edge: 方向性エッジ (winner - loser) / (winner + loser)
-        opposition_ratio: 逆方向比率 loser / winner
-        htf_opposition: HTF逆方向の加重強度
-        ltf_opposition: LTF逆方向の加重強度
+        directional_edge: TF加重方向性エッジ
+        opposition_ratio: 加重逆方向比率
+        htf_opposition: HTF逆方向の加重平均強度
+        ltf_opposition: LTF逆方向の加重平均強度
         passed: min_edge以上か
         penalty: SoftGuardに渡すペナルティ
         reasoning: 判断理由
@@ -62,10 +65,10 @@ class DirectionalEdgeResult:
 
 
 class DirectionalEdgeAssessor:
-    """方向性エッジ評価器
+    """方向性エッジ評価器（v2: 個別TF加重ベース）
 
-    コンセンサスのbuy_score/sell_scoreから方向性エッジを算出し、
-    逆方向の強度をHTFウェイトで重み付けしてペナルティを生成する。
+    各TFのbuy_strength/sell_strengthをHTF重みで加重し、
+    コンセンサス集約前の生データから方向性エッジを算出する。
     """
 
     def __init__(
@@ -90,87 +93,93 @@ class DirectionalEdgeAssessor:
     ) -> DirectionalEdgeResult:
         """方向性エッジを評価
 
+        個別TFのbuy_strength/sell_strengthをHTF重みで加重して
+        集約し、方向性エッジを算出する。
+
         Args:
-            consensus: コンセンサス結果
-            tf_signals: 時間足別シグナル（TimeframeEvaluator由来）
+            consensus: コンセンサス結果（方向判定に使用）
+            tf_signals: 時間足別シグナル
             tf_set: 時間足セット
 
         Returns:
             DirectionalEdgeResult: 評価結果
         """
+        # シグナルがなければブロック
+        if not tf_signals:
+            return self._blocked("シグナルなし")
+
+        # 勝方向をコンセンサスから決定
         buy_score = consensus.buy_score
         sell_score = consensus.sell_score
-        total = buy_score + sell_score
-
-        # スコア合計が0の場合はブロック
-        if total <= 0:
-            return DirectionalEdgeResult(
-                directional_edge=0.0,
-                opposition_ratio=0.0,
-                htf_opposition=0.0,
-                ltf_opposition=0.0,
-                passed=False,
-                penalty=0.0,
-                reasoning="スコア合計=0",
-            )
-
-        # 勝方向と敗方向のスコア
         if buy_score >= sell_score:
-            winner = buy_score
-            loser = sell_score
             winner_dir = SignalType.BUY
         else:
-            winner = sell_score
-            loser = buy_score
             winner_dir = SignalType.SELL
 
-        # 方向性エッジ: (winner - loser) / (winner + loser)
-        directional_edge = (winner - loser) / total
+        # 個別TFの加重support/opposition集計
+        total_support = 0.0
+        total_opposition = 0.0
+        htf_opp_sum = 0.0
+        ltf_opp_sum = 0.0
+        htf_wt_sum = 0.0
+        ltf_wt_sum = 0.0
 
-        # 逆方向比率: loser / winner
-        opposition_ratio = loser / winner if winner > 0 else 0.0
+        for tf, signal in tf_signals.items():
+            weight = _HTF_WEIGHTS.get(tf, 1.0)
 
-        # HTF/LTF逆方向の加重強度を計算
-        htf_opp, ltf_opp = self._calc_opposition_by_tier(
-            tf_signals, winner_dir,
+            if winner_dir == SignalType.BUY:
+                sup_str = signal.buy_strength
+                opp_str = signal.sell_strength
+            else:
+                sup_str = signal.sell_strength
+                opp_str = signal.buy_strength
+
+            total_support += sup_str * weight
+            total_opposition += opp_str * weight
+
+            # HTF/LTF別の逆方向集計
+            if tf in _HTF_SET:
+                htf_opp_sum += opp_str * weight
+                htf_wt_sum += weight
+            else:
+                ltf_opp_sum += opp_str * weight
+                ltf_wt_sum += weight
+
+        total = total_support + total_opposition
+        if total <= 0:
+            return self._blocked("加重スコア合計=0")
+
+        # TF加重方向性エッジ
+        directional_edge = (
+            (total_support - total_opposition) / total
+        )
+        # 加重逆方向比率
+        opposition_ratio = (
+            total_opposition / total_support
+            if total_support > 0
+            else 1.0
+        )
+        # HTF/LTF別の加重平均逆方向強度
+        htf_opp = (
+            htf_opp_sum / htf_wt_sum if htf_wt_sum > 0 else 0.0
+        )
+        ltf_opp = (
+            ltf_opp_sum / ltf_wt_sum if ltf_wt_sum > 0 else 0.0
         )
 
-        # ペナルティ計算（逆方向比率ベース）
-        # opposition_ratio が 0.3 以上でペナルティ発生
-        _opp_threshold = 0.3
-        penalty = 0.0
-        if opposition_ratio > _opp_threshold:
-            # 線形ペナルティ: (ratio - threshold) * scale
-            _raw = (opposition_ratio - _opp_threshold) * 0.5
-            # HTF逆方向がある場合はペナルティ増幅
-            _htf_mult = 1.0 + htf_opp * 0.5
-            penalty = _raw * _htf_mult * self._penalty_scale
-            # 0.0-1.0にクランプ
-            penalty = min(max(penalty, 0.0), 1.0)
+        # ペナルティ計算
+        penalty = self._calc_penalty(
+            opposition_ratio, htf_opp,
+        )
 
         # パス判定
         passed = directional_edge >= self._min_edge
 
         # 理由文生成
-        if not passed:
-            reasoning = (
-                f"BCAブロック: edge={directional_edge:.3f}"
-                f"<{self._min_edge}"
-                f"(opp={opposition_ratio:.2f},"
-                f" htf={htf_opp:.2f})"
-            )
-        elif penalty > 0:
-            reasoning = (
-                f"BCAペナルティ: edge={directional_edge:.3f},"
-                f" penalty={penalty:.3f}"
-                f"(opp={opposition_ratio:.2f},"
-                f" htf={htf_opp:.2f})"
-            )
-        else:
-            reasoning = (
-                f"BCAパス: edge={directional_edge:.3f}"
-                f"(opp={opposition_ratio:.2f})"
-            )
+        reasoning = self._build_reasoning(
+            directional_edge, opposition_ratio,
+            htf_opp, penalty, passed,
+        )
 
         return DirectionalEdgeResult(
             directional_edge=directional_edge,
@@ -182,53 +191,70 @@ class DirectionalEdgeAssessor:
             reasoning=reasoning,
         )
 
-    def _calc_opposition_by_tier(
+    def _calc_penalty(
         self,
-        tf_signals: dict[str, TimeframeSignal],
-        winner_dir: SignalType,
-    ) -> tuple[float, float]:
-        """HTF/LTF別の逆方向加重強度を計算
+        opposition_ratio: float,
+        htf_opp: float,
+    ) -> float:
+        """連続ペナルティを計算
 
         Args:
-            tf_signals: 時間足別シグナル
-            winner_dir: 勝方向
+            opposition_ratio: 加重逆方向比率
+            htf_opp: HTF加重平均逆方向強度
 
         Returns:
-            tuple[float, float]: (htf_opposition, ltf_opposition)
+            float: ペナルティ値（0.0-1.0）
         """
-        htf_opp = 0.0
-        ltf_opp = 0.0
-        htf_weight_sum = 0.0
-        ltf_weight_sum = 0.0
+        # 逆方向比率が0.3超でペナルティ発生
+        _opp_threshold = 0.3
+        if opposition_ratio <= _opp_threshold:
+            return 0.0
 
-        for tf, signal in tf_signals.items():
-            # 勝方向と同方向または HOLDはスキップ
-            if signal.direction == winner_dir:
-                continue
-            if signal.direction == SignalType.HOLD:
-                continue
+        # 線形ペナルティ基本値
+        raw = (opposition_ratio - _opp_threshold) * 0.5
+        # HTF逆方向が強い場合にペナルティ増幅
+        htf_mult = 1.0 + htf_opp * 0.5
+        penalty = raw * htf_mult * self._penalty_scale
+        # 0.0-1.0にクランプ
+        return min(max(penalty, 0.0), 1.0)
 
-            weight = _HTF_WEIGHTS.get(tf, 1.0)
+    def _build_reasoning(
+        self,
+        edge: float,
+        opp_ratio: float,
+        htf_opp: float,
+        penalty: float,
+        passed: bool,
+    ) -> str:
+        """理由文を生成"""
+        if not passed:
+            return (
+                f"BCAブロック: edge={edge:.3f}"
+                f"<{self._min_edge}"
+                f"(opp={opp_ratio:.2f},"
+                f" htf={htf_opp:.2f})"
+            )
+        if penalty > 0:
+            return (
+                f"BCAペナルティ: edge={edge:.3f},"
+                f" penalty={penalty:.3f}"
+                f"(opp={opp_ratio:.2f},"
+                f" htf={htf_opp:.2f})"
+            )
+        return (
+            f"BCAパス: edge={edge:.3f}"
+            f"(opp={opp_ratio:.2f})"
+        )
 
-            # 逆方向の強度を取得
-            if winner_dir == SignalType.BUY:
-                opp_strength = signal.sell_strength
-            else:
-                opp_strength = signal.buy_strength
-
-            weighted_opp = weight * opp_strength
-
-            if tf in _HTF_SET:
-                htf_opp += weighted_opp
-                htf_weight_sum += weight
-            else:
-                ltf_opp += weighted_opp
-                ltf_weight_sum += weight
-
-        # 正規化（重み合計で割る）
-        if htf_weight_sum > 0:
-            htf_opp /= htf_weight_sum
-        if ltf_weight_sum > 0:
-            ltf_opp /= ltf_weight_sum
-
-        return htf_opp, ltf_opp
+    @staticmethod
+    def _blocked(reason: str) -> DirectionalEdgeResult:
+        """ブロック結果を生成"""
+        return DirectionalEdgeResult(
+            directional_edge=0.0,
+            opposition_ratio=0.0,
+            htf_opposition=0.0,
+            ltf_opposition=0.0,
+            passed=False,
+            penalty=0.0,
+            reasoning=reason,
+        )
