@@ -5,7 +5,7 @@
 
 環境変数:
     PROJECT_DIR: プロジェクトディレクトリ（省略時はスクリプトの親ディレクトリ）
-    CLEANUP_GRACE_MINUTES: worktree保護の猶予時間（省略時30分）
+    CLEANUP_GRACE_MINUTES: worktree保護の猶予時間（省略時360分=6時間）
 """
 
 from __future__ import annotations
@@ -104,7 +104,7 @@ TMP_DIR = PROJECT_DIR / "tmp"
 
 # 安全クリーンアップ設定
 CLEANUP_GRACE_MINUTES = int(
-    os.environ.get("CLEANUP_GRACE_MINUTES", "30")
+    os.environ.get("CLEANUP_GRACE_MINUTES", "360")
 )
 LOCK_FILE_NAME = ".claude-active"
 
