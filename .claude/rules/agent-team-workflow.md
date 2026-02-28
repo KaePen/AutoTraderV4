@@ -44,22 +44,21 @@ Agent(
 - 同じファイルを複数エージェントが触らないよう設計
 - `TaskUpdate.addBlockedBy` で依存関係を明示
 
-## PR マージ後の掃除（必須）
+## PR マージ・掃除
 
-`scripts/pr_watcher.py` が自動実行するが、手動マージ時は必ず実行:
+`scripts/pr_watcher.py` が以下を全て自動処理する。エージェントによる手動掃除は不要:
+- PR のマージ（コンフリクト時は Claude による自動解決）
+- worktree 削除（アクティブ worktree は保護）
+- ローカル・リモートブランチ削除
+- `worktree prune` / `fetch --prune`
+- 孤立 tmp/ ディレクトリの掃除
 
-```bash
-git -C /d/Projects/AutoTraderV4 worktree remove <path> --force
-git -C /d/Projects/AutoTraderV4 branch -D <branch>
-git -C /d/Projects/AutoTraderV4 push origin --delete <branch>
-git -C /d/Projects/AutoTraderV4 worktree prune
-git -C /d/Projects/AutoTraderV4 fetch --prune origin
-```
+エージェントの責務は **PR 作成まで**。マージ以降は `pr_watcher.py` に委任する。
 
 ## tmp/ ディレクトリ
 
 - `tmp/` は worktree 専用（`.gitignore` 登録済み）
-- PR マージ後にディレクトリごと削除される
+- `pr_watcher.py` がマージ後に自動削除
 
 ## 禁止事項
 
@@ -68,4 +67,3 @@ git -C /d/Projects/AutoTraderV4 fetch --prune origin
 - `git commit --amend` による公開済みコミットの書き換え
 - `--no-verify` によるフックスキップ
 - `git push --force` を main/master に実行
-- worktree やブランチを掃除せずに作業を終了する
