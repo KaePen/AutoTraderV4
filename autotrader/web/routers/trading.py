@@ -7,10 +7,15 @@ from __future__ import annotations
 
 import logging
 import os
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, Request
 
 from autotrader.config.accounts_loader import AccountsLoader
+from autotrader.web.auth.dependencies import (
+    get_current_user,
+    require_admin,
+)
 from autotrader.web.dependencies import (
     get_engine_manager,
     get_live_engine,
@@ -132,6 +137,7 @@ def _build_trading_mode_response(
 )
 async def get_trading_mode(
     request: Request,
+    user: Annotated[dict[str, any], Depends(get_current_user)],
     engine=Depends(get_live_engine),
     mgr=Depends(get_engine_manager),
 ) -> ApiResponse[TradingModeResponse]:
@@ -182,6 +188,7 @@ def _build_mt5_status_response(
 )
 async def get_mt5_status(
     request: Request,
+    user: Annotated[dict[str, any], Depends(get_current_user)],
     engine=Depends(get_live_engine),
 ) -> ApiResponse[MT5StatusResponse]:
     """MT5接続状態取得
@@ -202,6 +209,7 @@ async def get_mt5_status(
 )
 async def connect_mt5(
     request: Request,
+    user: Annotated[dict[str, any], Depends(require_admin)],
     engine=Depends(get_live_engine),
     mgr=Depends(get_engine_manager),
 ) -> ApiResponse[MT5StatusResponse]:
@@ -276,6 +284,7 @@ async def connect_mt5(
 )
 async def disconnect_mt5(
     request: Request,
+    user: Annotated[dict[str, any], Depends(require_admin)],
     engine=Depends(get_live_engine),
     mgr=Depends(get_engine_manager),
 ) -> ApiResponse[MT5StatusResponse]:
@@ -323,6 +332,7 @@ async def disconnect_mt5(
 )
 async def toggle_auto_trade(
     request: Request,
+    user: Annotated[dict[str, any], Depends(require_admin)],
     enable: bool = False,
     engine=Depends(get_live_engine),
 ) -> ApiResponse[TradingModeResponse]:
@@ -362,6 +372,7 @@ async def toggle_auto_trade(
 )
 async def toggle_symbol_auto_trade(
     request: Request,
+    user: Annotated[dict[str, any], Depends(require_admin)],
     symbol: str,
     enable: bool = False,
     engine=Depends(get_live_engine),
@@ -468,6 +479,7 @@ async def toggle_symbol_auto_trade(
 )
 async def switch_symbol(
     request: Request,
+    user: Annotated[dict[str, any], Depends(require_admin)],
     symbol: str,
     engine=Depends(get_live_engine),
 ) -> ApiResponse[TradingModeResponse]:
@@ -512,6 +524,7 @@ async def switch_symbol(
 )
 async def toggle_symbol_demo_mode(
     request: Request,
+    user: Annotated[dict[str, any], Depends(require_admin)],
     symbol: str,
     enable: bool = False,
     engine=Depends(get_live_engine),
@@ -615,6 +628,7 @@ async def toggle_symbol_demo_mode(
 )
 async def switch_account(
     request: Request,
+    user: Annotated[dict[str, any], Depends(require_admin)],
     body: SwitchAccountRequest,
     engine=Depends(get_live_engine),
     mgr=Depends(get_engine_manager),
@@ -706,6 +720,7 @@ async def switch_account(
 
 @router.get("/symbols")
 async def get_symbols(
+    user: Annotated[dict[str, any], Depends(get_current_user)],
     mgr=Depends(get_engine_manager),
 ) -> ApiResponse[list[str]]:
     """アクティブシンボル一覧取得
@@ -724,6 +739,7 @@ async def get_symbols(
 @router.post("/symbols/add")
 async def add_symbol(
     request: Request,
+    user: Annotated[dict[str, any], Depends(require_admin)],
     symbol: str,
     mgr=Depends(get_engine_manager),
 ) -> ApiResponse[list[str]]:
@@ -755,6 +771,7 @@ async def add_symbol(
 @router.post("/symbols/remove")
 async def remove_symbol(
     request: Request,
+    user: Annotated[dict[str, any], Depends(require_admin)],
     symbol: str,
     mgr=Depends(get_engine_manager),
 ) -> ApiResponse[list[str]]:
@@ -784,7 +801,9 @@ async def remove_symbol(
     "/accounts",
     response_model=ApiResponse[AccountPresetsResponse],
 )
-async def get_account_presets() -> ApiResponse[AccountPresetsResponse]:
+async def get_account_presets(
+    user: Annotated[dict[str, any], Depends(get_current_user)],
+) -> ApiResponse[AccountPresetsResponse]:
     """口座プリセット一覧取得
 
     Returns:
@@ -810,6 +829,7 @@ async def get_account_presets() -> ApiResponse[AccountPresetsResponse]:
     response_model=ApiResponse[AccountPresetsResponse],
 )
 async def add_account_preset(
+    user: Annotated[dict[str, any], Depends(require_admin)],
     body: AccountPresetRequest,
 ) -> ApiResponse[AccountPresetsResponse]:
     """口座プリセット登録/更新
@@ -848,6 +868,7 @@ async def add_account_preset(
     response_model=ApiResponse[AccountPresetsResponse],
 )
 async def delete_account_preset(
+    user: Annotated[dict[str, any], Depends(require_admin)],
     login: int,
 ) -> ApiResponse[AccountPresetsResponse]:
     """口座プリセット削除
