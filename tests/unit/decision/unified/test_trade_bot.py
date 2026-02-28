@@ -5,14 +5,27 @@ from __future__ import annotations
 from datetime import datetime
 
 import pandas as pd
+import pytest
 
-from autotrader.core.enums import SignalType
+from autotrader.calculator.features.regime_detector import (
+    RegimeResult,
+)
+from autotrader.constraint.soft_guard import SoftGuardResult
+from autotrader.core.enums import (
+    MarketRegime,
+    SignalType,
+    TradingStrategyMode,
+)
 from autotrader.decision.unified import (
     BotState,
     RiskManager,
     UnifiedTradeBot,
 )
 from autotrader.decision.unified.config import RiskConfig, UnifiedBotConfig
+from autotrader.decision.unified.mode_aware_consensus import (
+    ConsensusResult,
+)
+from autotrader.decision.unified.mode_selector import TradingPlan
 
 
 class TestBotState:
@@ -219,5 +232,341 @@ class TestUnifiedBotConfig:
         config = UnifiedBotConfig()
         eval_config = config.get_evaluator_config("M5")
         assert eval_config.timeframe == "M5"
+
+
+# --- RANGEフィルタ統合テスト用ヘルパー ---
+
+def _make_regime(
+    regime: MarketRegime = MarketRegime.RANGE,
+    trend_strength: float = 0.1,
+    volatility_level: float = 0.5,
+) -> RegimeResult:
+    """テスト用RegimeResult生成"""
+    return RegimeResult(
+        regime=regime,
+        trend_strength=trend_strength,
+        volatility_level=volatility_level,
+        adx=25.0,
+        confidence=0.8,
+        reasoning="test",
+    )
+
+
+def _make_consensus(
+    score: float = 9.0,
+    threshold: float = 8.0,
+) -> ConsensusResult:
+    """テスト用ConsensusResult生成"""
+    return ConsensusResult(
+        direction=SignalType.BUY,
+        score=score,
+        threshold=threshold,
+        aligned_tfs=["M15"],
+        reasoning="test",
+    )
+
+
+def _make_sg(
+    penalty: float = 0.0,
+) -> SoftGuardResult:
+    """テスト用SoftGuardResult生成"""
+    return SoftGuardResult(total_penalty=penalty)
+
+
+def _make_plan() -> TradingPlan:
+    """テスト用TradingPlan生成"""
+    return TradingPlan(
+        mode=TradingStrategyMode.UNIVERSAL,
+        primary_tf="M15",
+        entry_tf="M5",
+        confirm_tfs=["H1"],
+        manage_tf="M15",
+        max_holding_bars=32,
+        tp_sl_ratio_range=(1.1, 1.4),
+    )
+
+
+class TestRangeFilterConsolidated:
+    """統合RANGEフィルタのテスト"""
+
+    def setup_method(self) -> None:
+        """テストセットアップ"""
+        self.config = UnifiedBotConfig(
+            range_filter_consolidated=True,
+            range_filter_block_threshold=0.6,
+            range_day_bbw_threshold=0.25,
+            range_day_score_premium=0.3,
+            weak_hours_enabled=True,
+            weak_hours_score_premium=0.5,
+        )
+        self.bot = UnifiedTradeBot(self.config)
+        self.plan = _make_plan()
+        self.time = pd.Timestamp("2023-06-15 10:00:00")
+
+    def test_trend_regime_passes(self) -> None:
+        """TRENDレジームはフィルタ対象外"""
+        result = self.bot._check_range_regime_filter(
+            regime_result=_make_regime(
+                regime=MarketRegime.TREND,
+            ),
+            consensus=_make_consensus(),
+            sg_result=_make_sg(),
+            hour_utc=10,
+            plan=self.plan,
+            current_time=self.time,
+        )
+        assert result is None
+
+    def test_range_high_score_passes(self) -> None:
+        """RANGEでもスコアが十分高ければ通過"""
+        result = self.bot._check_range_regime_filter(
+            regime_result=_make_regime(
+                trend_strength=0.5,
+            ),
+            consensus=_make_consensus(
+                score=12.0, threshold=8.0,
+            ),
+            sg_result=_make_sg(),
+            hour_utc=14,
+            plan=self.plan,
+            current_time=self.time,
+        )
+        assert result is None
+
+    def test_range_weak_trend_blocks(self) -> None:
+        """RANGE+弱トレンドで閾値超過時にブロック"""
+        result = self.bot._check_range_regime_filter(
+            regime_result=_make_regime(
+                trend_strength=0.05,
+            ),
+            consensus=_make_consensus(
+                score=8.1, threshold=8.0,
+            ),
+            sg_result=_make_sg(),
+            hour_utc=14,
+            plan=self.plan,
+            current_time=self.time,
+        )
+        # trend_strength=0.05 → スコア≈0.83
+        # score_premium: score=8.1, threshold+0.3=8.3
+        #   margin=0.2, _s=0.2/0.3≈0.67
+        # 合計 ≈ 1.5 > 0.6 → ブロック
+        assert result is not None
+        assert "RANGE統合フィルタ" in result
+
+    def test_low_vol_marginal_blocks(self) -> None:
+        """LOW_VOLでスコア余裕が小さい場合ブロック"""
+        result = self.bot._check_range_regime_filter(
+            regime_result=_make_regime(
+                regime=MarketRegime.LOW_VOL,
+            ),
+            consensus=_make_consensus(
+                score=8.5, threshold=8.0,
+            ),
+            sg_result=_make_sg(),
+            hour_utc=14,
+            plan=self.plan,
+            current_time=self.time,
+        )
+        # margin = 8.0+1.5-8.5 = 1.0
+        # _s = min(1.0/1.5, 1.0) ≈ 0.67 > 0.6
+        assert result is not None
+        assert "LOW_VOL" in result
+
+    def test_low_vol_high_score_passes(self) -> None:
+        """LOW_VOLでもスコアが高ければ通過"""
+        result = self.bot._check_range_regime_filter(
+            regime_result=_make_regime(
+                regime=MarketRegime.LOW_VOL,
+            ),
+            consensus=_make_consensus(
+                score=10.0, threshold=8.0,
+            ),
+            sg_result=_make_sg(),
+            hour_utc=14,
+            plan=self.plan,
+            current_time=self.time,
+        )
+        # margin = 8.0+1.5-10.0 = -0.5 < 0 → スコア0
+        assert result is None
+
+    def test_weak_hours_adds_score(self) -> None:
+        """WeakHours時間帯でスコアが加算される"""
+        result = self.bot._check_range_regime_filter(
+            regime_result=_make_regime(
+                trend_strength=0.5,
+            ),
+            consensus=_make_consensus(
+                score=8.2, threshold=8.0,
+            ),
+            sg_result=_make_sg(),
+            hour_utc=10,  # WeakHours帯
+            plan=self.plan,
+            current_time=self.time,
+        )
+        # weak_hours: threshold+0.5=8.5, margin=0.3
+        #   _s = min(0.3/0.5, 1.0) = 0.6
+        # score_premium: threshold+0.3=8.3, margin=0.1
+        #   _s = min(0.1/0.3, 1.0) ≈ 0.33
+        # 合計 ≈ 0.93 > 0.6 → ブロック
+        assert result is not None
+        assert "WeakHours" in result
+
+    def test_non_weak_hours_fewer_signals(self) -> None:
+        """WeakHours外ではWeakHoursスコアが加算されない"""
+        result = self.bot._check_range_regime_filter(
+            regime_result=_make_regime(
+                trend_strength=0.5,
+            ),
+            consensus=_make_consensus(
+                score=8.2, threshold=8.0,
+            ),
+            sg_result=_make_sg(),
+            hour_utc=14,  # WeakHours外
+            plan=self.plan,
+            current_time=self.time,
+        )
+        # score_premiumのみ: margin=0.1, _s≈0.33 < 0.6
+        assert result is None
+
+    def test_multiple_conditions_accumulate(self) -> None:
+        """複数条件のスコアが累積する"""
+        result = self.bot._check_range_regime_filter(
+            regime_result=_make_regime(
+                trend_strength=0.15,
+            ),
+            consensus=_make_consensus(
+                score=8.1, threshold=8.0,
+            ),
+            sg_result=_make_sg(),
+            hour_utc=10,
+            plan=self.plan,
+            current_time=self.time,
+        )
+        # 弱トレンド: 1-0.15/0.3=0.5
+        # WeakHours: margin=0.4, _s=0.8
+        # スコアPrem: margin=0.2, _s≈0.67
+        # 合計 ≈ 1.97 > 0.6 → ブロック
+        assert result is not None
+
+    def test_custom_block_threshold(self) -> None:
+        """カスタム閾値でのブロック判定"""
+        config = UnifiedBotConfig(
+            range_filter_consolidated=True,
+            range_filter_block_threshold=2.0,
+            range_day_score_premium=0.3,
+        )
+        bot = UnifiedTradeBot(config)
+        result = bot._check_range_regime_filter(
+            regime_result=_make_regime(
+                trend_strength=0.05,
+            ),
+            consensus=_make_consensus(
+                score=8.1, threshold=8.0,
+            ),
+            sg_result=_make_sg(),
+            hour_utc=14,
+            plan=self.plan,
+            current_time=self.time,
+        )
+        # 弱トレンド≈0.83 + スコアPrem≈0.67 = 1.5 < 2.0
+        assert result is None
+
+
+class TestRangeFilterLegacy:
+    """従来RANGEフィルタ（フォールバック）のテスト"""
+
+    def setup_method(self) -> None:
+        """テストセットアップ"""
+        self.config = UnifiedBotConfig(
+            range_filter_consolidated=False,
+            range_day_bbw_threshold=0.25,
+            range_day_score_premium=0.3,
+            weak_hours_enabled=True,
+            weak_hours_score_premium=0.5,
+        )
+        self.bot = UnifiedTradeBot(self.config)
+        self.plan = _make_plan()
+        self.time = pd.Timestamp("2023-06-15 10:00:00")
+
+    def test_low_vol_blocks(self) -> None:
+        """LOW_VOLで低スコア時にブロック"""
+        result = self.bot._check_range_legacy(
+            regime_result=_make_regime(
+                regime=MarketRegime.LOW_VOL,
+            ),
+            consensus=_make_consensus(
+                score=9.0, threshold=8.0,
+            ),
+            sg_result=_make_sg(),
+            hour_utc=14,
+            plan=self.plan,
+            current_time=self.time,
+        )
+        # score=9.0 < threshold+1.5=9.5 → ブロック
+        assert result is not None
+        assert "LOW_VOL制限" in result
+
+    def test_range_weak_trend_blocks(self) -> None:
+        """RANGE+弱トレンドでブロック"""
+        result = self.bot._check_range_legacy(
+            regime_result=_make_regime(
+                trend_strength=0.1,
+            ),
+            consensus=_make_consensus(),
+            sg_result=_make_sg(),
+            hour_utc=14,
+            plan=self.plan,
+            current_time=self.time,
+        )
+        assert result is not None
+        assert "RANGE制限" in result
+
+    def test_trend_regime_passes(self) -> None:
+        """TRENDレジームは全フィルタ通過"""
+        result = self.bot._check_range_legacy(
+            regime_result=_make_regime(
+                regime=MarketRegime.TREND,
+            ),
+            consensus=_make_consensus(),
+            sg_result=_make_sg(),
+            hour_utc=14,
+            plan=self.plan,
+            current_time=self.time,
+        )
+        assert result is None
+
+    def test_range_score_premium_blocks(self) -> None:
+        """RANGEスコアプレミアムでブロック"""
+        result = self.bot._check_range_legacy(
+            regime_result=_make_regime(
+                trend_strength=0.5,
+            ),
+            consensus=_make_consensus(
+                score=8.1, threshold=8.0,
+            ),
+            sg_result=_make_sg(),
+            hour_utc=14,
+            plan=self.plan,
+            current_time=self.time,
+        )
+        # score=8.1 < threshold+0.3=8.3 → ブロック
+        assert result is not None
+        assert "RANGEスコアプレミアム" in result
+
+    def test_fallback_mode_uses_legacy(self) -> None:
+        """consolidated=Falseでlegacyが使用される"""
+        result = self.bot._check_range_regime_filter(
+            regime_result=_make_regime(
+                trend_strength=0.1,
+            ),
+            consensus=_make_consensus(),
+            sg_result=_make_sg(),
+            hour_utc=14,
+            plan=self.plan,
+            current_time=self.time,
+        )
+        assert result is not None
+        assert "RANGE制限" in result
 
 
