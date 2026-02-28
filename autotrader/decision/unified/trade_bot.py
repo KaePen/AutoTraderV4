@@ -898,70 +898,6 @@ class UnifiedTradeBot:
                     f"score={consensus.score:.1f}<6.6"
                 )
 
-            # LOW_VOL制限: スコア品質要件を高める
-            # 低ボラティリティ環境はスプレッド影響が大きく不利
-            if (
-                regime_result.regime == MarketRegime.LOW_VOL
-                and consensus.score < consensus.threshold + 1.5
-            ):
-                return _filt_hold(
-                    f"LOW_VOL制限: score={consensus.score:.2f}"
-                    f" < threshold+1.5={consensus.threshold + 1.5:.2f}"
-                )
-
-            # RANGE + トレンド弱制限
-            if (
-                regime_result.regime == MarketRegime.RANGE
-                and regime_result.trend_strength < 0.3
-            ):
-                return _filt_hold(
-                    f"RANGE制限: trend_strength="
-                    f"{regime_result.trend_strength:.2f}"
-                )
-
-            # RANGE ペナルティ+低ボラ制限
-            if (
-                regime_result.regime == MarketRegime.RANGE
-                and sg_result.total_penalty > 0
-            ):
-                _primary_row = self._get_current_row(
-                    plan.primary_tf, current_time,
-                )
-                if _primary_row is not None:
-                    _bb_w = _primary_row.get("bb_width")
-                    if (
-                        _bb_w is not None
-                        and not pd.isna(_bb_w)
-                        and float(_bb_w)
-                        < self.config.range_day_bbw_threshold
-                    ):
-                        return _filt_hold(
-                            f"RANGE低ボラ制限: "
-                            f"penalty="
-                            f"{sg_result.total_penalty:.2f}"
-                            f", bb_width="
-                            f"{float(_bb_w):.4f}"
-                            f"<{self.config.range_day_bbw_threshold}"
-                        )
-
-            # Weak Hours RANGEフィルター（JST 18-21 = UTC 9-12）
-            if (
-                self.config.weak_hours_enabled
-                and 9 <= hour_utc <= 12
-                and regime_result.regime == MarketRegime.RANGE
-                and consensus.score < consensus.threshold
-                    + self.config.weak_hours_score_premium
-            ):
-                _wh_threshold = (
-                    consensus.threshold
-                    + self.config.weak_hours_score_premium
-                )
-                return _filt_hold(
-                    f"WeakHours RANGE: hour={hour_utc}, "
-                    f"score={consensus.score:.1f}"
-                    f"<{_wh_threshold:.1f}"
-                )
-
             # 東京深夜フィルター（JST 02-06 = UTC 17-21）
             # 東京深夜は流動性低下でトレンド追従が困難
             if (
@@ -976,19 +912,17 @@ class UnifiedTradeBot:
                     f"<{_tn_threshold:.1f}"
                 )
 
-            # RANGEスコアプレミアム（低スコア帯を除外）
-            _score_premium = self.config.range_day_score_premium
-            if (
-                _score_premium > 0
-                and regime_result.regime == MarketRegime.RANGE
-                and consensus.score
-                < consensus.threshold + _score_premium
-            ):
-                return _filt_hold(
-                    f"RANGEスコアプレミアム: "
-                    f"score={consensus.score:.1f}"
-                    f"<{consensus.threshold + _score_premium:.1f}"
-                )
+            # RANGE/LOW_VOLフィルタ群
+            _range_hold = self._check_range_regime_filter(
+                regime_result=regime_result,
+                consensus=consensus,
+                sg_result=sg_result,
+                hour_utc=hour_utc,
+                plan=plan,
+                current_time=current_time,
+            )
+            if _range_hold is not None:
+                return _filt_hold(_range_hold)
 
             # TOKYO低ペナルティ帯: 閾値+0.2
             if (
@@ -1357,6 +1291,267 @@ class UnifiedTradeBot:
         if not alignment_scores:
             return 0.0
         return sum(alignment_scores) / len(alignment_scores)
+
+    def _check_range_regime_filter(
+        self,
+        regime_result: RegimeResult,
+        consensus: ConsensusResult,
+        sg_result: SoftGuardResult,
+        hour_utc: int,
+        plan: TradingPlan,
+        current_time: pd.Timestamp,
+    ) -> str | None:
+        """RANGE/LOW_VOLレジーム統合フィルタ
+
+        従来5つに分散していたRANGE系フィルタを1つに統合。
+        各条件にスコア(0.0-1.0)を割り当て、合計が閾値を
+        超えた場合のみブロックする。個別条件での即HOLDを廃止
+        し、累積的な過剰排除を防ぐ。
+
+        range_filter_consolidated=False で従来の個別フィルタ
+        にフォールバックする（A/Bテスト用）。
+
+        Args:
+            regime_result: レジーム判定結果
+            consensus: コンセンサス結果
+            sg_result: SoftGuard結果
+            hour_utc: UTC時間
+            plan: トレーディングプラン
+            current_time: 現在時刻
+
+        Returns:
+            str | None: ブロック理由。Noneなら通過
+        """
+        regime = regime_result.regime
+
+        # RANGE/LOW_VOL以外は対象外
+        if regime not in (
+            MarketRegime.RANGE, MarketRegime.LOW_VOL,
+        ):
+            return None
+
+        # 従来モード（個別フィルタ）
+        if not self.config.range_filter_consolidated:
+            return self._check_range_legacy(
+                regime_result, consensus, sg_result,
+                hour_utc, plan, current_time,
+            )
+
+        # --- 統合モード: 各条件のスコアを加算 ---
+        score = 0.0
+        reasons: list[str] = []
+
+        # 1. LOW_VOLレジーム（スプレッド影響大）
+        if regime == MarketRegime.LOW_VOL:
+            _margin = (
+                consensus.threshold + 1.5 - consensus.score
+            )
+            if _margin > 0:
+                # スコア余裕度に応じて0.0-1.0
+                _s = min(_margin / 1.5, 1.0)
+                score += _s
+                reasons.append(
+                    f"LOW_VOL({_s:.2f})"
+                )
+
+        # 2. RANGE + トレンド弱（方向感欠如）
+        if (
+            regime == MarketRegime.RANGE
+            and regime_result.trend_strength < 0.3
+        ):
+            # trend_strength=0で1.0、0.3で0.0
+            _s = 1.0 - regime_result.trend_strength / 0.3
+            score += _s
+            reasons.append(
+                f"弱トレンド({_s:.2f},"
+                f"ts={regime_result.trend_strength:.2f})"
+            )
+
+        # 3. RANGE + ペナルティ + 低BB幅
+        if (
+            regime == MarketRegime.RANGE
+            and sg_result.total_penalty > 0
+        ):
+            _primary_row = self._get_current_row(
+                plan.primary_tf, current_time,
+            )
+            if _primary_row is not None:
+                _bb_w = _primary_row.get("bb_width")
+                if (
+                    _bb_w is not None
+                    and not pd.isna(_bb_w)
+                ):
+                    _bb_val = float(_bb_w)
+                    _thr = self.config.range_day_bbw_threshold
+                    if _bb_val < _thr:
+                        # BB幅がthreshold比でどれだけ小さいか
+                        _s = min(
+                            (_thr - _bb_val) / _thr, 1.0,
+                        )
+                        score += _s
+                        reasons.append(
+                            f"低BBW({_s:.2f},"
+                            f"bbw={_bb_val:.4f})"
+                        )
+
+        # 4. Weak Hours（JST 18-21 = UTC 9-12）
+        if (
+            self.config.weak_hours_enabled
+            and 9 <= hour_utc <= 12
+            and regime == MarketRegime.RANGE
+        ):
+            _wh_thr = (
+                consensus.threshold
+                + self.config.weak_hours_score_premium
+            )
+            _margin = _wh_thr - consensus.score
+            if _margin > 0:
+                _s = min(
+                    _margin
+                    / self.config.weak_hours_score_premium,
+                    1.0,
+                )
+                score += _s
+                reasons.append(
+                    f"WeakHours({_s:.2f},h={hour_utc})"
+                )
+
+        # 5. RANGEスコアプレミアム（低スコア帯を除外）
+        _sp = self.config.range_day_score_premium
+        if (
+            _sp > 0
+            and regime == MarketRegime.RANGE
+        ):
+            _margin = (
+                consensus.threshold + _sp
+                - consensus.score
+            )
+            if _margin > 0:
+                _s = min(_margin / _sp, 1.0)
+                score += _s
+                reasons.append(
+                    f"スコアPrem({_s:.2f},"
+                    f"sc={consensus.score:.1f})"
+                )
+
+        _thr = self.config.range_filter_block_threshold
+        if score >= _thr:
+            return (
+                f"RANGE統合フィルタ: "
+                f"score={score:.2f}>={_thr:.2f} "
+                f"[{','.join(reasons)}]"
+            )
+        return None
+
+    def _check_range_legacy(
+        self,
+        regime_result: RegimeResult,
+        consensus: ConsensusResult,
+        sg_result: SoftGuardResult,
+        hour_utc: int,
+        plan: TradingPlan,
+        current_time: pd.Timestamp,
+    ) -> str | None:
+        """従来の個別RANGEフィルタ（フォールバック用）
+
+        range_filter_consolidated=False 時に使用。
+        既存動作を完全に維持する。
+
+        Args:
+            regime_result: レジーム判定結果
+            consensus: コンセンサス結果
+            sg_result: SoftGuard結果
+            hour_utc: UTC時間
+            plan: トレーディングプラン
+            current_time: 現在時刻
+
+        Returns:
+            str | None: ブロック理由。Noneなら通過
+        """
+        # LOW_VOL制限
+        if (
+            regime_result.regime == MarketRegime.LOW_VOL
+            and consensus.score
+            < consensus.threshold + 1.5
+        ):
+            return (
+                f"LOW_VOL制限: score={consensus.score:.2f}"
+                f" < threshold+1.5="
+                f"{consensus.threshold + 1.5:.2f}"
+            )
+
+        # RANGE + トレンド弱制限
+        if (
+            regime_result.regime == MarketRegime.RANGE
+            and regime_result.trend_strength < 0.3
+        ):
+            return (
+                f"RANGE制限: trend_strength="
+                f"{regime_result.trend_strength:.2f}"
+            )
+
+        # RANGE ペナルティ+低ボラ制限
+        if (
+            regime_result.regime == MarketRegime.RANGE
+            and sg_result.total_penalty > 0
+        ):
+            _primary_row = self._get_current_row(
+                plan.primary_tf, current_time,
+            )
+            if _primary_row is not None:
+                _bb_w = _primary_row.get("bb_width")
+                if (
+                    _bb_w is not None
+                    and not pd.isna(_bb_w)
+                    and float(_bb_w)
+                    < self.config.range_day_bbw_threshold
+                ):
+                    return (
+                        f"RANGE低ボラ制限: "
+                        f"penalty="
+                        f"{sg_result.total_penalty:.2f}"
+                        f", bb_width="
+                        f"{float(_bb_w):.4f}"
+                        f"<"
+                        f"{self.config.range_day_bbw_threshold}"
+                    )
+
+        # Weak Hours RANGEフィルター
+        if (
+            self.config.weak_hours_enabled
+            and 9 <= hour_utc <= 12
+            and regime_result.regime == MarketRegime.RANGE
+            and consensus.score < consensus.threshold
+            + self.config.weak_hours_score_premium
+        ):
+            _wh_threshold = (
+                consensus.threshold
+                + self.config.weak_hours_score_premium
+            )
+            return (
+                f"WeakHours RANGE: hour={hour_utc}, "
+                f"score={consensus.score:.1f}"
+                f"<{_wh_threshold:.1f}"
+            )
+
+        # RANGEスコアプレミアム
+        _score_premium = (
+            self.config.range_day_score_premium
+        )
+        if (
+            _score_premium > 0
+            and regime_result.regime == MarketRegime.RANGE
+            and consensus.score
+            < consensus.threshold + _score_premium
+        ):
+            return (
+                f"RANGEスコアプレミアム: "
+                f"score={consensus.score:.1f}"
+                f"<"
+                f"{consensus.threshold + _score_premium:.1f}"
+            )
+
+        return None
 
     def _hold_signal(self, reason: str) -> ConsolidatedSignal:
         """HOLDシグナルを生成

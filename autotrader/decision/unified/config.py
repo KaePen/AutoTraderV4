@@ -230,6 +230,11 @@ class UnifiedBotConfig:
     fundamental_pm_enabled: bool = False
     # LLM処理ラグ（秒）: 発表後bias/surpriseが利用可能になるまでの遅延
     fundamental_post_event_lag_seconds: int = 30
+    # --- RANGEフィルタ統合 ---
+    # 統合RANGEフィルタ有効化（Falseで従来の個別フィルタを使用）
+    range_filter_consolidated: bool = True
+    # 統合RANGEフィルタのブロック閾値（合計スコアがこれ以上でHOLD）
+    range_filter_block_threshold: float = 0.6
     # --- BCA: Bidirectional Conviction Assessment ---
     # BCA有効化フラグ
     bca_enabled: bool = False

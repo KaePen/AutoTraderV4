@@ -337,6 +337,18 @@ def parse_args() -> argparse.Namespace:
         default=15.0,
         help="保険: 最低保有時間（分）",
     )
+    # RANGEフィルタ統合
+    parser.add_argument(
+        "--no-range-filter-consolidation",
+        action="store_true",
+        help="RANGEフィルタ統合を無効化（従来の個別フィルタを使用）",
+    )
+    parser.add_argument(
+        "--range-filter-threshold",
+        type=float,
+        default=0.6,
+        help="統合RANGEフィルタのブロック閾値（デフォルト: 0.6）",
+    )
     # Weak Hours RANGEフィルター
     parser.add_argument(
         "--no-weak-hours",
@@ -1229,6 +1241,12 @@ def run_single_backtest(args: argparse.Namespace):
         ]
 
     bot_config = UnifiedBotConfig(
+        range_filter_consolidated=(
+            not args.no_range_filter_consolidation
+        ),
+        range_filter_block_threshold=(
+            args.range_filter_threshold
+        ),
         range_day_bbw_threshold=args.range_day_bbw,
         range_day_score_premium=_score_prem,
         weak_hours_enabled=not args.no_weak_hours,
