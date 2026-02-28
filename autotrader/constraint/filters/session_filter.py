@@ -6,10 +6,14 @@ Kill Zones（ロンドン/NYセッション）のみでトレード。
 
 from __future__ import annotations
 
+import logging
+
 from autotrader.constraint.filters.filter_result import FilterResult
 
 from dataclasses import dataclass
 from datetime import datetime
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -170,3 +174,24 @@ class SessionFilter:
             if kz.start_hour <= hour < kz.end_hour:
                 return True
         return False
+
+    def check_tokyo_low_vol(
+        self, timestamp: datetime, bb_width: float
+    ) -> bool:
+        """TOKYO×低ボラの危険な組み合わせをチェック
+
+        Args:
+            timestamp: 時刻（UTC）
+            bb_width: BB幅（正規化済み）
+
+        Returns:
+            bool: トレード可能ならTrue、ブロックならFalse
+        """
+        current_session = self.get_current_session(timestamp)
+        if current_session and current_session.upper() == "TOKYO" and bb_width < 0.10:
+            logger.info(
+                f"TOKYO×低ボラブロック: session={current_session}, "
+                f"bb_width={bb_width:.4f}"
+            )
+            return False
+        return True

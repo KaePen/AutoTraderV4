@@ -242,6 +242,11 @@ class UnifiedBotConfig:
     bca_min_edge: float = 0.55
     # ペナルティスケール係数
     bca_penalty_scale: float = 1.0
+    # --- 超低ボラ環境フィルタ（2021年対策） ---
+    # BB幅閾値（この値未満で超低ボラと判定）
+    ultra_low_bbw_threshold: float = 0.08
+    # 超低ボラ検出時の追加閾値
+    ultra_low_bbw_score_add: float = 1.0
 
     def get_evaluator_config(self, timeframe: str) -> EvaluatorConfig:
         """時間足別評価器設定を取得

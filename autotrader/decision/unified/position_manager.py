@@ -264,6 +264,9 @@ class PositionManagerConfig:
     stagnation_stage2_minutes: float = 90.0
     stagnation_stage2_mfe_r: float = 0.10
     stagnation_stage2_max_r: float = -0.10
+    # 0.3R早期部分利確（低ボラSTAGNATION対策）
+    early_partial_0_3r_enabled: bool = False
+    early_partial_0_3r_ratio: float = 0.20
 
 
 class PositionManager:
@@ -295,6 +298,7 @@ class PositionManager:
         self._insurance_sl_applied: set[str] = set()
         self._insurance_partial_applied: set[str] = set()
         self._half_r_partial_applied: set[str] = set()
+        self._partial_0_3r_applied: set[str] = set()
 
     def register_position(
         self,
@@ -400,6 +404,9 @@ class PositionManager:
                 position_id
                 in self._half_r_partial_applied
             ),
+            "partial_0_3r_applied": (
+                position_id in self._partial_0_3r_applied
+            ),
         }
 
     def import_state(
@@ -449,6 +456,9 @@ class PositionManager:
             ),
             "half_r_partial_applied": (
                 self._half_r_partial_applied
+            ),
+            "partial_0_3r_applied": (
+                self._partial_0_3r_applied
             ),
         }
         for key, flag_set in _flag_map.items():
@@ -1005,6 +1015,33 @@ class PositionManager:
                 trigger_price=_1r_price,
             )
 
+        # === 0.3R早期部分利確（低ボラSTAGNATION対策）===
+        if (
+            self.config.early_partial_0_3r_enabled
+            and position.current_r >= 0.3
+            and pos_id not in self._partial_0_3r_applied
+            and pos_id not in self._partial_closed_1r
+            and pos_id not in self._half_r_partial_applied
+        ):
+            self._partial_0_3r_applied.add(pos_id)
+            if position.direction == SignalType.BUY:
+                _0_3r_price = (
+                    position.entry_price + 0.3 * position.r_value
+                )
+            else:
+                _0_3r_price = (
+                    position.entry_price - 0.3 * position.r_value
+                )
+            return ManagementAction.partial_close(
+                ratio=self.config.early_partial_0_3r_ratio,
+                new_sl=None,
+                reason=(
+                    f"0.3R早期部分利確: {position.current_r:.2f}R"
+                ),
+                exit_reason=ExitReason.TAKE_PROFIT_EARLY,
+                trigger_price=_0_3r_price,
+            )
+
         # === RANGE×DAY 0.5R部分利確 ===
         if (
             is_range
@@ -1387,3 +1424,4 @@ class PositionManager:
         self._insurance_sl_applied.clear()
         self._insurance_partial_applied.clear()
         self._half_r_partial_applied.clear()
+        self._partial_0_3r_applied.clear()

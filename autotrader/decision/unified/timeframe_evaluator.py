@@ -428,6 +428,21 @@ class TimeframeEvaluator:
             if htf_reason:
                 reasons.append(htf_reason)
 
+        # BB幅チェック（超低ボラ環境）
+        bb_width = row.get("bb_width")
+        if bb_width is not None and not pd.isna(bb_width):
+            if bb_width < self.config.ultra_low_bbw_threshold:
+                score_add = self.config.ultra_low_bbw_score_add
+                if buy_score > 0:
+                    buy_score += score_add
+                elif sell_score > 0:
+                    sell_score += score_add
+                logger.debug(
+                    f"超低ボラ環境検出: bb_width={bb_width:.4f} "
+                    f"(閾値{self.config.ultra_low_bbw_threshold}未満), "
+                    f"スコア+{score_add}"
+                )
+
         breakdown = ScoreBreakdown(
             trend=_bd_trend,
             adx=_bd_adx,
