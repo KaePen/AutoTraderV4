@@ -235,7 +235,7 @@ class PositionManagerConfig:
     # BE移動クッション: BE価格に余裕を持たせノイズによるBE_HIT削減
     be_cushion_pips: float = 3.0
     # コンセンサス逆転exit
-    consensus_exit_enabled: bool = False
+    consensus_exit_enabled: bool = True
     # 逆方向スコアがこの閾値以上で発動
     consensus_exit_threshold: float = 6.0
     # ポジション方向スコアがこの閾値以下で発動
@@ -243,7 +243,7 @@ class PositionManagerConfig:
     # 含み損時のみ発動（含み益時はトレーリングに任せる）
     consensus_exit_loss_only: bool = False
     # 利益反転ガード: MFE到達後の利益急落で早期退出
-    profit_reversal_enabled: bool = False
+    profit_reversal_enabled: bool = True
     # MFEがこのR値以上に達した後に発動対象
     profit_reversal_mfe_r: float = 0.3
     # highest_rからの下落がこの値以上で発動
@@ -251,11 +251,11 @@ class PositionManagerConfig:
     # current_rがこの値以下で発動
     profit_reversal_max_r: float = 0.05
     # ユニバーサル0.5R部分利確（全レジーム対応）
-    universal_half_r_enabled: bool = False
+    universal_half_r_enabled: bool = True
     universal_half_r_trigger: float = 0.5
     universal_half_r_ratio: float = 0.25
     # 段階的STAGNATION: 3段階で早期に停滞を検出
-    progressive_stagnation_enabled: bool = False
+    progressive_stagnation_enabled: bool = True
     # Stage1: 早期検出（60分 + MFE<0.05R + 含み損）
     stagnation_stage1_minutes: float = 60.0
     stagnation_stage1_mfe_r: float = 0.05

@@ -156,7 +156,7 @@ class UnifiedBotConfig:
     # デモモード（閾値を下げて活発にシグナルを発火させる）
     demo_mode: bool = False
     # コンセンサス閾値
-    consensus_threshold: float = 10.0
+    consensus_threshold: float = 9.0
     # 最大同時ポジション数（ライブ用）
     max_positions: int = 3
     # デモモード時の最大同時ポジション数
@@ -202,14 +202,14 @@ class UnifiedBotConfig:
     sg_volatility_penalty: float = 0.05
     sg_recent_loss_penalty: float = 0.1
     # レジーム別閾値調整（TRENDレジームでスコア要求引き上げ）
-    regime_threshold_enabled: bool = False
+    regime_threshold_enabled: bool = True
     regime_trend_threshold_add: float = 1.5
     # 低ATR+TRENDフィルター（低ボラTRENDはWR低下）
     low_atr_trend_filter_enabled: bool = False
     # ATR/ATR_MA比率がこの値以下で発動
     low_atr_trend_ratio_max: float = 0.75
     # HTFスコア最低要件（score_htf=0はWR低下）
-    htf_score_filter_enabled: bool = False
+    htf_score_filter_enabled: bool = True
     # HTF整合度がこの値以下のとき閾値を追加
     htf_score_filter_min_alignment: float = 0.1
     # HTF不一致時の追加閾値
