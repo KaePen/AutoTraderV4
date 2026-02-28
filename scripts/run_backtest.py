@@ -655,6 +655,24 @@ def parse_args() -> argparse.Namespace:
         default=1.0,
         help="HTF不一致時の追加閾値（デフォルト: 1.0）",
     )
+    # --- BCA: Bidirectional Conviction Assessment ---
+    parser.add_argument(
+        "--bca",
+        action="store_true",
+        help="BCA（方向性エッジ評価）を有効化",
+    )
+    parser.add_argument(
+        "--bca-min-edge",
+        type=float,
+        default=0.25,
+        help="BCA最小方向性エッジ（デフォルト: 0.25）",
+    )
+    parser.add_argument(
+        "--bca-penalty-scale",
+        type=float,
+        default=1.0,
+        help="BCAペナルティスケール（デフォルト: 1.0）",
+    )
     # --- ユニバーサル0.5R部分利確 ---
     parser.add_argument(
         "--universal-half-r",
@@ -1253,6 +1271,9 @@ def run_single_backtest(args: argparse.Namespace):
         fundamental_post_event_lag_seconds=(
             args.fundamental_lag
         ),
+        bca_enabled=args.bca,
+        bca_min_edge=args.bca_min_edge,
+        bca_penalty_scale=args.bca_penalty_scale,
     )
 
     # PositionManagerConfig構築

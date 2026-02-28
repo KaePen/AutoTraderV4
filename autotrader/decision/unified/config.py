@@ -230,6 +230,13 @@ class UnifiedBotConfig:
     fundamental_pm_enabled: bool = False
     # LLM処理ラグ（秒）: 発表後bias/surpriseが利用可能になるまでの遅延
     fundamental_post_event_lag_seconds: int = 30
+    # --- BCA: Bidirectional Conviction Assessment ---
+    # BCA有効化フラグ
+    bca_enabled: bool = False
+    # 最小方向性エッジ閾値（これ未満でブロック）
+    bca_min_edge: float = 0.25
+    # ペナルティスケール係数
+    bca_penalty_scale: float = 1.0
 
     def get_evaluator_config(self, timeframe: str) -> EvaluatorConfig:
         """時間足別評価器設定を取得
