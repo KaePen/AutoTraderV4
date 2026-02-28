@@ -8,16 +8,22 @@ EURGBP / EURNZD / EURAUD（好みで）
 
 .venv/Scripts/python.exe scripts/run_backtest.py --years 2010-2025 --verbose
 .venv/Scripts/python.exe scripts/run_backtest.py --years 2010-2025 --symbol USDCHF --verbose
+.venv/Scripts/python.exe scripts/run_backtest.py --start 2026-01-01 --end 2026-01-31 --symbol USDJPY --data-dir userdoc\csv --verbose
+
+■MT5 csvデータ取得
+.venv/Scripts/python.exe scripts/export_mt5_chart.py --symbol USDJPY --start 2026-01-01 --end 2026-01-31 --lookback-months 6 --output-dir tmp/csv
 
 ■WebUI起動
 .venv\Scripts\python -m autotrader.web --host 0.0.0.0 --port 8000
+
+■WebClaudeマネージャー起動
+cloudcli
 
 ■PR自動承認
 python scripts\pr_watcher.py
 
 ■Supabaseパスワード
 cUr5rHyklWdpdbOb
-
 
 ■課題箇所
 EURUSDペアの最適化を実施してください。調整に利用してよい期間は2018-2020年の間のとして、それ以外の期間は 
@@ -36,11 +42,17 @@ EURUSDペアの最適化を実施してください。調整に利用してよ�
 
   出力先: data/fundamental/events_2024.csv
 
-  event_id,event_time,currency,event_name,impact,actual,forecast,previous
-  ff_a1b2c3,2024-01-05T13:30:00+00:00,USD,Non-Farm Payrolls,high,216000,175000,199000
-
   # ニュースの収集
-  python scripts/collect_gdelt_news.py --source gkg --years 2022-2024 --currencies USD,JPY,EUR,GBP,AUD,NZD,CHF,CAD
+  .venv/Scripts/python.exe scripts/collect_gdelt_news.py --source gkg --years 2022-2024 --currencies USD,JPY,EUR,GBP,AUD,NZD,CHF,CAD
+  
+  # ニュースの絞り込み
+  .venv/Scripts/python.exe scripts/filter_news_by_source.py --years 2015-2019
+
+　#ニューススクレイピング
+  .venv/Scripts/python.exe scripts/scrape_news_content.py --years 2020-2025
+  .venv/Scripts/python.exe scripts/scrape_news_content.py --year 2020
+  .venv/Scripts/python.exe scripts/scrape_news_content.py --year 2024 --resume
+  .venv/Scripts/python.exe scripts/scrape_news_content.py --year 2024 --dry-run
 
   ---
   Step 2: LLMでコンテキストを事前生成する
@@ -49,15 +61,15 @@ EURUSDペアの最適化を実施してください。調整に利用してよ�
   ollama list  # qwen3:14b が表示されればOK
 
   # 処理量を事前確認（dry-run）
-  python scripts/generate_fundamental_llm.py --symbol USDJPY --years 2010-2025 --dry-run
+  .venv/Scripts/python.exe scripts/generate_fundamental_llm.py events --symbol USDJPY --year 2020 --dry-run
+  .venv/Scripts/python.exe scripts/generate_fundamental_llm.py news --symbol USDJPY --year 2021 --dry-run
+  .venv/Scripts/python.exe scripts/generate_fundamental_llm.py all --symbol USDJPY --year 2024 --dry-run
 
   # USDJPY 2010〜2025年を一括生成（約192回のLLM呼び出し）
-  python scripts/generate_fundamental_llm.py --symbol USDJPY --years 2010-2025
+  .venv/Scripts/python.exe scripts/generate_fundamental_llm.py --symbol USDJPY --years 2010-2025
 
-  出力先: data/fundamental/llm_context_USDJPY_2024.csv
-  period_start,macro_bias_score,macro_bias_summary,post_event_bias_score,post_event_summary,sentiment_score   
-  2024-01-01T00:00:00+00:00,0.35,USD強気（NFP大幅上振れ）,0.20,NFP後の短期ドル高,0.25
-  2024-02-01T00:00:00+00:00,-0.10,BOJ政策修正への警戒,...
+  出力先: data/fundamental/llm_events_USDJPY_2024.csv
+  出力先: data/fundamental/llm_news_USDJPY_2024.csv
 
   ---
   Step 3: バックテストで使用する
