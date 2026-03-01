@@ -3,13 +3,13 @@
 from __future__ import annotations
 
 from autotrader.web.routers import (
-    dashboard,
-    signals,
-    positions,
-    trades,
-    indicators,
     candles,
+    dashboard,
+    indicators,
+    positions,
     settings,
+    signals,
+    trades,
     trading,
 )
 

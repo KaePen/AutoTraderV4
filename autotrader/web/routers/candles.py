@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from fastapi import (
     APIRouter,
@@ -21,6 +21,7 @@ from autotrader.web.dependencies import (
     get_engine_manager,
     get_live_engine,
 )
+from autotrader.web.middleware import limiter
 from autotrader.web.schemas import ApiResponse, CandleResponse
 from autotrader.web.services.market_service import MarketService
 
@@ -33,6 +34,7 @@ router = APIRouter()
     "/candles/{symbol}/{timeframe}",
     response_model=ApiResponse[list[CandleResponse]],
 )
+@limiter.limit("60/minute")
 async def get_candles(
     request: Request,
     symbol: str = Path(description="通貨ペア"),
@@ -78,7 +80,7 @@ async def get_candles(
                 end_time.replace("Z", "+00:00")
             )
             if end_dt.tzinfo is None:
-                end_dt = end_dt.replace(tzinfo=timezone.utc)
+                end_dt = end_dt.replace(tzinfo=UTC)
         except ValueError:
             raise HTTPException(
                 status_code=400,

@@ -3,12 +3,11 @@
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
-
-from fastapi import APIRouter, Depends, Path, Query, Request
-from sqlalchemy.orm import Session
+from datetime import UTC, datetime
 
 import pandas as pd
+from fastapi import APIRouter, Depends, Path, Query, Request
+from sqlalchemy.orm import Session
 
 from autotrader.core.enums import Timeframe
 from autotrader.web.dependencies import (
@@ -16,6 +15,7 @@ from autotrader.web.dependencies import (
     get_engine_manager,
     get_live_engine,
 )
+from autotrader.web.middleware import limiter
 from autotrader.web.schemas import (
     ApiResponse,
     IndicatorResponse,
@@ -33,6 +33,7 @@ router = APIRouter()
     "/indicators/{symbol}/{timeframe}",
     response_model=ApiResponse[IndicatorResponse],
 )
+@limiter.limit("60/minute")
 async def get_indicators(
     request: Request,
     symbol: str = Path(description="通貨ペア"),
@@ -69,7 +70,7 @@ async def get_indicators(
                 ind = IndicatorResponse(
                     symbol=symbol,
                     timeframe=timeframe,
-                    timestamp=datetime.now(timezone.utc),
+                    timestamp=datetime.now(UTC),
                     rsi=raw.get("rsi"),
                     macd=raw.get("macd"),
                     macd_signal=raw.get("macd_signal"),
@@ -101,6 +102,7 @@ async def get_indicators(
     "/indicators/{symbol}/{timeframe}/series",
     response_model=ApiResponse[IndicatorSeriesResponse],
 )
+@limiter.limit("60/minute")
 async def get_indicator_series(
     request: Request,
     symbol: str = Path(description="通貨ペア"),

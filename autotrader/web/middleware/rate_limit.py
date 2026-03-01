@@ -9,6 +9,12 @@ from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.util import get_remote_address
 
+# グローバル Limiter インスタンス（各ルーターから参照可能）
+limiter = Limiter(
+    key_func=get_remote_address,
+    default_limits=["100/minute"],
+)
+
 
 def configure_rate_limit(app) -> Limiter:
     """Rate Limit 設定
@@ -19,10 +25,6 @@ def configure_rate_limit(app) -> Limiter:
     Returns:
         Limiter: Rate Limiter インスタンス
     """
-    limiter = Limiter(
-        key_func=get_remote_address,
-        default_limits=["100/minute"],
-    )
     app.state.limiter = limiter
     app.add_exception_handler(
         RateLimitExceeded, _rate_limit_exceeded_handler

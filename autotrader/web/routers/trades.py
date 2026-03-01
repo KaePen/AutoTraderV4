@@ -9,6 +9,7 @@ from sqlalchemy.exc import ProgrammingError
 from sqlalchemy.orm import Session
 
 from autotrader.web.dependencies import get_db
+from autotrader.web.middleware import limiter
 from autotrader.web.schemas import (
     ApiResponse,
     TradeResponse,
@@ -24,6 +25,7 @@ router = APIRouter()
     "/trades",
     response_model=ApiResponse[list[TradeResponse]],
 )
+@limiter.limit("60/minute")
 async def get_trades(
     request: Request,
     db: Session = Depends(get_db),
@@ -64,6 +66,7 @@ async def get_trades(
     "/trades/summary",
     response_model=ApiResponse[TradeSummaryResponse],
 )
+@limiter.limit("60/minute")
 async def get_trade_summary(
     request: Request,
     db: Session = Depends(get_db),

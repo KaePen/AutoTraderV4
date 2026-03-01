@@ -2,8 +2,9 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 
+from autotrader.web.middleware import limiter
 from autotrader.web.schemas import ApiResponse, SettingsResponse
 from autotrader.web.schemas.requests import SettingsUpdateRequest
 from autotrader.web.services.settings_service import (
@@ -18,7 +19,9 @@ router = APIRouter()
     "/settings",
     response_model=ApiResponse[SettingsResponse],
 )
+@limiter.limit("60/minute")
 async def get_settings(
+    request: Request,
     service: SettingsService = Depends(
         get_settings_service
     ),
@@ -26,6 +29,7 @@ async def get_settings(
     """現在の設定を取得
 
     Args:
+        request: FastAPIリクエスト
         service: 設定サービス
 
     Returns:
@@ -39,7 +43,9 @@ async def get_settings(
     "/settings",
     response_model=ApiResponse[SettingsResponse],
 )
+@limiter.limit("20/minute")
 async def update_settings(
+    http_request: Request,
     request: SettingsUpdateRequest,
     service: SettingsService = Depends(
         get_settings_service
@@ -48,6 +54,7 @@ async def update_settings(
     """設定を更新
 
     Args:
+        http_request: FastAPIリクエスト
         request: 更新リクエスト
         service: 設定サービス
 

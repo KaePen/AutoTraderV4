@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel
 
 from autotrader.web.auth.config import get_auth_settings
@@ -16,6 +16,7 @@ from autotrader.web.auth.security import (
     create_access_token,
     verify_password,
 )
+from autotrader.web.middleware import limiter
 from autotrader.web.schemas import ApiResponse
 
 router = APIRouter(prefix="/auth")
@@ -60,12 +61,15 @@ class UserResponse(BaseModel):
 @router.post(
     "/token", response_model=ApiResponse[TokenResponse]
 )
+@limiter.limit("5/minute")
 async def login(
+    request: Request,
     form: TokenRequest,
 ) -> ApiResponse[TokenResponse]:
     """ログイン・トークン発行
 
     Args:
+        request: FastAPIリクエスト
         form: ログインフォーム
 
     Returns:
@@ -104,12 +108,15 @@ async def login(
 
 
 @router.get("/me", response_model=ApiResponse[UserResponse])
+@limiter.limit("60/minute")
 async def get_me(
+    request: Request,
     user: Annotated[dict[str, any], Depends(get_current_user)],
 ) -> ApiResponse[UserResponse]:
     """現在のユーザー情報取得
 
     Args:
+        request: FastAPIリクエスト
         user: ユーザー情報
 
     Returns:
