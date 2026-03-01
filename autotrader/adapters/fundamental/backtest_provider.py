@@ -272,6 +272,74 @@ class BacktestFundamentalProvider:
             )
             return 0
 
+    def load_parquet(self, parquet_path: str | Path) -> int:
+        """Parquetキャッシュから経済イベントを読み込み
+
+        generate_event_cache.py で生成した通貨ペア別
+        Parquetファイルを読み込む。正規化・重複排除は
+        生成時に実施済みのためスキップする。
+
+        Args:
+            parquet_path: Parquetファイルパス
+
+        Returns:
+            int: 読み込んだイベント数
+        """
+        try:
+            import pandas as pd
+        except ImportError:
+            logger.warning(
+                "[BacktestFundamental] pandas未インストール"
+                "（Parquet読込不可）"
+            )
+            return 0
+
+        path = Path(parquet_path)
+        if not path.exists():
+            logger.warning(
+                "[BacktestFundamental] Parquetが見つかりません"
+                f": {path}"
+            )
+            return 0
+
+        try:
+            df = pd.read_parquet(path, engine="pyarrow")
+            fetched_at = datetime.now(timezone.utc)
+            loaded: list[EconomicEvent] = []
+
+            for _, row in df.iterrows():
+                event = self._parse_row(
+                    row.to_dict(), fetched_at,
+                )
+                if event:
+                    loaded.append(event)
+
+            # Parquetは生成時に重複排除済みだが、
+            # 複数ファイルロード時のマージのため再実行
+            self._events.extend(loaded)
+            self._events = self._normalizer.deduplicate(
+                self._events
+            )
+            self._events.sort(key=lambda e: e.event_time)
+            self._events_sorted_ts = [
+                e.event_time.timestamp()
+                for e in self._events
+            ]
+            self._loaded_files.append(str(path))
+
+            logger.info(
+                f"[BacktestFundamental] Parquet "
+                f"{len(loaded)}件読込: {path.name}"
+            )
+            return len(loaded)
+
+        except Exception as e:
+            logger.error(
+                f"[BacktestFundamental] Parquet読込エラー"
+                f": {e}"
+            )
+            return 0
+
     def load_llm_context_csv(
         self,
         csv_path: str | Path,

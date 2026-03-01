@@ -1365,25 +1365,50 @@ def run_single_backtest(args: argparse.Namespace):
         universal_half_r_ratio=args.universal_half_r_ratio,
     )
 
-    # ファンダメンタルCSVリスト構築
-    # 検索順: data/fundamental/events/ → data/fundamental/
+    # ファンダメンタルイベントデータ構築
+    # 優先: data/{symbol}/events/events_YYYY.parquet（キャッシュ）
+    # 次点: data/fundamental/events/events_YYYY.csv
     _fundamental_csvs: list[str] | None = None
+    _fundamental_parquets: list[str] | None = None
     if args.fundamental:
+        _sym = args.symbol
+        _data_base = Path(args.data_dir)
+        _parquet_dir = _data_base / _sym / "events"
         _fund_dir = Path(args.fundamental_dir)
         _events_dir = _fund_dir / "events"
         if not _events_dir.exists():
             _events_dir = _fund_dir
-        _fundamental_csvs = []
+
+        # Parquetキャッシュを優先検索
+        _parquet_files = []
+        _csv_files = []
         for _yr in range(start_year, end_year + 1):
+            _pq = _parquet_dir / f"events_{_yr}.parquet"
             _csv = _events_dir / f"events_{_yr}.csv"
-            if _csv.exists():
-                _fundamental_csvs.append(str(_csv))
-        if not _fundamental_csvs:
+            if _pq.exists():
+                _parquet_files.append(str(_pq))
+            elif _csv.exists():
+                _csv_files.append(str(_csv))
+
+        if _parquet_files:
+            _fundamental_parquets = _parquet_files
+            logging.info(
+                "[Fundamental] Parquetキャッシュ %d年分検出",
+                len(_parquet_files),
+            )
+        if _csv_files:
+            _fundamental_csvs = _csv_files
+            if _parquet_files:
+                logging.info(
+                    "[Fundamental] 残り%d年分はCSVフォールバック",
+                    len(_csv_files),
+                )
+        if not _parquet_files and not _csv_files:
             logging.warning(
-                "[Fundamental] %s に events_YYYY.csv が見つかりません",
+                "[Fundamental] %s にイベントデータが"
+                "見つかりません",
                 _events_dir,
             )
-            _fundamental_csvs = None
 
     # Phase 2b: --fundamental-phase2b で暗黙的に有効化
     if args.fundamental_phase2b:
@@ -1479,6 +1504,7 @@ def run_single_backtest(args: argparse.Namespace):
         period_end=period_end,
         sequential=args.sequential,
         fundamental_csv_list=_fundamental_csvs,
+        fundamental_parquet_list=_fundamental_parquets,
         event_llm_csv_list=_event_llm_csvs,
         news_llm_csv_list=_news_llm_csvs,
         fundamental_guard_minutes=args.fundamental_guard,

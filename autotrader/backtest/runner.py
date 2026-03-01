@@ -930,6 +930,7 @@ class BacktestRunner:
         pm_config: "PositionManagerConfig | None" = None,
         fundamental_csv: str | None = None,
         fundamental_csv_list: list[str] | None = None,
+        fundamental_parquet_list: list[str] | None = None,
         event_llm_csv_list: list[str] | None = None,
         news_llm_csv_list: list[str] | None = None,
         fundamental_guard_minutes: int = 30,
@@ -956,6 +957,7 @@ class BacktestRunner:
             pm_config: PositionManager設定（外部注入）
             fundamental_csv: 経済イベントCSVパス（Noneで無効）
             fundamental_csv_list: 複数の経済イベントCSVパスリスト
+            fundamental_parquet_list: Parquetキャッシュパスリスト
             fundamental_guard_minutes: 重要指標前の停止分数
             period_start: 日単位の開始日時（Noneで年始）
             period_end: 日単位の終了日時・exclusive（Noneで年末）
@@ -981,6 +983,7 @@ class BacktestRunner:
 
         _has_data = (
             bool(_csv_paths)
+            or bool(fundamental_parquet_list)
             or bool(event_llm_csv_list)
             or bool(news_llm_csv_list)
         )
@@ -1000,7 +1003,21 @@ class BacktestRunner:
                         _bot_cfg.fundamental_post_event_lag_seconds
                     ),
                 )
-                # 経済イベントCSV読み込み
+                # Parquetキャッシュ読み込み（優先）
+                if fundamental_parquet_list:
+                    _pq_total = 0
+                    for _pq in fundamental_parquet_list:
+                        _n = fundamental_provider.load_parquet(
+                            _pq,
+                        )
+                        _pq_total += _n
+                    _log.info(
+                        "[Fundamental] Parquetキャッシュ読込: "
+                        "%d件 (%dファイル)",
+                        _pq_total,
+                        len(fundamental_parquet_list),
+                    )
+                # 経済イベントCSV読み込み（フォールバック）
                 if _csv_paths:
                     total_count = 0
                     for _csv in _csv_paths:
