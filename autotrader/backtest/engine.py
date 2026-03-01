@@ -64,6 +64,9 @@ class SignalGeneratorProtocol(Protocol):
 class BacktestConfig:
     """バックテスト設定
 
+    トレードロジックに関するパラメータは UnifiedBotConfig を使用する。
+    バックテスト固有の設定（データ範囲、並列数、出力先等）のみここに置く。
+
     Attributes:
         symbol: シンボル
         timeframe: 時間足
@@ -75,9 +78,7 @@ class BacktestConfig:
         max_positions: 最大ポジション数
         default_volume: デフォルトロット
         data_dir: データディレクトリ
-        min_confidence: 最小確度
-        stop_loss_pips: デフォルトSL（pips）
-        take_profit_pips: デフォルトTP（pips）
+        min_confidence: 最小確度（DB保存用、シグナル生成は UnifiedBotConfig 参照）
     """
 
     symbol: str = "USDJPY"
@@ -95,12 +96,6 @@ class BacktestConfig:
     default_volume: float = 0.1
     data_dir: str = "data/raw"
     min_confidence: float = 0.6
-    stop_loss_pips: float = field(
-        default_factory=lambda: DEFAULT_TRADING_PARAMS.default_sl_pips
-    )
-    take_profit_pips: float = field(
-        default_factory=lambda: DEFAULT_TRADING_PARAMS.default_tp_pips
-    )
 
 
 @dataclass
@@ -342,107 +337,6 @@ class BacktestEngine:
             close=float(row["close"]),
             volume=float(row.get("volume", 0)),
         )
-
-    def _extract_indicators(self, row: pd.Series) -> dict[str, Any]:
-        """指標データを抽出
-
-        Args:
-            row: データ行
-
-        Returns:
-            dict: 指標辞書
-        """
-        indicators = {}
-
-        # 利用可能な指標列を抽出
-        indicator_cols = [
-            "sma_20", "sma_50", "sma_200",
-            "ema_12", "ema_26",
-            "rsi_14",
-            "macd", "macd_signal", "macd_hist",
-            "bb_upper", "bb_middle", "bb_lower", "bb_width",
-            "atr_14",
-            "stoch_k", "stoch_d",
-            "adx",
-        ]
-
-        for col in indicator_cols:
-            if col in row.index and pd.notna(row[col]):
-                indicators[col] = float(row[col])
-
-        return indicators
-
-    def _build_context(
-        self,
-        candle: Candle,
-        indicators: dict[str, Any],
-    ) -> dict[str, Any]:
-        """ガードチェック用コンテキストを構築
-
-        Args:
-            candle: 足データ
-            indicators: 指標辞書
-
-        Returns:
-            dict: コンテキスト
-        """
-        state = self.simulator.get_state_snapshot()
-
-        return {
-            "balance": state["balance"],
-            "equity": state["equity"],
-            "margin_used": 0.0,  # バックテストでは簡略化
-            "margin_free": state["balance"],
-            "daily_loss": 0.0,  # 日次損失は別途計算が必要
-            "open_positions_count": state["open_positions_count"],
-            "current_hour": candle.time.hour,
-            "spread_pips": self.config.spread_pips,
-            "volatility": indicators.get("atr_14", 0.0),
-            "trend_strength": indicators.get("adx", 0.0),
-            "current_drawdown": state["current_drawdown"],
-        }
-
-    def _calculate_stop_loss(
-        self,
-        signal_type: SignalType,
-        current_price: float,
-    ) -> float:
-        """ストップロスを計算
-
-        Args:
-            signal_type: シグナル種別
-            current_price: 現在価格
-
-        Returns:
-            float: ストップロス価格
-        """
-        sl_distance = self.config.stop_loss_pips * 0.01
-
-        if signal_type == SignalType.BUY:
-            return current_price - sl_distance
-        else:
-            return current_price + sl_distance
-
-    def _calculate_take_profit(
-        self,
-        signal_type: SignalType,
-        current_price: float,
-    ) -> float:
-        """テイクプロフィットを計算
-
-        Args:
-            signal_type: シグナル種別
-            current_price: 現在価格
-
-        Returns:
-            float: テイクプロフィット価格
-        """
-        tp_distance = self.config.take_profit_pips * 0.01
-
-        if signal_type == SignalType.BUY:
-            return current_price + tp_distance
-        else:
-            return current_price - tp_distance
 
     def _create_empty_result(
         self,
