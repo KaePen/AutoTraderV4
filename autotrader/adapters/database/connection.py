@@ -12,6 +12,8 @@ from autotrader.adapters.database.models import Base
 
 # dictベースキャッシュ（複数DB URL対応）
 _engine_cache: dict[str, Engine] = {}
+# セッションファクトリキャッシュ（エンジンID → ファクトリ）
+_factory_cache: dict[int, sessionmaker] = {}
 
 
 def get_engine(database_url: str) -> Engine:
@@ -47,7 +49,10 @@ def get_engine(database_url: str) -> Engine:
 
 
 def get_session_factory(engine: Engine) -> sessionmaker:
-    """セッションファクトリを取得
+    """セッションファクトリを取得（キャッシュ付き）
+
+    同一エンジンに対して毎回 sessionmaker を再生成せず、
+    キャッシュ済みファクトリを返す。
 
     Args:
         engine: SQLAlchemyエンジン
@@ -55,9 +60,14 @@ def get_session_factory(engine: Engine) -> sessionmaker:
     Returns:
         sessionmaker: セッションファクトリ
     """
-    return sessionmaker(
-        bind=engine, autocommit=False, autoflush=False,
-    )
+    key = id(engine)
+    if key not in _factory_cache:
+        _factory_cache[key] = sessionmaker(
+            bind=engine,
+            autocommit=False,
+            autoflush=False,
+        )
+    return _factory_cache[key]
 
 
 @contextmanager
@@ -129,3 +139,24 @@ def init_local_db() -> None:
     url = get_settings().local_database_url
     engine = get_engine(url)
     LocalBase.metadata.create_all(bind=engine)
+
+
+def dispose_engine(database_url: str) -> None:
+    """指定URLのエンジンを破棄しキャッシュから削除
+
+    Args:
+        database_url: 破棄するデータベースURL
+    """
+    engine = _engine_cache.pop(database_url, None)
+    if engine is not None:
+        # 対応するファクトリキャッシュも削除
+        _factory_cache.pop(id(engine), None)
+        engine.dispose()
+
+
+def dispose_all_engines() -> None:
+    """全エンジンを破棄しキャッシュをクリア"""
+    for engine in _engine_cache.values():
+        engine.dispose()
+    _engine_cache.clear()
+    _factory_cache.clear()

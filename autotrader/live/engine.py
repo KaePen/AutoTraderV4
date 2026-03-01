@@ -2056,12 +2056,112 @@ class LiveTradingEngine:
         is_open=trueレコードをクリーンアップする。
         MT5口座履歴から正確な決済データを復元する。
 
+        同期DB操作は asyncio.to_thread() で実行し、
+        イベントループをブロックしない。
+
         Note:
             _active_symbolのレコードのみ対象。
             他シンボルのゴーストはfix_ghost_positions.pyで対応。
 
         Args:
             active_tickets: MT5で現在有効なチケットIDの集合
+        """
+        try:
+            # 同期DB読み取りをスレッドプールで実行
+            ghost_data = await asyncio.to_thread(
+                self._fetch_ghost_records,
+                active_tickets,
+            )
+            if not ghost_data:
+                return
+
+            # MT5履歴取得（非同期）でゴーストの決済データを収集
+            updates: list[dict] = []
+            for ticket, trade_id in ghost_data:
+                deal = await (
+                    self._executor
+                    .get_deal_by_position_id_async(
+                        ticket
+                    )
+                )
+                if deal:
+                    closed_at = (
+                        datetime.fromtimestamp(
+                            deal["time"],
+                            tz=timezone.utc,
+                        )
+                        if deal["time"] > 0
+                        else datetime.now(timezone.utc)
+                    )
+                    updates.append({
+                        "ticket": ticket,
+                        "trade_id": trade_id,
+                        "exit_price": deal["price"],
+                        "profit_loss": deal["profit"],
+                        "exit_reason": (
+                            _mt5_reason_to_exit_reason(
+                                deal["reason_code"]
+                            )
+                        ),
+                        "closed_at": closed_at,
+                    })
+                    logger.info(
+                        "ゴースト復元(MT5履歴):"
+                        " ticket=%s reason=%s"
+                        " price=%.5f profit=%.2f",
+                        ticket,
+                        updates[-1]["exit_reason"],
+                        updates[-1]["exit_price"],
+                        updates[-1]["profit_loss"],
+                    )
+                else:
+                    updates.append({
+                        "ticket": ticket,
+                        "trade_id": trade_id,
+                        "exit_price": None,
+                        "profit_loss": None,
+                        "exit_reason": (
+                            ExitReason.GHOST_CLEANUP.value
+                        ),
+                        "closed_at": datetime.now(
+                            timezone.utc
+                        ),
+                    })
+                    logger.info(
+                        "ゴーストレコード掃除:"
+                        " ticket=%s trade_id=%s",
+                        ticket,
+                        trade_id,
+                    )
+
+            # 同期DB更新をスレッドプールで実行
+            if updates:
+                await asyncio.to_thread(
+                    self._apply_ghost_updates, updates,
+                )
+                logger.info(
+                    "ゴーストレコード %d件を"
+                    " is_open=false に更新",
+                    len(updates),
+                )
+        except Exception as e:
+            logger.warning(
+                "ゴーストレコード掃除スキップ: %s", e
+            )
+
+    def _fetch_ghost_records(
+        self, active_tickets: set[int]
+    ) -> list[tuple[int, str]]:
+        """DBからゴーストレコードを同期取得
+
+        イベントループをブロックしないよう
+        asyncio.to_thread() から呼び出す。
+
+        Args:
+            active_tickets: MT5で有効なチケットIDの集合
+
+        Returns:
+            list[tuple[int, str]]: (ticket, trade_id) のリスト
         """
         from autotrader.adapters.database.connection import (
             get_session,
@@ -2070,83 +2170,65 @@ class LiveTradingEngine:
             TradeRecord,
         )
         from autotrader.config.settings import get_settings
-        try:
-            db_url = get_settings().database_url
-            with get_session(db_url) as db:
-                ghost_records = (
+
+        db_url = get_settings().database_url
+        with get_session(db_url) as db:
+            records = (
+                db.query(TradeRecord)
+                .filter(
+                    TradeRecord.is_open.is_(True),
+                    TradeRecord.symbol == (
+                        self._active_symbol
+                    ),
+                )
+                .all()
+            )
+            return [
+                (r.ticket, r.trade_id)
+                for r in records
+                if r.ticket not in active_tickets
+            ]
+
+    def _apply_ghost_updates(
+        self, updates: list[dict]
+    ) -> None:
+        """ゴーストレコードの決済情報をDBに同期書き込み
+
+        イベントループをブロックしないよう
+        asyncio.to_thread() から呼び出す。
+
+        Args:
+            updates: 各ゴーストの更新データリスト
+        """
+        from autotrader.adapters.database.connection import (
+            get_session,
+        )
+        from autotrader.adapters.database.models import (
+            TradeRecord,
+        )
+        from autotrader.config.settings import get_settings
+
+        db_url = get_settings().database_url
+        with get_session(db_url) as db:
+            for upd in updates:
+                record = (
                     db.query(TradeRecord)
                     .filter(
+                        TradeRecord.ticket == upd["ticket"],
                         TradeRecord.is_open.is_(True),
-                        TradeRecord.symbol == (
-                            self._active_symbol
-                        ),
                     )
-                    .all()
+                    .first()
                 )
-                closed_count = 0
-                for r in ghost_records:
-                    if r.ticket not in active_tickets:
-                        r.is_open = False
-                        # MT5履歴から正確な決済データを復元
-                        deal = await (
-                            self._executor
-                            .get_deal_by_position_id_async(
-                                r.ticket
-                            )
-                        )
-                        if deal:
-                            r.exit_price = deal["price"]
-                            r.profit_loss = deal["profit"]
-                            r.exit_reason = (
-                                _mt5_reason_to_exit_reason(
-                                    deal["reason_code"]
-                                )
-                            )
-                            if deal["time"] > 0:
-                                r.closed_at = (
-                                    datetime.fromtimestamp(
-                                        deal["time"],
-                                        tz=timezone.utc,
-                                    )
-                                )
-                            else:
-                                r.closed_at = datetime.now(
-                                    timezone.utc
-                                )
-                            logger.info(
-                                "ゴースト復元(MT5履歴):"
-                                " ticket=%s reason=%s"
-                                " price=%.5f profit=%.2f",
-                                r.ticket,
-                                r.exit_reason,
-                                r.exit_price,
-                                r.profit_loss,
-                            )
-                        else:
-                            r.exit_reason = (
-                                ExitReason.GHOST_CLEANUP.value
-                            )
-                            r.closed_at = datetime.now(
-                                timezone.utc
-                            )
-                            logger.info(
-                                "ゴーストレコード掃除:"
-                                " ticket=%s trade_id=%s",
-                                r.ticket,
-                                r.trade_id,
-                            )
-                        closed_count += 1
-                if closed_count > 0:
-                    db.flush()
-                    logger.info(
-                        "ゴーストレコード %d件を"
-                        " is_open=false に更新",
-                        closed_count,
-                    )
-        except Exception as e:
-            logger.warning(
-                "ゴーストレコード掃除スキップ: %s", e
-            )
+                if record is None:
+                    continue
+                record.is_open = False
+                record.exit_reason = upd["exit_reason"]
+                record.closed_at = upd["closed_at"]
+                if upd["exit_price"] is not None:
+                    record.exit_price = upd["exit_price"]
+                if upd["profit_loss"] is not None:
+                    record.profit_loss = upd["profit_loss"]
+            db.flush()
 
     def _restore_open_trades_from_db(
         self, tickets: list[int]

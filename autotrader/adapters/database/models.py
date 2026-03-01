@@ -57,6 +57,8 @@ class TradeRecord(Base):
 
     __table_args__ = (
         Index("ix_trades_symbol_opened", "symbol", "opened_at"),
+        Index("ix_trades_is_open_symbol", "is_open", "symbol"),
+        Index("ix_trades_closed_at", "closed_at"),
     )
 
     def to_dict(self) -> dict[str, Any]:

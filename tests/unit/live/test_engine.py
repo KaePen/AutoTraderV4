@@ -450,36 +450,18 @@ class TestExecuteEntryNullSafety:
 
 
 class TestCloseGhostDbRecords:
-    """_close_ghost_db_records テスト"""
+    """_close_ghost_db_records テスト
 
-    def _make_db_mocks(
-        self, records: list[MagicMock],
-    ) -> tuple[MagicMock, MagicMock]:
-        """DB関連モックを生成するヘルパー
-
-        Returns:
-            tuple: (mock_session, context_managers_dict)
-        """
-        mock_query = MagicMock()
-        mock_query.filter.return_value.all.return_value = (
-            records
-        )
-        mock_session = MagicMock()
-        mock_session.query.return_value = mock_query
-        return mock_session
+    async/sync分離後のテスト。
+    _fetch_ghost_records / _apply_ghost_updates をモックし、
+    非同期制御フローを検証する。
+    """
 
     @pytest.mark.asyncio
     async def test_MT5履歴でゴースト復元_SL(
         self, engine: LiveTradingEngine
     ) -> None:
         """MT5 deal取得成功(SL)でexit_price等が復元される"""
-        mock_ghost = MagicMock()
-        mock_ghost.ticket = 99999
-        mock_ghost.trade_id = "ghost-001"
-        mock_ghost.is_open = True
-
-        mock_session = self._make_db_mocks([mock_ghost])
-
         engine._executor = MagicMock()
         engine._executor.get_deal_by_position_id_async = (
             AsyncMock(return_value={
@@ -490,46 +472,29 @@ class TestCloseGhostDbRecords:
             })
         )
 
-        with (
-            patch(
-                "autotrader.config.settings.get_settings"
-            ) as mock_settings,
-            patch(
-                "autotrader.adapters.database.connection"
-                ".get_session"
-            ) as mock_get_session,
-        ):
-            mock_settings.return_value.database_url = (
-                "sqlite://"
-            )
-            mock_get_session.return_value.__enter__ = (
-                MagicMock(return_value=mock_session)
-            )
-            mock_get_session.return_value.__exit__ = (
-                MagicMock(return_value=False)
-            )
-
+        with patch.object(
+            engine, "_fetch_ghost_records",
+            return_value=[(99999, "ghost-001")],
+        ), patch.object(
+            engine, "_apply_ghost_updates",
+        ) as mock_apply:
             await engine._close_ghost_db_records(set())
 
-        assert mock_ghost.is_open is False
-        assert mock_ghost.exit_price == 150.123
-        assert mock_ghost.profit_loss == -500.0
-        assert mock_ghost.exit_reason == "SL_HIT"
-        assert mock_ghost.closed_at is not None
-        mock_session.flush.assert_called_once()
+        # _apply_ghost_updates に渡された更新データを検証
+        mock_apply.assert_called_once()
+        updates = mock_apply.call_args[0][0]
+        assert len(updates) == 1
+        assert updates[0]["ticket"] == 99999
+        assert updates[0]["exit_price"] == 150.123
+        assert updates[0]["profit_loss"] == -500.0
+        assert updates[0]["exit_reason"] == "SL_HIT"
+        assert updates[0]["closed_at"] is not None
 
     @pytest.mark.asyncio
     async def test_MT5履歴でゴースト復元_手動決済(
         self, engine: LiveTradingEngine
     ) -> None:
         """MT5 deal取得成功(手動reason=0)でMANUAL_CLOSE"""
-        mock_ghost = MagicMock()
-        mock_ghost.ticket = 88888
-        mock_ghost.trade_id = "ghost-manual"
-        mock_ghost.is_open = True
-
-        mock_session = self._make_db_mocks([mock_ghost])
-
         engine._executor = MagicMock()
         engine._executor.get_deal_by_position_id_async = (
             AsyncMock(return_value={
@@ -540,43 +505,24 @@ class TestCloseGhostDbRecords:
             })
         )
 
-        with (
-            patch(
-                "autotrader.config.settings.get_settings"
-            ) as mock_settings,
-            patch(
-                "autotrader.adapters.database.connection"
-                ".get_session"
-            ) as mock_get_session,
-        ):
-            mock_settings.return_value.database_url = (
-                "sqlite://"
-            )
-            mock_get_session.return_value.__enter__ = (
-                MagicMock(return_value=mock_session)
-            )
-            mock_get_session.return_value.__exit__ = (
-                MagicMock(return_value=False)
-            )
-
+        with patch.object(
+            engine, "_fetch_ghost_records",
+            return_value=[(88888, "ghost-manual")],
+        ), patch.object(
+            engine, "_apply_ghost_updates",
+        ) as mock_apply:
             await engine._close_ghost_db_records(set())
 
-        assert mock_ghost.exit_reason == "MANUAL_CLOSE"
-        assert mock_ghost.exit_price == 149.500
-        assert mock_ghost.profit_loss == 200.0
+        updates = mock_apply.call_args[0][0]
+        assert updates[0]["exit_reason"] == "MANUAL_CLOSE"
+        assert updates[0]["exit_price"] == 149.500
+        assert updates[0]["profit_loss"] == 200.0
 
     @pytest.mark.asyncio
     async def test_MT5履歴でゴースト復元_ストップアウト(
         self, engine: LiveTradingEngine
     ) -> None:
         """MT5 deal取得成功(reason=6)でSTOP_OUT"""
-        mock_ghost = MagicMock()
-        mock_ghost.ticket = 77777
-        mock_ghost.trade_id = "ghost-so"
-        mock_ghost.is_open = True
-
-        mock_session = self._make_db_mocks([mock_ghost])
-
         engine._executor = MagicMock()
         engine._executor.get_deal_by_position_id_async = (
             AsyncMock(return_value={
@@ -587,168 +533,89 @@ class TestCloseGhostDbRecords:
             })
         )
 
-        with (
-            patch(
-                "autotrader.config.settings.get_settings"
-            ) as mock_settings,
-            patch(
-                "autotrader.adapters.database.connection"
-                ".get_session"
-            ) as mock_get_session,
-        ):
-            mock_settings.return_value.database_url = (
-                "sqlite://"
-            )
-            mock_get_session.return_value.__enter__ = (
-                MagicMock(return_value=mock_session)
-            )
-            mock_get_session.return_value.__exit__ = (
-                MagicMock(return_value=False)
-            )
-
+        with patch.object(
+            engine, "_fetch_ghost_records",
+            return_value=[(77777, "ghost-so")],
+        ), patch.object(
+            engine, "_apply_ghost_updates",
+        ) as mock_apply:
             await engine._close_ghost_db_records(set())
 
-        assert mock_ghost.exit_reason == "STOP_OUT"
+        updates = mock_apply.call_args[0][0]
+        assert updates[0]["exit_reason"] == "STOP_OUT"
 
     @pytest.mark.asyncio
     async def test_MT5履歴取得失敗でGHOST_CLEANUPフォールバック(
         self, engine: LiveTradingEngine
     ) -> None:
         """deal取得失敗時はGHOST_CLEANUPにフォールバック"""
-        mock_ghost = MagicMock()
-        mock_ghost.ticket = 99999
-        mock_ghost.trade_id = "ghost-001"
-        mock_ghost.is_open = True
-
-        mock_session = self._make_db_mocks([mock_ghost])
-
         engine._executor = MagicMock()
         engine._executor.get_deal_by_position_id_async = (
             AsyncMock(return_value=None)
         )
 
-        with (
-            patch(
-                "autotrader.config.settings.get_settings"
-            ) as mock_settings,
-            patch(
-                "autotrader.adapters.database.connection"
-                ".get_session"
-            ) as mock_get_session,
-        ):
-            mock_settings.return_value.database_url = (
-                "sqlite://"
-            )
-            mock_get_session.return_value.__enter__ = (
-                MagicMock(return_value=mock_session)
-            )
-            mock_get_session.return_value.__exit__ = (
-                MagicMock(return_value=False)
-            )
-
+        with patch.object(
+            engine, "_fetch_ghost_records",
+            return_value=[(99999, "ghost-001")],
+        ), patch.object(
+            engine, "_apply_ghost_updates",
+        ) as mock_apply:
             await engine._close_ghost_db_records(set())
 
-        assert mock_ghost.is_open is False
-        assert mock_ghost.exit_reason == "GHOST_CLEANUP"
-        assert mock_ghost.closed_at is not None
-        mock_session.flush.assert_called_once()
+        updates = mock_apply.call_args[0][0]
+        assert len(updates) == 1
+        assert updates[0]["exit_reason"] == "GHOST_CLEANUP"
+        assert updates[0]["closed_at"] is not None
+        assert updates[0]["exit_price"] is None
 
     @pytest.mark.asyncio
     async def test_アクティブレコードは更新されない(
         self, engine: LiveTradingEngine
     ) -> None:
-        """MT5に存在するレコードは変更されない"""
-        mock_ghost = MagicMock()
-        mock_ghost.ticket = 99999
-        mock_ghost.trade_id = "ghost-001"
-        mock_ghost.is_open = True
-
-        mock_active = MagicMock()
-        mock_active.ticket = 12345
-        mock_active.trade_id = "active-001"
-        mock_active.is_open = True
-
-        mock_session = self._make_db_mocks(
-            [mock_ghost, mock_active]
-        )
-
+        """MT5に存在するレコードは_fetch段階で除外される"""
         engine._executor = MagicMock()
         engine._executor.get_deal_by_position_id_async = (
             AsyncMock(return_value=None)
         )
 
-        with (
-            patch(
-                "autotrader.config.settings.get_settings"
-            ) as mock_settings,
-            patch(
-                "autotrader.adapters.database.connection"
-                ".get_session"
-            ) as mock_get_session,
-        ):
-            mock_settings.return_value.database_url = (
-                "sqlite://"
-            )
-            mock_get_session.return_value.__enter__ = (
-                MagicMock(return_value=mock_session)
-            )
-            mock_get_session.return_value.__exit__ = (
-                MagicMock(return_value=False)
-            )
-
-            # ticket=12345のみMT5に存在
+        # _fetch_ghost_recordsはアクティブを除外済み
+        with patch.object(
+            engine, "_fetch_ghost_records",
+            return_value=[(99999, "ghost-001")],
+        ), patch.object(
+            engine, "_apply_ghost_updates",
+        ) as mock_apply:
+            # ticket=12345はMT5に存在
             await engine._close_ghost_db_records({12345})
 
-        # ゴーストのみ更新される
-        assert mock_ghost.is_open is False
-        # アクティブは変更なし
-        assert mock_active.is_open is True
-        mock_session.flush.assert_called_once()
+        # ゴーストのみ更新データに含まれる
+        updates = mock_apply.call_args[0][0]
+        assert len(updates) == 1
+        assert updates[0]["ticket"] == 99999
 
     @pytest.mark.asyncio
-    async def test_ゴーストなしの場合flushされない(
+    async def test_ゴーストなしの場合applyされない(
         self, engine: LiveTradingEngine
     ) -> None:
-        """全レコードがMT5に存在する場合はflushなし"""
-        mock_record = MagicMock()
-        mock_record.ticket = 12345
-        mock_record.is_open = True
-
-        mock_session = self._make_db_mocks([mock_record])
-
-        with (
-            patch(
-                "autotrader.config.settings.get_settings"
-            ) as mock_settings,
-            patch(
-                "autotrader.adapters.database.connection"
-                ".get_session"
-            ) as mock_get_session,
-        ):
-            mock_settings.return_value.database_url = (
-                "sqlite://"
-            )
-            mock_get_session.return_value.__enter__ = (
-                MagicMock(return_value=mock_session)
-            )
-            mock_get_session.return_value.__exit__ = (
-                MagicMock(return_value=False)
-            )
-
+        """全レコードがMT5に存在する場合はapply不要"""
+        with patch.object(
+            engine, "_fetch_ghost_records",
+            return_value=[],
+        ), patch.object(
+            engine, "_apply_ghost_updates",
+        ) as mock_apply:
             await engine._close_ghost_db_records({12345})
 
-        mock_session.flush.assert_not_called()
+        mock_apply.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_DB例外時にログ出力しスキップ(
         self, engine: LiveTradingEngine
     ) -> None:
         """DB接続エラーでも例外は伝播しない"""
-        with (
-            patch(
-                "autotrader.config.settings.get_settings",
-                side_effect=Exception("DB接続失敗"),
-            ),
+        with patch.object(
+            engine, "_fetch_ghost_records",
+            side_effect=Exception("DB接続失敗"),
         ):
             # 例外が伝播しないことを確認
             await engine._close_ghost_db_records({12345})

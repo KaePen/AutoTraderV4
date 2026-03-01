@@ -118,7 +118,7 @@ class TradeRepository:
             list[TradeRecord]: トレードリスト
         """
         query = self.session.query(TradeRecord).filter(
-            TradeRecord.is_open == True
+            TradeRecord.is_open.is_(True)
         )
         if symbol:
             query = query.filter(TradeRecord.symbol == symbol)
