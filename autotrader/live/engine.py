@@ -46,6 +46,7 @@ from autotrader.decision.unified.signal_consolidator import (
 )
 from autotrader.live.tick_entry_optimizer import TickEntryOptimizer
 from autotrader.calculator.technical.batch import TechnicalIndicatorBatch
+from autotrader.core.event_bus import event_bus
 
 logger = logging.getLogger(__name__)
 
@@ -576,21 +577,12 @@ class LiveTradingEngine:
         # 1秒サイクルのフル処理で使うためキャッシュ
         self._last_tick_data = tick
 
-        try:
-            from autotrader.web.websocket.handlers import (
-                broadcast_price_update,
-            )
-            asyncio.create_task(
-                broadcast_price_update({
-                    "symbol": self._active_symbol,
-                    "bid": bid,
-                    "ask": ask,
-                    "time_ms": tick_ms,
-                })
-            )
-        except (ImportError, RuntimeError):
-            # WebSocketモジュール未導入時・ブロードキャスト失敗は無視
-            pass
+        event_bus.publish_nowait("price.updated", {
+            "symbol": self._active_symbol,
+            "bid": bid,
+            "ask": ask,
+            "time_ms": tick_ms,
+        })
 
     async def _tick(self) -> None:
         """1ティック分の処理
@@ -688,31 +680,23 @@ class LiveTradingEngine:
                 signal.confidence,
             )
 
-            # WebSocketシグナルブロードキャスト
-            try:
-                from autotrader.web.websocket.handlers import (
-                    broadcast_signal_update,
-                )
-                asyncio.create_task(
-                    broadcast_signal_update({
-                        "signal_id": converted.signal_id,
-                        "symbol": converted.symbol,
-                        "timeframe": converted.timeframe,
-                        "signal_type": converted.signal_type.value,
-                        "confidence": converted.confidence,
-                        "confidence_level": (
-                            converted.confidence_level.value
-                        ),
-                        "stop_loss": converted.stop_loss,
-                        "take_profit": converted.take_profit,
-                        "reasoning": converted.reasoning,
-                        "created_at": (
-                            converted.created_at.isoformat()
-                        ),
-                    })
-                )
-            except (ImportError, RuntimeError):
-                pass  # ブロードキャスト失敗は無視
+            # EventBus経由でシグナルブロードキャスト
+            event_bus.publish_nowait("signal.generated", {
+                "signal_id": converted.signal_id,
+                "symbol": converted.symbol,
+                "timeframe": converted.timeframe,
+                "signal_type": converted.signal_type.value,
+                "confidence": converted.confidence,
+                "confidence_level": (
+                    converted.confidence_level.value
+                ),
+                "stop_loss": converted.stop_loss,
+                "take_profit": converted.take_profit,
+                "reasoning": converted.reasoning,
+                "created_at": (
+                    converted.created_at.isoformat()
+                ),
+            })
 
             # 4. エントリー判定
             if self._enable_auto_trade:
@@ -745,14 +729,8 @@ class LiveTradingEngine:
         analysis / account / positions / radar を1ペイロードで送信。
         フロントエンドはこのイベントを受信してUIを全更新する。
         """
-        try:
-            from autotrader.web.websocket.handlers import (
-                broadcast_tick_update,
-            )
-            payload = self._build_tick_payload()
-            await broadcast_tick_update(payload)
-        except (ImportError, RuntimeError):
-            pass  # ブロードキャスト失敗は無視
+        payload = self._build_tick_payload()
+        await event_bus.publish("tick.completed", payload)
 
     def _build_tick_payload(self) -> dict:
         """tick_updateペイロードを構築
@@ -1277,18 +1255,11 @@ class LiveTradingEngine:
 
             # TradeBotに通知（取引時刻を渡す）
             self._bot.on_trade_executed(signal.created_at)
-            # WebSocketポジション更新ブロードキャスト
-            try:
-                from autotrader.web.websocket.handlers import (
-                    broadcast_position_update,
-                )
-                asyncio.create_task(
-                    broadcast_position_update(
-                        {"symbol": self._active_symbol}
-                    )
-                )
-            except (ImportError, RuntimeError):
-                pass
+            # EventBus経由でポジション更新ブロードキャスト
+            event_bus.publish_nowait(
+                "position.opened",
+                {"symbol": self._active_symbol},
+            )
         else:
             logger.error("エントリー失敗: %s", result.message)
 
@@ -1580,18 +1551,11 @@ class LiveTradingEngine:
                 " pnl_pips=%.1f profit_loss=%.2f",
                 trade_id, ticket, pnl_pips, profit_loss,
             )
-            # WebSocketで決済イベントをUIに即時通知
-            try:
-                from autotrader.web.websocket.handlers import (
-                    broadcast_position_update,
-                )
-                asyncio.get_running_loop().create_task(
-                    broadcast_position_update(
-                        {"symbol": self._active_symbol}
-                    )
-                )
-            except (ImportError, RuntimeError):
-                pass
+            # EventBus経由で決済イベントをUIに即時通知
+            event_bus.publish_nowait(
+                "position.closed",
+                {"symbol": self._active_symbol},
+            )
         except Exception as e:
             # trade_idは_open_tradesに残るため次回tickで再試行
             logger.error("DB書き込みエラー（決済）: %s", e)
@@ -2611,44 +2575,33 @@ class LiveTradingEngine:
                 self._news_buffer[symbol] = (
                     self._news_buffer[symbol][-_MAX_BUFFER:]
                 )
-            # WebSocketダッシュボードにリアルタイム配信
-            try:
-                from autotrader.web.websocket.handlers import (
-                    broadcast_news_update,
-                )
-                import asyncio
-
-                news_dict = {
-                    "news_id": getattr(
-                        news_item, "news_id", ""
-                    ),
-                    "published_at": str(
-                        getattr(
-                            news_item, "published_at", ""
-                        )
-                    ),
-                    "title": getattr(
-                        news_item, "title", ""
-                    ),
-                    "source_name": getattr(
-                        news_item, "source_name", ""
-                    ),
-                    "source_url": getattr(
-                        news_item, "source_url", ""
-                    ),
-                    "currencies": getattr(
-                        news_item, "currencies", []
-                    ),
-                    "snippet": getattr(
-                        news_item, "snippet", None
-                    ),
-                    "symbol": symbol,
-                }
-                asyncio.create_task(
-                    broadcast_news_update(news_dict)
-                )
-            except Exception:
-                pass
+            # EventBus経由でダッシュボードにリアルタイム配信
+            event_bus.publish_nowait("news.received", {
+                "news_id": getattr(
+                    news_item, "news_id", ""
+                ),
+                "published_at": str(
+                    getattr(
+                        news_item, "published_at", ""
+                    )
+                ),
+                "title": getattr(
+                    news_item, "title", ""
+                ),
+                "source_name": getattr(
+                    news_item, "source_name", ""
+                ),
+                "source_url": getattr(
+                    news_item, "source_url", ""
+                ),
+                "currencies": getattr(
+                    news_item, "currencies", []
+                ),
+                "snippet": getattr(
+                    news_item, "snippet", None
+                ),
+                "symbol": symbol,
+            })
 
     @staticmethod
     def _blend_news_sentiment(
