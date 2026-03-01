@@ -8,10 +8,9 @@ from uuid import uuid4
 from sqlalchemy.orm import Session
 
 from autotrader.adapters.database.models import (
-    TradeRecord,
-    AuditLog,
     MarketMemoryRecord,
     PositionStateRecord,
+    TradeRecord,
 )
 
 
@@ -124,50 +123,6 @@ class TradeRepository:
         if symbol:
             query = query.filter(TradeRecord.symbol == symbol)
         return query.all()
-
-
-class AuditRepository:
-    """監査ログリポジトリ"""
-
-    def __init__(self, session: Session) -> None:
-        self.session = session
-
-    def log(
-        self,
-        event_type: str,
-        entity_type: str | None = None,
-        entity_id: str | None = None,
-        before_state: dict | None = None,
-        after_state: dict | None = None,
-        reason: str | None = None,
-        user: str = "system",
-    ) -> AuditLog:
-        """監査ログを記録
-
-        Args:
-            event_type: イベント種別
-            entity_type: エンティティ種別
-            entity_id: エンティティID
-            before_state: 変更前状態
-            after_state: 変更後状態
-            reason: 理由
-            user: ユーザー
-
-        Returns:
-            AuditLog: 作成されたログ
-        """
-        log = AuditLog(
-            event_type=event_type,
-            entity_type=entity_type,
-            entity_id=entity_id,
-            before_state=before_state,
-            after_state=after_state,
-            reason=reason,
-            user=user,
-        )
-        self.session.add(log)
-        self.session.flush()
-        return log
 
 
 class MarketMemoryRepository:

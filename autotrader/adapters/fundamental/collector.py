@@ -30,10 +30,9 @@ class FundamentalDataCollector:
     """ファンダメンタルデータ収集スケジューラ
 
     定期的にMT5カレンダーとForexFactoryからデータを収集し、
-    DBに保存する。エンジンのメインループとは独立して動作。
+    メモリキャッシュに保存する。エンジンのメインループとは独立して動作。
 
     Args:
-        session_factory: SQLAlchemyセッションファクトリー
         fetch_interval_minutes: 取得間隔（分）
         use_mt5_calendar: MT5カレンダーを使用するか
         use_forex_factory: ForexFactoryを使用するか
@@ -43,7 +42,6 @@ class FundamentalDataCollector:
 
     def __init__(
         self,
-        session_factory,
         fetch_interval_minutes: int = 60,
         use_mt5_calendar: bool = True,
         use_forex_factory: bool = False,
@@ -54,7 +52,6 @@ class FundamentalDataCollector:
         """初期化
 
         Args:
-            session_factory: SQLAlchemyセッションファクトリー
             fetch_interval_minutes: 取得間隔（分）
             use_mt5_calendar: MT5カレンダー使用フラグ
             use_forex_factory: ForexFactory使用フラグ
@@ -62,7 +59,6 @@ class FundamentalDataCollector:
             currencies: 対象通貨リスト
             on_update: 収集完了時コールバック
         """
-        self._session_factory = session_factory
         self._interval = timedelta(minutes=fetch_interval_minutes)
         self._use_mt5 = use_mt5_calendar
         self._use_ff = use_forex_factory

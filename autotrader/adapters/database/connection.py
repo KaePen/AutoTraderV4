@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
+from collections.abc import Generator
 from contextlib import contextmanager
-from typing import Generator
 
-from sqlalchemy import create_engine, Engine
-from sqlalchemy.orm import sessionmaker, Session
+from sqlalchemy import Engine, create_engine
+from sqlalchemy.orm import Session, sessionmaker
 
 from autotrader.adapters.database.models import Base
 
@@ -14,9 +14,7 @@ from autotrader.adapters.database.models import Base
 _engine_cache: dict[str, Engine] = {}
 
 
-def get_engine(
-    database_url: str = "sqlite:///data/autotrader.db",
-) -> Engine:
+def get_engine(database_url: str) -> Engine:
     """SQLAlchemyエンジンを取得
 
     Args:
@@ -27,14 +25,23 @@ def get_engine(
     """
     if database_url not in _engine_cache:
         connect_args: dict = {}
+        kwargs: dict = {
+            "echo": False,
+            "pool_pre_ping": True,
+        }
+
         if database_url.startswith("sqlite"):
             connect_args["check_same_thread"] = False
+        else:
+            # PostgreSQL: 接続プール設定
+            kwargs["pool_size"] = 5
+            kwargs["max_overflow"] = 10
+            kwargs["pool_recycle"] = 1800
 
         _engine_cache[database_url] = create_engine(
             database_url,
             connect_args=connect_args,
-            echo=False,
-            pool_pre_ping=True,
+            **kwargs,
         )
     return _engine_cache[database_url]
 
@@ -55,7 +62,7 @@ def get_session_factory(engine: Engine) -> sessionmaker:
 
 @contextmanager
 def get_session(
-    database_url: str = "sqlite:///data/autotrader.db",
+    database_url: str,
 ) -> Generator[Session, None, None]:
     """セッションコンテキストマネージャ
 
@@ -102,9 +109,7 @@ def get_local_session() -> Generator[Session, None, None]:
         session.close()
 
 
-def init_db(
-    database_url: str = "sqlite:///data/autotrader.db",
-) -> None:
+def init_db(database_url: str) -> None:
     """データベースを初期化
 
     テーブルを作成する。
