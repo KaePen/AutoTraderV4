@@ -138,13 +138,13 @@ const FundamentalWidget = {
     var html = '<table class="w-full text-xs">';
     html += '<thead><tr class="text-gray-500 text-[10px]">' +
       '<th class="text-left py-1 px-1 w-5"></th>' +
-      '<th class="text-left py-1 px-1">Time</th>' +
-      '<th class="text-left py-1 px-1">Ccy</th>' +
-      '<th class="text-left py-1 px-1">Event</th>' +
-      '<th class="text-right py-1 px-1">Actual</th>' +
-      '<th class="text-right py-1 px-1">Forecast</th>' +
-      '<th class="text-right py-1 px-1">Previous</th>' +
-      '<th class="text-right py-1 px-1 w-16">ETA</th>' +
+      '<th class="text-left py-1 px-1">日時</th>' +
+      '<th class="text-left py-1 px-1">通貨</th>' +
+      '<th class="text-left py-1 px-1">イベント</th>' +
+      '<th class="text-right py-1 px-1">実績</th>' +
+      '<th class="text-right py-1 px-1">予想</th>' +
+      '<th class="text-right py-1 px-1">前回</th>' +
+      '<th class="text-right py-1 px-1 w-16">残り</th>' +
       '</tr></thead><tbody>';
 
     var prevDateStr = '';
