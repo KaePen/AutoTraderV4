@@ -658,14 +658,6 @@ class LiveTradingEngine:
                 fundamental_ctx = self._blend_news_sentiment(
                     fundamental_ctx, sentiment
                 )
-                # LLM結果をDB永続化
-                if self._fundamental_memory:
-                    self._fundamental_memory.write_sentiment_score(
-                        self._active_symbol,
-                        sentiment,
-                        confidence=0.7,
-                        summary=f"LLM: {len(news_items)}件分析",
-                    )
                 # ファイル永続化
                 from autotrader.adapters.fundamental.sentiment_store import (
                     SentimentRecord,
