@@ -81,10 +81,11 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
                 "form-action 'self'"
             )
         else:
-            # 開発環境: inline script/style を許可
+            # 開発環境: inline script/style + CDN を許可
             return (
                 "default-src 'self'; "
-                "script-src 'self' 'unsafe-inline' 'unsafe-eval'; "
+                "script-src 'self' 'unsafe-inline' 'unsafe-eval' "
+                "https://cdn.tailwindcss.com https://unpkg.com; "
                 "style-src 'self' 'unsafe-inline'; "
                 "img-src 'self' data:; "
                 "font-src 'self'; "
