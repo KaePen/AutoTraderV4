@@ -17,6 +17,7 @@ from loguru import logger
 from autotrader.adapters.fundamental.news_schemas import (
     NewsItem,
 )
+from autotrader.core.exceptions import ConfigurationError
 
 try:
     import ollama as _ollama_module
@@ -140,10 +141,10 @@ class NewsLLMAnalyzer:
             float: センチメントスコア（-1.0〜+1.0）
 
         Raises:
-            RuntimeError: Ollama未インストール時
+            ConfigurationError: Ollama未インストール時
         """
         if _ollama_module is None:
-            raise RuntimeError(
+            raise ConfigurationError(
                 "ollama パッケージが必要です: pip install ollama"
             )
 

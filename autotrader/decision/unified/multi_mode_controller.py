@@ -10,8 +10,10 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 import pandas as pd
+from loguru import logger
 
 from autotrader.core.enums import SignalType, TradingStrategyMode
+from autotrader.core.exceptions import CalculationError
 from autotrader.decision.unified.mode_monitor import (
     UNIVERSAL_CONFIG,
     ModeConfig,
@@ -192,8 +194,10 @@ class MultiModeController:
                     signal = future.result()
                     if signal is not None:
                         signals.append(signal)
-                except Exception:
-                    pass  # 評価エラーは無視
+                except CalculationError as e:
+                    logger.warning("モニター評価エラー: %s", e, exc_info=True)
+                except Exception as e:
+                    logger.warning("モニター評価エラー: %s", e, exc_info=True)
 
         return signals
 
@@ -218,8 +222,10 @@ class MultiModeController:
                 signal = monitor.evaluate(current_time, candle)
                 if signal is not None:
                     signals.append(signal)
-            except Exception:
-                pass
+            except CalculationError as e:
+                logger.warning("モニター評価エラー: %s", e, exc_info=True)
+            except Exception as e:
+                logger.warning("モニター評価エラー: %s", e, exc_info=True)
 
         return signals
 

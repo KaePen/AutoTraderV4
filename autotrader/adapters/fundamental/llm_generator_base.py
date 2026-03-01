@@ -23,6 +23,7 @@ except ImportError:
 from loguru import logger
 
 from autotrader.config.llm_settings import OllamaSettings
+from autotrader.core.exceptions import ConfigurationError, LLMResponseError, ValidationError
 
 # シンボル→通貨ペア（基軸・決済）の正規マッピング
 SYMBOL_CURRENCIES: dict[str, tuple[str, str]] = {
@@ -89,11 +90,11 @@ class LLMGeneratorBase:
             dict: パース済みJSONレスポンス
 
         Raises:
-            ValueError: JSON解析失敗時
-            RuntimeError: Ollama未インストール時
+            LLMResponseError: JSON解析失敗時
+            ConfigurationError: Ollama未インストール時
         """
         if _ollama_module is None:
-            raise RuntimeError(
+            raise ConfigurationError(
                 "ollama パッケージが必要です: pip install ollama"
             )
         timeout = self._settings.timeout_seconds
@@ -188,7 +189,7 @@ class LLMGeneratorBase:
             dict: パース済みdict
 
         Raises:
-            ValueError: パース失敗時
+            LLMResponseError: パース失敗時
         """
         # R1モデル: 閉じた<think>ブロックを除去
         cleaned = self._THINK_RE.sub("", content).strip()
@@ -230,7 +231,7 @@ class LLMGeneratorBase:
             except json.JSONDecodeError:
                 pass
 
-        raise ValueError(
+        raise LLMResponseError(
             f"JSON解析失敗\nコンテンツ: {content[:200]}"
         )
 
@@ -353,11 +354,11 @@ class LLMGeneratorBase:
             tuple[str, str]: (base, quote)
 
         Raises:
-            ValueError: 未対応シンボル
+            ValidationError: 未対応シンボル
         """
         currencies = SYMBOL_CURRENCIES.get(symbol)
         if not currencies:
-            raise ValueError(
+            raise ValidationError(
                 f"未対応シンボル: {symbol}. "
                 f"対応: {list(SYMBOL_CURRENCIES.keys())}"
             )
