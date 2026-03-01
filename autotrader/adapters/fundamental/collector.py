@@ -37,6 +37,7 @@ class FundamentalDataCollector:
         fetch_interval_minutes: 取得間隔（分）
         use_mt5_calendar: MT5カレンダーを使用するか
         use_forex_factory: ForexFactoryを使用するか
+        use_ff_holidays: FF休日データのみ取得するか
         currencies: 対象通貨リスト
     """
 
@@ -46,6 +47,7 @@ class FundamentalDataCollector:
         fetch_interval_minutes: int = 60,
         use_mt5_calendar: bool = True,
         use_forex_factory: bool = False,
+        use_ff_holidays: bool = True,
         currencies: list[str] | None = None,
         on_update: Callable | None = None,
     ) -> None:
@@ -56,6 +58,7 @@ class FundamentalDataCollector:
             fetch_interval_minutes: 取得間隔（分）
             use_mt5_calendar: MT5カレンダー使用フラグ
             use_forex_factory: ForexFactory使用フラグ
+            use_ff_holidays: FF休日のみ取得フラグ
             currencies: 対象通貨リスト
             on_update: 収集完了時コールバック
         """
@@ -63,6 +66,7 @@ class FundamentalDataCollector:
         self._interval = timedelta(minutes=fetch_interval_minutes)
         self._use_mt5 = use_mt5_calendar
         self._use_ff = use_forex_factory
+        self._use_ff_holidays = use_ff_holidays
         self._currencies = currencies or [
             "USD",
             "JPY",
@@ -147,7 +151,7 @@ class FundamentalDataCollector:
             except Exception as e:
                 logger.error(f"[Collector] MT5取得エラー: {e}")
 
-        # ForexFactory取得（MT5が空の場合フォールバック）
+        # ForexFactory取得（指標フォールバック）
         if self._use_ff and (not events or not self._use_mt5):
             try:
                 ff_events = await self._ff_client.fetch_events_async(
@@ -155,10 +159,33 @@ class FundamentalDataCollector:
                 )
                 events.extend(ff_events)
                 logger.debug(
-                    f"[Collector] ForexFactoryから{len(ff_events)}件取得"
+                    f"[Collector] ForexFactoryから"
+                    f"{len(ff_events)}件取得"
                 )
             except Exception as e:
-                logger.error(f"[Collector] ForexFactory取得エラー: {e}")
+                logger.error(
+                    f"[Collector] ForexFactory取得エラー: {e}"
+                )
+
+        # ForexFactory休日取得（MT5では取れない休日データ）
+        if self._use_ff_holidays and not self._use_ff:
+            try:
+                holiday_events = (
+                    await self._ff_client
+                    .fetch_holidays_only_async(
+                        currencies=self._currencies
+                    )
+                )
+                events.extend(holiday_events)
+                if holiday_events:
+                    logger.info(
+                        f"[Collector] FF休日"
+                        f"{len(holiday_events)}件取得"
+                    )
+            except Exception as e:
+                logger.debug(
+                    f"[Collector] FF休日取得エラー: {e}"
+                )
 
         # 重複排除
         events = self._normalizer.deduplicate(events)
