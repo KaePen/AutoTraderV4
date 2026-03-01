@@ -194,3 +194,17 @@ function switchAccountPreset(login, server) {
     body: JSON.stringify({ login, password: '', server }),
   });
 }
+
+/** ファンダメンタルニュース取得 */
+function getFundamentalNews(symbol, limit) {
+  symbol = symbol || 'USDJPY';
+  limit = limit || 30;
+  return fetchApi(`/fundamental/news?symbol=${symbol}&limit=${limit}`);
+}
+
+/** 経済カレンダー取得 */
+function getFundamentalCalendar(symbol, days) {
+  symbol = symbol || 'USDJPY';
+  days = days || 2;
+  return fetchApi(`/fundamental/calendar?symbol=${symbol}&days=${days}`);
+}

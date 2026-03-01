@@ -70,9 +70,7 @@ class AccountPresetsResponse(BaseModel):
         accounts: 口座プリセットリスト
     """
 
-    accounts: list[AccountPresetResponse] = Field(
-        default_factory=list
-    )
+    accounts: list[AccountPresetResponse] = Field(default_factory=list)
 
 
 class AccountInfoResponse(BaseModel):
@@ -529,15 +527,11 @@ class AnalysisResponse(BaseModel):
     sell_score: float = 0.0
     htf_alignment: float = 0.0
     penalty_total: float = 0.0
-    penalty_breakdown: dict[str, float] = Field(
-        default_factory=dict
-    )
+    penalty_breakdown: dict[str, float] = Field(default_factory=dict)
     trend_strength: float = 0.0
     aligned_tfs: list[str] = Field(default_factory=list)
     tf_scores: dict[str, float] = Field(default_factory=dict)
-    tf_breakdowns: dict[str, dict[str, float]] = Field(
-        default_factory=dict
-    )
+    tf_breakdowns: dict[str, dict[str, float]] = Field(default_factory=dict)
     tf_directions: dict[str, str] = Field(default_factory=dict)
     last_tick_time: str | None = None
     demo_mode: bool = False
@@ -603,3 +597,86 @@ class IndicatorSeriesResponse(BaseModel):
     bb_lower: list[IndicatorPoint] = Field(default_factory=list)
     rsi: list[IndicatorPoint] = Field(default_factory=list)
     vwap: list[IndicatorPoint] = Field(default_factory=list)
+
+
+# --- ファンダメンタル統合スキーマ ---
+
+
+class NewsItemResponse(BaseModel):
+    """ニュースアイテムレスポンス
+
+    Attributes:
+        news_id: ニュースID
+        published_at: 公開日時
+        title: タイトル
+        source_name: ソース名
+        source_url: ソースURL
+        currencies: 関連通貨リスト
+        snippet: 本文スニペット
+        sentiment_score: センチメントスコア
+    """
+
+    news_id: str
+    published_at: datetime
+    title: str
+    source_name: str
+    source_url: str
+    currencies: list[str] = Field(default_factory=list)
+    snippet: str | None = None
+    sentiment_score: float | None = None
+
+
+class EconomicEventResponse(BaseModel):
+    """経済イベントレスポンス
+
+    Attributes:
+        event_id: イベントID
+        event_time: イベント予定時刻
+        currency: 通貨コード
+        event_name: イベント名称
+        impact: インパクトレベル
+        actual: 実績値
+        forecast: 予測値
+        previous: 前回値
+        is_released: 発表済みフラグ
+        minutes_until: イベントまでの分数
+    """
+
+    event_id: str
+    event_time: datetime
+    currency: str
+    event_name: str
+    impact: str  # "high" | "medium" | "low"
+    actual: float | None = None
+    forecast: float | None = None
+    previous: float | None = None
+    is_released: bool = False
+    minutes_until: float = 0.0
+
+
+class FundamentalNewsResponse(BaseModel):
+    """ファンダメンタルニュース一覧レスポンス
+
+    Attributes:
+        items: ニュースアイテムリスト
+        total: 合計件数
+        symbol: 対象シンボル
+    """
+
+    items: list[NewsItemResponse] = Field(default_factory=list)
+    total: int = 0
+    symbol: str = ""
+
+
+class FundamentalCalendarResponse(BaseModel):
+    """経済カレンダーレスポンス
+
+    Attributes:
+        events: 経済イベントリスト
+        symbol: 対象シンボル
+        next_high_impact_minutes: 次のHIGHイベントまでの分数
+    """
+
+    events: list[EconomicEventResponse] = Field(default_factory=list)
+    symbol: str = ""
+    next_high_impact_minutes: float | None = None

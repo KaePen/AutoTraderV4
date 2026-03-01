@@ -5,6 +5,7 @@ from __future__ import annotations
 from autotrader.web.routers import (
     candles,
     dashboard,
+    fundamental,
     indicators,
     positions,
     settings,
@@ -22,4 +23,5 @@ __all__ = [
     "candles",
     "settings",
     "trading",
+    "fundamental",
 ]

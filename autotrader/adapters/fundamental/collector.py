@@ -7,21 +7,22 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone, timedelta
+from collections.abc import Callable
+from datetime import UTC, datetime, timedelta
 
 from loguru import logger
 
-from autotrader.adapters.fundamental.schemas import (
-    EconomicEvent,
+from autotrader.adapters.fundamental.forex_factory import (
+    ForexFactoryClient,
 )
 from autotrader.adapters.fundamental.mt5_calendar import (
     MT5CalendarClient,
 )
-from autotrader.adapters.fundamental.forex_factory import (
-    ForexFactoryClient,
-)
 from autotrader.adapters.fundamental.normalizer import (
     EconomicEventNormalizer,
+)
+from autotrader.adapters.fundamental.schemas import (
+    EconomicEvent,
 )
 
 
@@ -46,6 +47,7 @@ class FundamentalDataCollector:
         use_mt5_calendar: bool = True,
         use_forex_factory: bool = False,
         currencies: list[str] | None = None,
+        on_update: Callable | None = None,
     ) -> None:
         """初期化
 
@@ -55,13 +57,21 @@ class FundamentalDataCollector:
             use_mt5_calendar: MT5カレンダー使用フラグ
             use_forex_factory: ForexFactory使用フラグ
             currencies: 対象通貨リスト
+            on_update: 収集完了時コールバック
         """
         self._session_factory = session_factory
         self._interval = timedelta(minutes=fetch_interval_minutes)
         self._use_mt5 = use_mt5_calendar
         self._use_ff = use_forex_factory
         self._currencies = currencies or [
-            "USD", "JPY", "EUR", "GBP", "AUD", "CAD", "CHF", "NZD"
+            "USD",
+            "JPY",
+            "EUR",
+            "GBP",
+            "AUD",
+            "CAD",
+            "CHF",
+            "NZD",
         ]
         self._normalizer = EconomicEventNormalizer()
         self._mt5_client = MT5CalendarClient(self._normalizer)
@@ -71,6 +81,8 @@ class FundamentalDataCollector:
         # メモリキャッシュ（DB不要時の参照用）
         self._cached_events: list[EconomicEvent] = []
         self._last_fetch: datetime | None = None
+        # 収集完了時コールバック（WebSocket配信等）
+        self._on_update = on_update
 
     async def start(self) -> None:
         """収集タスクを開始"""
@@ -111,16 +123,14 @@ class FundamentalDataCollector:
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                logger.error(
-                    f"[Collector] 収集ループエラー: {e}"
-                )
+                logger.error(f"[Collector] 収集ループエラー: {e}")
                 # エラー後は短めにリトライ
                 await asyncio.sleep(60)
 
     async def _collect_once(self) -> None:
         """1回の収集処理"""
         events: list[EconomicEvent] = []
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         from_date = now - timedelta(hours=1)
         to_date = now + timedelta(days=7)
 
@@ -133,9 +143,7 @@ class FundamentalDataCollector:
                     currencies=self._currencies,
                 )
                 events.extend(mt5_events)
-                logger.debug(
-                    f"[Collector] MT5から{len(mt5_events)}件取得"
-                )
+                logger.debug(f"[Collector] MT5から{len(mt5_events)}件取得")
             except Exception as e:
                 logger.error(f"[Collector] MT5取得エラー: {e}")
 
@@ -150,9 +158,7 @@ class FundamentalDataCollector:
                     f"[Collector] ForexFactoryから{len(ff_events)}件取得"
                 )
             except Exception as e:
-                logger.error(
-                    f"[Collector] ForexFactory取得エラー: {e}"
-                )
+                logger.error(f"[Collector] ForexFactory取得エラー: {e}")
 
         # 重複排除
         events = self._normalizer.deduplicate(events)
@@ -163,13 +169,18 @@ class FundamentalDataCollector:
 
         # DBに保存（セッションファクトリーが提供されている場合）
         if self._session_factory and events:
-            await asyncio.to_thread(
-                self._save_to_db, events
-            )
+            await asyncio.to_thread(self._save_to_db, events)
 
-        logger.info(
-            f"[Collector] {len(events)}件のイベントをキャッシュ更新"
-        )
+        logger.info(f"[Collector] {len(events)}件のイベントをキャッシュ更新")
+
+        # コールバック呼び出し（WebSocket配信等）
+        if self._on_update is not None:
+            try:
+                result = self._on_update(events)
+                if asyncio.iscoroutine(result):
+                    await result
+            except Exception as e:
+                logger.debug(f"[Collector] on_updateコールバックエラー: {e}")
 
     def _save_to_db(self, events: list[EconomicEvent]) -> None:
         """イベントをDBに保存
@@ -181,6 +192,7 @@ class FundamentalDataCollector:
             from autotrader.adapters.database.repositories import (
                 EconomicEventRepository,
             )
+
             with self._session_factory() as session:
                 repo = EconomicEventRepository(session)
                 saved_count = 0
@@ -190,13 +202,9 @@ class FundamentalDataCollector:
                             repo.create(event)
                             saved_count += 1
                     except Exception as e:
-                        logger.debug(
-                            f"[Collector] DB保存スキップ: {e}"
-                        )
+                        logger.debug(f"[Collector] DB保存スキップ: {e}")
                 session.commit()
                 if saved_count > 0:
-                    logger.debug(
-                        f"[Collector] {saved_count}件をDBに保存"
-                    )
+                    logger.debug(f"[Collector] {saved_count}件をDBに保存")
         except Exception as e:
             logger.error(f"[Collector] DB保存エラー: {e}")

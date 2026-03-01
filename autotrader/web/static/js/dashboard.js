@@ -77,6 +77,11 @@ const DashboardApp = {
     this.fetchTradingMode();
     this.fetchAnalysis();
 
+    // ファンダメンタルウィジェット初期化
+    if (typeof FundamentalWidget !== 'undefined') {
+      FundamentalWidget.init(this.symbol);
+    }
+
     // ポジション経過/残り時間を1分ごとにクライアント側でカウントアップ
     this._posTimeInterval = setInterval(() => this._tickPositionTimers(), 60000);
 
@@ -112,6 +117,18 @@ const DashboardApp = {
     this.dashWs.on('position_update', () => {
       this.wsActive = true;
       this.fetchPositionsAndTrades();
+    });
+    // ファンダメンタル: ニュースリアルタイム更新
+    this.dashWs.on('news_update', (msg) => {
+      if (typeof FundamentalWidget !== 'undefined') {
+        FundamentalWidget.onNewsUpdate(msg);
+      }
+    });
+    // ファンダメンタル: カレンダー更新
+    this.dashWs.on('calendar_update', (msg) => {
+      if (typeof FundamentalWidget !== 'undefined') {
+        FundamentalWidget.onCalendarUpdate(msg);
+      }
     });
     this.dashWs.onStateChange((state) => {
       if (state === 'disconnected' || state === 'error') {
@@ -812,6 +829,10 @@ const DashboardApp = {
     this.fetchAnalysis();
     this.renderTradingControl();
     this.fetchAll();
+    // ファンダメンタルウィジェットをシンボル変更に追従
+    if (typeof FundamentalWidget !== 'undefined') {
+      FundamentalWidget.init(symbol);
+    }
   },
 
   /** シンボルごとの自動トレードON/OFFトグル */

@@ -21,6 +21,8 @@ class EventType(str, Enum):
     ACCOUNT_UPDATE = "account_update"
     TICK_UPDATE = "tick_update"
     PRICE_UPDATE = "price_update"
+    NEWS_UPDATE = "news_update"
+    CALENDAR_UPDATE = "calendar_update"
     ALERT = "alert"
     HEARTBEAT = "heartbeat"
 
@@ -74,7 +76,10 @@ class ConnectionManager:
                     self._connections[channel].remove(websocket)
 
     async def broadcast(
-        self, event_type: EventType, data: dict[str, Any], channel: str | None = None
+        self,
+        event_type: EventType,
+        data: dict[str, Any],
+        channel: str | None = None,
     ) -> None:
         """イベントをブロードキャスト
 
