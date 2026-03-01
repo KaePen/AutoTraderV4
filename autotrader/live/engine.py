@@ -2291,24 +2291,21 @@ class LiveTradingEngine:
                 DeterministicEventAnalyzer,
             )
             from autotrader.adapters.database.connection import (
-                DatabaseManager,
+                get_session,
             )
-
-            # DBセッションファクトリー取得
-            db_manager = DatabaseManager.get_instance()
 
             # 決定論的イベント分析器（リアルタイム用）
             analyzer = DeterministicEventAnalyzer()
 
             self._fundamental_collector = FundamentalDataCollector(
-                session_factory=db_manager.get_session,
+                session_factory=get_session,
                 fetch_interval_minutes=cfg.fetch_interval_minutes,
                 use_mt5_calendar=cfg.use_mt5_calendar,
                 use_forex_factory=cfg.use_forex_factory,
                 use_ff_holidays=cfg.use_ff_holidays,
             )
             self._fundamental_memory = FundamentalMemoryService(
-                session_factory=db_manager.get_session,
+                session_factory=get_session,
                 event_guard_minutes=cfg.event_guard_minutes,
                 cached_events_getter=(
                     self._fundamental_collector.get_cached_events

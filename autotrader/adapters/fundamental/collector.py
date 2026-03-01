@@ -194,10 +194,6 @@ class FundamentalDataCollector:
         self._cached_events = events
         self._last_fetch = now
 
-        # DBに保存（セッションファクトリーが提供されている場合）
-        if self._session_factory and events:
-            await asyncio.to_thread(self._save_to_db, events)
-
         logger.info(f"[Collector] {len(events)}件のイベントをキャッシュ更新")
 
         # コールバック呼び出し（WebSocket配信等）
@@ -209,29 +205,3 @@ class FundamentalDataCollector:
             except Exception as e:
                 logger.debug(f"[Collector] on_updateコールバックエラー: {e}")
 
-    def _save_to_db(self, events: list[EconomicEvent]) -> None:
-        """イベントをDBに保存
-
-        Args:
-            events: 保存対象イベントリスト
-        """
-        try:
-            from autotrader.adapters.database.repositories import (
-                EconomicEventRepository,
-            )
-
-            with self._session_factory() as session:
-                repo = EconomicEventRepository(session)
-                saved_count = 0
-                for event in events:
-                    try:
-                        if not repo.exists(event.event_id):
-                            repo.create(event)
-                            saved_count += 1
-                    except Exception as e:
-                        logger.debug(f"[Collector] DB保存スキップ: {e}")
-                session.commit()
-                if saved_count > 0:
-                    logger.debug(f"[Collector] {saved_count}件をDBに保存")
-        except Exception as e:
-            logger.error(f"[Collector] DB保存エラー: {e}")

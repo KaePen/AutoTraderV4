@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import TYPE_CHECKING
 from uuid import uuid4
 
 from sqlalchemy.orm import Session
@@ -11,13 +10,9 @@ from sqlalchemy.orm import Session
 from autotrader.adapters.database.models import (
     TradeRecord,
     AuditLog,
-    EconomicEventRecord,
     MarketMemoryRecord,
     PositionStateRecord,
 )
-
-if TYPE_CHECKING:
-    from autotrader.adapters.fundamental.schemas import EconomicEvent
 
 
 class TradeRepository:
@@ -173,91 +168,6 @@ class AuditRepository:
         self.session.add(log)
         self.session.flush()
         return log
-
-
-class EconomicEventRepository:
-    """経済イベントリポジトリ"""
-
-    def __init__(self, session: Session) -> None:
-        self.session = session
-
-    def create(self, event: "EconomicEvent") -> EconomicEventRecord:
-        """経済イベントを作成
-
-        Args:
-            event: EconomicEventデータクラス
-
-        Returns:
-            EconomicEventRecord: 作成済みレコード
-        """
-        record = EconomicEventRecord(
-            event_id=event.event_id,
-            event_time=event.event_time,
-            currency=event.currency,
-            symbol=event.symbol,
-            event_name=event.event_name,
-            impact=event.impact.value,
-            actual=event.actual,
-            forecast=event.forecast,
-            previous=event.previous,
-            source=event.source.value,
-            fetched_at=event.fetched_at,
-        )
-        self.session.add(record)
-        self.session.flush()
-        return record
-
-    def exists(self, event_id: str) -> bool:
-        """指定IDのイベントが存在するか確認
-
-        Args:
-            event_id: イベントID
-
-        Returns:
-            bool: 存在すればTrue
-        """
-        return (
-            self.session.query(EconomicEventRecord)
-            .filter(EconomicEventRecord.event_id == event_id)
-            .count()
-        ) > 0
-
-    def get_upcoming(
-        self,
-        from_time: datetime,
-        to_time: datetime,
-        currencies: list[str] | None = None,
-        impact: str | None = None,
-    ) -> list[EconomicEventRecord]:
-        """指定期間の経済イベントを取得
-
-        Args:
-            from_time: 取得開始時刻
-            to_time: 取得終了時刻
-            currencies: 通貨フィルタ
-            impact: インパクトフィルタ（high/medium/low）
-
-        Returns:
-            list[EconomicEventRecord]: イベントリスト
-        """
-        query = (
-            self.session.query(EconomicEventRecord)
-            .filter(
-                EconomicEventRecord.event_time >= from_time,
-                EconomicEventRecord.event_time <= to_time,
-            )
-        )
-        if currencies:
-            query = query.filter(
-                EconomicEventRecord.currency.in_(currencies)
-            )
-        if impact:
-            query = query.filter(
-                EconomicEventRecord.impact == impact
-            )
-        return (
-            query.order_by(EconomicEventRecord.event_time).all()
-        )
 
 
 class MarketMemoryRepository:
