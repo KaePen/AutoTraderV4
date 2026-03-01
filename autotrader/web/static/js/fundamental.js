@@ -15,6 +15,13 @@ const FundamentalWidget = {
     this.startCountdown();
   },
 
+  /** シンボル変更時の軽量更新（カウントダウン再起動なし） */
+  changeSymbol(symbol) {
+    this.symbol = symbol || 'USDJPY';
+    this.fetchNews();
+    this.fetchCalendar();
+  },
+
   /** ニュース取得 */
   async fetchNews() {
     try {

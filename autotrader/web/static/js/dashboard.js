@@ -817,6 +817,10 @@ const DashboardApp = {
     // ドロップダウンを閉じる
     const list = document.getElementById('symbol-dropdown-list');
     if (list) list.classList.add('hidden');
+    // ファンダメンタルは即座に更新（エンジン確保を待たない）
+    if (typeof FundamentalWidget !== 'undefined') {
+      FundamentalWidget.changeSymbol(symbol);
+    }
     // エンジン確保（なければ自動作成）
     try {
       await ensureSymbolEngine(symbol);
@@ -829,10 +833,6 @@ const DashboardApp = {
     this.fetchAnalysis();
     this.renderTradingControl();
     this.fetchAll();
-    // ファンダメンタルウィジェットをシンボル変更に追従
-    if (typeof FundamentalWidget !== 'undefined') {
-      FundamentalWidget.init(symbol);
-    }
   },
 
   /** シンボルごとの自動トレードON/OFFトグル */
