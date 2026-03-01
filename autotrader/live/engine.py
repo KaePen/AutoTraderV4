@@ -171,6 +171,15 @@ class LiveTradingEngine:
         self._rss_collector = None
         self._news_analyzer = None
         self._news_buffer: dict[str, list] = {}
+        # キーワードセンチメント分析・永続化（常時有効）
+        from autotrader.adapters.fundamental.keyword_sentiment import (
+            KeywordSentimentScorer,
+        )
+        from autotrader.adapters.fundamental.sentiment_store import (
+            SentimentStore,
+        )
+        self._keyword_scorer = KeywordSentimentScorer()
+        self._sentiment_store = SentimentStore()
         if config.fundamental_config.enabled:
             self._init_fundamental(config.fundamental_config)
         else:
@@ -619,6 +628,20 @@ class LiveTradingEngine:
                 return
         else:
             fundamental_ctx = None
+            # SentimentStore からのフォールバック
+            persisted = self._sentiment_store.load_latest(
+                self._active_symbol,
+            )
+            if persisted and persisted.score != 0.0:
+                from autotrader.adapters.fundamental.schemas import (
+                    FundamentalContext,
+                )
+                fundamental_ctx = FundamentalContext(
+                    sentiment_score=persisted.score,
+                    direction_bias=(
+                        persisted.score * 0.15
+                    ),
+                )
 
         # [NEWS] ニュースセンチメントをブレンド
         if (
@@ -634,6 +657,33 @@ class LiveTradingEngine:
                 )
                 fundamental_ctx = self._blend_news_sentiment(
                     fundamental_ctx, sentiment
+                )
+                # LLM結果をDB永続化
+                if self._fundamental_memory:
+                    self._fundamental_memory.write_sentiment_score(
+                        self._active_symbol,
+                        sentiment,
+                        confidence=0.7,
+                        summary=f"LLM: {len(news_items)}件分析",
+                    )
+                # ファイル永続化
+                from autotrader.adapters.fundamental.sentiment_store import (
+                    SentimentRecord,
+                )
+                self._sentiment_store.save(
+                    self._active_symbol,
+                    SentimentRecord(
+                        timestamp=datetime.now(
+                            timezone.utc,
+                        ).isoformat(),
+                        score=sentiment,
+                        method="llm",
+                        confidence=0.7,
+                        news_count=len(news_items),
+                        top_headlines=[
+                            n.title for n in news_items[:3]
+                        ],
+                    ),
                 )
                 # 分析済みバッファをクリア
                 self._news_buffer[self._active_symbol] = []
@@ -2560,6 +2610,35 @@ class LiveTradingEngine:
             if symbol not in self._news_buffer:
                 self._news_buffer[symbol] = []
             self._news_buffer[symbol].append(news_item)
+            # キーワードセンチメント分析・永続化
+            headlines = [
+                n.title
+                for n in self._news_buffer[symbol]
+            ]
+            if headlines:
+                from autotrader.adapters.fundamental.sentiment_store import (
+                    SentimentRecord,
+                )
+                result = self._keyword_scorer.score(
+                    headlines, symbol,
+                )
+                if result.headlines_used > 0:
+                    record = SentimentRecord(
+                        timestamp=datetime.now(
+                            timezone.utc,
+                        ).isoformat(),
+                        score=result.score,
+                        method="keyword",
+                        confidence=min(
+                            result.headlines_used / 10,
+                            1.0,
+                        ),
+                        news_count=result.headlines_used,
+                        top_headlines=headlines[:3],
+                    )
+                    self._sentiment_store.save(
+                        symbol, record,
+                    )
             # 3日超の古いニュースを削除
             _TTL_HOURS = 72
             now = datetime.now(timezone.utc)
