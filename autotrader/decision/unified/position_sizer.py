@@ -91,6 +91,9 @@ class PositionSizerConfig:
     equity_caution_pct: float = 0.50      # 初期資金の50%で減額開始
     max_total_exposure_lot: float = 4.0   # 合計4ロット上限（強化）
     max_same_direction_ratio: float = 0.6 # 同方向は全体の60%まで
+    # 流動性ゾーン連動TP設定
+    liquidity_tp_enabled: bool = True     # 流動性TPを有効化
+    liquidity_tp_safety_margin: float = 0.01  # 流動性ゾーンの1%手前でTP
 
 
 class PositionSizer(PositionSizerProtocol):
@@ -488,3 +491,60 @@ class PositionSizer(PositionSizerProtocol):
             return min_adj
         ratio = (consecutive_losses - start) / loss_range
         return 1.0 - ratio * (1.0 - min_adj)
+
+    def calculate_tp_with_liquidity(
+        self,
+        direction: int,
+        entry_price: float,
+        sl_pips: float,
+        buy_side_liquidity: float | None = None,
+        sell_side_liquidity: float | None = None,
+    ) -> float:
+        """流動性ゾーンを考慮したTP計算
+
+        基本TPはATRベース（RR比1.5）。流動性ゾーンが有効範囲内に
+        あればそれをターゲットとする。
+
+        Args:
+            direction: 方向（1=買い、-1=売り）
+            entry_price: エントリー価格
+            sl_pips: SL距離（pips）
+            buy_side_liquidity: 上側流動性ゾーン価格
+            sell_side_liquidity: 下側流動性ゾーン価格
+
+        Returns:
+            float: TP価格
+        """
+        # 基本TP（ATRベース、RR比1.5）
+        base_tp = entry_price + direction * sl_pips * 1.5 * 0.01
+
+        if not self.config.liquidity_tp_enabled:
+            return base_tp
+
+        margin = self.config.liquidity_tp_safety_margin
+
+        if direction == 1 and buy_side_liquidity is not None:
+            # 買いの場合、上の流動性ゾーンをターゲット
+            # 流動性ゾーンから1%分手前をターゲット
+            distance_to_liquidity = buy_side_liquidity - entry_price
+            liquidity_tp = (
+                entry_price + distance_to_liquidity * (1.0 - margin)
+            )
+            # TP範囲: entry_price < liquidity_tp <= max_tp
+            max_tp = entry_price + (base_tp - entry_price) * 1.5
+            if entry_price < liquidity_tp <= max_tp:
+                return liquidity_tp
+
+        if direction == -1 and sell_side_liquidity is not None:
+            # 売りの場合、下の流動性ゾーンをターゲット
+            # 流動性ゾーンから1%分上をターゲット
+            distance_to_liquidity = entry_price - sell_side_liquidity
+            liquidity_tp = (
+                entry_price - distance_to_liquidity * (1.0 - margin)
+            )
+            # TP範囲: min_tp <= liquidity_tp < entry_price
+            min_tp = entry_price - (entry_price - base_tp) * 1.5
+            if min_tp <= liquidity_tp < entry_price:
+                return liquidity_tp
+
+        return base_tp
