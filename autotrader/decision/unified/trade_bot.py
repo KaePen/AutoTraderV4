@@ -602,22 +602,31 @@ class UnifiedTradeBot:
                 + self.config.regime_trend_threshold_add
             )
             # TREND + BB_WIDTH > 0.06: 閾値 +1.0（ボラ拡大時の追従強化）
-            _primary_row = self._get_current_row(
-                plan.primary_tf, current_time,
-            )
-            if _primary_row is not None:
-                _bb_w_h4 = _primary_row.get("bb_width_h4")
-                if _bb_w_h4 is not None and not pd.isna(_bb_w_h4):
-                    if float(_bb_w_h4) > 0.06:
-                        _base_threshold = _base_threshold + 1.0
+            # bisect検証: -314K, WR -1.5pp → デフォルトOFF
+            if self.config.bb_width_trend_filter_enabled:
+                _primary_row = self._get_current_row(
+                    plan.primary_tf, current_time,
+                )
+                if _primary_row is not None:
+                    _bb_w_h4 = _primary_row.get("bb_width_h4")
+                    if (
+                        _bb_w_h4 is not None
+                        and not pd.isna(_bb_w_h4)
+                    ):
+                        if float(_bb_w_h4) > 0.06:
+                            _base_threshold = (
+                                _base_threshold + 1.0
+                            )
 
         # TOKYOセッション最適化（UTC 17-21 = JST 02-06）
         # 東京深夜は流動性低下→閾値引き上げ
-        _hour_utc_plan = current_time.hour if hasattr(
-            current_time, 'hour'
-        ) else current_time.to_pydatetime().hour
-        if 17 <= _hour_utc_plan < 21:
-            _base_threshold = _base_threshold + 0.5
+        # bisect検証: BB_WIDTHと合わせて-314K → デフォルトOFF
+        if self.config.tokyo_session_filter_enabled:
+            _hour_utc_plan = current_time.hour if hasattr(
+                current_time, 'hour'
+            ) else current_time.to_pydatetime().hour
+            if 17 <= _hour_utc_plan < 21:
+                _base_threshold = _base_threshold + 0.5
         # HTFスコア不一致フィルター（HTF整合度低→閾値引き上げ）
         if (
             self.config.htf_score_filter_enabled

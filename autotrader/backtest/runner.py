@@ -61,6 +61,10 @@ from autotrader.backtest.metrics_aggregator import (
 from autotrader.backtest.year_runner import (
     run_unified_year,
 )
+from autotrader.backtest.parallel_worker import (
+    _worker_process_init,
+    _run_year_worker,
+)
 
 
 @dataclass

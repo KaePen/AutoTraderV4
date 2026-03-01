@@ -2214,13 +2214,15 @@ class Test2021RangeImprovements:
         )
 
     def test_very_early_exit_mfe_below_02r(self) -> None:
-        """超早期exit: MFE<0.2R + 30分経過で撤退"""
-        manager = PositionManager()
+        """超早期exit: 有効時MFE<0.2R + 30分経過で撤退"""
+        # デフォルトOFF: 明示的にONにしてテスト
+        config = PositionManagerConfig(
+            very_early_exit_enabled=True,
+        )
+        manager = PositionManager(config)
         self._register(manager, self.trend_plan)
 
         # 30分経過、MFE<0.2R（価格=entry付近で上昇なし）
-        # entry=150.0, sl=149.5, r_value=0.5
-        # 0.2R = 0.1 → price=150.1未満
         now = self.entry_time + timedelta(minutes=35)
         action = manager.evaluate(
             "pos1", 150.0, now, atr=0.5,
@@ -2231,13 +2233,27 @@ class Test2021RangeImprovements:
         assert action.exit_reason == ExitReason.STAGNATION
         assert "超早期exit" in action.reason
 
-    def test_very_early_exit_skipped_with_mfe(self) -> None:
-        """超早期exit: MFE>=0.2R なら発火しない"""
+    def test_very_early_exit_disabled_by_default(self) -> None:
+        """超早期exit: デフォルトOFFで発火しない"""
         manager = PositionManager()
         self._register(manager, self.trend_plan)
 
+        # 30分経過、MFE<0.2Rでも超早期exitは発火しない
+        now = self.entry_time + timedelta(minutes=35)
+        action = manager.evaluate(
+            "pos1", 150.0, now, atr=0.5,
+        )
+        assert action.action_type == ManagementActionType.HOLD
+
+    def test_very_early_exit_skipped_with_mfe(self) -> None:
+        """超早期exit: MFE>=0.2R なら発火しない"""
+        config = PositionManagerConfig(
+            very_early_exit_enabled=True,
+        )
+        manager = PositionManager(config)
+        self._register(manager, self.trend_plan)
+
         # まず0.25Rまで上昇させてhighest_rを記録
-        # 0.25R = 0.125 → price=150.125
         t1 = self.entry_time + timedelta(minutes=10)
         manager.evaluate("pos1", 150.125, t1, atr=0.5)
 

@@ -98,9 +98,11 @@ class TestTrailingSLMultiplier:
             pos_id, 150.4, t, atr=0.002,
         )
         # trailing_start_r=0.5, current_r=(0.4/0.5)=0.8 > 0.5
+        # universal_half_r有効時は0.5R到達でPARTIAL_CLOSEもありえる
         assert action.action_type in (
             ManagementActionType.UPDATE_SL,
             ManagementActionType.HOLD,
+            ManagementActionType.PARTIAL_CLOSE,
         )
 
     def test_trailing_with_tighter_sl(

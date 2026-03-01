@@ -58,7 +58,7 @@ class SoftGuardConfig:
     volatility_penalty: float = 0.1
     recent_loss_threshold: int = 3
     recent_loss_penalty: float = 0.2
-    dynamic_spread_enabled: bool = True
+    dynamic_spread_enabled: bool = False
 
 
 @dataclass(frozen=True)
