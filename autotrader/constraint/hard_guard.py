@@ -25,6 +25,7 @@ class HardGuardReason(Enum):
     HIGH_IMPACT_NEWS = "high_impact_news"
     FUNDAMENTAL_CAUTION = "fundamental_caution"
     LOW_LIQUIDITY_HOLIDAY = "low_liquidity_holiday"
+    SESSION_TRANSITION = "session_transition"
 
 
 @dataclass(frozen=True)
@@ -38,6 +39,8 @@ class HardGuardConfig:
         blocked_hours: 取引禁止時間帯
         fundamental_caution_block_level: ブロック注意度閾値
         fundamental_holiday_liquidity_block: 休日流動性ブロック閾値
+        session_transition_wait_enabled: セッション切替待機有効化
+        session_transition_wait_minutes: セッション切替待機時間（分）
     """
 
     max_daily_loss_pct: float = 5.0
@@ -46,6 +49,8 @@ class HardGuardConfig:
     blocked_hours: tuple[int, ...] = (0, 23)
     fundamental_caution_block_level: int = 2
     fundamental_holiday_liquidity_block: float = 0.3
+    session_transition_wait_enabled: bool = True
+    session_transition_wait_minutes: int = 30
 
 
 @dataclass(frozen=True)
@@ -61,9 +66,7 @@ class HardGuardResult:
 
     is_allowed: bool
     reasons: list[str] = field(default_factory=list)
-    reason_codes: list[HardGuardReason] = field(
-        default_factory=list
-    )
+    reason_codes: list[HardGuardReason] = field(default_factory=list)
     checked_at: datetime = field(default_factory=datetime.now)
 
 
@@ -76,14 +79,17 @@ class HardGuard:
         config: ハードガード設定
     """
 
-    def __init__(
-        self, config: HardGuardConfig | None = None
-    ) -> None:
+    # セッション切替時刻（UTC）
+    TRANSITIONS = {
+        "TOKYO_TO_LONDON": 8,  # ロンドン開場
+        "LONDON_TO_NEWYORK": 13,  # NY開場
+        "NEWYORK_TO_TOKYO": 22,  # 東京開場（翌日）
+    }
+
+    def __init__(self, config: HardGuardConfig | None = None) -> None:
         self.config = config or HardGuardConfig()
 
-    def check_margin(
-        self, context: dict
-    ) -> tuple[bool, str | None]:
+    def check_margin(self, context: dict) -> tuple[bool, str | None]:
         """証拠金チェック
 
         Args:
@@ -102,9 +108,7 @@ class HardGuard:
             )
         return True, None
 
-    def check_daily_loss(
-        self, context: dict
-    ) -> tuple[bool, str | None]:
+    def check_daily_loss(self, context: dict) -> tuple[bool, str | None]:
         """日次損失チェック
 
         Args:
@@ -123,9 +127,7 @@ class HardGuard:
             )
         return True, None
 
-    def check_position_limit(
-        self, context: dict
-    ) -> tuple[bool, str | None]:
+    def check_position_limit(self, context: dict) -> tuple[bool, str | None]:
         """ポジション数チェック
 
         Args:
@@ -144,9 +146,7 @@ class HardGuard:
             )
         return True, None
 
-    def check_trading_hours(
-        self, context: dict
-    ) -> tuple[bool, str | None]:
+    def check_trading_hours(self, context: dict) -> tuple[bool, str | None]:
         """取引時間チェック
 
         Args:
@@ -155,9 +155,7 @@ class HardGuard:
         Returns:
             tuple[bool, str | None]: (OK, 理由)
         """
-        current_time: datetime | None = context.get(
-            "current_time"
-        )
+        current_time: datetime | None = context.get("current_time")
         if current_time is None:
             return True, None
 
@@ -172,9 +170,44 @@ class HardGuard:
 
         return True, None
 
-    def check_data_quality(
+    def check_session_transition(
         self, context: dict
     ) -> tuple[bool, str | None]:
+        """セッション切替待機チェック
+
+        主要セッション切替直後の待機時間中はエントリーを抑制。
+        セッション切替時は市場参加者が入れ替わり、ダマシが多い。
+
+        Args:
+            context: コンテキスト
+
+        Returns:
+            tuple[bool, str | None]: (OK, 理由)
+        """
+        if not self.config.session_transition_wait_enabled:
+            return True, None
+
+        current_time: datetime | None = context.get("current_time")
+        if current_time is None:
+            return True, None
+
+        hour = current_time.hour
+        minute = current_time.minute
+
+        for name, transition_hour in self.TRANSITIONS.items():
+            if (
+                hour == transition_hour
+                and minute < self.config.session_transition_wait_minutes
+            ):
+                return (
+                    False,
+                    f"セッション切替待機中（{name}, "
+                    f"{minute}/{self.config.session_transition_wait_minutes}分）",
+                )
+
+        return True, None
+
+    def check_data_quality(self, context: dict) -> tuple[bool, str | None]:
         """データ品質チェック
 
         Args:
@@ -189,9 +222,7 @@ class HardGuard:
             return False, "データ品質エラー"
         return True, None
 
-    def check_high_impact_news(
-        self, context: dict
-    ) -> tuple[bool, str | None]:
+    def check_high_impact_news(self, context: dict) -> tuple[bool, str | None]:
         """高インパクトニュースチェック
 
         Args:
@@ -211,7 +242,8 @@ class HardGuard:
         return True, None
 
     def check_fundamental(
-        self, fundamental_ctx: FundamentalContext,
+        self,
+        fundamental_ctx: FundamentalContext,
     ) -> tuple[bool, str | None, HardGuardReason | None]:
         """ファンダメンタルコンテキストチェック
 
@@ -229,21 +261,17 @@ class HardGuard:
         ctx = fundamental_ctx
 
         # 超重要指標日（NFP等）
-        if ctx.event_caution_level >= (
-            cfg.fundamental_caution_block_level
-        ):
+        if ctx.event_caution_level >= (cfg.fundamental_caution_block_level):
             return (
                 False,
-                f"超重要指標日: 注意度"
-                f"{ctx.event_caution_level}",
+                f"超重要指標日: 注意度{ctx.event_caution_level}",
                 HardGuardReason.FUNDAMENTAL_CAUTION,
             )
 
         # 休日の極度低流動性
         if (
             ctx.is_holiday
-            and ctx.liquidity_factor
-            < cfg.fundamental_holiday_liquidity_block
+            and ctx.liquidity_factor < cfg.fundamental_holiday_liquidity_block
         ):
             return (
                 False,
@@ -293,16 +321,22 @@ class HardGuard:
         ]
 
         if is_entry:
-            checks.extend([
-                (
-                    self.check_position_limit,
-                    HardGuardReason.MAX_POSITION_LIMIT,
-                ),
-                (
-                    self.check_high_impact_news,
-                    HardGuardReason.HIGH_IMPACT_NEWS,
-                ),
-            ])
+            checks.extend(
+                [
+                    (
+                        self.check_position_limit,
+                        HardGuardReason.MAX_POSITION_LIMIT,
+                    ),
+                    (
+                        self.check_high_impact_news,
+                        HardGuardReason.HIGH_IMPACT_NEWS,
+                    ),
+                    (
+                        self.check_session_transition,
+                        HardGuardReason.SESSION_TRANSITION,
+                    ),
+                ]
+            )
 
         for check_func, reason_code in checks:
             ok, reason = check_func(context)
@@ -312,9 +346,7 @@ class HardGuard:
 
         # ファンダメンタルチェック（エントリー時のみ）
         if is_entry and fundamental_ctx is not None:
-            ok, reason, code = self.check_fundamental(
-                fundamental_ctx
-            )
+            ok, reason, code = self.check_fundamental(fundamental_ctx)
             if not ok and reason and code:
                 reasons.append(reason)
                 reason_codes.append(code)

@@ -312,3 +312,132 @@ class TestConstraintChecker:
 
         assert adjusted < original_confidence
         assert adjusted == original_confidence * (1 - result.total_penalty)
+
+
+class TestSessionTransitionGuard:
+    """セッション切替待機ガードテスト"""
+
+    def test_session_transition_tokyo_to_london_blocked(self) -> None:
+        """東京→ロンドン切替直後（8:15 UTC）でブロック"""
+        from autotrader.constraint.hard_guard import HardGuardConfig
+
+        guard = HardGuard(
+            config=HardGuardConfig(
+                session_transition_wait_enabled=True,
+                session_transition_wait_minutes=30,
+            )
+        )
+        context = {"current_time": datetime(2021, 1, 4, 8, 15)}
+        ok, reason = guard.check_session_transition(context)
+
+        assert ok is False
+        assert "セッション切替待機中" in reason
+        assert "TOKYO_TO_LONDON" in reason
+
+    def test_session_transition_london_to_newyork_blocked(
+        self,
+    ) -> None:
+        """ロンドン→NY切替直後（13:10 UTC）でブロック"""
+        from autotrader.constraint.hard_guard import HardGuardConfig
+
+        guard = HardGuard(
+            config=HardGuardConfig(
+                session_transition_wait_enabled=True,
+                session_transition_wait_minutes=30,
+            )
+        )
+        context = {"current_time": datetime(2021, 1, 4, 13, 10)}
+        ok, reason = guard.check_session_transition(context)
+
+        assert ok is False
+        assert "セッション切替待機中" in reason
+        assert "LONDON_TO_NEWYORK" in reason
+
+    def test_session_transition_newyork_to_tokyo_blocked(
+        self,
+    ) -> None:
+        """NY→東京切替直後（22:20 UTC）でブロック"""
+        from autotrader.constraint.hard_guard import HardGuardConfig
+
+        guard = HardGuard(
+            config=HardGuardConfig(
+                session_transition_wait_enabled=True,
+                session_transition_wait_minutes=30,
+            )
+        )
+        context = {"current_time": datetime(2021, 1, 4, 22, 20)}
+        ok, reason = guard.check_session_transition(context)
+
+        assert ok is False
+        assert "セッション切替待機中" in reason
+        assert "NEWYORK_TO_TOKYO" in reason
+
+    def test_session_transition_after_wait_period_ok(
+        self,
+    ) -> None:
+        """待機時間経過後（8:35 UTC）でOK"""
+        from autotrader.constraint.hard_guard import HardGuardConfig
+
+        guard = HardGuard(
+            config=HardGuardConfig(
+                session_transition_wait_enabled=True,
+                session_transition_wait_minutes=30,
+            )
+        )
+        context = {"current_time": datetime(2021, 1, 4, 8, 35)}
+        ok, reason = guard.check_session_transition(context)
+
+        assert ok is True
+        assert reason is None
+
+    def test_session_transition_disabled_ok(self) -> None:
+        """機能無効時は常にOK"""
+        from autotrader.constraint.hard_guard import HardGuardConfig
+
+        guard = HardGuard(
+            config=HardGuardConfig(
+                session_transition_wait_enabled=False,
+            )
+        )
+        context = {"current_time": datetime(2021, 1, 4, 8, 15)}
+        ok, reason = guard.check_session_transition(context)
+
+        assert ok is True
+        assert reason is None
+
+    def test_session_transition_no_time_ok(self) -> None:
+        """時刻情報なしの場合はOK"""
+        guard = HardGuard()
+        context = {}
+        ok, reason = guard.check_session_transition(context)
+
+        assert ok is True
+        assert reason is None
+
+    def test_full_check_with_session_transition(self) -> None:
+        """統合チェックでセッション切替がブロックされる"""
+        from autotrader.constraint.hard_guard import (
+            HardGuardConfig,
+            HardGuardReason,
+        )
+
+        guard = HardGuard(
+            config=HardGuardConfig(
+                session_transition_wait_enabled=True,
+                session_transition_wait_minutes=30,
+            )
+        )
+        context = {
+            "current_time": datetime(2021, 1, 4, 13, 15),
+            "margin_ratio": 200.0,
+            "daily_pnl_pct": 0.0,
+            "position_count": 0,
+            "data_quality": "good",
+            "high_impact_news": False,
+        }
+        result = guard.check(context, is_entry=True)
+
+        assert result.is_allowed is False
+        assert len(result.reasons) == 1
+        assert HardGuardReason.SESSION_TRANSITION in result.reason_codes
+        assert "セッション切替待機中" in result.reasons[0]
