@@ -26,11 +26,14 @@ const FundamentalWidget = {
     this.renderNews();
   },
 
-  /** カレンダー取得 */
+  /** カレンダー取得（当日+翌営業日分） */
   async fetchCalendar() {
     try {
-      const data = await getFundamentalCalendar(this.symbol);
-      this.calendarEvents = (data && data.events) || [];
+      // 週末を跨ぐ場合を考慮して余裕を持って取得
+      const data = await getFundamentalCalendar(this.symbol, 4);
+      var raw = (data && data.events) || [];
+      // 当日+翌営業日のみにフィルタ
+      this.calendarEvents = this._filterTodayAndNextBizDay(raw);
       this.nextHighImpactMinutes = data ? data.next_high_impact_minutes : null;
     } catch (e) {
       this.calendarEvents = [];
@@ -44,13 +47,10 @@ const FundamentalWidget = {
   onNewsUpdate(msg) {
     if (!msg || !msg.data) return;
     const d = msg.data;
-    // シンボルフィルタ（配信されたシンボルと一致する場合のみ）
     if (d.symbol && d.symbol !== this.symbol) return;
-    // 先頭に追加（重複排除）
     const exists = this.newsItems.some(function(n) { return n.news_id === d.news_id; });
     if (!exists) {
       this.newsItems.unshift(d);
-      // 上限100件
       if (this.newsItems.length > 100) {
         this.newsItems = this.newsItems.slice(0, 100);
       }
@@ -61,7 +61,6 @@ const FundamentalWidget = {
   /** WebSocket: カレンダー更新ハンドラ */
   onCalendarUpdate(msg) {
     if (!msg || !msg.data) return;
-    // フルリフレッシュ
     this.fetchCalendar();
   },
 
@@ -73,7 +72,7 @@ const FundamentalWidget = {
     if (!container) return;
 
     if (countEl) {
-      countEl.textContent = this.newsItems.length + ' items';
+      countEl.textContent = this.newsItems.length + ' 件';
     }
     if (updatedEl) {
       var now = new Date();
@@ -82,7 +81,7 @@ const FundamentalWidget = {
     }
 
     if (this.newsItems.length === 0) {
-      container.innerHTML = '<div class="flex items-center justify-center h-16 text-gray-500 text-sm">No news available</div>';
+      container.innerHTML = '<div class="flex items-center justify-center h-16 text-gray-500 text-sm">ニュースなし</div>';
       return;
     }
 
@@ -125,30 +124,39 @@ const FundamentalWidget = {
     }
 
     if (this.calendarEvents.length === 0) {
-      container.innerHTML = '<div class="flex items-center justify-center h-16 text-gray-500 text-sm">No events</div>';
+      container.innerHTML = '<div class="flex items-center justify-center h-16 text-gray-500 text-sm">イベントなし</div>';
       return;
     }
 
     var html = '<table class="w-full text-xs">';
     html += '<thead><tr class="text-gray-500 text-[10px]">' +
       '<th class="text-left py-1 px-1 w-5"></th>' +
-      '<th class="text-left py-1 px-1">Time</th>' +
-      '<th class="text-left py-1 px-1">Ccy</th>' +
-      '<th class="text-left py-1 px-1">Event</th>' +
-      '<th class="text-right py-1 px-1">Act</th>' +
-      '<th class="text-right py-1 px-1">Fct</th>' +
-      '<th class="text-right py-1 px-1">Prev</th>' +
-      '<th class="text-right py-1 px-1 w-16">Until</th>' +
+      '<th class="text-left py-1 px-1">日時</th>' +
+      '<th class="text-left py-1 px-1">通貨</th>' +
+      '<th class="text-left py-1 px-1">イベント</th>' +
+      '<th class="text-right py-1 px-1">実績</th>' +
+      '<th class="text-right py-1 px-1">予想</th>' +
+      '<th class="text-right py-1 px-1">前回</th>' +
+      '<th class="text-right py-1 px-1 w-16">残り</th>' +
       '</tr></thead><tbody>';
 
+    var prevDateStr = '';
     for (var i = 0; i < this.calendarEvents.length; i++) {
       var ev = this.calendarEvents[i];
       var impactCls = this._impactClass(ev.impact);
-      var timeStr = this._formatEventTime(ev.event_time);
+      var evDate = new Date(ev.event_time);
+      var dateStr = this._formatDateLabel(evDate);
+      var timeStr = this._formatTimeOnly(evDate);
       var mins = ev.minutes_until || 0;
       var countdownStr = this._formatCountdown(mins);
       var rowCls = ev.is_released ? 'text-gray-500' : 'text-gray-300';
       var actualCls = ev.is_released ? 'text-blue-400 font-semibold' : '';
+
+      // 日付区切り行
+      if (dateStr !== prevDateStr) {
+        html += '<tr class="bg-gray-800/80"><td colspan="8" class="py-1 px-2 text-[10px] text-gray-400 font-semibold">' + dateStr + '</td></tr>';
+        prevDateStr = dateStr;
+      }
 
       html += '<tr class="' + rowCls + ' border-t border-gray-800/50 hover:bg-gray-800/30">' +
         '<td class="py-1.5 px-1"><span class="' + impactCls + '"></span></td>' +
@@ -173,7 +181,7 @@ const FundamentalWidget = {
 
     if (this.nextHighImpactMinutes !== null && this.nextHighImpactMinutes <= 60 && this.nextHighImpactMinutes > 0) {
       var mins = Math.round(this.nextHighImpactMinutes);
-      textEl.textContent = 'HIGH impact event in ' + mins + ' min';
+      textEl.textContent = '重要指標まで ' + mins + ' 分';
       banner.classList.remove('hidden');
     } else {
       banner.classList.add('hidden');
@@ -187,7 +195,6 @@ const FundamentalWidget = {
     }
     var self = this;
     this._countdownInterval = setInterval(function() {
-      // カレンダーのカウントダウンセルを更新
       var cells = document.querySelectorAll('[data-event-time]');
       var now = new Date();
       for (var i = 0; i < cells.length; i++) {
@@ -196,7 +203,6 @@ const FundamentalWidget = {
         var mins = diffMs / 60000;
         cells[i].textContent = self._formatCountdown(mins);
       }
-      // 警告バナーも更新
       if (self.nextHighImpactMinutes !== null) {
         self.nextHighImpactMinutes -= 1;
         self.renderNextEventWarning();
@@ -205,6 +211,59 @@ const FundamentalWidget = {
   },
 
   // ── ヘルパー ──
+
+  /** 当日+翌営業日のイベントのみ抽出 */
+  _filterTodayAndNextBizDay(events) {
+    var today = new Date();
+    today.setHours(0, 0, 0, 0);
+    var todayMs = today.getTime();
+
+    // 翌営業日を計算（土日スキップ）
+    var nextBiz = new Date(today);
+    nextBiz.setDate(nextBiz.getDate() + 1);
+    while (nextBiz.getDay() === 0 || nextBiz.getDay() === 6) {
+      nextBiz.setDate(nextBiz.getDate() + 1);
+    }
+    // 翌営業日の終わり（23:59:59）
+    var nextBizEnd = new Date(nextBiz);
+    nextBizEnd.setHours(23, 59, 59, 999);
+    var nextBizEndMs = nextBizEnd.getTime();
+
+    var filtered = [];
+    for (var i = 0; i < events.length; i++) {
+      var ev = events[i];
+      var evTime = new Date(ev.event_time);
+      var evMs = evTime.getTime();
+      if (evMs >= todayMs && evMs <= nextBizEndMs) {
+        filtered.push(ev);
+      }
+    }
+    return filtered;
+  },
+
+  /** 日付ラベル（今日/明日/曜日付き） */
+  _formatDateLabel(d) {
+    var days = ['日', '月', '火', '水', '木', '金', '土'];
+    var today = new Date();
+    today.setHours(0, 0, 0, 0);
+    var target = new Date(d);
+    target.setHours(0, 0, 0, 0);
+    var diffDays = Math.round((target - today) / 86400000);
+
+    var prefix = '';
+    if (diffDays === 0) prefix = '今日';
+    else if (diffDays === 1) prefix = '明日';
+    else prefix = (d.getMonth() + 1) + '/' + d.getDate();
+
+    return prefix + '（' + days[d.getDay()] + '）';
+  },
+
+  /** 時刻のみ（HH:MM） */
+  _formatTimeOnly(d) {
+    if (!d || isNaN(d.getTime())) return '--:--';
+    return d.getHours().toString().padStart(2, '0') + ':' +
+      d.getMinutes().toString().padStart(2, '0');
+  },
 
   /** センチメントスコアに応じた色クラス */
   _sentimentClass(score) {
@@ -230,24 +289,13 @@ const FundamentalWidget = {
       d.getMinutes().toString().padStart(2, '0');
   },
 
-  /** イベント時刻フォーマット（MM/DD HH:MM） */
-  _formatEventTime(isoStr) {
-    if (!isoStr) return '--';
-    var d = new Date(isoStr);
-    if (isNaN(d.getTime())) return '--';
-    return (d.getMonth() + 1).toString().padStart(2, '0') + '/' +
-      d.getDate().toString().padStart(2, '0') + ' ' +
-      d.getHours().toString().padStart(2, '0') + ':' +
-      d.getMinutes().toString().padStart(2, '0');
-  },
-
   /** カウントダウンフォーマット */
   _formatCountdown(mins) {
-    if (mins <= 0) return 'done';
-    if (mins < 60) return Math.round(mins) + 'm';
+    if (mins <= 0) return '済';
+    if (mins < 60) return Math.round(mins) + '分';
     var h = Math.floor(mins / 60);
     var m = Math.round(mins % 60);
-    return h + 'h' + (m > 0 ? m + 'm' : '');
+    return h + '時間' + (m > 0 ? m + '分' : '');
   },
 
   /** 数値フォーマット（null対応） */
