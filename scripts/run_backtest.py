@@ -454,8 +454,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--consensus-threshold",
         type=float,
-        default=8.0,
-        help="コンセンサス閾値（デフォルト: 8.0）",
+        default=None,
+        help="コンセンサス閾値（デフォルト: config.pyの値=9.0）",
     )
     parser.add_argument(
         "--penalty-cap",
@@ -581,8 +581,9 @@ def parse_args() -> argparse.Namespace:
     # --- コンセンサス逆転exit ---
     parser.add_argument(
         "--consensus-exit",
-        action="store_true",
-        help="コンセンサス逆転exitを有効化",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="コンセンサス逆転exit（デフォルト: 有効）",
     )
     parser.add_argument(
         "--consensus-exit-threshold",
@@ -604,8 +605,9 @@ def parse_args() -> argparse.Namespace:
     # --- 利益反転ガード ---
     parser.add_argument(
         "--profit-reversal",
-        action="store_true",
-        help="利益反転ガードを有効化",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="利益反転ガード（デフォルト: 有効）",
     )
     parser.add_argument(
         "--profit-reversal-mfe-r",
@@ -628,14 +630,16 @@ def parse_args() -> argparse.Namespace:
     # --- 段階的STAGNATION ---
     parser.add_argument(
         "--progressive-stagnation",
-        action="store_true",
-        help="段階的STAGNATIONを有効化",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="段階的STAGNATION（デフォルト: 有効）",
     )
     # --- レジーム別閾値調整 ---
     parser.add_argument(
         "--regime-threshold",
-        action="store_true",
-        help="レジーム別閾値調整を有効化",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="レジーム別閾値調整（デフォルト: 有効）",
     )
     parser.add_argument(
         "--regime-trend-add",
@@ -658,8 +662,9 @@ def parse_args() -> argparse.Namespace:
     # --- HTFスコアフィルター ---
     parser.add_argument(
         "--htf-score-filter",
-        action="store_true",
-        help="HTFスコアフィルターを有効化",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="HTFスコアフィルター（デフォルト: 有効）",
     )
     parser.add_argument(
         "--htf-score-threshold-add",
@@ -670,14 +675,15 @@ def parse_args() -> argparse.Namespace:
     # --- BCA: Bidirectional Conviction Assessment ---
     parser.add_argument(
         "--bca",
-        action="store_true",
-        help="BCA（方向性エッジ評価）を有効化",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="BCA（方向性エッジ評価）（デフォルト: 有効）",
     )
     parser.add_argument(
         "--bca-min-edge",
         type=float,
-        default=0.25,
-        help="BCA最小方向性エッジ（デフォルト: 0.25）",
+        default=None,
+        help="BCA最小方向性エッジ（デフォルト: config.pyの値=0.55）",
     )
     parser.add_argument(
         "--bca-penalty-scale",
@@ -688,8 +694,9 @@ def parse_args() -> argparse.Namespace:
     # --- ユニバーサル0.5R部分利確 ---
     parser.add_argument(
         "--universal-half-r",
-        action="store_true",
-        help="全レジームで0.5R部分利確を有効化",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="全レジームで0.5R部分利確（デフォルト: 有効）",
     )
     parser.add_argument(
         "--universal-half-r-ratio",
@@ -1228,6 +1235,10 @@ def run_single_backtest(args: argparse.Namespace):
     from autotrader.decision.unified.position_manager import (
         PositionManagerConfig,
     )
+    # CLI未指定時のフォールバック用デフォルトconfig
+    _default_bot = UnifiedBotConfig()
+    _default_pm = PositionManagerConfig()
+
     _score_prem = (
         0.0 if args.no_range_day_score_premium
         else args.range_day_score_premium
@@ -1260,7 +1271,11 @@ def run_single_backtest(args: argparse.Namespace):
         equity_caution_pct=args.equity_caution,
         slippage_buffer_pips=args.slippage_buffer,
         tp_sl_ratio=args.tp_sl_ratio,
-        consensus_threshold=args.consensus_threshold,
+        consensus_threshold=(
+            args.consensus_threshold
+            if args.consensus_threshold is not None
+            else _default_bot.consensus_threshold
+        ),
         penalty_cap=args.penalty_cap,
         trend_strength_max=args.trend_strength_max,
         bonus_max_positions=args.bonus_max_positions,
@@ -1290,7 +1305,11 @@ def run_single_backtest(args: argparse.Namespace):
             args.fundamental_lag
         ),
         bca_enabled=args.bca,
-        bca_min_edge=args.bca_min_edge,
+        bca_min_edge=(
+            args.bca_min_edge
+            if args.bca_min_edge is not None
+            else _default_bot.bca_min_edge
+        ),
         bca_penalty_scale=args.bca_penalty_scale,
     )
 
