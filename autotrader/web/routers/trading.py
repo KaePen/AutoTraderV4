@@ -20,6 +20,7 @@ from autotrader.web.dependencies import (
     get_engine_manager,
     get_live_engine,
 )
+from autotrader.web.middleware import limiter
 from autotrader.web.schemas import (
     AccountPresetRequest,
     ApiResponse,
@@ -136,6 +137,7 @@ def _build_trading_mode_response(
     "/mode",
     response_model=ApiResponse[TradingModeResponse],
 )
+@limiter.limit("60/minute")
 async def get_trading_mode(
     request: Request,
     user: Annotated[dict[str, any], Depends(get_current_user)],
@@ -187,6 +189,7 @@ def _build_mt5_status_response(
     "/mt5/status",
     response_model=ApiResponse[MT5StatusResponse],
 )
+@limiter.limit("60/minute")
 async def get_mt5_status(
     request: Request,
     user: Annotated[dict[str, any], Depends(get_current_user)],
@@ -208,6 +211,7 @@ async def get_mt5_status(
     "/mt5/connect",
     response_model=ApiResponse[MT5StatusResponse],
 )
+@limiter.limit("10/minute")
 async def connect_mt5(
     request: Request,
     user: Annotated[dict[str, any], Depends(require_admin)],
@@ -282,6 +286,7 @@ async def connect_mt5(
     "/mt5/disconnect",
     response_model=ApiResponse[MT5StatusResponse],
 )
+@limiter.limit("10/minute")
 async def disconnect_mt5(
     request: Request,
     user: Annotated[dict[str, any], Depends(require_admin)],
@@ -330,6 +335,7 @@ async def disconnect_mt5(
     "/auto-trade",
     response_model=ApiResponse[TradingModeResponse],
 )
+@limiter.limit("10/minute")
 async def toggle_auto_trade(
     request: Request,
     user: Annotated[dict[str, any], Depends(require_admin)],
@@ -370,9 +376,10 @@ async def toggle_auto_trade(
     "/symbol-auto-trade",
     response_model=ApiResponse[TradingModeResponse],
 )
+@limiter.limit("10/minute")
 async def toggle_symbol_auto_trade(
     request: Request,
-    user: Annotated[dict[str, any], Depends(require_admin)],
+    user: Annotated[dict[str, any], Depends(get_current_user)],
     symbol: str,
     enable: bool = False,
     engine=Depends(get_live_engine),
@@ -477,6 +484,7 @@ async def toggle_symbol_auto_trade(
     "/switch-symbol",
     response_model=ApiResponse[TradingModeResponse],
 )
+@limiter.limit("10/minute")
 async def switch_symbol(
     request: Request,
     user: Annotated[dict[str, any], Depends(require_admin)],
@@ -524,6 +532,7 @@ async def switch_symbol(
     "/symbol-demo-mode",
     response_model=ApiResponse[TradingModeResponse],
 )
+@limiter.limit("10/minute")
 async def toggle_symbol_demo_mode(
     request: Request,
     user: Annotated[dict[str, any], Depends(require_admin)],
@@ -628,6 +637,7 @@ async def toggle_symbol_demo_mode(
     "/mt5/switch-account",
     response_model=ApiResponse[MT5StatusResponse],
 )
+@limiter.limit("3/minute")
 async def switch_account(
     request: Request,
     user: Annotated[dict[str, any], Depends(require_admin)],
@@ -720,13 +730,16 @@ async def switch_account(
 
 
 @router.get("/symbols")
+@limiter.limit("60/minute")
 async def get_symbols(
+    request: Request,
     user: Annotated[dict[str, any], Depends(get_current_user)],
     mgr=Depends(get_engine_manager),
 ) -> ApiResponse[list[str]]:
     """アクティブシンボル一覧取得
 
     Args:
+        request: FastAPIリクエスト
         mgr: EngineManager
 
     Returns:
@@ -738,6 +751,7 @@ async def get_symbols(
 
 
 @router.post("/symbols/add")
+@limiter.limit("10/minute")
 async def add_symbol(
     request: Request,
     user: Annotated[dict[str, any], Depends(require_admin)],
@@ -770,6 +784,7 @@ async def add_symbol(
 
 
 @router.post("/symbols/remove")
+@limiter.limit("10/minute")
 async def remove_symbol(
     request: Request,
     user: Annotated[dict[str, any], Depends(require_admin)],
@@ -802,10 +817,15 @@ async def remove_symbol(
     "/accounts",
     response_model=ApiResponse[AccountPresetsResponse],
 )
+@limiter.limit("60/minute")
 async def get_account_presets(
+    request: Request,
     user: Annotated[dict[str, any], Depends(get_current_user)],
 ) -> ApiResponse[AccountPresetsResponse]:
     """口座プリセット一覧取得
+
+    Args:
+        request: FastAPIリクエスト
 
     Returns:
         ApiResponse[AccountPresetsResponse]: プリセット一覧
@@ -829,13 +849,16 @@ async def get_account_presets(
     "/accounts",
     response_model=ApiResponse[AccountPresetsResponse],
 )
+@limiter.limit("10/minute")
 async def add_account_preset(
+    request: Request,
     user: Annotated[dict[str, any], Depends(require_admin)],
     body: AccountPresetRequest,
 ) -> ApiResponse[AccountPresetsResponse]:
     """口座プリセット登録/更新
 
     Args:
+        request: FastAPIリクエスト
         body: プリセット登録リクエスト
 
     Returns:
@@ -868,13 +891,16 @@ async def add_account_preset(
     "/accounts/{login}",
     response_model=ApiResponse[AccountPresetsResponse],
 )
+@limiter.limit("10/minute")
 async def delete_account_preset(
+    request: Request,
     user: Annotated[dict[str, any], Depends(require_admin)],
     login: int,
 ) -> ApiResponse[AccountPresetsResponse]:
     """口座プリセット削除
 
     Args:
+        request: FastAPIリクエスト
         login: 削除するログインID
 
     Returns:

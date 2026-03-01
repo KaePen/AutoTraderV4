@@ -12,6 +12,7 @@ from autotrader.web.dependencies import (
     get_engine_manager,
     get_live_engine,
 )
+from autotrader.web.middleware import limiter
 from autotrader.web.schemas import ApiResponse, DashboardResponse
 from autotrader.web.schemas.responses import AccountInfoResponse
 from autotrader.web.services.market_service import MarketService
@@ -51,6 +52,7 @@ def _account_from_engine(engine) -> AccountInfoResponse | None:
 
 
 @router.get("/dashboard", response_model=ApiResponse[DashboardResponse])
+@limiter.limit("60/minute")
 async def get_dashboard(
     request: Request,
     db: Session = Depends(get_db),

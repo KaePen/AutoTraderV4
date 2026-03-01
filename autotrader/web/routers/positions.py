@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, Query, Request
 from sqlalchemy.orm import Session
@@ -13,6 +13,7 @@ from autotrader.web.dependencies import (
     get_engine_manager,
     get_live_engine,
 )
+from autotrader.web.middleware import limiter
 from autotrader.web.schemas import ApiResponse, PositionResponse
 from autotrader.web.services.market_service import MarketService
 
@@ -33,7 +34,7 @@ def _dict_to_position_response(d: dict) -> PositionResponse:
     if isinstance(opened_at, str):
         opened_at = datetime.fromisoformat(opened_at)
     elif opened_at is None:
-        opened_at = datetime.now(timezone.utc)
+        opened_at = datetime.now(UTC)
 
     signal_type_val = d.get("signal_type", "BUY")
     if isinstance(signal_type_val, str):
@@ -69,6 +70,7 @@ def _dict_to_position_response(d: dict) -> PositionResponse:
     "/positions",
     response_model=ApiResponse[list[PositionResponse]],
 )
+@limiter.limit("60/minute")
 async def get_positions(
     request: Request,
     db: Session = Depends(get_db),

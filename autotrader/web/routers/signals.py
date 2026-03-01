@@ -10,9 +10,10 @@ from autotrader.web.dependencies import (
     get_engine_manager,
     get_live_engine,
 )
+from autotrader.web.middleware import limiter
 from autotrader.web.schemas import (
-    ApiResponse,
     AnalysisResponse,
+    ApiResponse,
     SignalResponse,
 )
 
@@ -93,6 +94,7 @@ async def _resolve_engine(mgr, symbol, fallback_engine):
     "/signals/analysis",
     response_model=ApiResponse[AnalysisResponse],
 )
+@limiter.limit("60/minute")
 async def get_analysis(
     request: Request,
     symbol: str | None = Query(
@@ -218,6 +220,7 @@ async def get_analysis(
     "/signals/current",
     response_model=ApiResponse[list[SignalResponse]],
 )
+@limiter.limit("60/minute")
 async def get_current_signals(
     request: Request,
     symbol: str = Query(
@@ -261,6 +264,7 @@ async def get_current_signals(
     "/signals/history",
     response_model=ApiResponse[list[SignalResponse]],
 )
+@limiter.limit("60/minute")
 async def get_signal_history(
     request: Request,
     symbol: str = Query(
