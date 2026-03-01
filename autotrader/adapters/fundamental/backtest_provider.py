@@ -1,11 +1,11 @@
 """バックテスト用ファンダメンタルプロバイダー
 
-CSVファイルから過去の経済イベントを読み込み、
-バックテスト時刻に合わせてFundamentalContextを提供する。
+CSVファイルまたはParquetキャッシュから過去の経済イベントを
+読み込み、バックテスト時刻に合わせてFundamentalContextを提供する。
 
 フォールバック階層:
-1. イベントLLM CSV（llm_events_SYMBOL_YYYY.csv）→ 合成アルゴリズム
-2. 月次LLM CSV（llm_context_SYMBOL_YYYY.csv）→ 旧ロジック
+1. イベントLLM CSV/Parquet → 合成アルゴリズム
+2. 月次LLM CSV → 旧ロジック
 3. events CSV のみ → _estimate_bias_from_events
 4. 何もなし → FundamentalContext.neutral()
 """
@@ -483,6 +483,219 @@ class BacktestFundamentalProvider:
                 "[NewsLLM] CSV読込エラー: %s", e,
             )
             return 0
+
+    def load_parquet(self, parquet_path: str | Path) -> int:
+        """Parquetファイルから経済イベントを読み込み
+
+        CSV形式と同等のカラム構成を前提とし、
+        DataFrameを行単位で_parse_rowに渡す。
+
+        Args:
+            parquet_path: Parquetファイルパス
+
+        Returns:
+            int: 読み込んだイベント数
+        """
+        import pandas as pd
+
+        path = Path(parquet_path)
+        if not path.exists():
+            logger.warning(
+                "[BacktestFundamental] Parquetが"
+                "見つかりません: %s", path,
+            )
+            return 0
+
+        try:
+            df = pd.read_parquet(path)
+            fetched_at = datetime.now(timezone.utc)
+            loaded: list[EconomicEvent] = []
+
+            for _, row in df.iterrows():
+                row_dict = {
+                    k: self._safe_str(v)
+                    for k, v in row.items()
+                }
+                event = self._parse_row(row_dict, fetched_at)
+                if event:
+                    loaded.append(event)
+
+            # 重複排除してマージ
+            self._events.extend(loaded)
+            self._events = self._normalizer.deduplicate(
+                self._events,
+            )
+            self._events.sort(key=lambda e: e.event_time)
+            self._events_sorted_ts = [
+                e.event_time.timestamp()
+                for e in self._events
+            ]
+            self._loaded_files.append(str(path))
+
+            logger.info(
+                "[BacktestFundamental] %d件読込(Parquet): "
+                "%s", len(loaded), path.name,
+            )
+            return len(loaded)
+
+        except Exception as e:
+            logger.error(
+                "[BacktestFundamental] Parquet読込エラー: %s",
+                e,
+            )
+            return 0
+
+    def load_event_llm_parquet(
+        self,
+        parquet_path: str | Path,
+        symbol: str,
+    ) -> int:
+        """イベントLLM分析結果Parquetを読み込み
+
+        llm_events_SYMBOL_YYYY.parquet を読み込み、
+        内部リストに追記する。CSV版と同等の機能。
+
+        Args:
+            parquet_path: Parquetファイルパス
+            symbol: 対象シンボル
+
+        Returns:
+            int: 読み込んだレコード数
+        """
+        import pandas as pd
+
+        path = Path(parquet_path)
+        if not path.exists():
+            logger.warning(
+                "[BacktestFundamental] イベントLLM Parquet"
+                "が見つかりません: %s", path,
+            )
+            return 0
+
+        try:
+            df = pd.read_parquet(path)
+            loaded: list[EventLLMRecord] = []
+
+            for _, row in df.iterrows():
+                row_dict = {
+                    k: self._safe_str(v)
+                    for k, v in row.items()
+                }
+                rec = self._parse_event_llm_row(row_dict)
+                if rec is not None:
+                    loaded.append(rec)
+
+            if not loaded:
+                return 0
+
+            # 既存データとマージしてソート
+            existing = self._event_llm_records.get(
+                symbol, [],
+            )
+            merged = existing + loaded
+            merged.sort(key=lambda r: r.event_time)
+
+            self._event_llm_records[symbol] = merged
+            self._event_llm_ts[symbol] = [
+                r.event_time.timestamp() for r in merged
+            ]
+
+            logger.info(
+                "[BacktestFundamental] イベントLLM "
+                "%d件読込(Parquet): %s (%s)",
+                len(loaded), path.name, symbol,
+            )
+            return len(loaded)
+
+        except Exception as e:
+            logger.error(
+                "[BacktestFundamental] イベントLLM "
+                "Parquet読込エラー: %s", e,
+            )
+            return 0
+
+    def load_news_llm_parquet(
+        self,
+        parquet_path: str | Path,
+        symbol: str,
+    ) -> int:
+        """ニュースLLM分析Parquetを読み込み
+
+        llm_news_SYMBOL_YYYY.parquet を読み込み、
+        日付をキーとして辞書に格納する。
+        CSV版(load_news_llm_csv)と同等の機能。
+
+        Args:
+            parquet_path: Parquetファイルパス
+            symbol: 対象シンボル
+
+        Returns:
+            int: 読み込みレコード数
+        """
+        import pandas as pd
+
+        path = Path(parquet_path)
+        if not path.exists():
+            logger.warning(
+                "[NewsLLM] Parquet未存在: %s", path,
+            )
+            return 0
+
+        try:
+            df = pd.read_parquet(path)
+            count = 0
+            sym_dict = self._news_llm_by_date.setdefault(
+                symbol, {},
+            )
+
+            for _, row in df.iterrows():
+                row_dict = {
+                    k: self._safe_str(v)
+                    for k, v in row.items()
+                }
+                rec = self._parse_news_llm_row(row_dict)
+                if rec is not None:
+                    sym_dict[rec.record_date] = rec
+                    count += 1
+
+            logger.info(
+                "[NewsLLM] %s: %d日分読込(Parquet)",
+                path.name, count,
+            )
+            return count
+        except Exception as e:
+            logger.error(
+                "[NewsLLM] Parquet読込エラー: %s", e,
+            )
+            return 0
+
+    @staticmethod
+    def _safe_str(value: object) -> str:
+        """Parquetセルの値を安全に文字列に変換
+
+        float/NaN/Timestamp等に対応する。
+
+        Args:
+            value: セル値
+
+        Returns:
+            str: 文字列表現
+        """
+        import math
+
+        if value is None:
+            return ""
+        if isinstance(value, float):
+            if math.isnan(value):
+                return ""
+            # 整数と同等ならint表示（例: 3.0 → "3"）
+            if value == int(value):
+                return str(int(value))
+            return str(value)
+        if hasattr(value, "isoformat"):
+            # Timestamp/datetime/date
+            return value.isoformat()
+        return str(value)
 
     @staticmethod
     def _parse_news_llm_row(
