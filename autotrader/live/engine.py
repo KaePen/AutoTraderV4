@@ -18,8 +18,9 @@ import pandas as pd
 
 from autotrader.adapters.mt5.connection import MT5ConnectionManager
 from autotrader.adapters.mt5.data_provider import MT5DataProvider
+from autotrader.adapters.mt5.exceptions import MT5DataError, MT5Error
 from autotrader.adapters.mt5.trade_executor import MT5TradeExecutor
-from autotrader.adapters.mt5.exceptions import MT5Error, MT5DataError
+from autotrader.calculator.technical.batch import TechnicalIndicatorBatch
 from autotrader.core.entities import AccountInfo, Signal
 from autotrader.core.enums import (
     ExitReason,
@@ -27,6 +28,7 @@ from autotrader.core.enums import (
     SignalType,
     Timeframe,
 )
+from autotrader.core.event_bus import event_bus
 from autotrader.core.exceptions import TradingError, ValidationError
 from autotrader.core.interfaces.position_sizing import SizingContext
 from autotrader.decision.unified.config import UnifiedBotConfig
@@ -39,14 +41,13 @@ from autotrader.decision.unified.position_sizer import (
     PositionSizer,
     PositionSizerConfig,
 )
-from autotrader.decision.unified.trade_bot import UnifiedTradeBot
-from autotrader.live.config import FundamentalConfig, LiveTradingConfig
 from autotrader.decision.unified.signal_consolidator import (
     ConsolidatedSignal,
 )
+from autotrader.decision.unified.trade_bot import UnifiedTradeBot
+from autotrader.live.config import LiveTradingConfig
+from autotrader.live.fundamental_service import FundamentalDataService
 from autotrader.live.tick_entry_optimizer import TickEntryOptimizer
-from autotrader.calculator.technical.batch import TechnicalIndicatorBatch
-from autotrader.core.event_bus import event_bus
 
 logger = logging.getLogger(__name__)
 
@@ -95,6 +96,7 @@ class LiveTradingEngine:
         config: LiveTradingConfig,
         shared_conn: MT5ConnectionManager | None = None,
         shared_data_provider: MT5DataProvider | None = None,
+        fundamental_svc: FundamentalDataService | None = None,
     ) -> None:
         """初期化
 
@@ -102,6 +104,7 @@ class LiveTradingEngine:
             config: ライブトレーディング設定
             shared_conn: 共有MT5接続（マルチエンジン時）
             shared_data_provider: 共有データプロバイダ
+            fundamental_svc: ファンダメンタルデータサービス
         """
         self._config = config
         self._conn = shared_conn or MT5ConnectionManager(
@@ -163,19 +166,8 @@ class LiveTradingEngine:
         # フル処理（ローソク足+指標+シグナル）最終実行時刻
         self._last_full_tick_time: float = 0.0
 
-        # ファンダメンタル関連（FundamentalConfig.enabled=Trueのみ初期化）
-        self._fundamental_memory = None
-        self._fundamental_collector = None
-        self._morning_update_done_date: datetime | None = None
-        # RSSニュース関連
-        self._rss_collector = None
-        self._news_analyzer = None
-        self._news_buffer: dict[str, list] = {}
-        if config.fundamental_config.enabled:
-            self._init_fundamental(config.fundamental_config)
-        else:
-            # カレンダー＋RSS軽量初期化（DB不要・LLM不要）
-            self._init_calendar_only()
+        # ファンダメンタルサービス（外部注入 or 自動初期化）
+        self._fundamental_svc = fundamental_svc
 
     @property
     def connected(self) -> bool:
@@ -196,6 +188,13 @@ class LiveTradingEngine:
     def active_symbol(self) -> str:
         """現在のアクティブシンボル"""
         return self._active_symbol
+
+    @property
+    def fundamental_service(
+        self,
+    ) -> FundamentalDataService | None:
+        """ファンダメンタルサービスへの参照"""
+        return self._fundamental_svc
 
     @property
     def enable_auto_trade(self) -> bool:
@@ -490,7 +489,8 @@ class LiveTradingEngine:
         await self._sync_positions()
 
         # ファンダメンタル収集タスク起動
-        await self._start_fundamental_tasks()
+        if self._fundamental_svc:
+            await self._fundamental_svc.start()
 
         # メインループ開始
         self._running = True
@@ -504,7 +504,8 @@ class LiveTradingEngine:
 
     async def stop(self) -> None:
         """エンジン停止"""
-        await self._stop_fundamental_tasks()
+        if self._fundamental_svc:
+            await self._fundamental_svc.stop()
         self._running = False
 
         # ティック監視中ならキャンセル
@@ -606,50 +607,55 @@ class LiveTradingEngine:
 
         # [FUNDAMENTAL] ファンダメンタルコンテキスト取得・指標前スキップ
         now_utc = datetime.now(timezone.utc)
-        if self._fundamental_memory:
+        fundamental_ctx = None
+        if self._fundamental_svc:
             fundamental_ctx = (
-                self._fundamental_memory.get_context_for_llm(
+                self._fundamental_svc.get_fundamental_context(
                     self._active_symbol, now_utc
                 )
             )
-            if fundamental_ctx.has_high_impact_within_30min:
+            if (
+                fundamental_ctx
+                and fundamental_ctx.has_high_impact_within_30min
+            ):
                 logger.info(
                     "[Fundamental] 重要指標直前のためスキップ"
                 )
                 return
-        else:
-            fundamental_ctx = None
 
-        # [NEWS] ニュースセンチメントをブレンド
-        if (
-            fundamental_ctx is not None
-            and self._news_analyzer is not None
-        ):
-            news_items = self._news_buffer.get(
-                self._active_symbol, []
-            )
-            if news_items:
-                sentiment = await self._news_analyzer.analyze(
-                    news_items, self._active_symbol
-                )
-                fundamental_ctx = self._blend_news_sentiment(
-                    fundamental_ctx, sentiment
-                )
-                # 分析済みバッファをクリア
-                self._news_buffer[self._active_symbol] = []
-            else:
-                # バッファ空でもキャッシュから取得
-                sentiment = (
-                    self._news_analyzer.get_current_sentiment(
+            # [NEWS] ニュースセンチメントをブレンド
+            analyzer = self._fundamental_svc.news_analyzer
+            if (
+                fundamental_ctx is not None
+                and analyzer is not None
+            ):
+                news_items = (
+                    self._fundamental_svc.consume_news_for_analysis(
                         self._active_symbol
                     )
                 )
-                if sentiment != 0.0:
+                if news_items:
+                    sentiment = await analyzer.analyze(
+                        news_items, self._active_symbol
+                    )
                     fundamental_ctx = (
                         self._blend_news_sentiment(
                             fundamental_ctx, sentiment
                         )
                     )
+                else:
+                    sentiment = (
+                        analyzer.get_current_sentiment(
+                            self._active_symbol
+                        )
+                    )
+                    if sentiment != 0.0:
+                        fundamental_ctx = (
+                            self._blend_news_sentiment(
+                                fundamental_ctx,
+                                sentiment,
+                            )
+                        )
 
         # 4. シグナル生成
         current_time = pd.Timestamp.now(tz="UTC")
@@ -1278,10 +1284,10 @@ class LiveTradingEngine:
             volume: ロット数
             entry_tick: エントリー時のtick情報（ask/bid）
         """
+        from autotrader.core.enums import TradingStrategyMode
         from autotrader.decision.unified.mode_selector import (
             TradingModeSelector,
         )
-        from autotrader.core.enums import TradingStrategyMode
 
         # エントリー価格（実際のask/bid価格）
         is_buy = signal.signal_type == SignalType.BUY
@@ -1950,10 +1956,11 @@ class LiveTradingEngine:
             # PMに未登録なら簡易登録
             pos_id = str(pos.ticket)
             if self._pm.get_position(pos_id) is None:
+                import dataclasses as _dc
+
                 from autotrader.decision.unified.mode_selector import (
                     TradingPlan,
                 )
-                import dataclasses as _dc
 
                 plan = TradingPlan.create_universal(
                     self._bot.config,
@@ -2295,231 +2302,7 @@ class LiveTradingEngine:
                 "陳腐化状態クリーンアップエラー: %s", e
             )
 
-    # ==== ファンダメンタル統合メソッド ====
-
-    def _init_fundamental(
-        self, cfg: FundamentalConfig
-    ) -> None:
-        """ファンダメンタル機能を初期化
-
-        Args:
-            cfg: FundamentalConfig
-        """
-        try:
-            import functools
-
-            from autotrader.adapters.database.connection import (
-                get_session,
-            )
-            from autotrader.adapters.fundamental.collector import (
-                FundamentalDataCollector,
-            )
-            from autotrader.adapters.fundamental.deterministic_event_analyzer import (  # noqa: E501
-                DeterministicEventAnalyzer,
-            )
-            from autotrader.adapters.fundamental.memory import (
-                FundamentalMemoryService,
-            )
-            from autotrader.config.settings import get_settings
-
-            db_url = get_settings().database_url
-            # settings の URL を束縛したセッションファクトリ
-            session_factory = functools.partial(
-                get_session, db_url
-            )
-
-            # 決定論的イベント分析器（リアルタイム用）
-            analyzer = DeterministicEventAnalyzer()
-
-            self._fundamental_collector = FundamentalDataCollector(
-                fetch_interval_minutes=cfg.fetch_interval_minutes,
-                use_mt5_calendar=cfg.use_mt5_calendar,
-                use_forex_factory=cfg.use_forex_factory,
-                use_ff_holidays=cfg.use_ff_holidays,
-            )
-            self._fundamental_memory = FundamentalMemoryService(
-                session_factory=session_factory,
-                event_guard_minutes=cfg.event_guard_minutes,
-                cached_events_getter=(
-                    self._fundamental_collector.get_cached_events
-                ),
-                analyzer=analyzer,
-            )
-            # RSSニュース収集・分析（オプション）
-            if cfg.use_rss_news:
-                from autotrader.adapters.fundamental.rss_collector import (
-                    RSSCollector,
-                )
-                from autotrader.adapters.fundamental.news_llm_analyzer import (
-                    NewsLLMAnalyzer,
-                )
-
-                # シンボルから通貨コードを抽出
-                currencies = [
-                    self._active_symbol[:3],
-                    self._active_symbol[3:6],
-                ]
-                self._rss_collector = RSSCollector(
-                    currencies=currencies,
-                    poll_interval=(
-                        cfg.rss_poll_interval_minutes * 60
-                    ),
-                )
-                self._news_analyzer = NewsLLMAnalyzer(
-                    sentiment_ttl_hours=(
-                        cfg.rss_sentiment_ttl_hours
-                    ),
-                )
-                logger.info(
-                    "[Fundamental] RSSニュース機能初期化完了"
-                )
-
-            logger.info(
-                "[Fundamental] ファンダメンタル機能初期化完了"
-            )
-        except Exception as e:
-            logger.error(
-                f"[Fundamental] 初期化失敗（無効化）: {e}"
-            )
-            self._fundamental_memory = None
-            self._fundamental_collector = None
-
-    def _init_calendar_only(self) -> None:
-        """カレンダー＋RSSの軽量初期化（ファンダメンタル無効時）
-
-        MT5 MQL5サービス（CalendarExporter）のCSVからカレンダー取得。
-        ForexFactoryは休日データのフォールバックとして使用。
-        RSSニュースはDB/LLM不要で軽量ポーリング（タイトル+リンク表示用）。
-        """
-        try:
-            from autotrader.adapters.fundamental.collector import (
-                FundamentalDataCollector,
-            )
-
-            self._fundamental_collector = FundamentalDataCollector(
-                fetch_interval_minutes=60,
-                use_mt5_calendar=True,
-                use_forex_factory=False,
-                use_ff_holidays=True,
-            )
-            logger.info(
-                "[Calendar] 軽量カレンダー初期化完了"
-                "（MT5 CSV + FF休日）"
-            )
-        except Exception as e:
-            logger.error(
-                f"[Calendar] 軽量初期化失敗: {e}"
-            )
-            self._fundamental_collector = None
-
-        # RSS軽量ポーリング（DB・LLM不要）
-        try:
-            from autotrader.adapters.fundamental.rss_collector import (
-                RSSCollector,
-            )
-
-            currencies = [
-                self._active_symbol[:3],
-                self._active_symbol[3:6],
-            ]
-            self._rss_collector = RSSCollector(
-                currencies=currencies,
-                poll_interval=300,
-            )
-            logger.info(
-                "[RSS] 軽量RSSポーリング初期化完了"
-            )
-        except Exception as e:
-            logger.warning(
-                f"[RSS] RSS初期化スキップ: {e}"
-            )
-            self._rss_collector = None
-
-    async def _start_fundamental_tasks(self) -> None:
-        """ファンダメンタル収集タスクを起動"""
-        if self._fundamental_collector:
-            await self._fundamental_collector.start()
-            logger.info(
-                "[Fundamental] 収集タスク起動"
-            )
-        if self._rss_collector:
-            await self._rss_collector.start(
-                callback=self._on_rss_news
-            )
-            logger.info(
-                "[Fundamental] RSSポーリング起動"
-            )
-
-    async def _stop_fundamental_tasks(self) -> None:
-        """ファンダメンタル収集タスクを停止"""
-        if self._fundamental_collector:
-            await self._fundamental_collector.stop()
-        if self._rss_collector:
-            await self._rss_collector.stop()
-        self._news_buffer.clear()
-
-    async def _on_rss_news(self, news_item) -> None:
-        """RSSニュース受信コールバック
-
-        受信したNewsItemをシンボル別バッファに蓄積する。
-        3日以上古いニュースは自動削除（メモリ軽量化）。
-        WebSocket経由でダッシュボードにもリアルタイム配信する。
-
-        Args:
-            news_item: 受信したNewsItem
-        """
-        symbol = self._active_symbol
-        base = symbol[:3].upper()
-        quote = symbol[3:6].upper()
-        if (
-            base in news_item.currencies
-            or quote in news_item.currencies
-        ):
-            if symbol not in self._news_buffer:
-                self._news_buffer[symbol] = []
-            self._news_buffer[symbol].append(news_item)
-            # 3日超の古いニュースを削除
-            _TTL_HOURS = 72
-            now = datetime.now(timezone.utc)
-            self._news_buffer[symbol] = [
-                n for n in self._news_buffer[symbol]
-                if (now - getattr(
-                    n, "published_at", now
-                )).total_seconds() < _TTL_HOURS * 3600
-            ]
-            # バッファ上限（メモリリーク防止）
-            _MAX_BUFFER = 200
-            if len(self._news_buffer[symbol]) > _MAX_BUFFER:
-                self._news_buffer[symbol] = (
-                    self._news_buffer[symbol][-_MAX_BUFFER:]
-                )
-            # EventBus経由でダッシュボードにリアルタイム配信
-            event_bus.publish_nowait("news.received", {
-                "news_id": getattr(
-                    news_item, "news_id", ""
-                ),
-                "published_at": str(
-                    getattr(
-                        news_item, "published_at", ""
-                    )
-                ),
-                "title": getattr(
-                    news_item, "title", ""
-                ),
-                "source_name": getattr(
-                    news_item, "source_name", ""
-                ),
-                "source_url": getattr(
-                    news_item, "source_url", ""
-                ),
-                "currencies": getattr(
-                    news_item, "currencies", []
-                ),
-                "snippet": getattr(
-                    news_item, "snippet", None
-                ),
-                "symbol": symbol,
-            })
+    # ==== ファンダメンタルユーティリティ ====
 
     @staticmethod
     def _blend_news_sentiment(
@@ -2559,16 +2342,21 @@ class LiveTradingEngine:
         UTC21時（日本時間6時）に実行。当日実行済みならスキップ。
         LLMが利用できない場合は警告ログのみ。
         """
-        if not self._fundamental_memory:
+        if (
+            not self._fundamental_svc
+            or not self._fundamental_svc.fundamental_memory
+        ):
             return
 
+        fm = self._fundamental_svc.fundamental_memory
         now = datetime.now(timezone.utc)
         today = now.date()
 
         # 当日実行済みチェック
         if (
-            self._morning_update_done_date
-            and self._morning_update_done_date == today
+            self._fundamental_svc._morning_update_done_date
+            and self._fundamental_svc._morning_update_done_date
+            == today
         ):
             return
 
@@ -2578,15 +2366,18 @@ class LiveTradingEngine:
             return
 
         try:
-            from autotrader.adapters.ollama.client import OllamaClient
+            from autotrader.adapters.ollama.client import (
+                OllamaClient,
+            )
+
             llm_client = OllamaClient()
 
             # 現在価格取得
             symbol = self._active_symbol
-            upcoming_events = (
-                self._fundamental_memory.get_upcoming_events(
-                    symbol, now, window_minutes=168  # 7日間
-                )
+            upcoming_events = fm.get_upcoming_events(
+                symbol,
+                now,
+                window_minutes=168,  # 7日間
             )
             upcoming_dicts = [
                 {
@@ -2597,30 +2388,35 @@ class LiveTradingEngine:
                 for ev in upcoming_events
             ]
 
-            result = await llm_client.analyze_market_outlook_async(
-                symbol=symbol,
-                timestamp=now.isoformat(),
-                current_price=0.0,  # 価格なしでも分析可能
-                upcoming_events=upcoming_dicts,
-                valid_days=7,
+            result = (
+                await llm_client.analyze_market_outlook_async(
+                    symbol=symbol,
+                    timestamp=now.isoformat(),
+                    current_price=0.0,
+                    upcoming_events=upcoming_dicts,
+                    valid_days=7,
+                )
             )
 
-            self._fundamental_memory.write_macro_bias(
+            fm.write_macro_bias(
                 symbol=symbol,
                 direction_score=result.direction_score,
                 confidence=result.confidence,
                 summary=result.macro_summary,
                 llm_reasoning=str(result.key_factors),
             )
-            self._morning_update_done_date = today
+            self._fundamental_svc._morning_update_done_date = (
+                today
+            )
             logger.info(
-                f"[Fundamental] 朝の市場観更新完了: "
-                f"score={result.direction_score:+.2f}"
+                "[Fundamental] 朝の市場観更新完了: "
+                "score=%+.2f",
+                result.direction_score,
             )
 
         except Exception as e:
             logger.warning(
-                f"[Fundamental] 朝の市場観更新失敗: {e}"
+                "[Fundamental] 朝の市場観更新失敗: %s", e
             )
 
     async def _handle_post_event_analysis(
@@ -2646,28 +2442,37 @@ class LiveTradingEngine:
             current_price: 現在価格
             price_change: 指標発表後の価格変化率
         """
-        if not self._fundamental_memory:
+        if (
+            not self._fundamental_svc
+            or not self._fundamental_svc.fundamental_memory
+        ):
             return
 
+        fm = self._fundamental_svc.fundamental_memory
         try:
-            from autotrader.adapters.ollama.client import OllamaClient
+            from autotrader.adapters.ollama.client import (
+                OllamaClient,
+            )
+
             llm_client = OllamaClient()
             now = datetime.now(timezone.utc)
             symbol = self._active_symbol
 
-            result = await llm_client.analyze_post_event_async(
-                symbol=symbol,
-                timestamp=now.isoformat(),
-                event_name=event_name,
-                currency=currency,
-                actual=actual,
-                forecast=forecast,
-                previous=previous,
-                current_price=current_price,
-                price_change=price_change,
+            result = (
+                await llm_client.analyze_post_event_async(
+                    symbol=symbol,
+                    timestamp=now.isoformat(),
+                    event_name=event_name,
+                    currency=currency,
+                    actual=actual,
+                    forecast=forecast,
+                    previous=previous,
+                    current_price=current_price,
+                    price_change=price_change,
+                )
             )
 
-            self._fundamental_memory.write_post_event_bias(
+            fm.write_post_event_bias(
                 symbol=symbol,
                 direction_score=result.bias_score,
                 confidence=0.7,
@@ -2676,11 +2481,13 @@ class LiveTradingEngine:
                 llm_reasoning=result.analysis,
             )
             logger.info(
-                f"[Fundamental] 指標後バイアス保存: "
-                f"{event_name} score={result.bias_score:+.2f}"
+                "[Fundamental] 指標後バイアス保存: "
+                "%s score=%+.2f",
+                event_name,
+                result.bias_score,
             )
 
         except Exception as e:
             logger.warning(
-                f"[Fundamental] 指標後分析失敗: {e}"
+                "[Fundamental] 指標後分析失敗: %s", e
             )

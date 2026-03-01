@@ -124,9 +124,20 @@ def _create_live_engine():
         LiveTradingEngine: エンジンインスタンス
     """
     from autotrader.live.engine import LiveTradingEngine
+    from autotrader.live.fundamental_service import (
+        FundamentalDataService,
+    )
 
-    config = build_engine_config(os.environ.get("AUTOTRADER_SYMBOL", "USDJPY"))
-    return LiveTradingEngine(config)
+    config = build_engine_config(
+        os.environ.get("AUTOTRADER_SYMBOL", "USDJPY")
+    )
+    fundamental_svc = FundamentalDataService(
+        symbol=config.symbol,
+        config=config.fundamental_config,
+    )
+    return LiveTradingEngine(
+        config, fundamental_svc=fundamental_svc
+    )
 
 
 @asynccontextmanager

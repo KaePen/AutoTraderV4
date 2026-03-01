@@ -18,6 +18,9 @@ from autotrader.adapters.mt5.data_provider import (
 from autotrader.core.entities import AccountInfo
 from autotrader.live.config import LiveTradingConfig
 from autotrader.live.engine import LiveTradingEngine
+from autotrader.live.fundamental_service import (
+    FundamentalDataService,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -45,6 +48,9 @@ class EngineManager:
         self._conn = MT5ConnectionManager(mt5_config)
         self._data_provider = MT5DataProvider(self._conn)
         self._engines: dict[str, LiveTradingEngine] = {}
+        self._fundamental_services: dict[
+            str, FundamentalDataService
+        ] = {}
 
     @property
     def connected(self) -> bool:
@@ -55,6 +61,13 @@ class EngineManager:
     def engines(self) -> dict[str, LiveTradingEngine]:
         """エンジン辞書のコピー"""
         return dict(self._engines)
+
+    @property
+    def fundamental_services(
+        self,
+    ) -> dict[str, FundamentalDataService]:
+        """シンボル別ファンダメンタルサービス"""
+        return dict(self._fundamental_services)
 
     @property
     def symbols(self) -> list[str]:
@@ -102,12 +115,22 @@ class EngineManager:
             )
             return self._engines[symbol]
 
+        # ファンダメンタルサービス初期化
+        fundamental_svc = FundamentalDataService(
+            symbol=symbol,
+            config=config.fundamental_config,
+        )
+
         engine = LiveTradingEngine(
             config=config,
             shared_conn=self._conn,
             shared_data_provider=self._data_provider,
+            fundamental_svc=fundamental_svc,
         )
         self._engines[symbol] = engine
+        self._fundamental_services[symbol] = (
+            fundamental_svc
+        )
         logger.info("エンジン追加: %s", symbol)
 
         # 接続済みならエンジンも起動
@@ -124,6 +147,7 @@ class EngineManager:
             symbol: 通貨ペアシンボル
         """
         engine = self._engines.pop(symbol, None)
+        self._fundamental_services.pop(symbol, None)
         if engine is None:
             logger.warning(
                 "エンジン未登録: %s", symbol

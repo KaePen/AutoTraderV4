@@ -89,6 +89,27 @@ def get_live_engine(request: Request):
     )
 
 
+def get_fundamental_service(request: Request):
+    """FundamentalDataServiceを取得
+
+    EngineManager経由で最初のシンボルのサービスを返す。
+
+    Args:
+        request: FastAPIリクエスト
+
+    Returns:
+        FundamentalDataService | None
+    """
+    mgr = getattr(
+        request.app.state, "engine_manager", None
+    )
+    if mgr and hasattr(mgr, "fundamental_services"):
+        services = mgr.fundamental_services
+        if services:
+            return next(iter(services.values()))
+    return None
+
+
 def get_app_settings() -> Settings:
     """アプリケーション設定を取得
 
