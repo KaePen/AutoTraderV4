@@ -144,6 +144,9 @@ class LiveTradingEngine:
         self._news_buffer: dict[str, list] = {}
         if config.fundamental_config.enabled:
             self._init_fundamental(config.fundamental_config)
+        else:
+            # カレンダーのみ軽量初期化（DB不要・LLM不要・RSS不要）
+            self._init_calendar_only()
 
     @property
     def connected(self) -> bool:
@@ -2349,6 +2352,29 @@ class LiveTradingEngine:
                 f"[Fundamental] 初期化失敗（無効化）: {e}"
             )
             self._fundamental_memory = None
+            self._fundamental_collector = None
+
+    def _init_calendar_only(self) -> None:
+        """カレンダーのみの軽量初期化（ファンダメンタル無効時）"""
+        try:
+            from autotrader.adapters.fundamental.collector import (
+                FundamentalDataCollector,
+            )
+
+            self._fundamental_collector = FundamentalDataCollector(
+                session_factory=None,
+                fetch_interval_minutes=60,
+                use_mt5_calendar=True,
+                use_forex_factory=False,
+                use_ff_holidays=False,
+            )
+            logger.info(
+                "[Calendar] 軽量カレンダー初期化完了"
+            )
+        except Exception as e:
+            logger.error(
+                f"[Calendar] 軽量初期化失敗: {e}"
+            )
             self._fundamental_collector = None
 
     async def _start_fundamental_tasks(self) -> None:
