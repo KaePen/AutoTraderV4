@@ -145,7 +145,7 @@ const FundamentalWidget = {
       var ev = this.calendarEvents[i];
       var impactCls = this._impactClass(ev.impact);
       var evDate = new Date(ev.event_time);
-      var dateStr = this._formatDateLabelUTC(evDate);
+      var dateStr = this._formatDateLabelJST(evDate);
       var timeStr = this._formatTimeOnlyJST(evDate);
       var mins = ev.minutes_until || 0;
       var countdownStr = this._formatCountdown(mins);
@@ -212,14 +212,20 @@ const FundamentalWidget = {
 
   // ── ヘルパー ──
 
-  /** 当日+2営業日先までのイベントを抽出（UTC日付基準） */
+  /** 当日+2営業日先までのイベントを抽出（JST日付基準） */
   _filterTodayAndNextBizDay(events) {
-    // UTC基準で当日の開始を計算
-    var now = new Date();
-    var todayMs = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+    // JST基準で当日の開始を計算
+    var jstNow = new Date(Date.now() + 9 * 3600000);
+    var todayJSTStart =
+      Date.UTC(
+        jstNow.getUTCFullYear(),
+        jstNow.getUTCMonth(),
+        jstNow.getUTCDate(),
+      ) -
+      9 * 3600000; // JST 0:00 をUTCミリ秒に変換
 
-    // 2営業日先を計算（土日スキップ、UTC基準）
-    var endDate = new Date(todayMs);
+    // 2営業日先を計算（土日スキップ）
+    var endDate = new Date(todayJSTStart + 9 * 3600000); // JST基準
     var bizCount = 0;
     while (bizCount < 2) {
       endDate.setUTCDate(endDate.getUTCDate() + 1);
@@ -227,49 +233,79 @@ const FundamentalWidget = {
         bizCount++;
       }
     }
-    // 2営業日先の終わり（UTC 23:59:59）
-    var nextBizEndMs = Date.UTC(
-      endDate.getUTCFullYear(), endDate.getUTCMonth(), endDate.getUTCDate(),
-      23, 59, 59, 999
-    );
+    // 2営業日先の終わり（JST 23:59:59 = UTC 14:59:59）
+    var nextBizEndMs =
+      Date.UTC(
+        endDate.getUTCFullYear(),
+        endDate.getUTCMonth(),
+        endDate.getUTCDate(),
+        23,
+        59,
+        59,
+        999,
+      ) -
+      9 * 3600000;
 
     var filtered = [];
     for (var i = 0; i < events.length; i++) {
       var ev = events[i];
       var evTime = new Date(ev.event_time);
       var evMs = evTime.getTime();
-      if (evMs >= todayMs && evMs <= nextBizEndMs) {
+      if (evMs >= todayJSTStart && evMs <= nextBizEndMs) {
         filtered.push(ev);
       }
     }
     return filtered;
   },
 
-  /** 日付ラベル（UTC日付基準、MT5カレンダーと一致） */
-  _formatDateLabelUTC(d) {
+  /** 日付ラベル（JST基準 — 日本ユーザー向け） */
+  _formatDateLabelJST(d) {
     var days = ['日', '月', '火', '水', '木', '金', '土'];
-    // UTC日付で比較（経済カレンダーはUTC日付が標準）
-    var today = new Date();
-    var todayUTC = Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate());
-    var targetUTC = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate());
-    var diffDays = Math.round((targetUTC - todayUTC) / 86400000);
+    // JST基準の日付計算
+    var jstNow = new Date(Date.now() + 9 * 3600000);
+    var jstTarget = new Date(d.getTime() + 9 * 3600000);
+    var todayJST = Date.UTC(
+      jstNow.getUTCFullYear(),
+      jstNow.getUTCMonth(),
+      jstNow.getUTCDate(),
+    );
+    var targetJST = Date.UTC(
+      jstTarget.getUTCFullYear(),
+      jstTarget.getUTCMonth(),
+      jstTarget.getUTCDate(),
+    );
+    var diffDays = Math.round((targetJST - todayJST) / 86400000);
 
     var prefix = '';
     if (diffDays === 0) prefix = '今日';
     else if (diffDays === 1) prefix = '明日';
     else if (diffDays === 2) prefix = '明後日';
-    else prefix = (d.getUTCMonth() + 1) + '/' + d.getUTCDate();
+    else
+      prefix = jstTarget.getUTCMonth() + 1 + '/' + jstTarget.getUTCDate();
 
-    return prefix + '（' + days[d.getUTCDay()] + '）';
+    return prefix + '（' + days[jstTarget.getUTCDay()] + '）';
   },
 
-  /** 時刻表示（JST = UTC+9） */
+  /** 時刻表示（JST = Asia/Tokyo） */
   _formatTimeOnlyJST(d) {
     if (!d || isNaN(d.getTime())) return '--:--';
-    // UTC時刻に+9hしてJST表示
-    var jst = new Date(d.getTime() + 9 * 3600000);
-    return jst.getUTCHours().toString().padStart(2, '0') + ':' +
-      jst.getUTCMinutes().toString().padStart(2, '0');
+    // Intl APIでJST変換（DST考慮不要だが堅牢性のため）
+    try {
+      return d.toLocaleTimeString('ja-JP', {
+        timeZone: 'Asia/Tokyo',
+        hour: '2-digit',
+        minute: '2-digit',
+        hour12: false,
+      });
+    } catch (e) {
+      // Intl非対応環境フォールバック（UTC+9固定）
+      var jst = new Date(d.getTime() + 9 * 3600000);
+      return (
+        jst.getUTCHours().toString().padStart(2, '0') +
+        ':' +
+        jst.getUTCMinutes().toString().padStart(2, '0')
+      );
+    }
   },
 
   /** センチメントスコアに応じた色クラス */
