@@ -27,10 +27,14 @@ from pathlib import Path
 # RichがLegacy Windows Terminalで非ASCII文字を出力できない
 if sys.platform == "win32":
     sys.stdout = io.TextIOWrapper(
-        sys.stdout.buffer, encoding="utf-8", errors="replace",
+        sys.stdout.buffer,
+        encoding="utf-8",
+        errors="replace",
     )
     sys.stderr = io.TextIOWrapper(
-        sys.stderr.buffer, encoding="utf-8", errors="replace",
+        sys.stderr.buffer,
+        encoding="utf-8",
+        errors="replace",
     )
     os.environ.setdefault("PYTHONIOENCODING", "utf-8")
 
@@ -140,12 +144,29 @@ def parse_args() -> argparse.Namespace:
         help="シンボル（デフォルト: USDJPY）",
     )
     parser.add_argument(
-        "-tf", "--timeframe",
+        "-tf",
+        "--timeframe",
         default="M15",
         choices=[
-            "M1", "M2", "M3", "M4", "M5", "M6", "M10", "M12",
-            "M15", "M20", "M30", "H1", "H2", "H3", "H4",
-            "H6", "H8", "H12", "D1",
+            "M1",
+            "M2",
+            "M3",
+            "M4",
+            "M5",
+            "M6",
+            "M10",
+            "M12",
+            "M15",
+            "M20",
+            "M30",
+            "H1",
+            "H2",
+            "H3",
+            "H4",
+            "H6",
+            "H8",
+            "H12",
+            "D1",
         ],
         help="基準時間足（デフォルト: M15）",
     )
@@ -477,11 +498,15 @@ def parse_args() -> argparse.Namespace:
     )
     # spread/slippage上書き
     parser.add_argument(
-        "--spread", type=float, default=None,
+        "--spread",
+        type=float,
+        default=None,
         help="スプレッド上書き（pips）",
     )
     parser.add_argument(
-        "--slippage", type=float, default=None,
+        "--slippage",
+        type=float,
+        default=None,
         help="スリッページ上書き（pips）",
     )
     # --- ポジション管理（PM）設定 ---
@@ -734,17 +759,20 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
-        "-v", "--verbose",
+        "-v",
+        "--verbose",
         action="store_true",
         help="詳細出力",
     )
     # ファンダメンタルデータ
     parser.add_argument(
         "--fundamental",
-        action="store_true",
+        action=argparse.BooleanOptionalAction,
+        default=True,
         help=(
-            "経済イベントCSVを自動読み込み。"
+            "経済イベントCSVを自動読み込み（デフォルト: ON）。"
             "--fundamental-dir 配下の events_YYYY.csv を使用。"
+            "--no-fundamental で無効化。"
         ),
     )
     parser.add_argument(
@@ -761,11 +789,13 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--event-llm",
-        action="store_true",
+        action=argparse.BooleanOptionalAction,
+        default=True,
         help=(
-            "イベントLLM分析CSVを自動読み込み。"
+            "イベントLLM分析CSVを自動読み込み（デフォルト: ON）。"
             "data/{symbol}/llm_events/ 配下の "
             "llm_events_SYMBOL_YYYY.csv を使用。"
+            "--no-event-llm で無効化。"
         ),
     )
     parser.add_argument(
@@ -861,11 +891,13 @@ def print_header(args: argparse.Namespace) -> None:
             table.add_row("スキャルピング", "[green]有効[/green]")
 
         console.print()
-        console.print(Panel(
-            table,
-            title="[bold blue]AutoTraderV4 バックテスト[/bold blue]",
-            border_style="blue",
-        ))
+        console.print(
+            Panel(
+                table,
+                title="[bold blue]AutoTraderV4 バックテスト[/bold blue]",
+                border_style="blue",
+            )
+        )
         console.print()
 
     except ImportError:
@@ -875,7 +907,9 @@ def print_header(args: argparse.Namespace) -> None:
         print("=" * 80)
         print(f"シンボル: {args.symbol}")
         print(f"トレード判断頻度: {base_tf}")
-        print(f"評価時間足: M1, M5, M15, M30, H1, H4, H8, D1（マルチタイムフレーム）")
+        print(
+            f"評価時間足: M1, M5, M15, M30, H1, H4, H8, D1（マルチタイムフレーム）"
+        )
         if args.start_date or args.end_date:
             _sy, _ey = parse_years(args.years)
             _s = args.start_date or f"{_sy}-01-01"
@@ -906,7 +940,9 @@ def print_results(result) -> None:
 
         # 勝率に色付け
         win_color = "green" if result.win_rate >= 50 else "yellow"
-        table.add_row("勝率", f"[{win_color}]{result.win_rate:.1f}%[/{win_color}]")
+        table.add_row(
+            "勝率", f"[{win_color}]{result.win_rate:.1f}%[/{win_color}]"
+        )
 
         # 非敗率
         nlr = result.non_loss_rate
@@ -914,28 +950,32 @@ def print_results(result) -> None:
         table.add_row("非敗率", f"[{nlr_color}]{nlr:.1f}%[/{nlr_color}]")
 
         # PFに色付け
-        pf_color = "green" if result.profit_factor >= 1.5 else (
-            "yellow" if result.profit_factor >= 1.0 else "red"
+        pf_color = (
+            "green"
+            if result.profit_factor >= 1.5
+            else ("yellow" if result.profit_factor >= 1.0 else "red")
         )
         table.add_row(
             "プロフィットファクター",
-            f"[{pf_color}]{result.profit_factor:.2f}[/{pf_color}]"
+            f"[{pf_color}]{result.profit_factor:.2f}[/{pf_color}]",
         )
 
         # 純利益に色付け
         profit_color = "green" if result.net_profit > 0 else "red"
         table.add_row(
             "純利益",
-            f"[{profit_color}]JPY{result.net_profit:+,.0f}[/{profit_color}]"
+            f"[{profit_color}]JPY{result.net_profit:+,.0f}[/{profit_color}]",
         )
 
         # ドローダウン
-        dd_color = "green" if result.max_drawdown < 10 else (
-            "yellow" if result.max_drawdown < 20 else "red"
+        dd_color = (
+            "green"
+            if result.max_drawdown < 10
+            else ("yellow" if result.max_drawdown < 20 else "red")
         )
         table.add_row(
             "最大ドローダウン",
-            f"[{dd_color}]{result.max_drawdown:.2f}%[/{dd_color}]"
+            f"[{dd_color}]{result.max_drawdown:.2f}%[/{dd_color}]",
         )
 
         table.add_row("シャープレシオ", f"{result.sharpe_ratio:.2f}")
@@ -944,15 +984,17 @@ def print_results(result) -> None:
         ar_color = "green" if result.annual_return > 0 else "red"
         table.add_row(
             "年間平均収益率",
-            f"[{ar_color}]{result.annual_return:.1f}%[/{ar_color}]"
+            f"[{ar_color}]{result.annual_return:.1f}%[/{ar_color}]",
         )
 
         console.print()
-        console.print(Panel(
-            table,
-            title="[bold]バックテスト結果[/bold]",
-            border_style="blue",
-        ))
+        console.print(
+            Panel(
+                table,
+                title="[bold]バックテスト結果[/bold]",
+                border_style="blue",
+            )
+        )
 
     except ImportError:
         print(f"\n{'-' * 80}")
@@ -1038,7 +1080,9 @@ def print_yearly_results(yearly_results: list) -> None:
         print(f"黒字年: {profitable}/{len(yearly_results)}")
 
 
-def print_monthly_summary(monthly_results: list, verbose: bool = False) -> None:
+def print_monthly_summary(
+    monthly_results: list, verbose: bool = False
+) -> None:
     """月別サマリーを表示"""
     if not monthly_results:
         return
@@ -1053,10 +1097,14 @@ def print_monthly_summary(monthly_results: list, verbose: bool = False) -> None:
     avg_return = sum(r["return_pct"] for r in monthly_results) / total_months
     positive_months = sum(1 for r in monthly_results if r["return_pct"] > 0)
 
-    print(f"月間プラス率: {positive_months}/{total_months} "
-          f"({100*positive_months/total_months:.1f}%)")
-    print(f"月間+5%達成: {target_months}/{total_months} "
-          f"({100*target_months/total_months:.1f}%)")
+    print(
+        f"月間プラス率: {positive_months}/{total_months} "
+        f"({100 * positive_months / total_months:.1f}%)"
+    )
+    print(
+        f"月間+5%達成: {target_months}/{total_months} "
+        f"({100 * target_months / total_months:.1f}%)"
+    )
     print(f"月間平均収益率: {avg_return:.2f}%")
 
     # 直近12ヶ月
@@ -1141,7 +1189,8 @@ def run_single_backtest(args: argparse.Namespace):
 
     # commission: CLI明示指定 > preset値
     _commission = (
-        args.commission if args.commission is not None
+        args.commission
+        if args.commission is not None
         else _preset.commission_per_lot
     )
     config = BacktestServiceConfig(
@@ -1196,9 +1245,7 @@ def run_single_backtest(args: argparse.Namespace):
             console=console,
             transient=True,
         ) as progress:
-            task_id = progress.add_task(
-                "読み込み中: H1", total=4
-            )
+            task_id = progress.add_task("読み込み中: H1", total=4)
             runner = service.create_runner()
 
             def _on_tf_loaded(tf: str, current: int, total: int) -> None:
@@ -1235,29 +1282,25 @@ def run_single_backtest(args: argparse.Namespace):
     from autotrader.decision.unified.position_manager import (
         PositionManagerConfig,
     )
+
     # CLI未指定時のフォールバック用デフォルトconfig
     _default_bot = UnifiedBotConfig()
     _default_pm = PositionManagerConfig()
 
     _score_prem = (
-        0.0 if args.no_range_day_score_premium
+        0.0
+        if args.no_range_day_score_premium
         else args.range_day_score_premium
     )
     # --timeframes 解決チェーン:
     # CLI > SymbolPreset.timeframes > デフォルト8TF
     _tf_list = None
     if args.timeframes:
-        _tf_list = [
-            t.strip() for t in args.timeframes.split(",") if t.strip()
-        ]
+        _tf_list = [t.strip() for t in args.timeframes.split(",") if t.strip()]
 
     bot_config = UnifiedBotConfig(
-        range_filter_consolidated=(
-            not args.no_range_filter_consolidation
-        ),
-        range_filter_block_threshold=(
-            args.range_filter_threshold
-        ),
+        range_filter_consolidated=(not args.no_range_filter_consolidation),
+        range_filter_block_threshold=(args.range_filter_threshold),
         range_day_bbw_threshold=args.range_day_bbw,
         range_day_score_premium=_score_prem,
         weak_hours_enabled=not args.no_weak_hours,
@@ -1281,29 +1324,18 @@ def run_single_backtest(args: argparse.Namespace):
         bonus_max_positions=args.bonus_max_positions,
         bonus_score_threshold=args.bonus_score_threshold,
         enable_position_sizing=not args.no_position_sizing,
-        timeframes=_tf_list or [
-            "M1", "M5", "M15", "M30", "H1", "H4", "H8", "D1"
-        ],
+        timeframes=_tf_list
+        or ["M1", "M5", "M15", "M30", "H1", "H4", "H8", "D1"],
         regime_threshold_enabled=args.regime_threshold,
         regime_trend_threshold_add=args.regime_trend_add,
         low_atr_trend_filter_enabled=args.low_atr_trend_filter,
         low_atr_trend_ratio_max=args.low_atr_trend_ratio,
         htf_score_filter_enabled=args.htf_score_filter,
-        htf_score_filter_threshold_add=(
-            args.htf_score_threshold_add
-        ),
-        fundamental_assessor_enabled=(
-            args.fundamental_phase2b
-        ),
-        fundamental_softguard_enabled=(
-            args.fundamental_phase2b
-        ),
-        fundamental_pm_enabled=(
-            args.fundamental_phase2b
-        ),
-        fundamental_post_event_lag_seconds=(
-            args.fundamental_lag
-        ),
+        htf_score_filter_threshold_add=(args.htf_score_threshold_add),
+        fundamental_assessor_enabled=(args.fundamental_phase2b),
+        fundamental_softguard_enabled=(args.fundamental_phase2b),
+        fundamental_pm_enabled=(args.fundamental_phase2b),
+        fundamental_post_event_lag_seconds=(args.fundamental_lag),
         bca_enabled=args.bca,
         bca_min_edge=(
             args.bca_min_edge
@@ -1365,6 +1397,14 @@ def run_single_backtest(args: argparse.Namespace):
         universal_half_r_ratio=args.universal_half_r_ratio,
     )
 
+    # Phase 2b: --fundamental-phase2b で暗黙的に有効化
+    # CSV構築ブロックの前に配置（phase2bでフラグを書き換えてからCSVを構築する）
+    if args.fundamental_phase2b:
+        args.fundamental = True
+        args.event_llm = True
+        if not args.no_news_llm:
+            args.news_llm = True
+
     # ファンダメンタルCSVリスト構築
     # 検索順: data/fundamental/events/ → data/fundamental/
     _fundamental_csvs: list[str] | None = None
@@ -1385,13 +1425,6 @@ def run_single_backtest(args: argparse.Namespace):
             )
             _fundamental_csvs = None
 
-    # Phase 2b: --fundamental-phase2b で暗黙的に有効化
-    if args.fundamental_phase2b:
-        args.fundamental = True
-        args.event_llm = True
-        if not args.no_news_llm:
-            args.news_llm = True
-
     # イベントLLM CSVリスト構築
     # 検索順: data/{symbol}/llm_events/ → data/fundamental/
     _event_llm_csvs: list[str] | None = None
@@ -1410,15 +1443,16 @@ def run_single_backtest(args: argparse.Namespace):
                 _event_llm_csvs.append(str(_csv))
         if not _event_llm_csvs:
             logging.warning(
-                "[EventLLM] %s に llm_events_%s_YYYY.csv "
-                "が見つかりません",
-                _llm_dir, _sym,
+                "[EventLLM] %s に llm_events_%s_YYYY.csv が見つかりません",
+                _llm_dir,
+                _sym,
             )
             _event_llm_csvs = None
         else:
             logging.info(
                 "[EventLLM] %d年分のCSV検出: %s",
-                len(_event_llm_csvs), _llm_dir,
+                len(_event_llm_csvs),
+                _llm_dir,
             )
 
     # ニュースLLM CSVリスト構築
@@ -1431,23 +1465,21 @@ def run_single_backtest(args: argparse.Namespace):
         if _news_dir.exists():
             _news_llm_csvs = []
             for _yr in range(start_year, end_year + 1):
-                _csv = (
-                    _news_dir
-                    / f"llm_news_{_sym}_{_yr}.csv"
-                )
+                _csv = _news_dir / f"llm_news_{_sym}_{_yr}.csv"
                 if _csv.exists():
                     _news_llm_csvs.append(str(_csv))
             if not _news_llm_csvs:
                 logging.warning(
-                    "[NewsLLM] %s に llm_news_%s_YYYY.csv "
-                    "が見つかりません",
-                    _news_dir, _sym,
+                    "[NewsLLM] %s に llm_news_%s_YYYY.csv が見つかりません",
+                    _news_dir,
+                    _sym,
                 )
                 _news_llm_csvs = None
             else:
                 logging.info(
                     "[NewsLLM] %d年分のCSV検出: %s",
-                    len(_news_llm_csvs), _news_dir,
+                    len(_news_llm_csvs),
+                    _news_dir,
                 )
         else:
             logging.warning(
@@ -1459,13 +1491,15 @@ def run_single_backtest(args: argparse.Namespace):
     _adaptive_config = None
     if args.adaptive:
         from autotrader.decision.unified.adaptive import TunerConfig
+
         _adaptive_config = TunerConfig(
             window_size=args.adaptive_window,
             eval_interval=args.adaptive_interval,
         )
         logging.info(
             "[Adaptive] 有効: window=%d, interval=%d",
-            args.adaptive_window, args.adaptive_interval,
+            args.adaptive_window,
+            args.adaptive_interval,
         )
 
     result = runner.run_unified(
@@ -1549,7 +1583,6 @@ def run_debug_signal_mode(args: argparse.Namespace):
     )
 
 
-
 def run_fast(args: argparse.Namespace):
     """高速並列バックテスト実行"""
     from datetime import datetime as dt
@@ -1570,8 +1603,11 @@ def run_fast(args: argparse.Namespace):
     # 通貨ペア別サブディレクトリに解決
     data_dir = Path(args.data_dir) / args.symbol
     timeframes_map = {
-        "M1": "M1", "M5": "M5", "M15": "M15",
-        "H1": "H1", "H4": "H4",
+        "M1": "M1",
+        "M5": "M5",
+        "M15": "M15",
+        "H1": "H1",
+        "H4": "H4",
     }
     raw_data: dict[str, any] = {}
 
@@ -1582,8 +1618,7 @@ def run_fast(args: argparse.Namespace):
         if files:
             df = DataLoader.load_mt5_csv(files[0])
             df = df[
-                (df["time"] >= start_date)
-                & (df["time"] < end_date)
+                (df["time"] >= start_date) & (df["time"] < end_date)
             ].copy()
             if not df.empty:
                 raw_data[tf_str] = df
@@ -1694,8 +1729,7 @@ def run_quick(args: argparse.Namespace):
     start_date = dt(start_year, 1, 1)
     end_date = dt(start_year + 1, 1, 1)
     period_df = m5_df[
-        (m5_df["time"] >= start_date)
-        & (m5_df["time"] < end_date)
+        (m5_df["time"] >= start_date) & (m5_df["time"] < end_date)
     ].reset_index(drop=True)
 
     print(f"期間データ: {len(period_df):,}本")
@@ -1775,9 +1809,7 @@ def run_quick(args: argparse.Namespace):
             print(f"  進捗: {progress:.1f}% トレード: {closed}")
 
     if last_candle:
-        simulator.force_close_all(
-            last_candle, ExitReason.FORCE_CLOSE
-        )
+        simulator.force_close_all(last_candle, ExitReason.FORCE_CLOSE)
 
     trades = simulator.get_closed_trades()
     if not trades:
@@ -1787,13 +1819,11 @@ def run_quick(args: argparse.Namespace):
     wins = sum(1 for t in trades if (t.profit_loss or 0) > 0)
     total_pnl = sum((t.profit_loss or 0) for t in trades)
     gross_profit = sum(
-        (t.profit_loss or 0) for t in trades
-        if (t.profit_loss or 0) > 0
+        (t.profit_loss or 0) for t in trades if (t.profit_loss or 0) > 0
     )
-    gross_loss = abs(sum(
-        (t.profit_loss or 0) for t in trades
-        if (t.profit_loss or 0) < 0
-    ))
+    gross_loss = abs(
+        sum((t.profit_loss or 0) for t in trades if (t.profit_loss or 0) < 0)
+    )
     pf = gross_profit / gross_loss if gross_loss > 0 else 0
 
     print(f"\n=== 結果 ===")
@@ -1840,11 +1870,13 @@ def main():
     except Exception as e:
         try:
             from rich.console import Console
+
             console = Console()
             console.print_exception()
         except ImportError:
             print(f"\nエラー: {e}")
             import traceback
+
             traceback.print_exc()
         sys.exit(1)
 

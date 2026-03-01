@@ -17,7 +17,7 @@ class FundamentalConfig:
     """ファンダメンタルデータ収集・利用設定
 
     Attributes:
-        enabled: ファンダメンタル機能の有効/無効（デフォルトOFF）
+        enabled: ファンダメンタル機能の有効/無効（デフォルトON）
         use_mt5_calendar: MT5カレンダーを使用するか
         use_forex_factory: ForexFactoryを使用するか（デフォルトOFF）
         use_ff_holidays: ForexFactoryから休日データのみ取得するか
@@ -29,7 +29,7 @@ class FundamentalConfig:
         rss_sentiment_ttl_hours: センチメントスコアのTTL（時間）
     """
 
-    enabled: bool = False
+    enabled: bool = True
     use_mt5_calendar: bool = True
     use_forex_factory: bool = False
     use_ff_holidays: bool = True
@@ -61,18 +61,14 @@ class LiveTradingConfig:
     symbol: str = "USDJPY"
     check_interval_sec: float = 1.0
     candle_lookback: int = 500
-    bot_config: UnifiedBotConfig = field(
-        default_factory=UnifiedBotConfig
-    )
+    bot_config: UnifiedBotConfig = field(default_factory=UnifiedBotConfig)
     mt5_config: MT5Config = field(default_factory=MT5Config)
     pm_config: PositionManagerConfig = field(
         default_factory=PositionManagerConfig
     )
     enable_auto_trade: bool = False
     require_confirmation: bool = True
-    tick_entry_config: TickEntryConfig = field(
-        default_factory=TickEntryConfig
-    )
+    tick_entry_config: TickEntryConfig = field(default_factory=TickEntryConfig)
     fundamental_config: FundamentalConfig = field(
         default_factory=FundamentalConfig
     )
