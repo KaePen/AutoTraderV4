@@ -26,7 +26,7 @@ const FundamentalWidget = {
     this.renderNews();
   },
 
-  /** カレンダー取得（当日+翌営業日分） */
+  /** カレンダー取得（当日+2営業日先まで） */
   async fetchCalendar() {
     try {
       // 週末を跨ぐ場合を考慮して余裕を持って取得
@@ -212,20 +212,23 @@ const FundamentalWidget = {
 
   // ── ヘルパー ──
 
-  /** 当日+翌営業日のイベントのみ抽出 */
+  /** 当日+2営業日先までのイベントを抽出 */
   _filterTodayAndNextBizDay(events) {
     var today = new Date();
     today.setHours(0, 0, 0, 0);
     var todayMs = today.getTime();
 
-    // 翌営業日を計算（土日スキップ）
-    var nextBiz = new Date(today);
-    nextBiz.setDate(nextBiz.getDate() + 1);
-    while (nextBiz.getDay() === 0 || nextBiz.getDay() === 6) {
-      nextBiz.setDate(nextBiz.getDate() + 1);
+    // 2営業日先を計算（土日スキップ）
+    var endDate = new Date(today);
+    var bizCount = 0;
+    while (bizCount < 2) {
+      endDate.setDate(endDate.getDate() + 1);
+      if (endDate.getDay() !== 0 && endDate.getDay() !== 6) {
+        bizCount++;
+      }
     }
-    // 翌営業日の終わり（23:59:59）
-    var nextBizEnd = new Date(nextBiz);
+    // 2営業日先の終わり（23:59:59）
+    var nextBizEnd = new Date(endDate);
     nextBizEnd.setHours(23, 59, 59, 999);
     var nextBizEndMs = nextBizEnd.getTime();
 
@@ -253,6 +256,7 @@ const FundamentalWidget = {
     var prefix = '';
     if (diffDays === 0) prefix = '今日';
     else if (diffDays === 1) prefix = '明日';
+    else if (diffDays === 2) prefix = '明後日';
     else prefix = (d.getMonth() + 1) + '/' + d.getDate();
 
     return prefix + '（' + days[d.getDay()] + '）';
