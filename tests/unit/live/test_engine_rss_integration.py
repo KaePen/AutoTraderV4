@@ -207,8 +207,7 @@ class TestInitFundamentalRss:
         def _fake_import(name, *args, **kwargs):
             if name in _mock_modules:
                 mod = MagicMock()
-                mod.DatabaseManager.get_instance.return_value\
-                    .get_session = lambda: None
+                mod.get_session = lambda: None
                 return mod
             return _real_import(name, *args, **kwargs)
 
@@ -257,8 +256,7 @@ class TestInitFundamentalRss:
         def _fake_import(name, *args, **kwargs):
             if name in _mock_modules:
                 mod = MagicMock()
-                mod.DatabaseManager.get_instance.return_value\
-                    .get_session = lambda: None
+                mod.get_session = lambda: None
                 return mod
             if name == (
                 "autotrader.adapters.fundamental"
