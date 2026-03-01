@@ -8,7 +8,6 @@ from uuid import uuid4
 from sqlalchemy.orm import Session
 
 from autotrader.adapters.database.models import (
-    MarketMemoryRecord,
     PositionStateRecord,
     TradeRecord,
 )
@@ -123,100 +122,6 @@ class TradeRepository:
         if symbol:
             query = query.filter(TradeRecord.symbol == symbol)
         return query.all()
-
-
-class MarketMemoryRepository:
-    """市場記憶リポジトリ"""
-
-    def __init__(self, session: Session) -> None:
-        self.session = session
-
-    def create(
-        self,
-        memory_id: str,
-        symbol: str,
-        memory_type: str,
-        direction_score: float,
-        confidence: float,
-        valid_until: datetime,
-        summary: str | None = None,
-        source_event: str | None = None,
-        llm_reasoning: str | None = None,
-    ) -> MarketMemoryRecord:
-        """市場記憶を作成
-
-        Args:
-            memory_id: 記憶UUID
-            symbol: シンボル
-            memory_type: 記憶タイプ
-            direction_score: 方向性スコア (-1.0〜+1.0)
-            confidence: 確信度 (0.0〜1.0)
-            valid_until: 有効期限
-            summary: 要約文
-            source_event: ソースイベント名
-            llm_reasoning: LLM推論根拠
-
-        Returns:
-            MarketMemoryRecord: 作成済みレコード
-        """
-        record = MarketMemoryRecord(
-            memory_id=memory_id,
-            symbol=symbol,
-            memory_type=memory_type,
-            direction_score=direction_score,
-            confidence=confidence,
-            valid_until=valid_until,
-            summary=summary,
-            source_event=source_event,
-            llm_reasoning=llm_reasoning,
-        )
-        self.session.add(record)
-        self.session.flush()
-        return record
-
-    def get_active(
-        self,
-        symbol: str,
-        memory_type: str,
-        now: datetime,
-    ) -> list[MarketMemoryRecord]:
-        """有効な市場記憶を取得
-
-        Args:
-            symbol: シンボル
-            memory_type: 記憶タイプ
-            now: 現在時刻（UTC）
-
-        Returns:
-            list[MarketMemoryRecord]: 有効な記憶リスト
-        """
-        return (
-            self.session.query(MarketMemoryRecord)
-            .filter(
-                MarketMemoryRecord.symbol == symbol,
-                MarketMemoryRecord.memory_type == memory_type,
-                MarketMemoryRecord.valid_until > now,
-            )
-            .order_by(MarketMemoryRecord.created_at.desc())
-            .all()
-        )
-
-    def delete_expired(self, now: datetime) -> int:
-        """期限切れ記憶を削除
-
-        Args:
-            now: 現在時刻（UTC）
-
-        Returns:
-            int: 削除件数
-        """
-        result = (
-            self.session.query(MarketMemoryRecord)
-            .filter(MarketMemoryRecord.valid_until <= now)
-            .delete()
-        )
-        self.session.flush()
-        return result
 
 
 class PositionStateRepository:

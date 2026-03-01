@@ -1,15 +1,11 @@
-"""FundamentalMemoryService テスト（SQLiteインメモリDB）"""
+"""FundamentalMemoryService テスト"""
 
 from __future__ import annotations
 
-from contextlib import contextmanager
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 
 import pytest
-from sqlalchemy import create_engine
-from sqlalchemy.orm import sessionmaker
 
-from autotrader.adapters.database.models import Base
 from autotrader.adapters.fundamental.deterministic_event_analyzer import (
     DeterministicEventAnalyzer,
 )
@@ -18,43 +14,16 @@ from autotrader.adapters.fundamental.memory import (
 )
 from autotrader.adapters.fundamental.schemas import (
     EconomicEvent,
-    EventLLMRecord,
     EventSource,
-    ImpactLevel,
     FundamentalContext,
+    ImpactLevel,
 )
 
 
 @pytest.fixture
-def db_engine():
-    """テスト用SQLiteインメモリエンジン"""
-    engine = create_engine("sqlite:///:memory:")
-    Base.metadata.create_all(engine)
-    yield engine
-    Base.metadata.drop_all(engine)
-
-
-@pytest.fixture
-def session_factory(db_engine):
-    """テスト用セッションファクトリー"""
-    SessionLocal = sessionmaker(bind=db_engine)
-
-    @contextmanager
-    def get_session():
-        session = SessionLocal()
-        try:
-            yield session
-        finally:
-            session.close()
-
-    return get_session
-
-
-@pytest.fixture
-def memory_service(session_factory):
-    """テスト用FundamentalMemoryService"""
+def memory_service():
+    """テスト用FundamentalMemoryService（analyzer未設定）"""
     return FundamentalMemoryService(
-        session_factory=session_factory,
         event_guard_minutes=30,
     )
 
@@ -79,21 +48,32 @@ def make_event(
 class TestFundamentalMemoryService:
     """FundamentalMemoryServiceのテスト"""
 
-    def test_write_macro_bias_and_read(self, memory_service):
-        """マクロバイアスを書き込んで読み取れる"""
+    def test_neutral_context_without_analyzer(
+        self, memory_service
+    ):
+        """analyzer未設定時はニュートラルコンテキスト"""
+        now = datetime.now(timezone.utc)
+        ctx = memory_service.get_context_for_llm(
+            "USDJPY", now
+        )
+        assert ctx.direction_bias == 0.0
+        assert ctx.active_event_count == 0
+        assert ctx.has_high_impact_within_30min is False
+
+    def test_write_macro_bias_noop(self, memory_service):
+        """write_macro_biasはno-op（エラーにならない）"""
+        # DB廃止後も後方互換でエラーにならないことを確認
         memory_service.write_macro_bias(
             symbol="USDJPY",
             direction_score=0.7,
             confidence=0.8,
             summary="上昇バイアスあり",
         )
-        now = datetime.now(timezone.utc)
-        ctx = memory_service.get_context_for_llm("USDJPY", now)
-        assert ctx.macro_bias_score == pytest.approx(0.7)
-        assert ctx.macro_bias_summary == "上昇バイアスあり"
 
-    def test_write_post_event_bias(self, memory_service):
-        """指標後バイアスを書き込んで読み取れる"""
+    def test_write_post_event_bias_noop(
+        self, memory_service
+    ):
+        """write_post_event_biasはno-op（エラーにならない）"""
         memory_service.write_post_event_bias(
             symbol="USDJPY",
             direction_score=-0.5,
@@ -101,39 +81,40 @@ class TestFundamentalMemoryService:
             summary="NFPショック下降",
             source_event="NFP",
         )
-        now = datetime.now(timezone.utc)
-        ctx = memory_service.get_context_for_llm("USDJPY", now)
-        assert ctx.post_event_bias_score == pytest.approx(-0.5)
 
-    def test_neutral_context_on_empty_db(self, memory_service):
-        """DBが空の場合はニュートラルコンテキスト"""
-        now = datetime.now(timezone.utc)
-        ctx = memory_service.get_context_for_llm("USDJPY", now)
-        assert ctx.macro_bias_score == 0.0
-        assert ctx.post_event_bias_score == 0.0
-        assert ctx.has_high_impact_within_30min is False
+    def test_write_sentiment_score_noop(
+        self, memory_service
+    ):
+        """write_sentiment_scoreはno-op（エラーにならない）"""
+        memory_service.write_sentiment_score(
+            symbol="USDJPY",
+            sentiment_score=-0.3,
+            confidence=0.6,
+            summary="弱気センチメント",
+        )
 
-    def test_high_impact_detection(self, session_factory):
+    def test_high_impact_detection(self):
         """30分以内の高インパクト指標検出"""
         high_impact_event = make_event(
             impact=ImpactLevel.HIGH, minutes_from_now=20.0
         )
         service = FundamentalMemoryService(
-            session_factory=session_factory,
             event_guard_minutes=30,
-            cached_events_getter=lambda: [high_impact_event],
+            cached_events_getter=lambda: [
+                high_impact_event
+            ],
         )
         now = datetime.now(timezone.utc)
         ctx = service.get_context_for_llm("USDJPY", now)
         assert ctx.has_high_impact_within_30min is True
 
-    def test_no_high_impact_when_medium_only(self, session_factory):
+    def test_no_high_impact_when_medium_only(self):
         """MEDIUMのみの場合は高インパクト検出しない"""
         medium_event = make_event(
-            impact=ImpactLevel.MEDIUM, minutes_from_now=15.0
+            impact=ImpactLevel.MEDIUM,
+            minutes_from_now=15.0,
         )
         service = FundamentalMemoryService(
-            session_factory=session_factory,
             event_guard_minutes=30,
             cached_events_getter=lambda: [medium_event],
         )
@@ -141,13 +122,13 @@ class TestFundamentalMemoryService:
         ctx = service.get_context_for_llm("USDJPY", now)
         assert ctx.has_high_impact_within_30min is False
 
-    def test_no_high_impact_when_event_too_far(self, session_factory):
+    def test_no_high_impact_when_event_too_far(self):
         """60分後のイベントは30分ガード対象外"""
         far_event = make_event(
-            impact=ImpactLevel.HIGH, minutes_from_now=60.0
+            impact=ImpactLevel.HIGH,
+            minutes_from_now=60.0,
         )
         service = FundamentalMemoryService(
-            session_factory=session_factory,
             event_guard_minutes=30,
             cached_events_getter=lambda: [far_event],
         )
@@ -155,13 +136,13 @@ class TestFundamentalMemoryService:
         ctx = service.get_context_for_llm("USDJPY", now)
         assert ctx.has_high_impact_within_30min is False
 
-    def test_upcoming_events_in_context(self, session_factory):
+    def test_upcoming_events_in_context(self):
         """直近イベントがコンテキストに含まれる"""
         event = make_event(
-            impact=ImpactLevel.MEDIUM, minutes_from_now=30.0
+            impact=ImpactLevel.MEDIUM,
+            minutes_from_now=30.0,
         )
         service = FundamentalMemoryService(
-            session_factory=session_factory,
             event_guard_minutes=30,
             cached_events_getter=lambda: [event],
         )
@@ -174,7 +155,9 @@ class TestFundamentalMemoryService:
     ):
         """get_context_for_llmがFundamentalContextを返す"""
         now = datetime.now(timezone.utc)
-        ctx = memory_service.get_context_for_llm("USDJPY", now)
+        ctx = memory_service.get_context_for_llm(
+            "USDJPY", now
+        )
         assert isinstance(ctx, FundamentalContext)
 
     def test_fundamental_context_neutral(self):
@@ -184,10 +167,14 @@ class TestFundamentalMemoryService:
         assert ctx.has_high_impact_within_30min is False
         assert ctx.upcoming_events == []
 
-    def test_to_prompt_section_contains_scores(self, memory_service):
+    def test_to_prompt_section_contains_scores(
+        self, memory_service
+    ):
         """プロンプトセクションにPhase 2bフィールドが含まれる"""
         now = datetime.now(timezone.utc)
-        ctx = memory_service.get_context_for_llm("USDJPY", now)
+        ctx = memory_service.get_context_for_llm(
+            "USDJPY", now
+        )
         section = ctx.to_prompt_section()
         # Phase 2b フォーマット確認
         assert "方向バイアス" in section
@@ -205,7 +192,7 @@ class TestPhase2EventSynthesis:
         return DeterministicEventAnalyzer()
 
     @pytest.fixture
-    def analyzer_service(self, session_factory, analyzer):
+    def analyzer_service(self, analyzer):
         """analyzer付きFundamentalMemoryService"""
         now = datetime.now(timezone.utc)
         # 1時間前に発表済みの高インパクトイベント
@@ -222,7 +209,6 @@ class TestPhase2EventSynthesis:
             previous=180.0,
         )
         return FundamentalMemoryService(
-            session_factory=session_factory,
             event_guard_minutes=30,
             cached_events_getter=lambda: [nfp_event],
             analyzer=analyzer,
@@ -271,12 +257,9 @@ class TestPhase2EventSynthesis:
             )
         ) == 1
 
-    def test_no_analyzer_fallback_to_db(
-        self, session_factory
-    ):
-        """analyzer なしでは従来のDB記憶ベースに戻る"""
+    def test_no_analyzer_returns_neutral(self):
+        """analyzer なしではニュートラルコンテキストを返す"""
         service = FundamentalMemoryService(
-            session_factory=session_factory,
             event_guard_minutes=30,
         )
         now = datetime.now(timezone.utc)
@@ -307,7 +290,7 @@ class TestPhase2EventSynthesis:
         assert ctx.event_caution_level >= 1
 
     def test_unreleased_events_not_analyzed(
-        self, session_factory, analyzer
+        self, analyzer
     ):
         """未発表イベントは分析されない"""
         now = datetime.now(timezone.utc)
@@ -325,7 +308,6 @@ class TestPhase2EventSynthesis:
             previous=5.0,
         )
         service = FundamentalMemoryService(
-            session_factory=session_factory,
             event_guard_minutes=30,
             cached_events_getter=lambda: [future_event],
             analyzer=analyzer,
@@ -336,7 +318,7 @@ class TestPhase2EventSynthesis:
         assert ctx.active_event_count == 0
 
     def test_holiday_event_reduces_liquidity(
-        self, session_factory, analyzer
+        self, analyzer
     ):
         """休日イベントで流動性が低下する"""
         now = datetime.now(timezone.utc)
@@ -353,7 +335,6 @@ class TestPhase2EventSynthesis:
             previous=None,
         )
         service = FundamentalMemoryService(
-            session_factory=session_factory,
             event_guard_minutes=30,
             cached_events_getter=lambda: [holiday],
             analyzer=analyzer,
