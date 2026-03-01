@@ -205,7 +205,7 @@ class PositionManagerConfig:
     stagnation_exit_minutes: float = 120.0
     stagnation_min_mfe_r: float = 0.10
     # 超早期exit（MFE<0.2R + 30分経過）
-    very_early_exit_enabled: bool = True
+    very_early_exit_enabled: bool = False
     very_early_exit_minutes: float = 30.0
     very_early_exit_mfe_r: float = 0.2
     # P0-1: RANGE×DAY BE制御
@@ -259,7 +259,7 @@ class PositionManagerConfig:
     universal_half_r_trigger: float = 0.5
     universal_half_r_ratio: float = 0.25
     # 段階的STAGNATION: 3段階で早期に停滞を検出
-    progressive_stagnation_enabled: bool = True
+    progressive_stagnation_enabled: bool = False
     # Stage1: 早期検出（60分 + MFE<0.05R + 含み損）
     stagnation_stage1_minutes: float = 60.0
     stagnation_stage1_mfe_r: float = 0.05
