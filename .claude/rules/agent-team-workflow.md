@@ -1,4 +1,4 @@
-# AutoTraderV4 エージェントチーム ワークフロー
+# AutoTraderV4 Git Worktree ワークフロー（全セッション共通）
 
 ## 基本原則
 
@@ -67,3 +67,29 @@ Agent(
 - `git commit --amend` による公開済みコミットの書き換え
 - `--no-verify` によるフックスキップ
 - `git push --force` を main/master に実行
+
+## スタンドアロンセッション（エージェントチーム未使用時）
+
+別ターミナルで Claude Code を個別起動して作業する場合も、worktree ルールは同様に適用される。
+
+### 作業開始手順
+
+1. `EnterWorktree` ツールでworktreeを作成し、セッションの作業ディレクトリを切り替える
+2. worktree 内でコード変更・コミット・プッシュ・PR作成を行う
+3. PR 作成後、`pr_watcher.py` がマージ・掃除を自動処理
+
+### 手動 worktree 作成（EnterWorktree が使えない場合）
+
+```bash
+BRANCH="feat/xxx"
+WORKTREE="/d/Projects/AutoTraderV4/tmp/${BRANCH//\//_}"
+git -C /d/Projects/AutoTraderV4 pull origin main
+git -C /d/Projects/AutoTraderV4 branch "$BRANCH"
+git -C /d/Projects/AutoTraderV4 worktree add "$WORKTREE" "$BRANCH"
+# 以降は $WORKTREE 配下のファイルのみ編集する
+```
+
+### ルール適用の仕組み
+
+- `~/.claude/rules/*.md`（グローバル）と `.claude/rules/*.md`（プロジェクト）は全セッションで自動読み込み
+- worktree 内にも `.claude/rules/` がコピーされるため、ルールはworktree内でも有効
