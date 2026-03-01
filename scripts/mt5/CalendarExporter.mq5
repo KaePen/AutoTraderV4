@@ -8,7 +8,7 @@
 //|   3. ナビゲーター → サービス → CalendarExporter → 開始           |
 //|                                                                    |
 //| 出力: MQL5/Files/calendar_events.csv                              |
-//| 更新間隔: 30分                                                    |
+//| 更新間隔: アダプティブ（通常30分、HIGH前後3秒）                  |
 //+------------------------------------------------------------------+
 #property service
 #property copyright "AutoTraderV4"
@@ -184,20 +184,68 @@ bool ExportCalendar()
   }
 
 //+------------------------------------------------------------------+
+//| 次のHIGHイベントまでの秒数を返す（なければ INT_MAX）             |
+//| 発表後2分以内のHIGHイベントも検出（actual値キャッチ用）          |
+//+------------------------------------------------------------------+
+int SecondsToNextHighEvent()
+  {
+   datetime now = TimeCurrent();
+   datetime from = now - 120; // 過去2分も確認（発表直後キャッチ）
+   datetime to = now + 3600;  // 1時間先まで確認
+   MqlCalendarValue values[];
+   int count = CalendarValueHistory(values, from, to);
+   if(count <= 0) return INT_MAX;
+
+   int min_sec = INT_MAX;
+   for(int i = 0; i < count; i++)
+     {
+      MqlCalendarEvent ev;
+      if(!CalendarEventById(values[i].event_id, ev))
+         continue;
+      if(ev.importance != CALENDAR_IMPORTANCE_HIGH)
+         continue;
+
+      int diff = (int)(values[i].time - now);
+
+      // 未発表で未来 → 発表前カウントダウン
+      if(values[i].actual_value == LONG_MIN && diff >= 0)
+        {
+         if(diff < min_sec) min_sec = diff;
+        }
+      // 発表済みで過去2分以内 → 発表直後キャッチ
+      else if(values[i].actual_value != LONG_MIN
+              && diff >= -120 && diff <= 0)
+        {
+         min_sec = 0; // 即座に3秒モード
+        }
+     }
+   return min_sec;
+  }
+
+//+------------------------------------------------------------------+
 //| サービスメイン関数                                                |
 //+------------------------------------------------------------------+
 void OnStart()
   {
-   PrintFormat("[CalendarExporter] サービス開始 (間隔: %d秒)",
-               UpdateIntervalSec);
+   PrintFormat("[CalendarExporter] サービス開始 (アダプティブ間隔)");
 
    while(!IsStopped())
      {
       ExportCalendar();
 
-      // 指定間隔スリープ（1秒刻みで停止チェック）
+      // 次のHIGHイベントまでの秒数で間隔を決定
+      int sec_to_high = SecondsToNextHighEvent();
+      int interval;
+      if(sec_to_high <= 300)       // 5分以内
+         interval = 3;             // 3秒間隔
+      else if(sec_to_high <= 1800) // 30分以内
+         interval = 30;            // 30秒間隔
+      else
+         interval = UpdateIntervalSec; // デフォルト30分
+
+      // スリープ（1秒刻みで停止チェック + 間隔再計算）
       for(int elapsed = 0;
-          elapsed < UpdateIntervalSec && !IsStopped();
+          elapsed < interval && !IsStopped();
           elapsed++)
         {
          Sleep(1000);

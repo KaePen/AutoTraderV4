@@ -23,6 +23,7 @@ from autotrader.adapters.fundamental.normalizer import (
 )
 from autotrader.adapters.fundamental.schemas import (
     EconomicEvent,
+    ImpactLevel,
 )
 
 
@@ -112,19 +113,88 @@ class FundamentalDataCollector:
         return list(self._cached_events)
 
     async def _collect_loop(self) -> None:
-        """収集ループ（バックグラウンドタスク）"""
-        # 起動直後に1回収集
+        """アダプティブ収集ループ
+
+        HIGHインパクトイベントの前後は3秒間隔で更新。
+        通常時はデフォルト間隔。ForexFactoryは12時間ごと。
+        """
+        # 起動直後に全ソースから1回収集
         await self._collect_once()
+
+        last_ff_fetch = datetime.now(UTC)
+        _FF_INTERVAL = timedelta(hours=12)
 
         while self._running:
             try:
-                await asyncio.sleep(self._interval.total_seconds())
-                await self._collect_once()
+                # 次のHIGHイベントまでの秒数で間隔を決定
+                sec = self._get_seconds_to_next_high()
+                if sec <= 300:       # 5分以内
+                    interval = 3     # 3秒
+                elif sec <= 1800:    # 30分以内
+                    interval = 30    # 30秒
+                else:
+                    interval = self._interval.total_seconds()
+
+                await asyncio.sleep(interval)
+
+                # MT5は毎回取得（ローカルCSV、軽い）
+                mt5_events = await self._fetch_mt5_events()
+
+                # FFは12時間ごと
+                now = datetime.now(UTC)
+                ff_events: list[EconomicEvent] = []
+                if now - last_ff_fetch >= _FF_INTERVAL:
+                    ff_events = (
+                        await self._fetch_ff_events()
+                    )
+                    last_ff_fetch = now
+
+                # マージ・重複排除・キャッシュ更新
+                all_events = mt5_events + ff_events
+                if ff_events:
+                    all_events = (
+                        self._normalizer.deduplicate(
+                            all_events,
+                        )
+                    )
+                self._cached_events = all_events
+                self._last_fetch = now
+
+                # 3秒モード時はDEBUG、通常時はINFO
+                if interval <= 3:
+                    logger.debug(
+                        "[Collector] 高速更新: "
+                        "%d件 (次HIGH: %.0f秒後)",
+                        len(all_events), sec,
+                    )
+                else:
+                    logger.info(
+                        "[Collector] %d件のイベントを"
+                        "キャッシュ更新",
+                        len(all_events),
+                    )
+
+                # コールバック
+                if self._on_update is not None:
+                    try:
+                        result = self._on_update(
+                            all_events,
+                        )
+                        if asyncio.iscoroutine(result):
+                            await result
+                    except Exception as e:
+                        logger.error(
+                            "[Collector] コールバック"
+                            "エラー: %s", e,
+                        )
+
             except asyncio.CancelledError:
                 break
             except Exception as e:
-                logger.error(f"[Collector] 収集ループエラー: {e}")
-                # エラー後は短めにリトライ
+                logger.error(
+                    "[Collector] 収集ループエラー: %s",
+                    e,
+                )
                 await asyncio.sleep(60)
 
     async def _collect_once(self) -> None:
@@ -143,9 +213,14 @@ class FundamentalDataCollector:
                     currencies=self._currencies,
                 )
                 events.extend(mt5_events)
-                logger.debug(f"[Collector] MT5から{len(mt5_events)}件取得")
+                logger.debug(
+                    "[Collector] MT5から%d件取得",
+                    len(mt5_events),
+                )
             except Exception as e:
-                logger.error(f"[Collector] MT5取得エラー: {e}")
+                logger.error(
+                    "[Collector] MT5取得エラー: %s", e,
+                )
 
         # ForexFactory取得（指標フォールバック）
         if self._use_ff and (not events or not self._use_mt5):
@@ -155,12 +230,14 @@ class FundamentalDataCollector:
                 )
                 events.extend(ff_events)
                 logger.debug(
-                    f"[Collector] ForexFactoryから"
-                    f"{len(ff_events)}件取得"
+                    "[Collector] ForexFactoryから"
+                    "%d件取得",
+                    len(ff_events),
                 )
             except Exception as e:
                 logger.error(
-                    f"[Collector] ForexFactory取得エラー: {e}"
+                    "[Collector] ForexFactory"
+                    "取得エラー: %s", e,
                 )
 
         # ForexFactory休日取得（MT5では取れない休日データ）
@@ -175,12 +252,13 @@ class FundamentalDataCollector:
                 events.extend(holiday_events)
                 if holiday_events:
                     logger.info(
-                        f"[Collector] FF休日"
-                        f"{len(holiday_events)}件取得"
+                        "[Collector] FF休日%d件取得",
+                        len(holiday_events),
                     )
             except Exception as e:
                 logger.debug(
-                    f"[Collector] FF休日取得エラー: {e}"
+                    "[Collector] FF休日取得エラー: %s",
+                    e,
                 )
 
         # 重複排除
@@ -190,7 +268,10 @@ class FundamentalDataCollector:
         self._cached_events = events
         self._last_fetch = now
 
-        logger.info(f"[Collector] {len(events)}件のイベントをキャッシュ更新")
+        logger.info(
+            "[Collector] %d件のイベントをキャッシュ更新",
+            len(events),
+        )
 
         # コールバック呼び出し（WebSocket配信等）
         if self._on_update is not None:
@@ -199,5 +280,103 @@ class FundamentalDataCollector:
                 if asyncio.iscoroutine(result):
                     await result
             except Exception as e:
-                logger.debug(f"[Collector] on_updateコールバックエラー: {e}")
+                logger.debug(
+                    "[Collector] on_update"
+                    "コールバックエラー: %s", e,
+                )
+
+    async def _fetch_mt5_events(self) -> list[EconomicEvent]:
+        """MT5カレンダーCSVのみ取得（軽量・ローカルI/O）"""
+        if not self._use_mt5:
+            return []
+        now = datetime.now(UTC)
+        from_date = now - timedelta(hours=1)
+        to_date = now + timedelta(days=7)
+        try:
+            events = (
+                await self._mt5_client.fetch_events_async(
+                    from_date=from_date,
+                    to_date=to_date,
+                    currencies=self._currencies,
+                )
+            )
+            logger.debug(
+                "[Collector] MT5から%d件取得",
+                len(events),
+            )
+            return events
+        except Exception as e:
+            logger.error(
+                "[Collector] MT5取得エラー: %s", e,
+            )
+            return []
+
+    async def _fetch_ff_events(
+        self,
+    ) -> list[EconomicEvent]:
+        """ForexFactory取得（重量・HTTPスクレイピング）"""
+        events: list[EconomicEvent] = []
+        if self._use_ff:
+            try:
+                ff_events = (
+                    await self._ff_client.fetch_events_async(
+                        currencies=self._currencies,
+                    )
+                )
+                events.extend(ff_events)
+                logger.debug(
+                    "[Collector] ForexFactoryから%d件取得",
+                    len(ff_events),
+                )
+            except Exception as e:
+                logger.error(
+                    "[Collector] ForexFactory"
+                    "取得エラー: %s",
+                    e,
+                )
+        # FF休日取得（MT5では取れない休日データ）
+        if self._use_ff_holidays and not self._use_ff:
+            try:
+                holiday_events = (
+                    await self._ff_client
+                    .fetch_holidays_only_async(
+                        currencies=self._currencies,
+                    )
+                )
+                events.extend(holiday_events)
+                if holiday_events:
+                    logger.info(
+                        "[Collector] FF休日%d件取得",
+                        len(holiday_events),
+                    )
+            except Exception as e:
+                logger.debug(
+                    "[Collector] FF休日取得エラー: %s",
+                    e,
+                )
+        return events
+
+    def _get_seconds_to_next_high(self) -> float:
+        """キャッシュから次のHIGHイベントまでの秒数を算出
+
+        Returns:
+            float: 秒数（HIGHなければ float('inf')）
+        """
+        now = datetime.now(UTC)
+        min_sec = float("inf")
+        for ev in self._cached_events:
+            if ev.impact != ImpactLevel.HIGH:
+                continue
+            diff = (ev.event_time - now).total_seconds()
+            # 未発表で未来 → 発表前カウントダウン
+            if ev.actual is None and diff >= 0:
+                min_sec = min(min_sec, diff)
+            # 発表済みで過去2分以内 → 直後キャッチ
+            elif (
+                ev.actual is not None
+                and -120 <= diff <= 0
+            ):
+                min_sec = 0
+                break
+        return min_sec
 
