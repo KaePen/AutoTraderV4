@@ -166,6 +166,20 @@ class MT5Transport(ABC):
         ...
 
     @abstractmethod
+    async def history_deals_get_by_position(
+        self, position_id: int
+    ) -> list[dict]:
+        """ポジションIDで約定履歴取得
+
+        Args:
+            position_id: MT5ポジションID
+
+        Returns:
+            list[dict]: 約定データ
+        """
+        ...
+
+    @abstractmethod
     async def copy_ticks_from(
         self,
         symbol: str,
@@ -384,6 +398,21 @@ class DirectTransport(MT5Transport):
             None,
             lambda: self._mt5.history_deals_get(
                 dt_from, dt_to
+            ),
+        )
+        if deals is None:
+            return []
+        return [d._asdict() for d in deals]
+
+    async def history_deals_get_by_position(
+        self, position_id: int
+    ) -> list[dict]:
+        """ポジションIDで約定履歴取得"""
+        loop = asyncio.get_running_loop()
+        deals = await loop.run_in_executor(
+            None,
+            lambda: self._mt5.history_deals_get(
+                position=position_id
             ),
         )
         if deals is None:

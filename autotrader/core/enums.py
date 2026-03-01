@@ -135,6 +135,9 @@ class ExitReason(str, Enum):
     TAKE_PROFIT_EARLY = "TP_EARLY"
     FORCE_CLOSE = "FORCE_CLOSE"
     EXTERNAL_CLOSE = "EXTERNAL_CLOSE"
+    MANUAL_CLOSE = "MANUAL_CLOSE"
+    STOP_OUT = "STOP_OUT"
+    GHOST_CLEANUP = "GHOST_CLEANUP"
 
 
 class TrendDirection(str, Enum):
