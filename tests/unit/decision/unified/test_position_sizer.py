@@ -265,7 +265,7 @@ class TestSlippageBuffer:
         assert result_buf.lot < result_no_buf.lot
 
     def test_slippage_buffer_proportional(self) -> None:
-        """スリッページバッファの影響が比例的"""
+        """スリッページバッファの影響が比例的（2025年版）"""
         config = PositionSizerConfig(slippage_buffer_pips=2.0)
         sizer = PositionSizer(config)
 
@@ -281,16 +281,17 @@ class TestSlippageBuffer:
         result = sizer.calculate(context)
 
         # 手計算: conf_adjust = 0.3 + 0.7*0.7 = 0.79
-        # 1M * 0.04 * 0.79 / ((20+2) * 1000) ≈ 1.436 → 1.44
+        # 1M * 0.025 * 0.79 / ((20+2) * 1000) ≈ 0.897 → 0.90
         conf_adjust = 0.3 + 0.7 * 0.7
         expected_lot = (
-            1_000_000 * 0.04 * conf_adjust
+            1_000_000 * 0.025 * conf_adjust
         ) / (22.0 * 1000.0)
         # max_risk_pct_absoluteによる上限
         max_lot_risk = (
             1_000_000 * 0.07
         ) / (22.0 * 1000.0)
-        expected = min(expected_lot, 5.0, max_lot_risk)
+        # max_lot_per_trade=2.5
+        expected = min(expected_lot, 2.5, max_lot_risk)
         assert abs(result.lot - round(expected, 2)) < 0.02
 
 
@@ -373,34 +374,34 @@ class TestGradualConsecutiveLoss:
     """連敗の段階的減額テスト"""
 
     def test_no_reduction_below_start(self) -> None:
-        """start未満は減額なし"""
+        """start未満は減額なし（2025年版: start=2）"""
         sizer = PositionSizer()
-        # 2連敗（start=3未満）
-        adjust = sizer._calculate_consecutive_loss_adjust(2)
+        # 1連敗（start=2未満）
+        adjust = sizer._calculate_consecutive_loss_adjust(1)
         assert adjust == 1.0
 
     def test_gradual_reduction(self) -> None:
-        """start〜maxで段階的減額"""
+        """start〜maxで段階的減額（2025年版: 2-5）"""
         sizer = PositionSizer()
 
+        adj_2 = sizer._calculate_consecutive_loss_adjust(2)
         adj_3 = sizer._calculate_consecutive_loss_adjust(3)
-        adj_5 = sizer._calculate_consecutive_loss_adjust(5)
-        adj_7 = sizer._calculate_consecutive_loss_adjust(7)
+        adj_4 = sizer._calculate_consecutive_loss_adjust(4)
 
         # 段階的に減少
-        assert adj_3 == 1.0  # ちょうどstartは減額開始直前
-        assert adj_5 < 1.0
-        assert adj_7 < adj_5
+        assert adj_2 == 1.0  # ちょうどstartは減額開始直前
+        assert adj_3 < 1.0
+        assert adj_4 < adj_3
 
     def test_max_reduction_at_max_losses(self) -> None:
-        """max以上で最大減額"""
+        """max以上で最大減額（2025年版: max=5, 0.2x）"""
         sizer = PositionSizer()
 
-        adj_8 = sizer._calculate_consecutive_loss_adjust(8)
-        adj_10 = sizer._calculate_consecutive_loss_adjust(10)
+        adj_5 = sizer._calculate_consecutive_loss_adjust(5)
+        adj_6 = sizer._calculate_consecutive_loss_adjust(6)
 
-        assert adj_8 == pytest.approx(0.3, abs=0.01)
-        assert adj_10 == pytest.approx(0.3, abs=0.01)
+        assert adj_5 == pytest.approx(0.2, abs=0.01)
+        assert adj_6 == pytest.approx(0.2, abs=0.01)
 
     def test_monotonic_decrease(self) -> None:
         """連敗数増加で単調減少"""
@@ -419,10 +420,10 @@ class TestSameDirectionExposure:
     """同方向エクスポージャー制限テスト"""
 
     def test_same_direction_blocks_at_limit(self) -> None:
-        """同方向エクスポージャー上限で取引停止"""
+        """同方向エクスポージャー上限で取引停止（2025年版: 4.0*0.6=2.4）"""
         sizer = PositionSizer()
 
-        # max_total=5.0 * ratio=0.6 = 3.0上限
+        # max_total=4.0 * ratio=0.6 = 2.4上限
         context = SizingContext(
             equity=1_000_000,
             sl_pips=20.0,
@@ -430,7 +431,7 @@ class TestSameDirectionExposure:
             regime=MarketRegime.TREND,
             consecutive_losses=0,
             current_dd_pct=0.0,
-            open_same_direction_lot=3.0,  # 上限到達
+            open_same_direction_lot=2.4,  # 上限到達
         )
 
         result = sizer.calculate(context)
@@ -438,10 +439,10 @@ class TestSameDirectionExposure:
         assert "同方向" in result.reasoning
 
     def test_same_direction_limits_lot(self) -> None:
-        """同方向エクスポージャーがロットを制限"""
+        """同方向エクスポージャーがロットを制限（2025年版）"""
         sizer = PositionSizer()
 
-        # 同方向2.5lot → 残り0.5lot
+        # 同方向2.0lot → 残り0.4lot
         context = SizingContext(
             equity=1_000_000,
             sl_pips=20.0,
@@ -449,12 +450,12 @@ class TestSameDirectionExposure:
             regime=MarketRegime.TREND,
             consecutive_losses=0,
             current_dd_pct=0.0,
-            open_same_direction_lot=2.5,
+            open_same_direction_lot=2.0,
         )
 
         result = sizer.calculate(context)
-        # max_same_dir = 5.0 * 0.6 = 3.0、残り0.5lot
-        assert result.lot <= 0.5
+        # max_same_dir = 4.0 * 0.6 = 2.4、残り0.4lot
+        assert result.lot <= 0.4
         assert not result.blocked
 
     def test_no_same_direction_no_limit(self) -> None:
@@ -485,30 +486,30 @@ class TestSmoothDdAdjustment:
         assert sizer._calculate_dd_adjust(0.0) == 1.0
 
     def test_early_dd_slight_reduction(self) -> None:
-        """早期DD域（2%→5%）で軽い減額"""
+        """早期DD域（2025年版: 1%→2%で1.0→0.7）"""
         sizer = PositionSizer()
 
-        adj_3pct = sizer._calculate_dd_adjust(0.03)
-        adj_4pct = sizer._calculate_dd_adjust(0.04)
+        adj_1_5pct = sizer._calculate_dd_adjust(0.015)
+        adj_1_8pct = sizer._calculate_dd_adjust(0.018)
 
-        # 2%〜5%間で1.0→0.9の軽い減額
-        assert 0.9 < adj_3pct < 1.0
-        assert adj_4pct < adj_3pct
+        # 1%〜2%間で1.0→0.7の減額
+        assert 0.7 < adj_1_5pct < 1.0
+        assert adj_1_8pct < adj_1_5pct
 
     def test_main_dd_stronger_reduction(self) -> None:
-        """本格DD域（5%超）でより強い減額"""
+        """本格DD域（2025年版: 2%超で0.7→0.5）"""
         sizer = PositionSizer()
 
+        adj_2pct = sizer._calculate_dd_adjust(0.02)
         adj_5pct = sizer._calculate_dd_adjust(0.05)
         adj_10pct = sizer._calculate_dd_adjust(0.10)
-        adj_15pct = sizer._calculate_dd_adjust(0.15)
 
-        # 5%でちょうど0.9
-        assert adj_5pct == pytest.approx(0.9, abs=0.01)
-        # 10%で更に減額
+        # 2%でちょうど0.7
+        assert adj_2pct == pytest.approx(0.7, abs=0.01)
+        # 5%で更に減額
+        assert adj_5pct < adj_2pct
+        # 10%で更に強い減額
         assert adj_10pct < adj_5pct
-        # 15%で更に強い減額
-        assert adj_15pct < adj_10pct
 
     def test_dd_monotonic_decrease(self) -> None:
         """DD増加で単調減少"""
@@ -519,6 +520,87 @@ class TestSmoothDdAdjustment:
 
         for i in range(1, len(adjustments)):
             assert adjustments[i] <= adjustments[i - 1]
+
+
+class TestDd2025Reduction:
+    """2025年DD対策のテスト"""
+
+    def test_early_dd_threshold_1pct(self) -> None:
+        """DD早期減額が1%から開始"""
+        sizer = PositionSizer()
+
+        adj_0pct = sizer._calculate_dd_adjust(0.0)
+        adj_1pct = sizer._calculate_dd_adjust(0.01)
+        adj_1_5pct = sizer._calculate_dd_adjust(0.015)
+
+        # 0%: 減額なし
+        assert adj_0pct == 1.0
+        # 1%: 減額開始（ちょうど閾値なので1.0）
+        assert adj_1pct == 1.0
+        # 1.5%: 早期減額域
+        assert adj_1_5pct < 1.0
+
+    def test_main_dd_threshold_2pct(self) -> None:
+        """DD本格減額が2%から開始"""
+        sizer = PositionSizer()
+
+        adj_1_9pct = sizer._calculate_dd_adjust(0.019)
+        adj_2pct = sizer._calculate_dd_adjust(0.02)
+        adj_2_5pct = sizer._calculate_dd_adjust(0.025)
+
+        # 2%未満: 早期減額域
+        assert adj_1_9pct > 0.7
+        # 2%: 本格減額開始（0.7）
+        assert adj_2pct == pytest.approx(0.7, abs=0.01)
+        # 2.5%: 本格減額域
+        assert adj_2_5pct < 0.7
+
+    def test_consecutive_loss_2start(self) -> None:
+        """連敗減額が2連敗から開始"""
+        sizer = PositionSizer()
+
+        adj_1 = sizer._calculate_consecutive_loss_adjust(1)
+        adj_2 = sizer._calculate_consecutive_loss_adjust(2)
+        adj_3 = sizer._calculate_consecutive_loss_adjust(3)
+
+        # 1連敗: 減額なし
+        assert adj_1 == 1.0
+        # 2連敗: 減額開始（ちょうど閾値なので1.0）
+        assert adj_2 == 1.0
+        # 3連敗: 減額域
+        assert adj_3 < 1.0
+
+    def test_consecutive_loss_5max(self) -> None:
+        """連敗が5で最大減額（0.2x）"""
+        sizer = PositionSizer()
+
+        adj_5 = sizer._calculate_consecutive_loss_adjust(5)
+        adj_6 = sizer._calculate_consecutive_loss_adjust(6)
+
+        # 5連敗: 最大減額
+        assert adj_5 == pytest.approx(0.2, abs=0.01)
+        # 6連敗: 最大減額維持
+        assert adj_6 == pytest.approx(0.2, abs=0.01)
+
+    def test_base_risk_2_5pct(self) -> None:
+        """基本リスクが2.5%"""
+        sizer = PositionSizer()
+        assert sizer.config.base_risk_pct == 0.025
+
+    def test_max_lot_per_trade_2_5(self) -> None:
+        """最大ロットが2.5"""
+        sizer = PositionSizer()
+        assert sizer.config.max_lot_per_trade == 2.5
+
+    def test_max_total_exposure_4(self) -> None:
+        """合計ロット上限が4.0"""
+        sizer = PositionSizer()
+        assert sizer.config.max_total_exposure_lot == 4.0
+
+    def test_dd_max_reduction_50pct(self) -> None:
+        """DD最大減額が50%"""
+        sizer = PositionSizer()
+        assert sizer.config.dd_max_reduction == 0.5
 
 
 class TestDynamicMaxLotFromRisk:

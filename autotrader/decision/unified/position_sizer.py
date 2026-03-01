@@ -71,25 +71,25 @@ class PositionSizerConfig:
     """
 
     symbol: str = ""              # 通貨ペアシンボル（pip_value自動計算用）
-    base_risk_pct: float = 0.04  # 4%リスク
+    base_risk_pct: float = 0.025  # 2.5%リスク（2025年DD対策）
     pip_value: float = 0.0       # 0=シンボルから自動計算
     min_lot: float = 0.01
     max_lot: float = 10.0
     confidence_high_threshold: float = 0.7
     confidence_low_threshold: float = 0.5
-    dd_reduction_threshold: float = 0.05  # 5%DD本格減額
-    dd_max_reduction: float = 0.7         # 最大70%減額
-    dd_early_threshold: float = 0.02      # 2%DD早期減額開始
-    consecutive_loss_start: int = 3       # 3連敗から減額開始
-    consecutive_loss_max: int = 8         # 8連敗で最大減額
-    consecutive_loss_min_adjust: float = 0.3  # 最大減額時0.3x
+    dd_reduction_threshold: float = 0.02  # 2%DD本格減額（強化）
+    dd_max_reduction: float = 0.5         # 最大50%減額（強化）
+    dd_early_threshold: float = 0.01      # 1%DD早期減額開始（強化）
+    consecutive_loss_start: int = 2       # 2連敗から減額開始（強化）
+    consecutive_loss_max: int = 5         # 5連敗で最大減額（強化）
+    consecutive_loss_min_adjust: float = 0.2  # 最大減額時0.2x（強化）
     slippage_buffer_pips: float = 2.0     # SLスリッページバッファ
     # 資金管理パラメータ
-    max_lot_per_trade: float = 5.0        # 1トレード上限5ロット
+    max_lot_per_trade: float = 2.5        # 1トレード上限2.5ロット（強化）
     max_risk_pct_absolute: float = 0.07   # 絶対最大7%リスク
     equity_floor_pct: float = 0.30        # 初期資金の30%で取引停止
     equity_caution_pct: float = 0.50      # 初期資金の50%で減額開始
-    max_total_exposure_lot: float = 5.0   # 合計5ロット上限
+    max_total_exposure_lot: float = 4.0   # 合計4ロット上限（強化）
     max_same_direction_ratio: float = 0.6 # 同方向は全体の60%まで
 
 
@@ -102,8 +102,8 @@ class PositionSizer(PositionSizerProtocol):
     リスク調整係数は以下の要素で決定:
     - 確度調整: 0.7以上→1.2倍、0.5以下→0.5倍
     - レジーム調整: TREND=1.0, RANGE=0.7, HIGH_VOL=0.5, LOW_VOL=0.8
-    - DD調整: 2%から緩やかに開始、5%超で本格減額
-    - 連敗調整: 3連敗から段階的に減額（8連敗で0.3x）
+    - DD調整: 1%から緩やかに開始、2%超で本格減額（2025年強化）
+    - 連敗調整: 2連敗から段階的に減額（5連敗で0.2x）（2025年強化）
 
     資金管理:
     - 資金下限（初期の30%）で取引停止
@@ -422,11 +422,11 @@ class PositionSizer(PositionSizerProtocol):
             return 0.3 + confidence * 0.7  # 0.5〜1.2の範囲
 
     def _calculate_dd_adjust(self, current_dd_pct: float) -> float:
-        """ドローダウンに基づく調整係数（平滑化版）
+        """ドローダウンに基づく調整係数（2025年強化版）
 
-        2%以下: 1.0（減額なし）
-        2%→5%: 緩やかな減額（1.0→0.9）
-        5%→20%: 本格減額（0.9→最小値）
+        1%以下: 1.0（減額なし）
+        1%→2%: 早期減額（1.0→0.7）
+        2%超: 本格減額（0.7→最小値）
 
         Args:
             current_dd_pct: 現在のドローダウン率（0-1）
@@ -441,22 +441,22 @@ class PositionSizer(PositionSizerProtocol):
         if current_dd_pct <= early:
             return 1.0
 
-        # 早期減額域（early→mainで1.0→0.9）
+        # 早期減額域（early→mainで1.0→0.7）
         if current_dd_pct <= main:
             early_range = main - early
             if early_range <= 0:
                 return 1.0
             ratio = (current_dd_pct - early) / early_range
-            return 1.0 - ratio * 0.1
+            return 1.0 - ratio * 0.3
 
-        # 本格減額域（main超過→最大減額）
+        # 本格減額域（main超過→最大減額0.5）
         excess = current_dd_pct - main
-        max_excess = 0.15  # 20%DDで最大減額
+        max_excess = 0.15  # 17%DDで最大減額
         reduction = (
             min(excess / max_excess, 1.0)
             * self.config.dd_max_reduction
         )
-        return 0.9 - reduction * (0.9 - 0.3) / self.config.dd_max_reduction
+        return 0.7 - reduction * (0.7 - 0.5) / self.config.dd_max_reduction
 
     def _calculate_consecutive_loss_adjust(
         self, consecutive_losses: int
