@@ -198,9 +198,7 @@ class BacktestRunner:
         self.data_dir = _base / self.config.symbol
         # チャートCSVが chart/ 配下の場合はそちらを優先
         _chart_dir = self.data_dir / "chart"
-        self.chart_dir = (
-            _chart_dir if _chart_dir.exists() else self.data_dir
-        )
+        self.chart_dir = _chart_dir if _chart_dir.exists() else self.data_dir
         # TFデータを統合dict管理
         self._tf_data: dict[str, pd.DataFrame] = {}
         self._cancel_callback: Callable[[], bool] | None = None
@@ -208,9 +206,7 @@ class BacktestRunner:
         # イベントエミッター初期化
         self._emitter = BacktestEventEmitter()
         if verbose:
-            self._emitter.add_listener(
-                ConsoleEventListener(verbose=True)
-            )
+            self._emitter.add_listener(ConsoleEventListener(verbose=True))
 
         # ファイルログリスナー追加
         # ログも通貨ペア別サブディレクトリに出力
@@ -341,6 +337,48 @@ class BacktestRunner:
             return False
         return self._cancel_callback()
 
+    def _load_chart_tf(
+        self,
+        tf: str,
+    ) -> pd.DataFrame | None:
+        """チャートデータを読み込み（Parquetキャッシュ優先）
+
+        データソース優先順位:
+        1. chart/cache/{SYMBOL}_{TF}.parquet
+        2. chart/{SYMBOL}_{TF}_*.csv（従来パス）
+
+        Args:
+            tf: タイムフレーム名（例: H1, H4, Daily, M15）
+
+        Returns:
+            pd.DataFrame | None: OHLCVデータ
+        """
+        symbol = self.config.symbol
+        _log = logging.getLogger(__name__)
+
+        # 優先1: chart/cache/ Parquet
+        _chart_pq = self.chart_dir / "cache" / f"{symbol}_{tf}.parquet"
+        if _chart_pq.exists():
+            try:
+                df = pd.read_parquet(_chart_pq)
+                _log.info(
+                    "チャートParquet使用: %s",
+                    _chart_pq.name,
+                )
+                return df
+            except Exception as e:
+                _log.warning(
+                    "チャートParquet読込失敗: %s",
+                    e,
+                )
+
+        # 優先2: 従来CSV
+        csv_files = list(self.chart_dir.glob(f"{symbol}_{tf}_*.csv"))
+        if csv_files:
+            return DataLoader.load_mt5_csv(csv_files[0])
+
+        return None
+
     def load_data(
         self,
         on_tf_loaded: "Callable[[str, int, int], None] | None" = None,
@@ -357,42 +395,37 @@ class BacktestRunner:
         _loaded = 0
 
         # メイン時間足
-        main_files = list(self.chart_dir.glob(f"{symbol}_{tf}_*.csv"))
-        if not main_files:
-            # H1、M15などのパターン
-            main_files = list(self.chart_dir.glob(f"{symbol}_H1_*.csv"))
-        if main_files:
-            self._h1_df = DataLoader.load_mt5_csv(main_files[0])
-            self._h1_df = self._calculate_indicators(self._h1_df)
+        df = self._load_chart_tf(tf)
+        if df is None:
+            df = self._load_chart_tf("H1")
+        if df is not None:
+            self._h1_df = self._calculate_indicators(df)
         _loaded += 1
         if on_tf_loaded:
             on_tf_loaded("H1", _loaded, _total)
 
         # 上位足（H4）
-        h4_files = list(self.chart_dir.glob(f"{symbol}_H4_*.csv"))
-        if h4_files:
-            self._h4_df = DataLoader.load_mt5_csv(h4_files[0])
-            self._h4_df = self._calculate_indicators(self._h4_df)
+        df = self._load_chart_tf("H4")
+        if df is not None:
+            self._h4_df = self._calculate_indicators(df)
         _loaded += 1
         if on_tf_loaded:
             on_tf_loaded("H4", _loaded, _total)
 
         # 日足
-        d1_files = list(self.chart_dir.glob(f"{symbol}_Daily_*.csv"))
-        if not d1_files:
-            d1_files = list(self.chart_dir.glob(f"{symbol}_D1_*.csv"))
-        if d1_files:
-            self._d1_df = DataLoader.load_mt5_csv(d1_files[0])
-            self._d1_df = self._calculate_indicators(self._d1_df)
+        df = self._load_chart_tf("Daily")
+        if df is None:
+            df = self._load_chart_tf("D1")
+        if df is not None:
+            self._d1_df = self._calculate_indicators(df)
         _loaded += 1
         if on_tf_loaded:
             on_tf_loaded("D1", _loaded, _total)
 
         # M15（マルチ戦略用）
-        m15_files = list(self.chart_dir.glob(f"{symbol}_M15_*.csv"))
-        if m15_files:
-            self._m15_df = DataLoader.load_mt5_csv(m15_files[0])
-            self._m15_df = self._calculate_indicators(self._m15_df)
+        df = self._load_chart_tf("M15")
+        if df is not None:
+            self._m15_df = self._calculate_indicators(df)
         _loaded += 1
         if on_tf_loaded:
             on_tf_loaded("M15", _loaded, _total)
@@ -416,7 +449,8 @@ class BacktestRunner:
         if macd is not None:
             cols = macd.columns.tolist()
             macd_cols = [
-                c for c in cols
+                c
+                for c in cols
                 if "MACD_" in c and "MACDs" not in c and "MACDh" not in c
             ]
             signal_cols = [c for c in cols if "MACDs" in c]
@@ -463,9 +497,7 @@ class BacktestRunner:
             upper_cols = [c for c in bb.columns if "BBU" in c]
             lower_cols = [c for c in bb.columns if "BBL" in c]
             if upper_cols and lower_cols:
-                df["bb_width"] = (
-                    bb[upper_cols[0]] - bb[lower_cols[0]]
-                )
+                df["bb_width"] = bb[upper_cols[0]] - bb[lower_cols[0]]
 
         # ダイバージェンス
         detector = DivergenceDetector(
@@ -531,23 +563,17 @@ class BacktestRunner:
                     years_to_load = sorted(years_needed)
                     try:
                         dfs = [
-                            pd.read_parquet(
-                                cache_dir / f"{y}.parquet"
-                            )
+                            pd.read_parquet(cache_dir / f"{y}.parquet")
                             for y in years_to_load
                         ]
                         _log.info(
                             "年別キャッシュ使用: %s [%s]",
                             cache_key,
-                            ", ".join(
-                                str(y) for y in years_to_load
-                            ),
+                            ", ".join(str(y) for y in years_to_load),
                         )
                         return pd.concat(dfs, ignore_index=True)
                     except Exception as e:
-                        _log.warning(
-                            "キャッシュ読み込み失敗（再計算）: %s", e
-                        )
+                        _log.warning("キャッシュ読み込み失敗（再計算）: %s", e)
 
         # インジケータ計算（全期間・ウォームアップ込み）
         _log.info("インジケータ計算（全期間）: %s", cache_key)
@@ -561,13 +587,9 @@ class BacktestRunner:
             try:
                 year_df = df[time_years == year]
                 year_df.to_parquet(year_path, index=False)
-                _log.debug(
-                    "年別キャッシュ保存: %s/%d", cache_key, year
-                )
+                _log.debug("年別キャッシュ保存: %s/%d", cache_key, year)
             except Exception as e:
-                _log.warning(
-                    "キャッシュ保存失敗 %d: %s", year, e
-                )
+                _log.warning("キャッシュ保存失敗 %d: %s", year, e)
 
         # 必要年のみ返す
         if needed_years is not None:
@@ -671,11 +693,7 @@ class BacktestRunner:
         volume = volume or 1.0
 
         # シミュレーター設定
-        _pip_unit = (
-            0.01
-            if "JPY" in self.config.symbol.upper()
-            else 0.0001
-        )
+        _pip_unit = 0.01 if "JPY" in self.config.symbol.upper() else 0.0001
         sim_config = SimulatorConfig(
             initial_balance=self.config.initial_balance,
             spread_pips=self.config.spread_pips,
@@ -762,13 +780,15 @@ class BacktestRunner:
                 # 月末処理
                 month_pnl = simulator.state.balance - month_start_balance
                 month_return = month_pnl / month_start_balance * 100
-                monthly_results.append({
-                    "year": current_month[0],
-                    "month": current_month[1],
-                    "trades": month_trades,
-                    "pnl": month_pnl,
-                    "return_pct": month_return,
-                })
+                monthly_results.append(
+                    {
+                        "year": current_month[0],
+                        "month": current_month[1],
+                        "trades": month_trades,
+                        "pnl": month_pnl,
+                        "return_pct": month_return,
+                    }
+                )
                 current_month = candle_month
                 month_start_balance = simulator.state.balance
                 month_trades = 0
@@ -790,13 +810,15 @@ class BacktestRunner:
         if current_month:
             month_pnl = simulator.state.balance - month_start_balance
             month_return = month_pnl / month_start_balance * 100
-            monthly_results.append({
-                "year": current_month[0],
-                "month": current_month[1],
-                "trades": month_trades,
-                "pnl": month_pnl,
-                "return_pct": month_return,
-            })
+            monthly_results.append(
+                {
+                    "year": current_month[0],
+                    "month": current_month[1],
+                    "trades": month_trades,
+                    "pnl": month_pnl,
+                    "return_pct": month_return,
+                }
+            )
 
         trades = simulator.get_closed_trades()
         calculator = MetricsCalculator(
@@ -894,25 +916,23 @@ class BacktestRunner:
             valid_end = valid_start + valid_years - 1
 
             # 訓練期間
-            train_result = self.run(
-                strategy_name, train_start, train_end
-            )
+            train_result = self.run(strategy_name, train_start, train_end)
 
             # 検証期間
-            valid_result = self.run(
-                strategy_name, valid_start, valid_end
-            )
+            valid_result = self.run(strategy_name, valid_start, valid_end)
 
-            results.append({
-                "train_period": f"{train_start}-{train_end}",
-                "valid_period": f"{valid_start}-{valid_end}",
-                "train_return": train_result.annual_return,
-                "valid_return": valid_result.annual_return,
-                "train_win_rate": train_result.win_rate,
-                "valid_win_rate": valid_result.win_rate,
-                "train_trades": train_result.trades,
-                "valid_trades": valid_result.trades,
-            })
+            results.append(
+                {
+                    "train_period": f"{train_start}-{train_end}",
+                    "valid_period": f"{valid_start}-{valid_end}",
+                    "train_return": train_result.annual_return,
+                    "valid_return": valid_result.annual_return,
+                    "train_win_rate": train_result.win_rate,
+                    "valid_win_rate": valid_result.win_rate,
+                    "train_trades": train_result.trades,
+                    "valid_trades": valid_result.trades,
+                }
+            )
 
             current += valid_years
 
@@ -930,8 +950,11 @@ class BacktestRunner:
         pm_config: "PositionManagerConfig | None" = None,
         fundamental_csv: str | None = None,
         fundamental_csv_list: list[str] | None = None,
+        fundamental_parquet_list: list[str] | None = None,
         event_llm_csv_list: list[str] | None = None,
+        event_llm_parquet_list: list[str] | None = None,
         news_llm_csv_list: list[str] | None = None,
+        news_llm_parquet_list: list[str] | None = None,
         fundamental_guard_minutes: int = 30,
         period_start: datetime | None = None,
         period_end: datetime | None = None,
@@ -956,6 +979,11 @@ class BacktestRunner:
             pm_config: PositionManager設定（外部注入）
             fundamental_csv: 経済イベントCSVパス（Noneで無効）
             fundamental_csv_list: 複数の経済イベントCSVパスリスト
+            fundamental_parquet_list: events Parquetパスリスト
+            event_llm_csv_list: イベントLLM CSVパスリスト
+            event_llm_parquet_list: イベントLLM Parquetパスリスト
+            news_llm_csv_list: ニュースLLM CSVパスリスト
+            news_llm_parquet_list: ニュースLLM Parquetパスリスト
             fundamental_guard_minutes: 重要指標前の停止分数
             period_start: 日単位の開始日時（Noneで年始）
             period_end: 日単位の終了日時・exclusive（Noneで年末）
@@ -970,8 +998,7 @@ class BacktestRunner:
             self.load_data()
 
         # ファンダメンタルプロバイダー初期化
-        # fundamental_csv_list / fundamental_csv / event_llm_csv_list
-        # のいずれかがあればプロバイダーを作成
+        # CSV/Parquet いずれかがあればプロバイダーを作成
         fundamental_provider = None
         _csv_paths: list[str] = []
         if fundamental_csv_list:
@@ -981,8 +1008,11 @@ class BacktestRunner:
 
         _has_data = (
             bool(_csv_paths)
+            or bool(fundamental_parquet_list)
             or bool(event_llm_csv_list)
+            or bool(event_llm_parquet_list)
             or bool(news_llm_csv_list)
+            or bool(news_llm_parquet_list)
         )
         _log = logging.getLogger(__name__)
         if _has_data:
@@ -990,66 +1020,96 @@ class BacktestRunner:
                 from autotrader.adapters.fundamental.backtest_provider import (
                     BacktestFundamentalProvider,
                 )
+
                 _bot_cfg = config or UnifiedBotConfig()
                 fundamental_provider = BacktestFundamentalProvider(
                     event_guard_minutes=fundamental_guard_minutes,
-                    decay_coefficient=(
-                        _bot_cfg.fundamental_decay_coefficient
-                    ),
+                    decay_coefficient=(_bot_cfg.fundamental_decay_coefficient),
                     post_event_lag_seconds=(
                         _bot_cfg.fundamental_post_event_lag_seconds
                     ),
                 )
-                # 経済イベントCSV読み込み
+                # 経済イベント読み込み（Parquet優先）
+                if fundamental_parquet_list:
+                    _pq_total = 0
+                    for _pq in fundamental_parquet_list:
+                        _n = fundamental_provider.load_parquet(
+                            _pq,
+                        )
+                        _pq_total += _n
+                    _log.info(
+                        "[Fundamental] Parquet読込: %d件 (%dファイル)",
+                        _pq_total,
+                        len(fundamental_parquet_list),
+                    )
                 if _csv_paths:
                     total_count = 0
                     for _csv in _csv_paths:
                         count = fundamental_provider.load_csv(_csv)
                         total_count += count
                     _log.info(
-                        "[Fundamental] バックテスト用CSV読込: "
-                        "%d件 (%dファイル)",
-                        total_count, len(_csv_paths),
+                        "[Fundamental] CSV読込: %d件 (%dファイル)",
+                        total_count,
+                        len(_csv_paths),
                     )
-                # イベントLLM CSV読み込み（Phase 2）
+                # イベントLLM読み込み（Parquet優先）
+                _sym = self.config.symbol
+                if event_llm_parquet_list:
+                    _llm_pq_total = 0
+                    for _pq in event_llm_parquet_list:
+                        _n = fundamental_provider.load_event_llm_parquet(
+                            _pq, _sym
+                        )
+                        _llm_pq_total += _n
+                    if _llm_pq_total > 0:
+                        _log.info(
+                            "[Fundamental] イベントLLM Parquet %d件読込",
+                            _llm_pq_total,
+                        )
                 if event_llm_csv_list:
-                    _sym = self.config.symbol
                     _llm_total = 0
                     for _csv in event_llm_csv_list:
                         _n = fundamental_provider.load_event_llm_csv(
-                            _csv, _sym,
+                            _csv,
+                            _sym,
                         )
                         _llm_total += _n
                     if _llm_total > 0:
                         _log.info(
-                            "[Fundamental] イベントLLM %d件読込",
+                            "[Fundamental] イベントLLM CSV %d件読込",
                             _llm_total,
                         )
-                # ニュースLLM CSV読み込み
+                # ニュースLLM読み込み（Parquet優先）
+                if news_llm_parquet_list:
+                    _news_pq_total = 0
+                    for _pq in news_llm_parquet_list:
+                        _n = fundamental_provider.load_news_llm_parquet(
+                            _pq, _sym
+                        )
+                        _news_pq_total += _n
+                    if _news_pq_total > 0:
+                        _log.info(
+                            "[Fundamental] ニュースLLM Parquet %d日分読込",
+                            _news_pq_total,
+                        )
                 if news_llm_csv_list:
-                    _sym = self.config.symbol
                     _news_total = 0
                     for _csv in news_llm_csv_list:
-                        _n = (
-                            fundamental_provider
-                            .load_news_llm_csv(_csv, _sym)
-                        )
+                        _n = fundamental_provider.load_news_llm_csv(_csv, _sym)
                         _news_total += _n
                     if _news_total > 0:
                         _log.info(
-                            "[Fundamental] ニュースLLM "
-                            "%d日分読込",
+                            "[Fundamental] ニュースLLM CSV %d日分読込",
                             _news_total,
                         )
                 # Phase 2b: FundamentalMemory有効化
                 if _bot_cfg.fundamental_assessor_enabled:
                     fundamental_provider.enable_memory()
-                    _log.info(
-                        "[Fundamental] メモリ蓄積有効"
-                    )
+                    _log.info("[Fundamental] メモリ蓄積有効")
             except Exception as e:
                 _log.warning(
-                    "[Fundamental] CSV読込失敗（無効化）: %s", e,
+                    "[Fundamental] データ読込失敗（無効化）: %s",
+                    e,
                 )
 
         # ボット設定（各年の bot インスタンスはこの設定から生成）
@@ -1080,14 +1140,12 @@ class BacktestRunner:
                     "use_m1": use_m1,
                     "use_multi_mode": use_multi_mode,
                     "use_parallel_tf": use_parallel_tf,
-                }
+                },
             )
 
         # TFロード進捗コールバック（use_parallel_tf時はなし）
         def _on_tf_loaded(tf: str, current: int, total: int) -> None:
-            self._emitter.emit_init_progress(
-                "tf_loading", tf, current, total
-            )
+            self._emitter.emit_init_progress("tf_loading", tf, current, total)
 
         # バックテスト対象年リスト（キャッシュの絞り込みに使用）
         needed_years = list(range(start_year, end_year + 1))
@@ -1112,15 +1170,12 @@ class BacktestRunner:
         multi_mode_controller = None
         if use_multi_mode:
             from autotrader.decision.unified import MultiModeController
+
             multi_mode_controller = MultiModeController()
             multi_mode_controller.set_market_data(market_data)
 
         # シミュレーター設定
-        _pip_unit = (
-            0.01
-            if "JPY" in self.config.symbol.upper()
-            else 0.0001
-        )
+        _pip_unit = 0.01 if "JPY" in self.config.symbol.upper() else 0.0001
         sim_config = SimulatorConfig(
             initial_balance=self.config.initial_balance,
             spread_pips=self.config.spread_pips,
@@ -1187,7 +1242,10 @@ class BacktestRunner:
                     if self._check_cancel_requested():
                         break
                     yr = self._run_unified_year(
-                        bot_config, sim_config, year, market_data,
+                        bot_config,
+                        sim_config,
+                        year,
+                        market_data,
                         use_m1=use_m1,
                         multi_mode_controller=multi_mode_controller,
                         fundamental_provider=fundamental_provider,
@@ -1312,9 +1370,7 @@ class BacktestRunner:
                     _drain_thread.join(timeout=2.0)
 
                 # 失敗した年を警告
-                _missing = set(years) - {
-                    r["year"] for r in yearly_results
-                }
+                _missing = set(years) - {r["year"] for r in yearly_results}
                 if _missing:
                     _log.error(
                         "並列バックテスト失敗年: %s",
@@ -1325,9 +1381,7 @@ class BacktestRunner:
 
             # ワーカー収集データをFileEventListenerにマージ
             for _listener in self._emitter._listeners:
-                if not isinstance(
-                    _listener, FileEventListener
-                ):
+                if not isinstance(_listener, FileEventListener):
                     continue
                 for yr in yearly_results:
                     _listener.merge_worker_data(
@@ -1341,12 +1395,8 @@ class BacktestRunner:
             for year in years:
                 # キャンセルチェック
                 if self._check_cancel_requested():
-                    self._emitter.emit_backtest_end(
-                        {"cancelled": True}
-                    )
-                    return self._aggregate_results_from_yearly(
-                        yearly_results
-                    )
+                    self._emitter.emit_backtest_end({"cancelled": True})
+                    return self._aggregate_results_from_yearly(yearly_results)
 
                 self._emitter.emit_year_start(year)
                 year_result = self._run_unified_year(
@@ -1360,13 +1410,8 @@ class BacktestRunner:
                     period_start=period_start,
                     period_end=period_end,
                 )
-                if (
-                    year_result is None
-                    and self._check_cancel_requested()
-                ):
-                    return self._aggregate_results_from_yearly(
-                        yearly_results
-                    )
+                if year_result is None and self._check_cancel_requested():
+                    return self._aggregate_results_from_yearly(yearly_results)
                 if year_result is not None:
                     yearly_results.append(year_result)
                     self._emitter.emit_year_end(year_result)
@@ -1380,11 +1425,13 @@ class BacktestRunner:
         result = self._aggregate_results_from_yearly(yearly_results)
 
         # イベント発行: バックテスト終了
-        self._emitter.emit_backtest_end({
-            "total_trades": result.trades,
-            "win_rate": result.win_rate,
-            "profit_factor": result.profit_factor,
-        })
+        self._emitter.emit_backtest_end(
+            {
+                "total_trades": result.trades,
+                "win_rate": result.win_rate,
+                "profit_factor": result.profit_factor,
+            }
+        )
 
         return result
 
@@ -1426,7 +1473,14 @@ class BacktestRunner:
             pass  # 明示指定をそのまま使用
         elif include_m1:
             timeframes_to_load = [
-                "M1", "M5", "M15", "M30", "H1", "H4", "H8", "D1"
+                "M1",
+                "M5",
+                "M15",
+                "M30",
+                "H1",
+                "H4",
+                "H8",
+                "D1",
             ]
         else:
             timeframes_to_load = ["M15", "M30", "H1", "H4", "H8", "D1"]
@@ -1435,70 +1489,109 @@ class BacktestRunner:
 
         symbol = self.config.symbol
 
+        # チャートParquetキャッシュディレクトリ
+        _chart_cache_dir = self.chart_dir / "cache"
+
         def _load_single_tf(tf: str) -> tuple[str, pd.DataFrame | None]:
-            """単一TFのデータをロード（並列実行対象）"""
-            pattern = f"{symbol}_{tf}_*.csv"
-            tf_files = list(self.chart_dir.glob(pattern))
+            """単一TFのデータをロード（並列実行対象）
 
-            if not tf_files:
-                tf_path = self.chart_dir / f"{symbol}_{tf}.csv"
-                tf_files = [tf_path] if tf_path.exists() else []
+            データソース優先順位:
+            1. chart/cache/{SYMBOL}_{TF}.parquet（Parquetキャッシュ）
+            2. chart/csv/{SYMBOL}_{TF}_*.csv（csv/サブディレクトリ）
+            3. chart/{SYMBOL}_{TF}_*.csv（従来パス）
+            """
+            # --- データソース解決 ---
+            # 優先1: chart/cache/ Parquet
+            _chart_pq = _chart_cache_dir / f"{symbol}_{tf}.parquet"
+            _use_chart_parquet = _chart_pq.exists()
 
-            if not tf_files:
+            # CSVパス（フォールバック用）
+            tf_path = None
+            if not _use_chart_parquet:
+                # 優先2: chart/csv/ 内のCSV
+                _csv_sub = self.chart_dir / "csv"
+                if _csv_sub.exists():
+                    _csv_files = sorted(_csv_sub.glob(f"{symbol}_{tf}_*.csv"))
+                    if _csv_files:
+                        tf_path = _csv_files[0]
+
+                # 優先3: chart/ 直下のCSV（従来パス）
+                if tf_path is None:
+                    pattern = f"{symbol}_{tf}_*.csv"
+                    tf_files = list(self.chart_dir.glob(pattern))
+                    if not tf_files:
+                        _single = self.chart_dir / f"{symbol}_{tf}.csv"
+                        tf_files = [_single] if _single.exists() else []
+                    if tf_files:
+                        tf_path = sorted(tf_files)[0]
+
+            # データソースが何もない
+            if not _use_chart_parquet and tf_path is None:
                 return tf, None
 
-            tf_path = sorted(tf_files)[0]
-            stat = tf_path.stat()
-            cache_key = (
-                f"{tf}"
-                f"_{int(stat.st_mtime * 1000)}"
-                f"_{stat.st_size}"
-            )
+            # --- キャッシュキー構築 ---
+            if _use_chart_parquet:
+                _stat = _chart_pq.stat()
+            else:
+                _stat = tf_path.stat()
+            cache_key = f"{tf}_{int(_stat.st_mtime * 1000)}_{_stat.st_size}"
 
-            cache_dir = (
+            indicator_cache_dir = (
                 self.data_dir / ".indicator_cache" / cache_key
             )
-            _can_skip_csv = False
-            if needed_years is not None and cache_dir.is_dir():
+            _can_skip_raw = False
+            if needed_years is not None and indicator_cache_dir.is_dir():
                 cached_years = {
                     int(p.stem)
-                    for p in cache_dir.glob("*.parquet")
+                    for p in indicator_cache_dir.glob("*.parquet")
                     if p.stem.isdigit()
                 }
                 if set(needed_years).issubset(cached_years):
-                    _can_skip_csv = True
+                    _can_skip_raw = True
 
             df = None
-            if _can_skip_csv:
+            if _can_skip_raw:
                 try:
                     years_to_load = sorted(needed_years)
                     _dfs = [
-                        pd.read_parquet(
-                            cache_dir / f"{y}.parquet"
-                        )
+                        pd.read_parquet(indicator_cache_dir / f"{y}.parquet")
                         for y in years_to_load
                     ]
                     df = pd.concat(_dfs, ignore_index=True)
                     _log.info(
-                        "年別キャッシュ使用（CSV省略）: %s [%s]",
+                        "年別キャッシュ使用（ロード省略）: %s [%s]",
                         cache_key,
-                        ", ".join(
-                            str(y) for y in years_to_load
-                        ),
+                        ", ".join(str(y) for y in years_to_load),
                     )
                 except Exception as e:
                     _log.warning(
-                        "キャッシュ読み込み失敗: %s"
-                        "（CSV再読み込み）",
+                        "キャッシュ読み込み失敗: %s（再読み込み）",
                         e,
                     )
-                    df = loader.load_csv(tf_path)
-                    if df is not None:
-                        df = self._calculate_indicators_cached(
-                            df, cache_key, needed_years
+                    _can_skip_raw = False
+
+            if not _can_skip_raw and df is None:
+                # chart Parquetから読み込み
+                if _use_chart_parquet:
+                    try:
+                        df = pd.read_parquet(_chart_pq)
+                        _log.info(
+                            "チャートParquet使用: %s",
+                            _chart_pq.name,
                         )
-            else:
-                df = loader.load_csv(tf_path)
+                    except Exception as e:
+                        _log.warning(
+                            "チャートParquet読み込み失敗（CSV fallback）: %s",
+                            e,
+                        )
+                        # CSV にフォールバック
+                        if tf_path is not None:
+                            df = loader.load_csv(tf_path)
+                        else:
+                            return tf, None
+                else:
+                    df = loader.load_csv(tf_path)
+
                 if df is not None:
                     df = self._calculate_indicators_cached(
                         df, cache_key, needed_years
@@ -1562,7 +1655,7 @@ class BacktestRunner:
             config={
                 "mode": "parallel_multi_tf",
                 "timeframes": list(market_data.keys()),
-            }
+            },
         )
 
         # 全期間の結果を集約
@@ -1618,8 +1711,12 @@ class BacktestRunner:
             year_result = {
                 "year": year,
                 "trades": len(result.trades),
-                "win_rate": result.metrics.win_rate * 100 if result.metrics else 0,
-                "net_profit": result.metrics.net_profit if result.metrics else 0,
+                "win_rate": result.metrics.win_rate * 100
+                if result.metrics
+                else 0,
+                "net_profit": result.metrics.net_profit
+                if result.metrics
+                else 0,
             }
             self._emitter.emit_year_end(year_result)
 
@@ -1643,19 +1740,19 @@ class BacktestRunner:
             win_rate=metrics.win_rate * 100 if metrics else 0,
             profit_factor=metrics.profit_factor if metrics else 0,
             net_profit=metrics.net_profit if metrics else 0,
-            max_drawdown=metrics.max_drawdown_pct * 100
-            if metrics else 0,
+            max_drawdown=metrics.max_drawdown_pct * 100 if metrics else 0,
             sharpe_ratio=metrics.sharpe_ratio if metrics else 0,
-            annual_return=metrics.annual_return_pct
-            if metrics else 0,
+            annual_return=metrics.annual_return_pct if metrics else 0,
         )
 
         # イベント発行: バックテスト終了
-        self._emitter.emit_backtest_end({
-            "total_trades": result.trades,
-            "win_rate": result.win_rate,
-            "profit_factor": result.profit_factor,
-        })
+        self._emitter.emit_backtest_end(
+            {
+                "total_trades": result.trades,
+                "win_rate": result.win_rate,
+                "profit_factor": result.profit_factor,
+            }
+        )
 
         return result
 
@@ -1671,9 +1768,7 @@ class BacktestRunner:
         period_start: datetime | None = None,
         period_end: datetime | None = None,
         emitter: "BacktestEventEmitter | None" = None,
-        row_progress_callback: (
-            "Callable[[int, int], None] | None"
-        ) = None,
+        row_progress_callback: ("Callable[[int, int], None] | None") = None,
         adaptive_config: "TunerConfig | None" = None,
     ) -> dict[str, Any] | None:
         """統合ボットで1年分のバックテスト実行（self-contained）
@@ -1703,5 +1798,5 @@ class BacktestRunner:
     ) -> None:
         """トレードログ品質チェック（year_runner に委譲）"""
         from autotrader.backtest.year_runner import validate_trade_log
-        validate_trade_log(trades, year)
 
+        validate_trade_log(trades, year)

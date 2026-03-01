@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import bisect
 import csv
+import math
 import re
 from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta, timezone
@@ -43,8 +44,14 @@ from autotrader.adapters.fundamental.schemas import (
 
 # 経済イベントCSVカラム定義
 _CSV_COLUMNS = [
-    "event_id", "event_time", "currency", "event_name",
-    "impact", "actual", "forecast", "previous",
+    "event_id",
+    "event_time",
+    "currency",
+    "event_name",
+    "impact",
+    "actual",
+    "forecast",
+    "previous",
 ]
 
 # シンボル→通貨ペア（先行・後続）のマッピング
@@ -172,9 +179,7 @@ class BacktestFundamentalProvider:
         self._llm_data: dict[str, list[dict]] = {}
 
         # イベントLLMレコード: symbol → レコード一覧
-        self._event_llm_records: dict[
-            str, list[EventLLMRecord]
-        ] = {}
+        self._event_llm_records: dict[str, list[EventLLMRecord]] = {}
         # bisect用: symbol → タイムスタンプ一覧
         self._event_llm_ts: dict[str, list[float]] = {}
 
@@ -182,9 +187,7 @@ class BacktestFundamentalProvider:
         self._news_items: list[NewsItem] = []
 
         # ニュースLLMレコード: symbol → 日付 → レコード
-        self._news_llm_by_date: dict[
-            str, dict[date, NewsLLMRecord]
-        ] = {}
+        self._news_llm_by_date: dict[str, dict[date, NewsLLMRecord]] = {}
 
         # Phase 2b: FundamentalMemory（バイアス蓄積）
         self.memory: FundamentalMemory | None = None
@@ -210,8 +213,7 @@ class BacktestFundamentalProvider:
         self._news_items.extend(items)
         self._news_items.sort(key=lambda n: n.published_at)
         logger.info(
-            f"[BacktestFundamental] ニュース"
-            f"{len(items)}件読込: {path.name}"
+            f"[BacktestFundamental] ニュース{len(items)}件読込: {path.name}"
         )
         return len(items)
 
@@ -243,16 +245,12 @@ class BacktestFundamentalProvider:
                         if event:
                             loaded.append(event)
                     except Exception as e:
-                        logger.debug(
-                            f"[BacktestFundamental] 行スキップ: {e}"
-                        )
+                        logger.debug(f"[BacktestFundamental] 行スキップ: {e}")
                         continue
 
             # 重複排除してマージし、時刻順ソート（bisect検索用）
             self._events.extend(loaded)
-            self._events = self._normalizer.deduplicate(
-                self._events
-            )
+            self._events = self._normalizer.deduplicate(self._events)
             # イベントを時系列順にソートしてbisect用TSリストを構築
             self._events.sort(key=lambda e: e.event_time)
             self._events_sorted_ts = [
@@ -261,15 +259,12 @@ class BacktestFundamentalProvider:
             self._loaded_files.append(str(path))
 
             logger.info(
-                f"[BacktestFundamental] {len(loaded)}件読込: "
-                f"{path.name}"
+                f"[BacktestFundamental] {len(loaded)}件読込: {path.name}"
             )
             return len(loaded)
 
         except Exception as e:
-            logger.error(
-                f"[BacktestFundamental] CSV読込エラー: {e}"
-            )
+            logger.error(f"[BacktestFundamental] CSV読込エラー: {e}")
             return 0
 
     def load_llm_context_csv(
@@ -315,34 +310,32 @@ class BacktestFundamentalProvider:
                     if not period_str:
                         continue
                     try:
-                        period_dt = datetime.fromisoformat(
-                            period_str
-                        )
+                        period_dt = datetime.fromisoformat(period_str)
                         if period_dt.tzinfo is None:
-                            period_dt = period_dt.replace(
-                                tzinfo=timezone.utc
-                            )
+                            period_dt = period_dt.replace(tzinfo=timezone.utc)
                     except ValueError:
                         continue
 
                     ts_list.append(period_dt.timestamp())
-                    data_list.append({
-                        "macro_bias_score": _f(
-                            row.get("macro_bias_score", "")
-                        ),
-                        "macro_bias_summary": row.get(
-                            "macro_bias_summary", ""
-                        ),
-                        "post_event_bias_score": _f(
-                            row.get("post_event_bias_score", "")
-                        ),
-                        "post_event_summary": row.get(
-                            "post_event_summary", ""
-                        ),
-                        "sentiment_score": _f(
-                            row.get("sentiment_score", "")
-                        ),
-                    })
+                    data_list.append(
+                        {
+                            "macro_bias_score": _f(
+                                row.get("macro_bias_score", "")
+                            ),
+                            "macro_bias_summary": row.get(
+                                "macro_bias_summary", ""
+                            ),
+                            "post_event_bias_score": _f(
+                                row.get("post_event_bias_score", "")
+                            ),
+                            "post_event_summary": row.get(
+                                "post_event_summary", ""
+                            ),
+                            "sentiment_score": _f(
+                                row.get("sentiment_score", "")
+                            ),
+                        }
+                    )
 
             # シンボルに追記（既存データとマージ）
             existing_ts = self._llm_ts.get(symbol, [])
@@ -350,8 +343,7 @@ class BacktestFundamentalProvider:
 
             # マージしてソート
             combined = sorted(
-                zip(existing_ts + ts_list,
-                    existing_data + data_list),
+                zip(existing_ts + ts_list, existing_data + data_list),
                 key=lambda x: x[0],
             )
             if combined:
@@ -371,8 +363,7 @@ class BacktestFundamentalProvider:
 
         except Exception as e:
             logger.error(
-                f"[BacktestFundamental] LLMコンテキストCSV"
-                f"読込エラー: {e}"
+                f"[BacktestFundamental] LLMコンテキストCSV読込エラー: {e}"
             )
             return 0
 
@@ -432,8 +423,7 @@ class BacktestFundamentalProvider:
 
         except Exception as e:
             logger.error(
-                f"[BacktestFundamental] イベントLLM CSV"
-                f"読込エラー: {e}"
+                f"[BacktestFundamental] イベントLLM CSV読込エラー: {e}"
             )
             return 0
 
@@ -456,15 +446,14 @@ class BacktestFundamentalProvider:
         """
         path = Path(csv_path)
         if not path.exists():
-            logger.warning(
-                "[NewsLLM] ファイル未存在: %s", path
-            )
+            logger.warning("[NewsLLM] ファイル未存在: %s", path)
             return 0
 
         try:
             count = 0
             sym_dict = self._news_llm_by_date.setdefault(
-                symbol, {},
+                symbol,
+                {},
             )
             with open(path, encoding="utf-8") as f:
                 reader = csv.DictReader(f)
@@ -475,12 +464,14 @@ class BacktestFundamentalProvider:
                         count += 1
             logger.info(
                 "[NewsLLM] %s: %d日分読込",
-                path.name, count,
+                path.name,
+                count,
             )
             return count
         except Exception as e:
             logger.error(
-                "[NewsLLM] CSV読込エラー: %s", e,
+                "[NewsLLM] CSV読込エラー: %s",
+                e,
             )
             return 0
 
@@ -510,38 +501,247 @@ class BacktestFundamentalProvider:
 
             return NewsLLMRecord(
                 record_date=_d,
-                article_count=int(
-                    row.get("article_count", "0") or "0"
-                ),
+                article_count=int(row.get("article_count", "0") or "0"),
                 sentiment_score=_f("sentiment_score"),
                 sentiment_confidence=max(
                     0.0,
                     min(1.0, _f("sentiment_confidence", 0.5)),
                 ),
                 macro_bias_score=_f("macro_bias_score"),
-                policy_divergence_score=_f(
-                    "policy_divergence_score"
-                ),
+                policy_divergence_score=_f("policy_divergence_score"),
                 risk_appetite_score=_f("risk_appetite_score"),
                 geopolitical_risk_level=max(
                     0,
                     min(
                         3,
-                        int(
-                            row.get(
-                                "geopolitical_risk_level", "0"
-                            )
-                            or "0"
-                        ),
+                        int(row.get("geopolitical_risk_level", "0") or "0"),
                     ),
                 ),
-                dominant_theme=row.get(
-                    "dominant_theme", ""
-                ),
+                dominant_theme=row.get("dominant_theme", ""),
             )
         except (ValueError, KeyError) as e:
             logger.debug("[NewsLLM] 行パース失敗: %s", e)
             return None
+
+    @staticmethod
+    def _safe_str(val: any) -> str:
+        """Parquet由来の値を安全に文字列変換
+
+        float/NaN/Timestampなどを文字列に変換する。
+        CSVDictReaderは全て文字列だが、Parquet経由では
+        ネイティブ型が返されるためこのヘルパーが必要。
+
+        Args:
+            val: 変換対象値
+
+        Returns:
+            str: 文字列表現（NaN/Noneは空文字）
+        """
+        if val is None:
+            return ""
+        if isinstance(val, float) and math.isnan(val):
+            return ""
+        return str(val)
+
+    def load_parquet(
+        self,
+        parquet_path: str | Path,
+    ) -> int:
+        """Parquetファイルから経済イベントを読み込み
+
+        events Parquetキャッシュからの読み込み。
+        float型カラムのNaN処理を含む。
+
+        Args:
+            parquet_path: Parquetファイルパス
+
+        Returns:
+            int: 読み込んだイベント数
+        """
+        import pandas as pd
+
+        path = Path(parquet_path)
+        if not path.exists():
+            logger.warning(
+                "[BacktestFundamental] Parquetが見つかりません: %s",
+                path,
+            )
+            return 0
+
+        try:
+            df = pd.read_parquet(path)
+            if df.empty:
+                return 0
+
+            loaded: list[EconomicEvent] = []
+            fetched_at = datetime.now(timezone.utc)
+
+            for _, row in df.iterrows():
+                # Parquet行をdict化し、文字列に正規化
+                row_dict = {
+                    k: self._safe_str(v) for k, v in row.to_dict().items()
+                }
+                try:
+                    event = self._parse_row(
+                        row_dict,
+                        fetched_at,
+                    )
+                    if event:
+                        loaded.append(event)
+                except Exception as e:
+                    logger.debug(
+                        "[BacktestFundamental] Parquet行スキップ: %s",
+                        e,
+                    )
+                    continue
+
+            self._events.extend(loaded)
+            self._events = self._normalizer.deduplicate(self._events)
+            self._events.sort(key=lambda e: e.event_time)
+            self._events_sorted_ts = [
+                e.event_time.timestamp() for e in self._events
+            ]
+            self._loaded_files.append(str(path))
+
+            logger.info(
+                "[BacktestFundamental] Parquet %d件読込: %s",
+                len(loaded),
+                path.name,
+            )
+            return len(loaded)
+
+        except Exception as e:
+            logger.error(
+                "[BacktestFundamental] Parquet読込エラー: %s",
+                e,
+            )
+            return 0
+
+    def load_event_llm_parquet(
+        self,
+        parquet_path: str | Path,
+        symbol: str,
+    ) -> int:
+        """イベントLLM Parquetキャッシュを読み込み
+
+        Args:
+            parquet_path: Parquetファイルパス
+            symbol: 対象シンボル
+
+        Returns:
+            int: 読み込んだレコード数
+        """
+        import pandas as pd
+
+        path = Path(parquet_path)
+        if not path.exists():
+            logger.warning(
+                "[BacktestFundamental] イベントLLM Parquet"
+                "が見つかりません: %s",
+                path,
+            )
+            return 0
+
+        try:
+            df = pd.read_parquet(path)
+            if df.empty:
+                return 0
+
+            loaded: list[EventLLMRecord] = []
+            for _, row in df.iterrows():
+                row_dict = {
+                    k: self._safe_str(v) for k, v in row.to_dict().items()
+                }
+                rec = self._parse_event_llm_row(row_dict)
+                if rec is not None:
+                    loaded.append(rec)
+
+            if not loaded:
+                return 0
+
+            existing = self._event_llm_records.get(
+                symbol,
+                [],
+            )
+            merged = existing + loaded
+            merged.sort(key=lambda r: r.event_time)
+
+            self._event_llm_records[symbol] = merged
+            self._event_llm_ts[symbol] = [
+                r.event_time.timestamp() for r in merged
+            ]
+
+            logger.info(
+                "[BacktestFundamental] イベントLLM Parquet %d件読込: %s (%s)",
+                len(loaded),
+                path.name,
+                symbol,
+            )
+            return len(loaded)
+
+        except Exception as e:
+            logger.error(
+                "[BacktestFundamental] イベントLLM Parquet読込エラー: %s",
+                e,
+            )
+            return 0
+
+    def load_news_llm_parquet(
+        self,
+        parquet_path: str | Path,
+        symbol: str,
+    ) -> int:
+        """ニュースLLM Parquetキャッシュを読み込み
+
+        Args:
+            parquet_path: Parquetファイルパス
+            symbol: 対象シンボル
+
+        Returns:
+            int: 読み込みレコード数
+        """
+        import pandas as pd
+
+        path = Path(parquet_path)
+        if not path.exists():
+            logger.warning(
+                "[NewsLLM] Parquet未存在: %s",
+                path,
+            )
+            return 0
+
+        try:
+            df = pd.read_parquet(path)
+            if df.empty:
+                return 0
+
+            count = 0
+            sym_dict = self._news_llm_by_date.setdefault(
+                symbol,
+                {},
+            )
+            for _, row in df.iterrows():
+                row_dict = {
+                    k: self._safe_str(v) for k, v in row.to_dict().items()
+                }
+                rec = self._parse_news_llm_row(row_dict)
+                if rec is not None:
+                    sym_dict[rec.record_date] = rec
+                    count += 1
+
+            logger.info(
+                "[NewsLLM] Parquet %s: %d日分読込",
+                path.name,
+                count,
+            )
+            return count
+
+        except Exception as e:
+            logger.error(
+                "[NewsLLM] Parquet読込エラー: %s",
+                e,
+            )
+            return 0
 
     def get_context(
         self, current_time: datetime, symbol: str
@@ -562,27 +762,33 @@ class BacktestFundamentalProvider:
             FundamentalContext: ファンダメンタルコンテキスト
         """
         # 共通: upcoming events / high impact check
-        upcoming_dicts, high_impact_soon = (
-            self._compute_upcoming(current_time, symbol)
+        upcoming_dicts, high_impact_soon = self._compute_upcoming(
+            current_time, symbol
         )
 
         # 優先度1: イベントLLMデータがある場合
         records = self._event_llm_records.get(symbol, [])
         if records:
             ctx = self._synthesize_event_llm_context(
-                current_time, symbol,
-                upcoming_dicts, high_impact_soon,
+                current_time,
+                symbol,
+                upcoming_dicts,
+                high_impact_soon,
             )
         else:
             # 優先度2-3: 旧ロジック（月次LLM or events計算）
             ctx = self._fallback_context(
-                current_time, symbol,
-                upcoming_dicts, high_impact_soon,
+                current_time,
+                symbol,
+                upcoming_dicts,
+                high_impact_soon,
             )
 
         # ニュースLLMデータをコンテキストにマージ
         ctx = self._merge_news_into_context(
-            ctx, current_time, symbol,
+            ctx,
+            current_time,
+            symbol,
         )
         self._update_memory(ctx, current_time, symbol)
         return ctx
@@ -671,18 +877,14 @@ class BacktestFundamentalProvider:
             self.memory.last_event_date is not None
             and current_date > self.memory.last_event_date
         ):
-            days = (
-                current_date - self.memory.last_event_date
-            ).days
+            days = (current_date - self.memory.last_event_date).days
             self.memory.apply_daily_decay(days)
 
         # イベントバイアス更新（有意なイベントのみ）
-        if (
-            abs(ctx.direction_bias) > 0.05
-            and abs(ctx.surprise_score) > 0.05
-        ):
+        if abs(ctx.direction_bias) > 0.05 and abs(ctx.surprise_score) > 0.05:
             self.memory.update_event(
-                ctx.direction_bias, ctx.surprise_score,
+                ctx.direction_bias,
+                ctx.surprise_score,
             )
             self.memory.last_event_date = current_date
         elif self.memory.last_event_date is None:
@@ -691,10 +893,7 @@ class BacktestFundamentalProvider:
         # ニュースバイアス更新（日次、1日1回）
         sym_dict = self._news_llm_by_date.get(symbol, {})
         news = sym_dict.get(current_date)
-        if (
-            news is not None
-            and self.memory.last_news_date != current_date
-        ):
+        if news is not None and self.memory.last_news_date != current_date:
             # macro_bias_scoreを方向バイアスとして使用
             self.memory.update_news(
                 news.macro_bias_score,
@@ -723,9 +922,7 @@ class BacktestFundamentalProvider:
         if not self._events:
             return [], False
 
-        symbol_events = self._normalizer.filter_by_symbol(
-            self._events, symbol
-        )
+        symbol_events = self._normalizer.filter_by_symbol(self._events, symbol)
         upcoming = self._normalizer.get_upcoming_events(
             symbol_events, current_time, window_minutes=60
         )
@@ -739,8 +936,7 @@ class BacktestFundamentalProvider:
         ]
         high_impact_soon = any(
             ev.impact == ImpactLevel.HIGH
-            and 0 <= ev.minutes_until(current_time)
-            <= self._guard_minutes
+            and 0 <= ev.minutes_until(current_time) <= self._guard_minutes
             for ev in upcoming
         )
         return upcoming_dicts, high_impact_soon
@@ -782,9 +978,7 @@ class BacktestFundamentalProvider:
         # 各候補の影響度を計算
         active: list[tuple[EventLLMRecord, float]] = []
         for rec in candidates:
-            elapsed_h = (
-                current_time - rec.event_time
-            ).total_seconds() / 3600
+            elapsed_h = (current_time - rec.event_time).total_seconds() / 3600
             infl = compute_influence(
                 elapsed_h,
                 rec.convergence_hours,
@@ -810,9 +1004,7 @@ class BacktestFundamentalProvider:
         w_surprise = 0.0
         for rec, infl in active:
             w = infl * _IMPACT_WEIGHT.get(rec.impact, 0.3)
-            elapsed_s = (
-                current_time - rec.event_time
-            ).total_seconds()
+            elapsed_s = (current_time - rec.event_time).total_seconds()
             if elapsed_s >= lag_s:
                 # ラグ経過後: LLM分析結果を使用
                 w_bias += rec.direction_bias * w
@@ -823,12 +1015,8 @@ class BacktestFundamentalProvider:
         direction_bias = 0.0
         surprise_score = 0.0
         if total_w > 0:
-            direction_bias = max(
-                -1.0, min(1.0, w_bias / total_w)
-            )
-            surprise_score = max(
-                -1.0, min(1.0, w_surprise / total_w)
-            )
+            direction_bias = max(-1.0, min(1.0, w_bias / total_w))
+            surprise_score = max(-1.0, min(1.0, w_surprise / total_w))
 
         # --- ボラティリティ合成（通常イベントのmax） ---
         normal_vols = [
@@ -836,9 +1024,7 @@ class BacktestFundamentalProvider:
             for rec, infl in active
             if not rec.is_holiday
         ]
-        volatility_multiplier = (
-            max(normal_vols) if normal_vols else 1.0
-        )
+        volatility_multiplier = max(normal_vols) if normal_vols else 1.0
 
         # --- 流動性合成（休日イベントのmin） ---
         liquidity_factor = 1.0
@@ -847,22 +1033,16 @@ class BacktestFundamentalProvider:
             if rec.is_holiday:
                 is_holiday = True
                 # 減衰適用: 流動性は時間とともに正常化
-                liq = (
-                    rec.expected_volatility * infl
-                    + (1.0 - infl)
-                )
+                liq = rec.expected_volatility * infl + (1.0 - infl)
                 liquidity_factor = min(liquidity_factor, liq)
 
         # --- 注意度合成（全アクティブイベントのmax） ---
         event_caution_level = max(
-            rec.trade_caution_level
-            for rec, infl in active
+            rec.trade_caution_level for rec, infl in active
         )
 
         # --- 収束進捗（最も未収束なもの） ---
-        convergence_progress = min(
-            1.0 - infl for _, infl in active
-        )
+        convergence_progress = min(1.0 - infl for _, infl in active)
 
         # --- アクティブイベント数 ---
         active_event_count = len(active)
@@ -910,50 +1090,35 @@ class BacktestFundamentalProvider:
         if not self._events:
             return FundamentalContext(
                 macro_bias_score=llm_ctx["macro_bias_score"],
-                macro_bias_summary=llm_ctx[
-                    "macro_bias_summary"
-                ],
-                post_event_bias_score=llm_ctx[
-                    "post_event_bias_score"
-                ],
-                post_event_summary=llm_ctx[
-                    "post_event_summary"
-                ],
+                macro_bias_summary=llm_ctx["macro_bias_summary"],
+                post_event_bias_score=llm_ctx["post_event_bias_score"],
+                post_event_summary=llm_ctx["post_event_summary"],
                 sentiment_score=llm_ctx["sentiment_score"],
                 upcoming_events=upcoming_dicts,
                 has_high_impact_within_30min=high_impact_soon,
             )
 
         # シンボル関連イベントにフィルタリング
-        symbol_events = self._normalizer.filter_by_symbol(
-            self._events, symbol
-        )
+        symbol_events = self._normalizer.filter_by_symbol(self._events, symbol)
 
         # 24hマクロバイアス計算
         released_24h = self._get_released_events(
             symbol_events, current_time, hours=24
         )
-        macro_bias, macro_summary = (
-            self._estimate_bias_from_events(
-                released_24h, symbol
-            )
+        macro_bias, macro_summary = self._estimate_bias_from_events(
+            released_24h, symbol
         )
 
         # 4h指標後バイアス計算
         released_4h = self._get_released_events(
             symbol_events, current_time, hours=4
         )
-        post_bias, post_summary = (
-            self._estimate_bias_from_events(
-                released_4h, symbol
-            )
+        post_bias, post_summary = self._estimate_bias_from_events(
+            released_4h, symbol
         )
 
         # LLMコンテキスト優先
-        has_llm = (
-            symbol in self._llm_ts
-            and len(self._llm_ts[symbol]) > 0
-        )
+        has_llm = symbol in self._llm_ts and len(self._llm_ts[symbol]) > 0
         if has_llm:
             m_score = llm_ctx["macro_bias_score"]
             m_summary = llm_ctx["macro_bias_summary"]
@@ -983,9 +1148,7 @@ class BacktestFundamentalProvider:
     # プライベート: ユーティリティ
     # --------------------------------------------------
 
-    def _parse_event_llm_row(
-        self, row: dict
-    ) -> EventLLMRecord | None:
+    def _parse_event_llm_row(self, row: dict) -> EventLLMRecord | None:
         """CSV行をEventLLMRecordに変換
 
         Args:
@@ -1001,9 +1164,7 @@ class BacktestFundamentalProvider:
         try:
             event_time = datetime.fromisoformat(event_time_str)
             if event_time.tzinfo is None:
-                event_time = event_time.replace(
-                    tzinfo=timezone.utc
-                )
+                event_time = event_time.replace(tzinfo=timezone.utc)
         except ValueError:
             return None
 
@@ -1030,38 +1191,30 @@ class BacktestFundamentalProvider:
             event_name=event_name,
             impact=row.get("impact", "low").lower(),
             surprise_score=max(
-                -1.0, min(1.0, _f(row.get(
-                    "surprise_score", ""
-                )))
+                -1.0, min(1.0, _f(row.get("surprise_score", "")))
             ),
             direction_bias=max(
-                -1.0, min(1.0, _f(row.get(
-                    "direction_bias", ""
-                )))
+                -1.0, min(1.0, _f(row.get("direction_bias", "")))
             ),
             convergence_hours=max(
-                0.0, min(72.0, _f(row.get(
-                    "convergence_hours", ""
-                )))
+                0.0, min(72.0, _f(row.get("convergence_hours", "")))
             ),
             expected_volatility=max(
-                0.0, min(2.0, _f(row.get(
-                    "expected_volatility", ""
-                )))
+                0.0, min(2.0, _f(row.get("expected_volatility", "")))
             ),
             trade_caution_level=max(
-                0, min(2, _i(row.get(
-                    "trade_caution_level", ""
-                )))
+                0, min(2, _i(row.get("trade_caution_level", "")))
             ),
             is_holiday=self._parse_is_holiday(
-                row, event_name,
+                row,
+                event_name,
             ),
         )
 
     @staticmethod
     def _parse_is_holiday(
-        row: dict, event_name: str,
+        row: dict,
+        event_name: str,
     ) -> bool:
         """CSVの is_holiday カラムを読み取り
 
@@ -1078,7 +1231,9 @@ class BacktestFundamentalProvider:
         raw = row.get("is_holiday")
         if raw is not None and raw != "":
             return str(raw).strip().lower() in (
-                "true", "1", "yes",
+                "true",
+                "1",
+                "yes",
             )
         # フォールバック: 旧CSVとの後方互換
         return bool(_HOLIDAY_RE.search(event_name))
@@ -1106,10 +1261,7 @@ class BacktestFundamentalProvider:
         times = [ev.event_time for ev in events]
         lo = bisect.bisect_left(times, cutoff)
         hi = bisect.bisect_left(times, current_time)
-        return [
-            ev for ev in events[lo:hi]
-            if ev.actual is not None
-        ]
+        return [ev for ev in events[lo:hi] if ev.actual is not None]
 
     def _estimate_bias_from_events(
         self,
@@ -1166,9 +1318,7 @@ class BacktestFundamentalProvider:
 
             total_bias += bias
             direction = "↑" if bias > 0 else "↓"
-            event_summaries.append(
-                f"{ev.currency}/{ev.event_name}{direction}"
-            )
+            event_summaries.append(f"{ev.currency}/{ev.event_name}{direction}")
 
         clipped = max(-1.0, min(1.0, total_bias))
 
@@ -1181,9 +1331,7 @@ class BacktestFundamentalProvider:
 
         return clipped, summary
 
-    def _get_llm_context(
-        self, current_time: datetime, symbol: str
-    ) -> dict:
+    def _get_llm_context(self, current_time: datetime, symbol: str) -> dict:
         """指定時刻のLLMコンテキストをbisectで取得
 
         Args:
@@ -1224,9 +1372,7 @@ class BacktestFundamentalProvider:
         try:
             event_time = datetime.fromisoformat(event_time_str)
             if event_time.tzinfo is None:
-                event_time = event_time.replace(
-                    tzinfo=timezone.utc
-                )
+                event_time = event_time.replace(tzinfo=timezone.utc)
         except ValueError:
             return None
 
@@ -1245,19 +1391,23 @@ class BacktestFundamentalProvider:
             "low": ImpactLevel.LOW,
         }.get(impact_str, ImpactLevel.LOW)
 
-        def parse_float(val: str) -> float | None:
-            """文字列をfloatに変換"""
-            if not val or val.strip() == "":
+        def parse_float(val: any) -> float | None:
+            """値をfloatに変換（Parquet由来のfloat/NaN対応）"""
+            if val is None:
+                return None
+            if isinstance(val, (int, float)):
+                if math.isnan(val):
+                    return None
+                return float(val)
+            if not val or str(val).strip() == "":
                 return None
             try:
                 return float(val)
-            except ValueError:
+            except (ValueError, TypeError):
                 return None
 
         return EconomicEvent(
-            event_id=row.get(
-                "event_id", f"bt_{hash(event_name)}"
-            ),
+            event_id=row.get("event_id", f"bt_{hash(event_name)}"),
             event_time=event_time,
             currency=currency,
             event_name=event_name,
