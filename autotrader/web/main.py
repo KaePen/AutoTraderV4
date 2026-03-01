@@ -203,6 +203,13 @@ async def lifespan(app: FastAPI):
         app.state.engine_manager = None
         app.state.live_engine = None
 
+    # EventBus → WebSocketブリッジ登録
+    from autotrader.web.websocket.event_bridge import (
+        setup_event_bridge,
+    )
+    setup_event_bridge()
+    logger.info("EventBus → WebSocketブリッジ登録完了")
+
     yield
 
     # シャットダウン
