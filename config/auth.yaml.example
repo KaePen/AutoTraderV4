@@ -1,0 +1,20 @@
+# AutoTrader Web API 認証設定
+# このファイルを auth.yaml にコピーして使用してください。
+# auth.yaml は .gitignore に登録されており、リポジトリには含まれません。
+#
+# 初回起動時に auth.yaml が存在しない場合、
+# デフォルトユーザー (admin/admin) で自動作成されます。
+
+users:
+  # 管理者ユーザー
+  - username: admin
+    # パスワードはbcryptでハッシュ化されています
+    # 以下は "admin" のハッシュ例です
+    # 実運用では必ず変更してください
+    password_hash: "$2b$12$EXAMPLE_HASH_CHANGE_THIS"
+    role: admin
+
+  # 閲覧専用ユーザー（オプション）
+  # - username: viewer
+  #   password_hash: "$2b$12$EXAMPLE_HASH"
+  #   role: user

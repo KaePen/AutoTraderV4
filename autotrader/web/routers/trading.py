@@ -687,9 +687,11 @@ async def switch_account(
             get_settings_service,
         )
 
+        # パスワードは空文字列（MT5保存済みパスワードを使用）
+        # APIでのパスワード送信は廃止（セキュリティ向上）
         mt5_config = MT5Config(
             login=body.login,
-            password=body.password,
+            password="",
             server=body.server,
             terminal_path=os.environ.get(
                 "MT5_TERMINAL_PATH", ""

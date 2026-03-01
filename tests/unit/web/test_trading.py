@@ -8,12 +8,37 @@ import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
+from autotrader.web.auth.dependencies import (
+    get_current_user,
+    require_admin,
+)
 from autotrader.web.dependencies import (
     get_db,
     get_engine_manager,
     get_live_engine,
 )
 from autotrader.web.routers import trading
+
+
+# テスト用ダミーユーザー
+_TEST_ADMIN_USER = {
+    "username": "test_admin",
+    "role": "admin",
+}
+
+
+def _mock_get_current_user():
+    """テスト用 get_current_user モック"""
+    async def _inner():
+        return _TEST_ADMIN_USER
+    return _inner
+
+
+def _mock_require_admin():
+    """テスト用 require_admin モック"""
+    async def _inner():
+        return _TEST_ADMIN_USER
+    return _inner
 
 
 def _create_test_app_with_mgr(
@@ -32,6 +57,13 @@ def _create_test_app_with_mgr(
     )
     app.dependency_overrides[get_live_engine] = (
         lambda: mock_engine
+    )
+    # 認証モック
+    app.dependency_overrides[get_current_user] = (
+        _mock_get_current_user()
+    )
+    app.dependency_overrides[require_admin] = (
+        _mock_require_admin()
     )
     return app
 
