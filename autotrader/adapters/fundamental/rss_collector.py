@@ -30,22 +30,13 @@ except ImportError:
 # RSSフィードURL定義（通貨別）
 RSS_FEEDS: dict[str, list[str]] = {
     "general": [
-        "https://feeds.reuters.com/reuters/businessNews",
-        "https://www.ft.com/rss/home/us",
+        # FX専門ニュース
+        "https://www.forexlive.com/feed",
+        "https://www.fxstreet.com/rss",
+        # 一般金融ニュース
+        "https://feeds.bloomberg.com/markets/news.rss",
         "https://feeds.feedburner.com/reuters/businessNews",
-    ],
-    "USD": [
-        "https://feeds.reuters.com/reuters/USDollarRSS",
-        "https://feeds.feedburner.com/forex/usd",
-    ],
-    "JPY": [
-        "https://feeds.reuters.com/reuters/JPYenRSS",
-    ],
-    "EUR": [
-        "https://feeds.reuters.com/reuters/EurEuroRSS",
-    ],
-    "GBP": [
-        "https://feeds.reuters.com/reuters/GBPoundRSS",
+        "https://feeds.marketwatch.com/marketwatch/topstories/",
     ],
 }
 

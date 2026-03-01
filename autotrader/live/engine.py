@@ -173,7 +173,7 @@ class LiveTradingEngine:
         if config.fundamental_config.enabled:
             self._init_fundamental(config.fundamental_config)
         else:
-            # カレンダーのみ軽量初期化（DB不要・LLM不要・RSS不要）
+            # カレンダー＋RSS軽量初期化（DB不要・LLM不要）
             self._init_calendar_only()
 
     @property
@@ -2413,7 +2413,12 @@ class LiveTradingEngine:
             self._fundamental_collector = None
 
     def _init_calendar_only(self) -> None:
-        """カレンダーのみの軽量初期化（ファンダメンタル無効時）"""
+        """カレンダー＋RSSの軽量初期化（ファンダメンタル無効時）
+
+        MT5 MQL5サービス（CalendarExporter）のCSVからカレンダー取得。
+        ForexFactoryは休日データのフォールバックとして使用。
+        RSSニュースはDB/LLM不要で軽量ポーリング（タイトル+リンク表示用）。
+        """
         try:
             from autotrader.adapters.fundamental.collector import (
                 FundamentalDataCollector,
@@ -2422,18 +2427,42 @@ class LiveTradingEngine:
             self._fundamental_collector = FundamentalDataCollector(
                 session_factory=None,
                 fetch_interval_minutes=60,
-                use_mt5_calendar=False,
-                use_forex_factory=True,
-                use_ff_holidays=False,
+                use_mt5_calendar=True,
+                use_forex_factory=False,
+                use_ff_holidays=True,
             )
             logger.info(
                 "[Calendar] 軽量カレンダー初期化完了"
+                "（MT5 CSV + FF休日）"
             )
         except Exception as e:
             logger.error(
                 f"[Calendar] 軽量初期化失敗: {e}"
             )
             self._fundamental_collector = None
+
+        # RSS軽量ポーリング（DB・LLM不要）
+        try:
+            from autotrader.adapters.fundamental.rss_collector import (
+                RSSCollector,
+            )
+
+            currencies = [
+                self._active_symbol[:3],
+                self._active_symbol[3:6],
+            ]
+            self._rss_collector = RSSCollector(
+                currencies=currencies,
+                poll_interval=300,
+            )
+            logger.info(
+                "[RSS] 軽量RSSポーリング初期化完了"
+            )
+        except Exception as e:
+            logger.warning(
+                f"[RSS] RSS初期化スキップ: {e}"
+            )
+            self._rss_collector = None
 
     async def _start_fundamental_tasks(self) -> None:
         """ファンダメンタル収集タスクを起動"""
@@ -2462,7 +2491,7 @@ class LiveTradingEngine:
         """RSSニュース受信コールバック
 
         受信したNewsItemをシンボル別バッファに蓄積する。
-        バッファは _tick() 内でLLM分析に使用後クリアされる。
+        3日以上古いニュースは自動削除（メモリ軽量化）。
         WebSocket経由でダッシュボードにもリアルタイム配信する。
 
         Args:
@@ -2478,8 +2507,17 @@ class LiveTradingEngine:
             if symbol not in self._news_buffer:
                 self._news_buffer[symbol] = []
             self._news_buffer[symbol].append(news_item)
+            # 3日超の古いニュースを削除
+            _TTL_HOURS = 72
+            now = datetime.now(timezone.utc)
+            self._news_buffer[symbol] = [
+                n for n in self._news_buffer[symbol]
+                if (now - getattr(
+                    n, "published_at", now
+                )).total_seconds() < _TTL_HOURS * 3600
+            ]
             # バッファ上限（メモリリーク防止）
-            _MAX_BUFFER = 100
+            _MAX_BUFFER = 200
             if len(self._news_buffer[symbol]) > _MAX_BUFFER:
                 self._news_buffer[symbol] = (
                     self._news_buffer[symbol][-_MAX_BUFFER:]
