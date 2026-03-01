@@ -17,6 +17,9 @@ from autotrader.adapters.fundamental.schemas import (
     FundamentalContext,
 )
 from autotrader.live.engine import LiveTradingEngine
+from autotrader.live.fundamental_service import (
+    FundamentalService,
+)
 
 
 # ===== テスト用ダミーNewsItem =====
@@ -45,23 +48,29 @@ def _make_engine_stub() -> LiveTradingEngine:
     """テスト用のEngine stub を作成
 
     __init__ をバイパスし、テストに必要な属性のみセットする。
+    FundamentalServiceも同様にstub化する。
     """
     engine = object.__new__(LiveTradingEngine)
     engine._active_symbol = "USDJPY"
-    engine._news_buffer = []
-    engine._rss_collector = None
-    engine._news_analyzer = None
-    # 共有コレクター（デフォルト: なし＝自前作成）
-    engine._shared_fundamental_collector = None
-    engine._shared_rss_collector = None
-    engine._owns_collectors = True
-    # キーワードスコアラーのモック（score()の戻り値を設定）
+
+    # FundamentalServiceのstubを作成
+    fs = object.__new__(FundamentalService)
+    fs._news_buffer = []
+    fs._rss_collector = None
+    fs._news_analyzer = None
+    fs._shared_fundamental_collector = None
+    fs._shared_rss_collector = None
+    fs._owns_collectors = True
+    fs.symbol = "USDJPY"
+    # キーワードスコアラーのモック
     mock_scorer = MagicMock()
     mock_result = MagicMock()
     mock_result.headlines_used = 0
     mock_scorer.score.return_value = mock_result
-    engine._keyword_scorer = mock_scorer
-    engine._sentiment_store = MagicMock()
+    fs._keyword_scorer = mock_scorer
+    fs._sentiment_store = MagicMock()
+    engine._fundamental_svc = fs
+
     return engine
 
 

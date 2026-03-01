@@ -294,12 +294,13 @@ class TestSyncPositions:
             return_value=None
         )
 
+        svc = engine._position_sync_svc
         with (
             patch.object(
-                engine, "_close_ghost_db_records"
+                svc, "close_ghost_db_records"
             ) as mock_ghost,
             patch.object(
-                engine, "_restore_open_trades_from_db"
+                svc, "_restore_open_trades_from_db"
             ) as mock_restore,
         ):
             await engine._sync_positions()
@@ -322,18 +323,21 @@ class TestSyncPositions:
             return_value=[]
         )
 
+        svc = engine._position_sync_svc
         with (
             patch.object(
-                engine, "_close_ghost_db_records"
+                svc, "close_ghost_db_records"
             ) as mock_ghost,
             patch.object(
-                engine, "_restore_open_trades_from_db"
+                svc, "_restore_open_trades_from_db"
             ) as mock_restore,
         ):
             await engine._sync_positions()
 
         # ゴースト掃除は空セットで呼ばれる
-        mock_ghost.assert_called_once_with(set())
+        mock_ghost.assert_called_once_with(
+            set(), "USDJPY",
+        )
         # DB復元はスキップ（ポジション0件）
         mock_restore.assert_not_called()
 
@@ -362,22 +366,25 @@ class TestSyncPositions:
             return_value=[position]
         )
 
+        svc = engine._position_sync_svc
         with (
             patch.object(
-                engine, "_close_ghost_db_records"
+                svc, "close_ghost_db_records"
             ) as mock_ghost,
             patch.object(
-                engine, "_restore_open_trades_from_db"
+                svc, "_restore_open_trades_from_db"
             ) as mock_restore,
             patch.object(
-                engine, "_load_position_states",
+                svc, "_load_position_states",
                 return_value={},
             ),
         ):
             await engine._sync_positions()
 
         # ゴースト掃除はticketセットで呼ばれる
-        mock_ghost.assert_called_once_with({12345})
+        mock_ghost.assert_called_once_with(
+            {12345}, "USDJPY",
+        )
         # DB復元も呼ばれる
         mock_restore.assert_called_once_with([12345])
 
@@ -462,8 +469,8 @@ class TestCloseGhostDbRecords:
         self, engine: LiveTradingEngine
     ) -> None:
         """MT5 deal取得成功(SL)でexit_price等が復元される"""
-        engine._executor = MagicMock()
-        engine._executor.get_deal_by_position_id_async = (
+        mock_exec = MagicMock()
+        mock_exec.get_deal_by_position_id_async = (
             AsyncMock(return_value={
                 "price": 150.123,
                 "profit": -500.0,
@@ -471,12 +478,15 @@ class TestCloseGhostDbRecords:
                 "time": 1700000000,
             })
         )
+        engine._executor = mock_exec
+        engine._position_sync_svc._executor = mock_exec
 
+        svc = engine._position_sync_svc
         with patch.object(
-            engine, "_fetch_ghost_records",
+            svc, "_fetch_ghost_records",
             return_value=[(99999, "ghost-001")],
         ), patch.object(
-            engine, "_apply_ghost_updates",
+            svc, "_apply_ghost_updates",
         ) as mock_apply:
             await engine._close_ghost_db_records(set())
 
@@ -495,8 +505,8 @@ class TestCloseGhostDbRecords:
         self, engine: LiveTradingEngine
     ) -> None:
         """MT5 deal取得成功(手動reason=0)でMANUAL_CLOSE"""
-        engine._executor = MagicMock()
-        engine._executor.get_deal_by_position_id_async = (
+        mock_exec = MagicMock()
+        mock_exec.get_deal_by_position_id_async = (
             AsyncMock(return_value={
                 "price": 149.500,
                 "profit": 200.0,
@@ -504,12 +514,15 @@ class TestCloseGhostDbRecords:
                 "time": 1700000000,
             })
         )
+        engine._executor = mock_exec
+        engine._position_sync_svc._executor = mock_exec
 
+        svc = engine._position_sync_svc
         with patch.object(
-            engine, "_fetch_ghost_records",
+            svc, "_fetch_ghost_records",
             return_value=[(88888, "ghost-manual")],
         ), patch.object(
-            engine, "_apply_ghost_updates",
+            svc, "_apply_ghost_updates",
         ) as mock_apply:
             await engine._close_ghost_db_records(set())
 
@@ -523,8 +536,8 @@ class TestCloseGhostDbRecords:
         self, engine: LiveTradingEngine
     ) -> None:
         """MT5 deal取得成功(reason=6)でSTOP_OUT"""
-        engine._executor = MagicMock()
-        engine._executor.get_deal_by_position_id_async = (
+        mock_exec = MagicMock()
+        mock_exec.get_deal_by_position_id_async = (
             AsyncMock(return_value={
                 "price": 148.000,
                 "profit": -1000.0,
@@ -532,12 +545,15 @@ class TestCloseGhostDbRecords:
                 "time": 1700000000,
             })
         )
+        engine._executor = mock_exec
+        engine._position_sync_svc._executor = mock_exec
 
+        svc = engine._position_sync_svc
         with patch.object(
-            engine, "_fetch_ghost_records",
+            svc, "_fetch_ghost_records",
             return_value=[(77777, "ghost-so")],
         ), patch.object(
-            engine, "_apply_ghost_updates",
+            svc, "_apply_ghost_updates",
         ) as mock_apply:
             await engine._close_ghost_db_records(set())
 
@@ -549,16 +565,19 @@ class TestCloseGhostDbRecords:
         self, engine: LiveTradingEngine
     ) -> None:
         """deal取得失敗時はGHOST_CLEANUPにフォールバック"""
-        engine._executor = MagicMock()
-        engine._executor.get_deal_by_position_id_async = (
+        mock_exec = MagicMock()
+        mock_exec.get_deal_by_position_id_async = (
             AsyncMock(return_value=None)
         )
+        engine._executor = mock_exec
+        engine._position_sync_svc._executor = mock_exec
 
+        svc = engine._position_sync_svc
         with patch.object(
-            engine, "_fetch_ghost_records",
+            svc, "_fetch_ghost_records",
             return_value=[(99999, "ghost-001")],
         ), patch.object(
-            engine, "_apply_ghost_updates",
+            svc, "_apply_ghost_updates",
         ) as mock_apply:
             await engine._close_ghost_db_records(set())
 
@@ -573,17 +592,20 @@ class TestCloseGhostDbRecords:
         self, engine: LiveTradingEngine
     ) -> None:
         """MT5に存在するレコードは_fetch段階で除外される"""
-        engine._executor = MagicMock()
-        engine._executor.get_deal_by_position_id_async = (
+        mock_exec = MagicMock()
+        mock_exec.get_deal_by_position_id_async = (
             AsyncMock(return_value=None)
         )
+        engine._executor = mock_exec
+        engine._position_sync_svc._executor = mock_exec
 
+        svc = engine._position_sync_svc
         # _fetch_ghost_recordsはアクティブを除外済み
         with patch.object(
-            engine, "_fetch_ghost_records",
+            svc, "_fetch_ghost_records",
             return_value=[(99999, "ghost-001")],
         ), patch.object(
-            engine, "_apply_ghost_updates",
+            svc, "_apply_ghost_updates",
         ) as mock_apply:
             # ticket=12345はMT5に存在
             await engine._close_ghost_db_records({12345})
@@ -598,11 +620,12 @@ class TestCloseGhostDbRecords:
         self, engine: LiveTradingEngine
     ) -> None:
         """全レコードがMT5に存在する場合はapply不要"""
+        svc = engine._position_sync_svc
         with patch.object(
-            engine, "_fetch_ghost_records",
+            svc, "_fetch_ghost_records",
             return_value=[],
         ), patch.object(
-            engine, "_apply_ghost_updates",
+            svc, "_apply_ghost_updates",
         ) as mock_apply:
             await engine._close_ghost_db_records({12345})
 
@@ -613,8 +636,9 @@ class TestCloseGhostDbRecords:
         self, engine: LiveTradingEngine
     ) -> None:
         """DB接続エラーでも例外は伝播しない"""
+        svc = engine._position_sync_svc
         with patch.object(
-            engine, "_fetch_ghost_records",
+            svc, "_fetch_ghost_records",
             side_effect=Exception("DB接続失敗"),
         ):
             # 例外が伝播しないことを確認
