@@ -12,6 +12,116 @@ from autotrader.decision.unified.position_sizer import (
 )
 
 
+class TestLiquidityTP:
+    """流動性ゾーン連動TP機能のテスト"""
+
+    def setup_method(self) -> None:
+        """テストセットアップ"""
+        self.sizer = PositionSizer(
+            PositionSizerConfig(
+                liquidity_tp_enabled=True,
+                liquidity_tp_safety_margin=0.01,
+            )
+        )
+
+    def test_buy_with_liquidity_zone(self) -> None:
+        """買いで流動性ゾーンがある場合のTP計算"""
+        entry_price = 150.00
+        sl_pips = 20.0
+        buy_side_liquidity = 150.40  # 上の流動性ゾーン
+
+        tp = self.sizer.calculate_tp_with_liquidity(
+            direction=1,
+            entry_price=entry_price,
+            sl_pips=sl_pips,
+            buy_side_liquidity=buy_side_liquidity,
+            sell_side_liquidity=None,
+        )
+
+        # 流動性ゾーンまでの距離の99%
+        distance = buy_side_liquidity - entry_price
+        expected_tp = entry_price + distance * 0.99
+        assert abs(tp - expected_tp) < 0.01
+
+    def test_sell_with_liquidity_zone(self) -> None:
+        """売りで流動性ゾーンがある場合のTP計算"""
+        entry_price = 150.00
+        sl_pips = 20.0
+        sell_side_liquidity = 149.80  # 下の流動性ゾーン
+
+        tp = self.sizer.calculate_tp_with_liquidity(
+            direction=-1,
+            entry_price=entry_price,
+            sl_pips=sl_pips,
+            buy_side_liquidity=None,
+            sell_side_liquidity=sell_side_liquidity,
+        )
+
+        # 流動性ゾーンまでの距離の99%
+        distance = entry_price - sell_side_liquidity
+        expected_tp = entry_price - distance * 0.99
+        assert abs(tp - expected_tp) < 0.01
+
+    def test_no_liquidity_zone_uses_base_tp(self) -> None:
+        """流動性ゾーンがない場合は基本TPを使用"""
+        entry_price = 150.00
+        sl_pips = 20.0
+
+        tp = self.sizer.calculate_tp_with_liquidity(
+            direction=1,
+            entry_price=entry_price,
+            sl_pips=sl_pips,
+            buy_side_liquidity=None,
+            sell_side_liquidity=None,
+        )
+
+        # 基本TP（RR比1.5）
+        base_tp = entry_price + sl_pips * 1.5 * 0.01
+        assert abs(tp - base_tp) < 0.01
+
+    def test_liquidity_tp_disabled(self) -> None:
+        """流動性TP無効時は基本TPを使用"""
+        sizer = PositionSizer(
+            PositionSizerConfig(liquidity_tp_enabled=False)
+        )
+        entry_price = 150.00
+        sl_pips = 20.0
+        buy_side_liquidity = 150.50
+
+        tp = sizer.calculate_tp_with_liquidity(
+            direction=1,
+            entry_price=entry_price,
+            sl_pips=sl_pips,
+            buy_side_liquidity=buy_side_liquidity,
+            sell_side_liquidity=None,
+        )
+
+        # 基本TP
+        base_tp = entry_price + sl_pips * 1.5 * 0.01
+        assert abs(tp - base_tp) < 0.01
+
+    def test_liquidity_zone_out_of_range(self) -> None:
+        """流動性ゾーンが有効範囲外の場合は基本TPを使用"""
+        entry_price = 150.00
+        sl_pips = 20.0
+        # 遠すぎる流動性ゾーン（max_tp以上）
+        # max_tp = entry_price + (base_tp - entry_price) * 1.5
+        # base_tp = 150.3 → max_tp = 150.45
+        buy_side_liquidity = 151.00  # 150.45より遠い
+
+        tp = self.sizer.calculate_tp_with_liquidity(
+            direction=1,
+            entry_price=entry_price,
+            sl_pips=sl_pips,
+            buy_side_liquidity=buy_side_liquidity,
+            sell_side_liquidity=None,
+        )
+
+        # 範囲外なので基本TP
+        base_tp = entry_price + sl_pips * 1.5 * 0.01
+        assert abs(tp - base_tp) < 0.01
+
+
 class TestPositionSizer:
     """PositionSizerのテスト"""
 

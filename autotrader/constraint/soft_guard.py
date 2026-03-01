@@ -45,6 +45,7 @@ class SoftGuardConfig:
         volatility_penalty: ボラティリティペナルティ
         recent_loss_threshold: 連敗閾値
         recent_loss_penalty: 連敗ペナルティ
+        dynamic_spread_enabled: 動的スプレッド調整を有効化
     """
 
     spread_threshold_pips: float = 2.0
@@ -57,6 +58,7 @@ class SoftGuardConfig:
     volatility_penalty: float = 0.1
     recent_loss_threshold: int = 3
     recent_loss_penalty: float = 0.2
+    dynamic_spread_enabled: bool = True
 
 
 @dataclass(frozen=True)
@@ -78,6 +80,53 @@ class SoftGuardResult:
     checked_at: datetime = field(default_factory=datetime.now)
 
 
+class DynamicSpreadEstimator:
+    """動的スプレッド見積もりクラス
+
+    セッション・時間帯・ボラティリティ・イベント前フラグに応じて
+    スプレッドを動的に調整する。
+    """
+
+    # 低流動性時間帯（TOKYO早朝、UTC17-21時）
+    LOW_LIQUIDITY_HOURS: tuple[int, ...] = (17, 18, 19, 20, 21)
+
+    def estimate_spread(
+        self,
+        base_spread: float,
+        session: str,
+        hour: int,
+        atr_ratio: float,
+        is_pre_event: bool = False,
+    ) -> float:
+        """動的スプレッド見積もり
+
+        Args:
+            base_spread: 基本スプレッド（pips）
+            session: セッション名（TOKYO/LONDON/NEWYORK）
+            hour: UTC時刻
+            atr_ratio: ATR / ATR_MA（ボラティリティ比）
+            is_pre_event: イベント前フラグ
+
+        Returns:
+            float: 調整後スプレッド（pips）
+        """
+        adjusted = base_spread
+
+        # 低流動性時間帯（TOKYO早朝）
+        if session == "TOKYO" and hour in self.LOW_LIQUIDITY_HOURS:
+            adjusted *= 1.5
+
+        # 高ボラティリティ時
+        if atr_ratio > 1.5:
+            adjusted *= min(atr_ratio, 2.0)
+
+        # イベント前
+        if is_pre_event:
+            adjusted *= 2.0
+
+        return adjusted
+
+
 class SoftGuard:
     """ソフトガードクラス
 
@@ -89,6 +138,7 @@ class SoftGuard:
 
     def __init__(self, config: SoftGuardConfig | None = None) -> None:
         self.config = config or SoftGuardConfig()
+        self.spread_estimator = DynamicSpreadEstimator()
 
     def check_spread(self, context: dict) -> tuple[float, str | None]:
         """スプレッドチェック
@@ -99,7 +149,25 @@ class SoftGuard:
         Returns:
             tuple[float, str | None]: (ペナルティ, 理由)
         """
-        spread_pips = context.get("spread_pips", 0.0)
+        base_spread = context.get("spread_pips", 0.0)
+
+        # 動的スプレッド調整
+        if self.config.dynamic_spread_enabled:
+            current_time: datetime | None = context.get("current_time")
+            session = context.get("session", "UNKNOWN")
+            hour = current_time.hour if current_time else 0
+            atr_ratio = context.get("atr_ratio", 1.0)
+            is_pre_event = context.get("is_pre_event", False)
+
+            spread_pips = self.spread_estimator.estimate_spread(
+                base_spread=base_spread,
+                session=session,
+                hour=hour,
+                atr_ratio=atr_ratio,
+                is_pre_event=is_pre_event,
+            )
+        else:
+            spread_pips = base_spread
 
         if spread_pips > self.config.spread_threshold_pips:
             excess = spread_pips - self.config.spread_threshold_pips
