@@ -292,12 +292,15 @@ class MT5CalendarClient:
     def _parse_utc_time(time_str: str) -> datetime | None:
         """UTC時刻文字列をdatetimeに変換
 
+        CalendarExporter.mq5 がブローカーサーバー時刻→UTC変換
+        済みで出力するため、Z付き文字列はそのままUTCとして扱う。
+
         対応フォーマット:
         - 2025-01-15T08:30:00Z (ISO 8601)
         - 2025-01-15 08:30:00
 
         Args:
-            time_str: 時刻文字列
+            time_str: UTC時刻文字列
 
         Returns:
             datetime | None: パース済み（失敗はNone）

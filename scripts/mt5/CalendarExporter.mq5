@@ -55,12 +55,25 @@ string FormatValue(long raw_value)
   }
 
 //+------------------------------------------------------------------+
-//| datetime を UTC ISO形式文字列に変換                               |
+//| ブローカーサーバー時刻とGMTの差分（秒）を取得                    |
+//| ※TimeCurrent()はサーバー時刻、TimeGMT()はUTC                    |
+//+------------------------------------------------------------------+
+int GetBrokerGMTOffsetSec()
+  {
+   return (int)(TimeCurrent() - TimeGMT());
+  }
+
+//+------------------------------------------------------------------+
+//| datetime を真のUTC ISO形式文字列に変換                           |
+//| MT5カレンダーの時刻はブローカーサーバー時刻のため                |
+//| GMTオフセットを減算して真のUTCに変換する                          |
 //+------------------------------------------------------------------+
 string DatetimeToUTCString(datetime dt)
   {
+   // ブローカーサーバー時刻 → UTC に変換
+   datetime utc_dt = dt - GetBrokerGMTOffsetSec();
    MqlDateTime mdt;
-   TimeToStruct(dt, mdt);
+   TimeToStruct(utc_dt, mdt);
    return StringFormat("%04d-%02d-%02dT%02d:%02d:%02dZ",
                        mdt.year, mdt.mon, mdt.day,
                        mdt.hour, mdt.min, mdt.sec);
@@ -86,9 +99,9 @@ string EscapeCSV(string text)
 //+------------------------------------------------------------------+
 bool ExportCalendar()
   {
-   // 取得範囲（UTC）
-   datetime from_time = TimeGMT() - LookbackDays * 86400;
-   datetime to_time   = TimeGMT() + ForwardDays * 86400;
+   // 取得範囲（サーバー時刻 — CalendarValueHistoryはサーバー時刻を期待）
+   datetime from_time = TimeCurrent() - LookbackDays * 86400;
+   datetime to_time   = TimeCurrent() + ForwardDays * 86400;
 
    // カレンダー値を取得
    MqlCalendarValue values[];
