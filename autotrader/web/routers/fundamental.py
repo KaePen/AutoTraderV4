@@ -88,7 +88,12 @@ async def get_fundamental_news(
     Returns:
         ApiResponse[FundamentalNewsResponse]: ニュース一覧
     """
-    target_engine = _get_engine_for_symbol(engine, mgr, symbol)
+    # ニュースはグローバルバッファ（コレクター所有エンジン）に蓄積
+    # シンボル別フィルタは get_news_for_symbol() で実行
+    if mgr and hasattr(mgr, "engines") and mgr.engines:
+        target_engine = next(iter(mgr.engines.values()))
+    else:
+        target_engine = engine
 
     items: list[NewsItemResponse] = []
     if target_engine is not None:
