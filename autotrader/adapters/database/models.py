@@ -2,19 +2,18 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from typing import Any
 
 from sqlalchemy import (
+    Boolean,
     Column,
+    DateTime,
+    Float,
+    Index,
     Integer,
     String,
-    Float,
-    DateTime,
-    Boolean,
     Text,
-    JSON,
-    Index,
 )
 from sqlalchemy.orm import DeclarativeBase
 
@@ -82,45 +81,6 @@ class TradeRecord(Base):
         }
 
 
-class AuditLog(Base):
-    """監査ログテーブル
-
-    システム操作の監査ログを記録。
-    """
-
-    __tablename__ = "audit_logs"
-
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    event_type = Column(String(50), nullable=False, index=True)
-    entity_type = Column(String(50), nullable=True)
-    entity_id = Column(String(50), nullable=True)
-    before_state = Column(JSON, nullable=True)
-    after_state = Column(JSON, nullable=True)
-    reason = Column(Text, nullable=True)
-    user = Column(String(50), default="system")
-    timestamp = Column(
-        DateTime(timezone=True),
-        default=lambda: datetime.now(timezone.utc),
-        nullable=False,
-    )
-
-    __table_args__ = (
-        Index("ix_audit_event_time", "event_type", "timestamp"),
-    )
-
-    def to_dict(self) -> dict[str, Any]:
-        """辞書に変換"""
-        return {
-            "id": self.id,
-            "event_type": self.event_type,
-            "entity_type": self.entity_type,
-            "entity_id": self.entity_id,
-            "reason": self.reason,
-            "user": self.user,
-            "timestamp": self.timestamp.isoformat() if self.timestamp else None,
-        }
-
-
 class MarketMemoryRecord(Base):
     """市場記憶テーブル
 
@@ -146,7 +106,7 @@ class MarketMemoryRecord(Base):
     )
     created_at = Column(
         DateTime(timezone=True),
-        default=lambda: datetime.now(timezone.utc),
+        default=lambda: datetime.now(UTC),
         nullable=False,
     )
     llm_reasoning = Column(Text, nullable=True)
@@ -239,7 +199,7 @@ class PositionStateRecord(LocalBase):
 
     updated_at = Column(
         DateTime(timezone=True),
-        default=lambda: datetime.now(timezone.utc),
-        onupdate=lambda: datetime.now(timezone.utc),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
         nullable=False,
     )
