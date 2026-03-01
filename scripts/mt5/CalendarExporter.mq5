@@ -99,9 +99,16 @@ string EscapeCSV(string text)
 //+------------------------------------------------------------------+
 bool ExportCalendar()
   {
+   // サーバー時刻を取得（Service では TimeCurrent() が古い場合がある）
+   datetime now = TimeCurrent();
+   // TimeCurrent() が古すぎる場合は TimeGMT()+オフセット で代替
+   datetime gmt_now = TimeGMT();
+   if(gmt_now > 0 && (now == 0 || MathAbs(now - gmt_now) > 86400))
+      now = gmt_now + GetBrokerGMTOffsetSec();
+
    // 取得範囲（サーバー時刻 — CalendarValueHistoryはサーバー時刻を期待）
-   datetime from_time = TimeCurrent() - LookbackDays * 86400;
-   datetime to_time   = TimeCurrent() + ForwardDays * 86400;
+   datetime from_time = now - LookbackDays * 86400;
+   datetime to_time   = now + ForwardDays * 86400;
 
    // カレンダー値を取得
    MqlCalendarValue values[];
@@ -190,6 +197,9 @@ bool ExportCalendar()
 int SecondsToNextHighEvent()
   {
    datetime now = TimeCurrent();
+   datetime gmt_now = TimeGMT();
+   if(gmt_now > 0 && (now == 0 || MathAbs(now - gmt_now) > 86400))
+      now = gmt_now + GetBrokerGMTOffsetSec();
    datetime from = now - 120; // 過去2分も確認（発表直後キャッチ）
    datetime to = now + 3600;  // 1時間先まで確認
    MqlCalendarValue values[];
