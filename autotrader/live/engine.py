@@ -170,7 +170,7 @@ class LiveTradingEngine:
         # RSSニュース関連
         self._rss_collector = None
         self._news_analyzer = None
-        self._news_buffer: dict[str, list] = {}
+        self._news_buffer: list = []
         # キーワードセンチメント分析・永続化（常時有効）
         from autotrader.adapters.fundamental.keyword_sentiment import (
             KeywordSentimentScorer,
@@ -648,8 +648,8 @@ class LiveTradingEngine:
             fundamental_ctx is not None
             and self._news_analyzer is not None
         ):
-            news_items = self._news_buffer.get(
-                self._active_symbol, []
+            news_items = self.get_news_for_symbol(
+                self._active_symbol
             )
             if news_items:
                 sentiment = await self._news_analyzer.analyze(
@@ -677,8 +677,14 @@ class LiveTradingEngine:
                         ],
                     ),
                 )
-                # 分析済みバッファをクリア
-                self._news_buffer[self._active_symbol] = []
+                # active_symbolの関連ニュースのみ除去
+                base = self._active_symbol[:3].upper()
+                quote = self._active_symbol[3:6].upper()
+                self._news_buffer = [
+                    n for n in self._news_buffer
+                    if base not in n.currencies
+                    and quote not in n.currencies
+                ]
             else:
                 # バッファ空でもキャッシュから取得
                 sentiment = (
@@ -2465,13 +2471,8 @@ class LiveTradingEngine:
                     NewsLLMAnalyzer,
                 )
 
-                # シンボルから通貨コードを抽出
-                currencies = [
-                    self._active_symbol[:3],
-                    self._active_symbol[3:6],
-                ]
+                # 全通貨対応の単一インスタンス
                 self._rss_collector = RSSCollector(
-                    currencies=currencies,
                     poll_interval=(
                         cfg.rss_poll_interval_minutes * 60
                     ),
@@ -2529,12 +2530,8 @@ class LiveTradingEngine:
                 RSSCollector,
             )
 
-            currencies = [
-                self._active_symbol[:3],
-                self._active_symbol[3:6],
-            ]
+            # 全通貨対応の単一インスタンス
             self._rss_collector = RSSCollector(
-                currencies=currencies,
                 poll_interval=300,
             )
             logger.info(
@@ -2569,16 +2566,47 @@ class LiveTradingEngine:
             await self._rss_collector.stop()
         self._news_buffer.clear()
 
+    def get_news_for_symbol(
+        self, symbol: str, limit: int = 50,
+    ) -> list:
+        """指定シンボルに関連するニュースをフィルタリング
+
+        Args:
+            symbol: 通貨ペアシンボル（例: USDJPY）
+            limit: 最大取得件数
+
+        Returns:
+            list: フィルタ済みニュースアイテム
+        """
+        base = symbol[:3].upper()
+        quote = symbol[3:6].upper()
+        filtered = [
+            n for n in self._news_buffer
+            if base in n.currencies
+            or quote in n.currencies
+        ]
+        filtered.sort(
+            key=lambda n: getattr(
+                n, "published_at", datetime.min
+            ),
+            reverse=True,
+        )
+        return filtered[:limit]
+
     async def _on_rss_news(self, news_item) -> None:
         """RSSニュース受信コールバック
 
-        受信したNewsItemをシンボル別バッファに蓄積する。
+        受信したNewsItemをグローバルバッファに蓄積する。
         3日以上古いニュースは自動削除（メモリ軽量化）。
         WebSocket経由でダッシュボードにもリアルタイム配信する。
 
         Args:
             news_item: 受信したNewsItem
         """
+        # 全ニュースをグローバルバッファに追加
+        self._news_buffer.append(news_item)
+
+        # active_symbol 関連のキーワードセンチメント分析・永続化
         symbol = self._active_symbol
         base = symbol[:3].upper()
         quote = symbol[3:6].upper()
@@ -2586,13 +2614,11 @@ class LiveTradingEngine:
             base in news_item.currencies
             or quote in news_item.currencies
         ):
-            if symbol not in self._news_buffer:
-                self._news_buffer[symbol] = []
-            self._news_buffer[symbol].append(news_item)
-            # キーワードセンチメント分析・永続化
             headlines = [
                 n.title
-                for n in self._news_buffer[symbol]
+                for n in self._news_buffer
+                if base in n.currencies
+                or quote in n.currencies
             ]
             if headlines:
                 from autotrader.adapters.fundamental.sentiment_store import (
@@ -2618,22 +2644,28 @@ class LiveTradingEngine:
                     self._sentiment_store.save(
                         symbol, record,
                     )
-            # 3日超の古いニュースを削除
-            _TTL_HOURS = 72
-            now = datetime.now(timezone.utc)
-            self._news_buffer[symbol] = [
-                n for n in self._news_buffer[symbol]
-                if (now - getattr(
-                    n, "published_at", now
-                )).total_seconds() < _TTL_HOURS * 3600
-            ]
-            # バッファ上限（メモリリーク防止）
-            _MAX_BUFFER = 200
-            if len(self._news_buffer[symbol]) > _MAX_BUFFER:
-                self._news_buffer[symbol] = (
-                    self._news_buffer[symbol][-_MAX_BUFFER:]
-                )
-            # EventBus経由でダッシュボードにリアルタイム配信
+
+        # 3日超の古いニュースを削除
+        _TTL_HOURS = 72
+        now = datetime.now(timezone.utc)
+        self._news_buffer = [
+            n for n in self._news_buffer
+            if (now - getattr(
+                n, "published_at", now
+            )).total_seconds() < _TTL_HOURS * 3600
+        ]
+        # バッファ上限（メモリリーク防止）
+        _MAX_BUFFER = 500
+        if len(self._news_buffer) > _MAX_BUFFER:
+            self._news_buffer = (
+                self._news_buffer[-_MAX_BUFFER:]
+            )
+        # EventBus経由でダッシュボードにリアルタイム配信
+        # （active_symbol 関連のみ配信）
+        if (
+            base in news_item.currencies
+            or quote in news_item.currencies
+        ):
             event_bus.publish_nowait("news.received", {
                 "news_id": getattr(
                     news_item, "news_id", ""

@@ -51,24 +51,26 @@ class RSSCollector:
     新着ニュースをコールバック経由で通知する。
 
     Args:
-        currencies: 対象通貨コードリスト
+        currencies: 対象通貨コードリスト（省略時は全通貨）
         poll_interval: ポーリング間隔（秒）。デフォルト300秒
     """
 
     def __init__(
         self,
-        currencies: list[str],
+        currencies: list[str] | None = None,
         poll_interval: int = 300,
         article_fetcher: object | None = None,
     ) -> None:
         """初期化
 
         Args:
-            currencies: 対象通貨コードリスト
+            currencies: 対象通貨コードリスト（省略時は全通貨）
             poll_interval: ポーリング間隔（秒）
             article_fetcher: ArticleFetcher インスタンス（任意）。
                 指定時は新着ニュースの本文を自動取得する。
         """
+        if currencies is None:
+            currencies = list(CURRENCY_KEYWORDS.keys())
         self._currencies = [c.upper() for c in currencies]
         self._poll_interval = poll_interval
         self._article_fetcher = article_fetcher

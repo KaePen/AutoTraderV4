@@ -92,14 +92,12 @@ async def get_fundamental_news(
 
     items: list[NewsItemResponse] = []
     if target_engine is not None:
-        news_buffer = getattr(target_engine, "_news_buffer", {})
-        raw_items = news_buffer.get(symbol, [])
-        # 時系列降順（最新順）
-        sorted_items = sorted(
-            raw_items,
-            key=lambda n: getattr(n, "published_at", datetime.min),
-            reverse=True,
-        )[:limit]
+        if hasattr(target_engine, "get_news_for_symbol"):
+            sorted_items = target_engine.get_news_for_symbol(
+                symbol, limit
+            )
+        else:
+            sorted_items = []
         for n in sorted_items:
             items.append(
                 NewsItemResponse(

@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -48,9 +48,16 @@ def _make_engine_stub() -> LiveTradingEngine:
     """
     engine = object.__new__(LiveTradingEngine)
     engine._active_symbol = "USDJPY"
-    engine._news_buffer = {}
+    engine._news_buffer = []
     engine._rss_collector = None
     engine._news_analyzer = None
+    # キーワードスコアラーのモック（score()の戻り値を設定）
+    mock_scorer = MagicMock()
+    mock_result = MagicMock()
+    mock_result.headlines_used = 0
+    mock_scorer.score.return_value = mock_result
+    engine._keyword_scorer = mock_scorer
+    engine._sentiment_store = MagicMock()
     return engine
 
 
@@ -126,11 +133,12 @@ class TestOnRssNews:
         asyncio.get_event_loop().run_until_complete(
             engine._on_rss_news(item)
         )
-        assert len(engine._news_buffer["USDJPY"]) == 1
-        assert engine._news_buffer["USDJPY"][0] is item
+        # グローバルバッファに蓄積される
+        assert len(engine._news_buffer) == 1
+        assert engine._news_buffer[0] is item
 
-    def test_ignores_unrelated_currency(self) -> None:
-        """無関係通貨のニュースはバッファに入らない"""
+    def test_buffers_all_currencies(self) -> None:
+        """全通貨のニュースがグローバルバッファに蓄積される"""
         engine = _make_engine_stub()
         item = _FakeNewsItem(
             news_id="2",
@@ -140,14 +148,37 @@ class TestOnRssNews:
         asyncio.get_event_loop().run_until_complete(
             engine._on_rss_news(item)
         )
-        assert "USDJPY" not in engine._news_buffer
+        # 無関係通貨もグローバルバッファに蓄積される
+        assert len(engine._news_buffer) == 1
+
+    def test_get_news_for_symbol_filters(self) -> None:
+        """get_news_for_symbol が正しくフィルタする"""
+        engine = _make_engine_stub()
+        usd_item = _FakeNewsItem(
+            news_id="1",
+            title="Fed rate",
+            currencies=["USD"],
+        )
+        eur_item = _FakeNewsItem(
+            news_id="2",
+            title="ECB decision",
+            currencies=["EUR"],
+        )
+        engine._news_buffer = [usd_item, eur_item]
+        # USDJPYでフィルタ → USD関連のみ
+        result = engine.get_news_for_symbol("USDJPY")
+        assert len(result) == 1
+        assert result[0] is usd_item
+        # EURUSDでフィルタ → 両方含まれる
+        result = engine.get_news_for_symbol("EURUSD")
+        assert len(result) == 2
 
     def test_buffer_limit(self) -> None:
-        """バッファが100件上限を超えない"""
+        """バッファが500件上限を超えない"""
         engine = _make_engine_stub()
 
         async def _fill_buffer():
-            for i in range(120):
+            for i in range(550):
                 item = _FakeNewsItem(
                     news_id=str(i),
                     title=f"News {i}",
@@ -158,11 +189,11 @@ class TestOnRssNews:
         asyncio.get_event_loop().run_until_complete(
             _fill_buffer()
         )
-        assert len(engine._news_buffer["USDJPY"]) == 100
-        # 最新の100件が保持される（末尾がID 119）
+        assert len(engine._news_buffer) == 500
+        # 最新の500件が保持される（末尾がID 549）
         assert (
-            engine._news_buffer["USDJPY"][-1].news_id
-            == "119"
+            engine._news_buffer[-1].news_id
+            == "549"
         )
 
 
@@ -278,7 +309,6 @@ class TestInitFundamentalRss:
             engine._init_fundamental(cfg)
 
         mock_rss_cls.assert_called_once_with(
-            currencies=["USD", "JPY"],
             poll_interval=600,  # 10分 * 60秒
         )
         mock_llm_cls.assert_called_once_with(
