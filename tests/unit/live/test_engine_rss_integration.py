@@ -9,7 +9,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -51,6 +51,10 @@ def _make_engine_stub() -> LiveTradingEngine:
     engine._news_buffer = []
     engine._rss_collector = None
     engine._news_analyzer = None
+    # 共有コレクター（デフォルト: なし＝自前作成）
+    engine._shared_fundamental_collector = None
+    engine._shared_rss_collector = None
+    engine._owns_collectors = True
     # キーワードスコアラーのモック（score()の戻り値を設定）
     mock_scorer = MagicMock()
     mock_result = MagicMock()
@@ -316,3 +320,129 @@ class TestInitFundamentalRss:
         )
         assert engine._rss_collector is not None
         assert engine._news_analyzer is not None
+
+
+# ===== 共有コレクター起動/停止テスト =====
+
+
+class TestSharedCollectorStartStop:
+    """共有コレクター使用時の起動/停止スキップテスト"""
+
+    @pytest.mark.asyncio
+    async def test_owns_collectors_trueで起動する(
+        self,
+    ) -> None:
+        """_owns_collectors=Trueならコレクターを起動"""
+        engine = _make_engine_stub()
+        mock_fc = AsyncMock()
+        mock_rss = AsyncMock()
+        engine._fundamental_collector = mock_fc
+        engine._rss_collector = mock_rss
+
+        await engine._start_fundamental_tasks()
+
+        mock_fc.start.assert_called_once()
+        mock_rss.start.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_owns_collectors_falseで起動スキップ(
+        self,
+    ) -> None:
+        """_owns_collectors=Falseなら起動しない"""
+        engine = _make_engine_stub()
+        engine._owns_collectors = False
+        mock_fc = AsyncMock()
+        mock_rss = AsyncMock()
+        engine._fundamental_collector = mock_fc
+        engine._rss_collector = mock_rss
+
+        await engine._start_fundamental_tasks()
+
+        mock_fc.start.assert_not_called()
+        mock_rss.start.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_owns_collectors_trueで停止する(
+        self,
+    ) -> None:
+        """_owns_collectors=Trueならコレクターを停止"""
+        engine = _make_engine_stub()
+        mock_fc = AsyncMock()
+        mock_rss = AsyncMock()
+        engine._fundamental_collector = mock_fc
+        engine._rss_collector = mock_rss
+
+        await engine._stop_fundamental_tasks()
+
+        mock_fc.stop.assert_called_once()
+        mock_rss.stop.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_owns_collectors_falseで停止スキップ(
+        self,
+    ) -> None:
+        """_owns_collectors=Falseなら停止しない"""
+        engine = _make_engine_stub()
+        engine._owns_collectors = False
+        mock_fc = AsyncMock()
+        mock_rss = AsyncMock()
+        engine._fundamental_collector = mock_fc
+        engine._rss_collector = mock_rss
+
+        await engine._stop_fundamental_tasks()
+
+        mock_fc.stop.assert_not_called()
+        mock_rss.stop.assert_not_called()
+        # バッファはクリアされる
+        assert engine._news_buffer == []
+
+    def test_shared_collector使用時はコレクター再作成しない(
+        self,
+    ) -> None:
+        """共有コレクター設定時は新規作成をスキップ"""
+        engine = _make_engine_stub()
+        engine._fundamental_memory = None
+        engine._fundamental_collector = None
+        engine._morning_update_done_date = None
+        mock_shared_fc = MagicMock()
+        engine._shared_fundamental_collector = (
+            mock_shared_fc
+        )
+
+        from autotrader.live.config import FundamentalConfig
+
+        cfg = FundamentalConfig(
+            enabled=True,
+            use_rss_news=False,
+        )
+
+        import builtins
+        _real_import = builtins.__import__
+
+        _mock_modules = {
+            "autotrader.adapters.fundamental.memory",
+            "autotrader.adapters.fundamental.collector",
+            "autotrader.adapters.fundamental"
+            ".deterministic_event_analyzer",
+            "autotrader.adapters.database.connection",
+            "autotrader.adapters.database",
+        }
+
+        def _fake_import(name, *args, **kwargs):
+            if name in _mock_modules:
+                mod = MagicMock()
+                mod.get_session = lambda: None
+                return mod
+            return _real_import(name, *args, **kwargs)
+
+        with patch(
+            "builtins.__import__",
+            side_effect=_fake_import,
+        ):
+            engine._init_fundamental(cfg)
+
+        # 共有コレクターがそのまま使われる
+        assert (
+            engine._fundamental_collector
+            is mock_shared_fc
+        )

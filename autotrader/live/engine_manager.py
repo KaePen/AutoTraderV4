@@ -45,6 +45,9 @@ class EngineManager:
         self._conn = MT5ConnectionManager(mt5_config)
         self._data_provider = MT5DataProvider(self._conn)
         self._engines: dict[str, LiveTradingEngine] = {}
+        # 共有コレクター（最初のエンジン起動時に初期化）
+        self._shared_fundamental_collector = None
+        self._shared_rss_collector = None
 
     @property
     def connected(self) -> bool:
@@ -102,10 +105,38 @@ class EngineManager:
             )
             return self._engines[symbol]
 
+        # 最初のエンジンからコレクターを取得（共有用）
+        if self._engines:
+            first_engine = next(
+                iter(self._engines.values())
+            )
+            if (
+                self._shared_fundamental_collector is None
+                and first_engine._fundamental_collector
+                is not None
+            ):
+                self._shared_fundamental_collector = (
+                    first_engine._fundamental_collector
+                )
+            if (
+                self._shared_rss_collector is None
+                and first_engine._rss_collector
+                is not None
+            ):
+                self._shared_rss_collector = (
+                    first_engine._rss_collector
+                )
+
         engine = LiveTradingEngine(
             config=config,
             shared_conn=self._conn,
             shared_data_provider=self._data_provider,
+            shared_fundamental_collector=(
+                self._shared_fundamental_collector
+            ),
+            shared_rss_collector=(
+                self._shared_rss_collector
+            ),
         )
         self._engines[symbol] = engine
         logger.info("エンジン追加: %s", symbol)
@@ -160,6 +191,9 @@ class EngineManager:
             if engine.running:
                 await engine.stop()
                 logger.info("エンジン停止: %s", symbol)
+        # 共有コレクター参照をクリア
+        self._shared_fundamental_collector = None
+        self._shared_rss_collector = None
 
     @property
     def all_cached_positions(self) -> list[dict]:

@@ -8,6 +8,7 @@ import pytest
 
 from autotrader.adapters.mt5.config import MT5Config
 from autotrader.live.config import LiveTradingConfig
+from autotrader.live.engine import LiveTradingEngine
 from autotrader.live.engine_manager import EngineManager
 
 
@@ -313,3 +314,109 @@ class TestAggregation:
                 {"trade_id": "t1", "ticket": 1}
             ]
             assert len(manager.trade_history) == 1
+
+
+class TestSharedCollectors:
+    """共有コレクターテスト"""
+
+    def test_初期状態_コレクターなし(
+        self, manager: EngineManager,
+    ) -> None:
+        """初期状態で共有コレクターがNone"""
+        assert (
+            manager._shared_fundamental_collector is None
+        )
+        assert manager._shared_rss_collector is None
+
+    @pytest.mark.asyncio
+    async def test_最初のエンジンはコレクター所有(
+        self,
+        manager: EngineManager,
+        usdjpy_config: LiveTradingConfig,
+    ) -> None:
+        """最初のエンジンは_owns_collectors=True"""
+        with patch.object(
+            manager, "_conn", MagicMock(connected=False)
+        ):
+            engine = await manager.add_symbol(
+                usdjpy_config
+            )
+            assert engine._owns_collectors is True
+
+    @pytest.mark.asyncio
+    async def test_2番目のエンジンは共有コレクター使用(
+        self,
+        manager: EngineManager,
+        usdjpy_config: LiveTradingConfig,
+        eurusd_config: LiveTradingConfig,
+    ) -> None:
+        """2番目のエンジンは共有コレクターを受け取る"""
+        with patch.object(
+            manager, "_conn", MagicMock(connected=False)
+        ):
+            e1 = await manager.add_symbol(usdjpy_config)
+            # 最初のエンジンにモックコレクターをセット
+            mock_fc = MagicMock()
+            mock_rss = MagicMock()
+            e1._fundamental_collector = mock_fc
+            e1._rss_collector = mock_rss
+
+            e2 = await manager.add_symbol(eurusd_config)
+            # 2番目は共有コレクターを使用
+            assert e2._owns_collectors is False
+            assert (
+                e2._shared_fundamental_collector is mock_fc
+            )
+            assert (
+                e2._shared_rss_collector is mock_rss
+            )
+
+    @pytest.mark.asyncio
+    async def test_コレクター共有でインスタンス同一(
+        self,
+        manager: EngineManager,
+        usdjpy_config: LiveTradingConfig,
+        eurusd_config: LiveTradingConfig,
+    ) -> None:
+        """共有コレクターは同一インスタンスを参照"""
+        with patch.object(
+            manager, "_conn", MagicMock(connected=False)
+        ):
+            e1 = await manager.add_symbol(usdjpy_config)
+            mock_fc = MagicMock()
+            mock_rss = MagicMock()
+            e1._fundamental_collector = mock_fc
+            e1._rss_collector = mock_rss
+
+            e2 = await manager.add_symbol(eurusd_config)
+            # _init_fundamental/_init_calendar_only で
+            # 共有コレクターが代入されている
+            assert (
+                e2._fundamental_collector is mock_fc
+            )
+
+    @pytest.mark.asyncio
+    async def test_stop_all_コレクター参照クリア(
+        self,
+        manager: EngineManager,
+        usdjpy_config: LiveTradingConfig,
+    ) -> None:
+        """stop_all後に共有コレクター参照がクリア"""
+        with patch.object(
+            manager, "_conn", MagicMock(connected=False)
+        ):
+            await manager.add_symbol(usdjpy_config)
+            manager._shared_fundamental_collector = (
+                MagicMock()
+            )
+            manager._shared_rss_collector = MagicMock()
+
+            await manager.stop_all()
+
+            assert (
+                manager._shared_fundamental_collector
+                is None
+            )
+            assert (
+                manager._shared_rss_collector is None
+            )
