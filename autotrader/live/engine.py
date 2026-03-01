@@ -22,7 +22,7 @@ from autotrader.adapters.mt5.trade_executor import MT5TradeExecutor
 from autotrader.adapters.mt5.exceptions import MT5Error, MT5DataError
 from autotrader.core.entities import AccountInfo, Signal
 from autotrader.core.enums import MarketRegime, SignalType, Timeframe
-from autotrader.core.exceptions import TradingError
+from autotrader.core.exceptions import TradingError, ValidationError
 from autotrader.core.interfaces.position_sizing import SizingContext
 from autotrader.decision.unified.config import UnifiedBotConfig
 from autotrader.decision.unified.position_manager import (
@@ -222,10 +222,10 @@ class LiveTradingEngine:
             symbol: 新しい通貨ペアシンボル
 
         Raises:
-            ValueError: シンボルが空または不正な場合
+            ValidationError: シンボルが空または不正な場合
         """
         if not symbol or not symbol.strip():
-            raise ValueError("symbolは空にできません")
+            raise ValidationError("symbolは空にできません")
         symbol = symbol.strip().upper()
         if symbol == self._active_symbol:
             return

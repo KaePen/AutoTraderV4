@@ -26,6 +26,8 @@ from urllib.parse import urlparse
 
 from loguru import logger
 
+from autotrader.core.exceptions import ConfigurationError
+
 try:
     from bs4 import BeautifulSoup as _BeautifulSoup
 except ImportError:
@@ -582,7 +584,7 @@ class ArticleFetcher:
             str: HTMLテキスト
         """
         if _httpx is None:
-            raise RuntimeError(
+            raise ConfigurationError(
                 "httpx が必要です: pip install httpx"
             )
         response = _httpx.get(
@@ -612,7 +614,7 @@ class ArticleFetcher:
             LookupError: スナップショットが存在しない
         """
         if _httpx is None:
-            raise RuntimeError(
+            raise ConfigurationError(
                 "httpx が必要です: pip install httpx"
             )
         # Wayback Availability API
@@ -655,7 +657,7 @@ class ArticleFetcher:
             str: HTMLテキスト
         """
         if _curl_requests is None:
-            raise RuntimeError(
+            raise ConfigurationError(
                 "curl-cffi が必要です: "
                 "pip install curl-cffi"
             )
