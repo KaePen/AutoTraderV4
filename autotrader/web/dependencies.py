@@ -2,53 +2,39 @@
 
 from __future__ import annotations
 
-from functools import lru_cache
-from typing import Generator
+from collections.abc import Generator
 
 from fastapi import Request
-from sqlalchemy import create_engine
-from sqlalchemy.orm import Session, sessionmaker
+from sqlalchemy.orm import Session
 
+from autotrader.adapters.database.connection import (
+    get_engine,
+    get_session_factory,
+)
 from autotrader.config.settings import Settings, get_settings
 from autotrader.web.config import WebSettings, get_web_settings
 
 
-@lru_cache
-def get_engine():
-    """SQLAlchemyエンジンを取得
-
-    Returns:
-        Engine: SQLAlchemyエンジン
-    """
-    settings = get_settings()
-    return create_engine(
-        settings.database_url,
-        connect_args={"check_same_thread": False}
-        if "sqlite" in settings.database_url
-        else {},
-    )
-
-
-@lru_cache
-def get_session_factory():
-    """セッションファクトリを取得
-
-    Returns:
-        sessionmaker: セッションファクトリ
-    """
-    return sessionmaker(autocommit=False, autoflush=False, bind=get_engine())
-
-
 def get_db() -> Generator[Session, None, None]:
-    """DBセッションを取得
+    """DBセッションを取得（commit/rollback付き）
+
+    connection.pyのエンジン・ファクトリを使用し、
+    正常終了時にcommit、例外時にrollbackする。
 
     Yields:
         Session: DBセッション
     """
-    session_factory = get_session_factory()
-    db = session_factory()
+    settings = get_settings()
+    factory = get_session_factory(
+        get_engine(settings.database_url)
+    )
+    db = factory()
     try:
         yield db
+        db.commit()
+    except Exception:
+        db.rollback()
+        raise
     finally:
         db.close()
 

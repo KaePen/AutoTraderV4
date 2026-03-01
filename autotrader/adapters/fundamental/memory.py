@@ -572,6 +572,8 @@ class FundamentalMemoryService:
                     source_event=source_event,
                     llm_reasoning=llm_reasoning,
                 )
+                # session_factoryは外部注入のため
+                # 自動commitが保証されない。明示commit維持。
                 session.commit()
                 logger.info(
                     "[FundamentalMemory] %s記録: "
