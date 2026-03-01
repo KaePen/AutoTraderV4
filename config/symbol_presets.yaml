@@ -14,9 +14,9 @@ defaults:
   max_positions: 2
   bonus_max_positions: 1
   bonus_score_threshold: 7.0
-  base_risk_pct: 0.02
-  max_lot_per_trade: 2.0
-  max_total_exposure_lot: 5.0
+  base_risk_pct: 0.025        # 2025年DD対策: 0.02 → 0.025
+  max_lot_per_trade: 2.5      # 2025年DD対策: 2.0 → 2.5
+  max_total_exposure_lot: 4.0 # 2025年DD対策: 5.0 → 4.0
   equity_floor_pct: 0.30
   # トレーリングストップ設定（デフォルトOFF）
   use_position_manager: false
