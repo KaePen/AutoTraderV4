@@ -14,6 +14,7 @@ from fastapi import APIRouter, Depends, Request
 from autotrader.config.accounts_loader import AccountsLoader
 from autotrader.web.auth.dependencies import (
     get_current_user,
+    get_optional_user,
     require_admin,
 )
 from autotrader.web.dependencies import (
@@ -140,7 +141,7 @@ def _build_trading_mode_response(
 @limiter.limit("60/minute")
 async def get_trading_mode(
     request: Request,
-    user: Annotated[dict[str, any], Depends(get_current_user)],
+    user: Annotated[dict[str, any] | None, Depends(get_optional_user)],
     engine=Depends(get_live_engine),
     mgr=Depends(get_engine_manager),
 ) -> ApiResponse[TradingModeResponse]:
@@ -756,7 +757,7 @@ async def get_symbols(
 @limiter.limit("10/minute")
 async def add_symbol(
     request: Request,
-    user: Annotated[dict[str, any], Depends(require_admin)],
+    user: Annotated[dict[str, any] | None, Depends(get_optional_user)],
     symbol: str,
     mgr=Depends(get_engine_manager),
 ) -> ApiResponse[list[str]]:
