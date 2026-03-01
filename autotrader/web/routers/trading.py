@@ -13,9 +13,7 @@ from fastapi import APIRouter, Depends, Request
 
 from autotrader.config.accounts_loader import AccountsLoader
 from autotrader.web.auth.dependencies import (
-    get_current_user,
     get_optional_user,
-    require_admin,
 )
 from autotrader.web.dependencies import (
     get_engine_manager,
@@ -193,7 +191,7 @@ def _build_mt5_status_response(
 @limiter.limit("60/minute")
 async def get_mt5_status(
     request: Request,
-    user: Annotated[dict[str, any], Depends(get_current_user)],
+    user: Annotated[dict[str, any] | None, Depends(get_optional_user)],
     engine=Depends(get_live_engine),
 ) -> ApiResponse[MT5StatusResponse]:
     """MT5接続状態取得
@@ -215,7 +213,7 @@ async def get_mt5_status(
 @limiter.limit("10/minute")
 async def connect_mt5(
     request: Request,
-    user: Annotated[dict[str, any], Depends(require_admin)],
+    user: Annotated[dict[str, any] | None, Depends(get_optional_user)],
     engine=Depends(get_live_engine),
     mgr=Depends(get_engine_manager),
 ) -> ApiResponse[MT5StatusResponse]:
@@ -290,7 +288,7 @@ async def connect_mt5(
 @limiter.limit("10/minute")
 async def disconnect_mt5(
     request: Request,
-    user: Annotated[dict[str, any], Depends(require_admin)],
+    user: Annotated[dict[str, any] | None, Depends(get_optional_user)],
     engine=Depends(get_live_engine),
     mgr=Depends(get_engine_manager),
 ) -> ApiResponse[MT5StatusResponse]:
@@ -339,7 +337,7 @@ async def disconnect_mt5(
 @limiter.limit("10/minute")
 async def toggle_auto_trade(
     request: Request,
-    user: Annotated[dict[str, any], Depends(require_admin)],
+    user: Annotated[dict[str, any] | None, Depends(get_optional_user)],
     enable: bool = False,
     engine=Depends(get_live_engine),
 ) -> ApiResponse[TradingModeResponse]:
@@ -380,7 +378,7 @@ async def toggle_auto_trade(
 @limiter.limit("10/minute")
 async def toggle_symbol_auto_trade(
     request: Request,
-    user: Annotated[dict[str, any], Depends(get_current_user)],
+    user: Annotated[dict[str, any] | None, Depends(get_optional_user)],
     symbol: str,
     enable: bool = False,
     engine=Depends(get_live_engine),
@@ -488,7 +486,7 @@ async def toggle_symbol_auto_trade(
 @limiter.limit("10/minute")
 async def switch_symbol(
     request: Request,
-    user: Annotated[dict[str, any], Depends(require_admin)],
+    user: Annotated[dict[str, any] | None, Depends(get_optional_user)],
     symbol: str,
     engine=Depends(get_live_engine),
 ) -> ApiResponse[TradingModeResponse]:
@@ -536,7 +534,7 @@ async def switch_symbol(
 @limiter.limit("10/minute")
 async def toggle_symbol_demo_mode(
     request: Request,
-    user: Annotated[dict[str, any], Depends(require_admin)],
+    user: Annotated[dict[str, any] | None, Depends(get_optional_user)],
     symbol: str,
     enable: bool = False,
     engine=Depends(get_live_engine),
@@ -641,7 +639,7 @@ async def toggle_symbol_demo_mode(
 @limiter.limit("3/minute")
 async def switch_account(
     request: Request,
-    user: Annotated[dict[str, any], Depends(require_admin)],
+    user: Annotated[dict[str, any] | None, Depends(get_optional_user)],
     body: SwitchAccountRequest,
     engine=Depends(get_live_engine),
     mgr=Depends(get_engine_manager),
@@ -736,7 +734,7 @@ async def switch_account(
 @limiter.limit("60/minute")
 async def get_symbols(
     request: Request,
-    user: Annotated[dict[str, any], Depends(get_current_user)],
+    user: Annotated[dict[str, any] | None, Depends(get_optional_user)],
     mgr=Depends(get_engine_manager),
 ) -> ApiResponse[list[str]]:
     """アクティブシンボル一覧取得
@@ -790,7 +788,7 @@ async def add_symbol(
 @limiter.limit("10/minute")
 async def remove_symbol(
     request: Request,
-    user: Annotated[dict[str, any], Depends(require_admin)],
+    user: Annotated[dict[str, any] | None, Depends(get_optional_user)],
     symbol: str,
     mgr=Depends(get_engine_manager),
 ) -> ApiResponse[list[str]]:
@@ -823,7 +821,7 @@ async def remove_symbol(
 @limiter.limit("60/minute")
 async def get_account_presets(
     request: Request,
-    user: Annotated[dict[str, any], Depends(get_current_user)],
+    user: Annotated[dict[str, any] | None, Depends(get_optional_user)],
 ) -> ApiResponse[AccountPresetsResponse]:
     """口座プリセット一覧取得
 
@@ -855,7 +853,7 @@ async def get_account_presets(
 @limiter.limit("10/minute")
 async def add_account_preset(
     request: Request,
-    user: Annotated[dict[str, any], Depends(require_admin)],
+    user: Annotated[dict[str, any] | None, Depends(get_optional_user)],
     body: AccountPresetRequest,
 ) -> ApiResponse[AccountPresetsResponse]:
     """口座プリセット登録/更新
@@ -897,7 +895,7 @@ async def add_account_preset(
 @limiter.limit("10/minute")
 async def delete_account_preset(
     request: Request,
-    user: Annotated[dict[str, any], Depends(require_admin)],
+    user: Annotated[dict[str, any] | None, Depends(get_optional_user)],
     login: int,
 ) -> ApiResponse[AccountPresetsResponse]:
     """口座プリセット削除
