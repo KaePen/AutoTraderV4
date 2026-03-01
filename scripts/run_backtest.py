@@ -1365,26 +1365,6 @@ def run_single_backtest(args: argparse.Namespace):
         universal_half_r_ratio=args.universal_half_r_ratio,
     )
 
-    # ファンダメンタルCSVリスト構築
-    # 検索順: data/fundamental/events/ → data/fundamental/
-    _fundamental_csvs: list[str] | None = None
-    if args.fundamental:
-        _fund_dir = Path(args.fundamental_dir)
-        _events_dir = _fund_dir / "events"
-        if not _events_dir.exists():
-            _events_dir = _fund_dir
-        _fundamental_csvs = []
-        for _yr in range(start_year, end_year + 1):
-            _csv = _events_dir / f"events_{_yr}.csv"
-            if _csv.exists():
-                _fundamental_csvs.append(str(_csv))
-        if not _fundamental_csvs:
-            logging.warning(
-                "[Fundamental] %s に events_YYYY.csv が見つかりません",
-                _events_dir,
-            )
-            _fundamental_csvs = None
-
     # Phase 2b: --fundamental-phase2b で暗黙的に有効化
     if args.fundamental_phase2b:
         args.fundamental = True
@@ -1392,67 +1372,147 @@ def run_single_backtest(args: argparse.Namespace):
         if not args.no_news_llm:
             args.news_llm = True
 
-    # イベントLLM CSVリスト構築
-    # 検索順: data/{symbol}/llm_events/ → data/fundamental/
-    _event_llm_csvs: list[str] | None = None
-    if args.event_llm:
-        _sym = args.symbol
-        _data_base = Path(args.data_dir)
-        # 新構造: data/{symbol}/llm_events/
-        _llm_dir = _data_base / _sym / "llm_events"
-        if not _llm_dir.exists():
-            # フォールバック: data/fundamental/
-            _llm_dir = Path(args.fundamental_dir)
-        _event_llm_csvs = []
+    _sym = args.symbol
+    _data_base = Path(args.data_dir)
+
+    # ファンダメンタルCSV/Parquetリスト構築
+    # 検索順: cache/ (Parquet) → csv/ (フィルタ済みCSV)
+    #       → data/fundamental/events/ (元データ、フォールバック)
+    _fundamental_csvs: list[str] | None = None
+    _fundamental_parquets: list[str] | None = None
+    if args.fundamental:
+        _fund_csv_list: list[str] = []
+        _fund_pq_list: list[str] = []
         for _yr in range(start_year, end_year + 1):
-            _csv = _llm_dir / f"llm_events_{_sym}_{_yr}.csv"
-            if _csv.exists():
-                _event_llm_csvs.append(str(_csv))
-        if not _event_llm_csvs:
-            logging.warning(
-                "[EventLLM] %s に llm_events_%s_YYYY.csv "
-                "が見つかりません",
-                _llm_dir, _sym,
+            # 優先1: cache/ Parquet
+            _pq = (
+                _data_base / _sym / "cache"
+                / f"events_{_yr}.parquet"
             )
-            _event_llm_csvs = None
-        else:
+            if _pq.exists():
+                _fund_pq_list.append(str(_pq))
+                continue
+            # 優先2: csv/ フィルタ済みCSV
+            _csv = (
+                _data_base / _sym / "csv"
+                / f"events_{_yr}.csv"
+            )
+            if _csv.exists():
+                _fund_csv_list.append(str(_csv))
+                continue
+            # 優先3: 元データ（data/fundamental/events/）
+            _fund_dir = Path(args.fundamental_dir)
+            _events_dir = _fund_dir / "events"
+            if not _events_dir.exists():
+                _events_dir = _fund_dir
+            _csv = _events_dir / f"events_{_yr}.csv"
+            if _csv.exists():
+                _fund_csv_list.append(str(_csv))
+        if _fund_pq_list:
+            _fundamental_parquets = _fund_pq_list
             logging.info(
-                "[EventLLM] %d年分のCSV検出: %s",
-                len(_event_llm_csvs), _llm_dir,
+                "[Fundamental] %d年分のParquet検出",
+                len(_fund_pq_list),
+            )
+        if _fund_csv_list:
+            _fundamental_csvs = _fund_csv_list
+        if not _fund_pq_list and not _fund_csv_list:
+            logging.warning(
+                "[Fundamental] events データが見つかりません",
             )
 
-    # ニュースLLM CSVリスト構築
-    # 検索順: data/{symbol}/llm_news/
-    _news_llm_csvs: list[str] | None = None
-    if args.news_llm:
-        _sym = args.symbol
-        _data_base = Path(args.data_dir)
-        _news_dir = _data_base / _sym / "llm_news"
-        if _news_dir.exists():
-            _news_llm_csvs = []
-            for _yr in range(start_year, end_year + 1):
-                _csv = (
-                    _news_dir
-                    / f"llm_news_{_sym}_{_yr}.csv"
-                )
-                if _csv.exists():
-                    _news_llm_csvs.append(str(_csv))
-            if not _news_llm_csvs:
-                logging.warning(
-                    "[NewsLLM] %s に llm_news_%s_YYYY.csv "
-                    "が見つかりません",
-                    _news_dir, _sym,
-                )
-                _news_llm_csvs = None
-            else:
-                logging.info(
-                    "[NewsLLM] %d年分のCSV検出: %s",
-                    len(_news_llm_csvs), _news_dir,
-                )
-        else:
+    # イベントLLM CSV/Parquetリスト構築
+    # 検索順: cache/ (Parquet) → csv/ (コピー済み)
+    #       → llm_events/ (旧パス、フォールバック)
+    _event_llm_csvs: list[str] | None = None
+    _event_llm_parquets: list[str] | None = None
+    if args.event_llm:
+        _ellm_csv_list: list[str] = []
+        _ellm_pq_list: list[str] = []
+        for _yr in range(start_year, end_year + 1):
+            _fname = f"llm_events_{_sym}_{_yr}"
+            # 優先1: cache/ Parquet
+            _pq = (
+                _data_base / _sym / "cache"
+                / f"{_fname}.parquet"
+            )
+            if _pq.exists():
+                _ellm_pq_list.append(str(_pq))
+                continue
+            # 優先2: csv/ コピー済みCSV
+            _csv = (
+                _data_base / _sym / "csv"
+                / f"{_fname}.csv"
+            )
+            if _csv.exists():
+                _ellm_csv_list.append(str(_csv))
+                continue
+            # 優先3: 旧パス（data/{symbol}/llm_events/）
+            _csv = (
+                _data_base / _sym / "llm_events"
+                / f"{_fname}.csv"
+            )
+            if _csv.exists():
+                _ellm_csv_list.append(str(_csv))
+        if _ellm_pq_list:
+            _event_llm_parquets = _ellm_pq_list
+            logging.info(
+                "[EventLLM] %d年分のParquet検出",
+                len(_ellm_pq_list),
+            )
+        if _ellm_csv_list:
+            _event_llm_csvs = _ellm_csv_list
+        if not _ellm_pq_list and not _ellm_csv_list:
             logging.warning(
-                "[NewsLLM] ディレクトリ未存在: %s",
-                _news_dir,
+                "[EventLLM] llm_events_%s データが"
+                "見つかりません", _sym,
+            )
+
+    # ニュースLLM CSV/Parquetリスト構築
+    # 検索順: cache/ (Parquet) → csv/ (コピー済み)
+    #       → llm_news/ (旧パス、フォールバック)
+    _news_llm_csvs: list[str] | None = None
+    _news_llm_parquets: list[str] | None = None
+    if args.news_llm:
+        _nllm_csv_list: list[str] = []
+        _nllm_pq_list: list[str] = []
+        for _yr in range(start_year, end_year + 1):
+            _fname = f"llm_news_{_sym}_{_yr}"
+            # 優先1: cache/ Parquet
+            _pq = (
+                _data_base / _sym / "cache"
+                / f"{_fname}.parquet"
+            )
+            if _pq.exists():
+                _nllm_pq_list.append(str(_pq))
+                continue
+            # 優先2: csv/ コピー済みCSV
+            _csv = (
+                _data_base / _sym / "csv"
+                / f"{_fname}.csv"
+            )
+            if _csv.exists():
+                _nllm_csv_list.append(str(_csv))
+                continue
+            # 優先3: 旧パス（data/{symbol}/llm_news/）
+            _csv = (
+                _data_base / _sym / "llm_news"
+                / f"{_fname}.csv"
+            )
+            if _csv.exists():
+                _nllm_csv_list.append(str(_csv))
+        if _nllm_pq_list:
+            _news_llm_parquets = _nllm_pq_list
+            logging.info(
+                "[NewsLLM] %d年分のParquet検出",
+                len(_nllm_pq_list),
+            )
+        if _nllm_csv_list:
+            _news_llm_csvs = _nllm_csv_list
+        if not _nllm_pq_list and not _nllm_csv_list:
+            logging.warning(
+                "[NewsLLM] llm_news_%s データが"
+                "見つかりません", _sym,
             )
 
     # アダプティブパラメータ調整設定
@@ -1479,8 +1539,11 @@ def run_single_backtest(args: argparse.Namespace):
         period_end=period_end,
         sequential=args.sequential,
         fundamental_csv_list=_fundamental_csvs,
+        fundamental_parquet_list=_fundamental_parquets,
         event_llm_csv_list=_event_llm_csvs,
+        event_llm_parquet_list=_event_llm_parquets,
         news_llm_csv_list=_news_llm_csvs,
+        news_llm_parquet_list=_news_llm_parquets,
         fundamental_guard_minutes=args.fundamental_guard,
         max_year_workers=args.max_year_workers,
         adaptive_config=_adaptive_config,

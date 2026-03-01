@@ -930,8 +930,11 @@ class BacktestRunner:
         pm_config: "PositionManagerConfig | None" = None,
         fundamental_csv: str | None = None,
         fundamental_csv_list: list[str] | None = None,
+        fundamental_parquet_list: list[str] | None = None,
         event_llm_csv_list: list[str] | None = None,
+        event_llm_parquet_list: list[str] | None = None,
         news_llm_csv_list: list[str] | None = None,
+        news_llm_parquet_list: list[str] | None = None,
         fundamental_guard_minutes: int = 30,
         period_start: datetime | None = None,
         period_end: datetime | None = None,
@@ -952,14 +955,19 @@ class BacktestRunner:
             use_m1: M1データを基準タイムフレームとして使用
             use_multi_mode: マルチモードトレード有効化
             use_parallel_tf: 並列マルチTFモード（全TFでエントリー可能）
-            enable_scalping: スキャルピングモード有効化（M1/M5からエントリー可能）
+            enable_scalping: スキャルピングモード有効化
             pm_config: PositionManager設定（外部注入）
             fundamental_csv: 経済イベントCSVパス（Noneで無効）
             fundamental_csv_list: 複数の経済イベントCSVパスリスト
+            fundamental_parquet_list: 経済イベントParquetリスト
+            event_llm_csv_list: イベントLLM CSVリスト
+            event_llm_parquet_list: イベントLLM Parquetリスト
+            news_llm_csv_list: ニュースLLM CSVリスト
+            news_llm_parquet_list: ニュースLLM Parquetリスト
             fundamental_guard_minutes: 重要指標前の停止分数
             period_start: 日単位の開始日時（Noneで年始）
             period_end: 日単位の終了日時・exclusive（Noneで年末）
-            sequential: Trueでシーケンシャル実行を強制（デバッグ用）
+            sequential: Trueでシーケンシャル実行を強制
 
         Returns:
             BacktestResult: バックテスト結果
@@ -970,8 +978,7 @@ class BacktestRunner:
             self.load_data()
 
         # ファンダメンタルプロバイダー初期化
-        # fundamental_csv_list / fundamental_csv / event_llm_csv_list
-        # のいずれかがあればプロバイダーを作成
+        # Parquet/CSV のいずれかがあればプロバイダーを作成
         fundamental_provider = None
         _csv_paths: list[str] = []
         if fundamental_csv_list:
@@ -979,10 +986,17 @@ class BacktestRunner:
         elif fundamental_csv:
             _csv_paths = [fundamental_csv]
 
+        _pq_paths: list[str] = (
+            fundamental_parquet_list or []
+        )
+
         _has_data = (
             bool(_csv_paths)
+            or bool(_pq_paths)
             or bool(event_llm_csv_list)
+            or bool(event_llm_parquet_list)
             or bool(news_llm_csv_list)
+            or bool(news_llm_parquet_list)
         )
         _log = logging.getLogger(__name__)
         if _has_data:
@@ -1000,46 +1014,89 @@ class BacktestRunner:
                         _bot_cfg.fundamental_post_event_lag_seconds
                     ),
                 )
-                # 経済イベントCSV読み込み
-                if _csv_paths:
-                    total_count = 0
-                    for _csv in _csv_paths:
-                        count = fundamental_provider.load_csv(_csv)
-                        total_count += count
-                    _log.info(
-                        "[Fundamental] バックテスト用CSV読込: "
-                        "%d件 (%dファイル)",
-                        total_count, len(_csv_paths),
-                    )
-                # イベントLLM CSV読み込み（Phase 2）
-                if event_llm_csv_list:
-                    _sym = self.config.symbol
-                    _llm_total = 0
-                    for _csv in event_llm_csv_list:
-                        _n = fundamental_provider.load_event_llm_csv(
-                            _csv, _sym,
+                # 経済イベント読み込み（Parquet優先）
+                _ev_total = 0
+                if _pq_paths:
+                    for _pq in _pq_paths:
+                        _ev_total += (
+                            fundamental_provider.load_parquet(_pq)
                         )
-                        _llm_total += _n
+                    _log.info(
+                        "[Fundamental] Parquet読込: "
+                        "%d件 (%dファイル)",
+                        _ev_total, len(_pq_paths),
+                    )
+                if _csv_paths:
+                    _csv_total = 0
+                    for _csv in _csv_paths:
+                        _csv_total += (
+                            fundamental_provider.load_csv(_csv)
+                        )
+                    _log.info(
+                        "[Fundamental] CSV読込: "
+                        "%d件 (%dファイル)",
+                        _csv_total, len(_csv_paths),
+                    )
+                # イベントLLM読み込み（Parquet優先）
+                _sym = self.config.symbol
+                _llm_total = 0
+                if event_llm_parquet_list:
+                    for _pq in event_llm_parquet_list:
+                        _llm_total += (
+                            fundamental_provider
+                            .load_event_llm_parquet(
+                                _pq, _sym,
+                            )
+                        )
                     if _llm_total > 0:
                         _log.info(
-                            "[Fundamental] イベントLLM %d件読込",
+                            "[Fundamental] イベントLLM "
+                            "%d件読込(Parquet)",
                             _llm_total,
                         )
-                # ニュースLLM CSV読み込み
-                if news_llm_csv_list:
-                    _sym = self.config.symbol
-                    _news_total = 0
-                    for _csv in news_llm_csv_list:
-                        _n = (
+                if event_llm_csv_list:
+                    _llm_csv = 0
+                    for _csv in event_llm_csv_list:
+                        _llm_csv += (
                             fundamental_provider
-                            .load_news_llm_csv(_csv, _sym)
+                            .load_event_llm_csv(
+                                _csv, _sym,
+                            )
                         )
-                        _news_total += _n
+                    if _llm_csv > 0:
+                        _log.info(
+                            "[Fundamental] イベントLLM "
+                            "%d件読込(CSV)",
+                            _llm_csv,
+                        )
+                # ニュースLLM読み込み（Parquet優先）
+                _news_total = 0
+                if news_llm_parquet_list:
+                    for _pq in news_llm_parquet_list:
+                        _news_total += (
+                            fundamental_provider
+                            .load_news_llm_parquet(
+                                _pq, _sym,
+                            )
+                        )
                     if _news_total > 0:
                         _log.info(
                             "[Fundamental] ニュースLLM "
-                            "%d日分読込",
+                            "%d日分読込(Parquet)",
                             _news_total,
+                        )
+                if news_llm_csv_list:
+                    _news_csv = 0
+                    for _csv in news_llm_csv_list:
+                        _news_csv += (
+                            fundamental_provider
+                            .load_news_llm_csv(_csv, _sym)
+                        )
+                    if _news_csv > 0:
+                        _log.info(
+                            "[Fundamental] ニュースLLM "
+                            "%d日分読込(CSV)",
+                            _news_csv,
                         )
                 # Phase 2b: FundamentalMemory有効化
                 if _bot_cfg.fundamental_assessor_enabled:
@@ -1049,7 +1106,8 @@ class BacktestRunner:
                     )
             except Exception as e:
                 _log.warning(
-                    "[Fundamental] CSV読込失敗（無効化）: %s", e,
+                    "[Fundamental] データ読込失敗（無効化）: %s",
+                    e,
                 )
 
         # ボット設定（各年の bot インスタンスはこの設定から生成）
