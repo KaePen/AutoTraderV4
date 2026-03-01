@@ -404,10 +404,8 @@ class ForexFactoryClient:
             parsed = datetime.strptime(
                 f"{month_str} {day_str} {target_year}", "%b %d %Y"
             )
-            # EST → UTC (+5)
-            return parsed.replace(
-                tzinfo=timezone.utc
-            ) + timedelta(hours=5)
+            # 日付のみ保持（EST→UTC変換は_parse_timeで一括）
+            return parsed.replace(tzinfo=timezone.utc)
         except ValueError:
             return now
 
@@ -426,14 +424,15 @@ class ForexFactoryClient:
         import re
         time_str = time_cell.get_text(strip=True) if time_cell else ""
         if not time_str or time_str.lower() == "all day":
-            return current_date
+            # 終日イベント: EST日付の開始をUTCに変換（+5h）
+            return current_date + timedelta(hours=5)
 
         try:
             match = re.match(
                 r'(\d{1,2}):(\d{2})(am|pm)', time_str.lower()
             )
             if not match:
-                return current_date
+                return current_date + timedelta(hours=5)
 
             hour = int(match.group(1))
             minute = int(match.group(2))
@@ -444,7 +443,7 @@ class ForexFactoryClient:
             elif ampm == "am" and hour == 12:
                 hour = 0
 
-            # EST → UTC (+5)
+            # EST時刻をセット → UTC変換（+5h）
             result = current_date.replace(
                 hour=hour, minute=minute, second=0, microsecond=0
             ) + timedelta(hours=5)
