@@ -37,6 +37,8 @@ def pm() -> PositionManager:
         time_exit_enabled=False,
         breakeven_at_1r=False,
         early_breakeven_enabled=False,
+        # 超早期exit無効化（テスト用）
+        very_early_exit_enabled=False,
     )
     return PositionManager(config)
 
