@@ -13,7 +13,6 @@ from sqlalchemy import (
     Index,
     Integer,
     String,
-    Text,
 )
 from sqlalchemy.orm import DeclarativeBase
 
@@ -80,66 +79,6 @@ class TradeRecord(Base):
             "opened_at": self.opened_at.isoformat() if self.opened_at else None,
             "closed_at": self.closed_at.isoformat() if self.closed_at else None,
             "is_open": self.is_open,
-        }
-
-
-class MarketMemoryRecord(Base):
-    """市場記憶テーブル
-
-    LLMが生成した方向性の記憶をTTL付きで蓄積。
-    マクロバイアス・指標後バイアス・センチメントを保存。
-    """
-
-    __tablename__ = "market_memory"
-
-    id = Column(Integer, primary_key=True, autoincrement=True)
-    memory_id = Column(
-        String(36), unique=True, nullable=False, index=True
-    )
-    symbol = Column(String(20), nullable=False, index=True)
-    # MACRO_BIAS / POST_EVENT_BIAS / SENTIMENT_SCORE
-    memory_type = Column(String(30), nullable=False)
-    direction_score = Column(Float, nullable=False)  # -1.0〜+1.0
-    confidence = Column(Float, nullable=False)  # 0.0〜1.0
-    summary = Column(Text, nullable=True)
-    source_event = Column(String(200), nullable=True)
-    valid_until = Column(
-        DateTime(timezone=True), nullable=False, index=True
-    )
-    created_at = Column(
-        DateTime(timezone=True),
-        default=lambda: datetime.now(UTC),
-        nullable=False,
-    )
-    llm_reasoning = Column(Text, nullable=True)
-
-    __table_args__ = (
-        Index(
-            "ix_market_memory_symbol_type_valid",
-            "symbol",
-            "memory_type",
-            "valid_until",
-        ),
-    )
-
-    def to_dict(self) -> dict[str, Any]:
-        """辞書に変換"""
-        return {
-            "memory_id": self.memory_id,
-            "symbol": self.symbol,
-            "memory_type": self.memory_type,
-            "direction_score": self.direction_score,
-            "confidence": self.confidence,
-            "summary": self.summary,
-            "source_event": self.source_event,
-            "valid_until": (
-                self.valid_until.isoformat()
-                if self.valid_until else None
-            ),
-            "created_at": (
-                self.created_at.isoformat()
-                if self.created_at else None
-            ),
         }
 
 

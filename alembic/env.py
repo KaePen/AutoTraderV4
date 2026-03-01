@@ -1,7 +1,7 @@
 """Alembic マイグレーション環境設定
 
 DATABASE_URL 環境変数から接続先を決定し、
-Base.metadata（trades, market_memory）を対象にマイグレーションを実行する。
+Base.metadata（trades）を対象にマイグレーションを実行する。
 """
 
 from __future__ import annotations

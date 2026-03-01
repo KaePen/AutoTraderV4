@@ -2438,11 +2438,6 @@ class LiveTradingEngine:
             cfg: FundamentalConfig
         """
         try:
-            import functools
-
-            from autotrader.adapters.database.connection import (
-                get_session,
-            )
             from autotrader.adapters.fundamental.collector import (
                 FundamentalDataCollector,
             )
@@ -2451,13 +2446,6 @@ class LiveTradingEngine:
             )
             from autotrader.adapters.fundamental.memory import (
                 FundamentalMemoryService,
-            )
-            from autotrader.config.settings import get_settings
-
-            db_url = get_settings().database_url
-            # settings の URL を束縛したセッションファクトリ
-            session_factory = functools.partial(
-                get_session, db_url
             )
 
             # 決定論的イベント分析器（リアルタイム用）
@@ -2470,7 +2458,6 @@ class LiveTradingEngine:
                 use_ff_holidays=cfg.use_ff_holidays,
             )
             self._fundamental_memory = FundamentalMemoryService(
-                session_factory=session_factory,
                 event_guard_minutes=cfg.event_guard_minutes,
                 cached_events_getter=(
                     self._fundamental_collector.get_cached_events
