@@ -68,6 +68,9 @@ cache/
 .env
 .env.local
 
+# 認証設定（機密情報）
+config/auth.yaml
+
 # OS固有
 .DS_Store
 Thumbs.db

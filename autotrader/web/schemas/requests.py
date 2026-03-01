@@ -192,15 +192,16 @@ class SettingsUpdateRequest(BaseModel):
 class SwitchAccountRequest(BaseModel):
     """口座切替リクエスト
 
+    パスワードはMT5に保存されているものを使用する。
+    APIでのパスワード送信は廃止（セキュリティ向上）。
+
     Attributes:
         login: MT5ログインID
         server: サーバー名
-        password: パスワード（MT5保存済みの場合は省略可）
     """
 
     login: int
     server: str
-    password: str = ""
 
 
 class AccountPresetRequest(BaseModel):

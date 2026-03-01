@@ -2,9 +2,12 @@
 
 from __future__ import annotations
 
+import os
 from datetime import datetime, timezone
+from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import AsyncMock, MagicMock
+from typing import Generator
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi import FastAPI
@@ -14,6 +17,11 @@ from autotrader.core.enums import (
     ConfidenceLevel,
     SignalType,
     Timeframe,
+)
+from autotrader.web.auth import router as auth_router
+from autotrader.web.auth.dependencies import (
+    get_current_user,
+    require_admin,
 )
 from autotrader.web.dependencies import (
     get_db,
@@ -32,9 +40,43 @@ from autotrader.web.routers import (
 from autotrader.web.routers import settings as settings_router
 
 
+# テスト用ダミーユーザー
+_TEST_ADMIN_USER = {
+    "username": "test_admin",
+    "role": "admin",
+}
+
+_TEST_USER = {
+    "username": "test_user",
+    "role": "user",
+}
+
+
+def _mock_get_current_user():
+    """テスト用 get_current_user モック（管理者）"""
+    async def _inner():
+        return _TEST_ADMIN_USER
+    return _inner
+
+
+def _mock_require_admin():
+    """テスト用 require_admin モック"""
+    async def _inner():
+        return _TEST_ADMIN_USER
+    return _inner
+
+
 def _create_test_app() -> FastAPI:
-    """テスト用FastAPIアプリ（lifespanなし）"""
+    """テスト用FastAPIアプリ（lifespanなし）
+
+    認証依存関係をモックで置き換え、
+    テスト時は常に認証済みとして扱う。
+    """
     app = FastAPI()
+    # 認証ルーター
+    app.include_router(
+        auth_router.router, prefix="/api/v1"
+    )
     app.include_router(
         dashboard.router, prefix="/api/v1"
     )
@@ -66,6 +108,13 @@ def _create_test_app() -> FastAPI:
     # EngineManagerはデフォルトNone（後方互換テスト）
     app.dependency_overrides[get_engine_manager] = (
         lambda: None
+    )
+    # 認証をモックで置き換え（テスト時は常に認証済み）
+    app.dependency_overrides[get_current_user] = (
+        _mock_get_current_user()
+    )
+    app.dependency_overrides[require_admin] = (
+        _mock_require_admin()
     )
     return app
 
@@ -168,3 +217,22 @@ def no_engine_app():
 def no_engine_client(no_engine_app):
     """エンジンなしクライアント"""
     return TestClient(no_engine_app)
+
+
+@pytest.fixture()
+def temp_auth_file(tmp_path) -> Generator[Path, None, None]:
+    """テスト用一時auth.yamlファイル
+
+    テスト終了後に自動削除される。
+    """
+    auth_file = tmp_path / "auth.yaml"
+    yield auth_file
+    # クリーンアップは tmp_path が自動で行う
+
+
+@pytest.fixture()
+def auth_disabled_env(monkeypatch):
+    """認証無効化環境変数を設定"""
+    monkeypatch.setenv("AUTOTRADER_AUTH_AUTH_DISABLED", "true")
+    yield
+    # monkeypatch は自動でクリーンアップ

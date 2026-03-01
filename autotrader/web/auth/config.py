@@ -15,8 +15,10 @@ class AuthSettings(BaseSettings):
         secret_key: JWT署名用シークレットキー
         algorithm: JWTアルゴリズム
         access_token_expire_minutes: トークン有効期限（分）
-        default_username: デフォルトユーザー名
-        default_password_hash: デフォルトパスワードハッシュ
+        auth_disabled: 認証を無効化（開発用）
+        auth_file: auth.yamlのパス
+        default_username: デフォルトユーザー名（後方互換）
+        default_password_hash: デフォルトパスワードハッシュ（後方互換）
     """
 
     model_config = SettingsConfigDict(
@@ -32,6 +34,15 @@ class AuthSettings(BaseSettings):
     )
     algorithm: str = "HS256"
     access_token_expire_minutes: int = 1440  # 24時間
+    auth_disabled: bool = Field(
+        default=False,
+        description="認証を無効化（開発環境用）",
+    )
+    auth_file: str = Field(
+        default="config/auth.yaml",
+        description="ユーザー情報YAMLファイルのパス",
+    )
+    # 後方互換用（YAMLベースに移行後は使用しない）
     default_username: str = "admin"
     default_password_hash: str = Field(
         default=(
