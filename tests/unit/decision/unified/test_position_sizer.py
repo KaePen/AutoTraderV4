@@ -489,27 +489,27 @@ class TestSmoothDdAdjustment:
         """早期DD域（2025年版: 1%→2%で1.0→0.7）"""
         sizer = PositionSizer()
 
-        adj_1_5pct = sizer._calculate_dd_adjust(0.015)
-        adj_1_8pct = sizer._calculate_dd_adjust(0.018)
+        adj_1_1pct = sizer._calculate_dd_adjust(0.011)
+        adj_1_3pct = sizer._calculate_dd_adjust(0.013)
 
-        # 1%〜2%間で1.0→0.7の減額
-        assert 0.7 < adj_1_5pct < 1.0
-        assert adj_1_8pct < adj_1_5pct
+        # 0.8%〜1.5%間で1.0→0.7の減額
+        assert 0.7 < adj_1_1pct < 1.0
+        assert adj_1_3pct < adj_1_1pct
 
     def test_main_dd_stronger_reduction(self) -> None:
-        """本格DD域（2025年版: 2%超で0.7→0.5）"""
+        """本格DD域（2025年版: 1.5%超で0.7→0.5）"""
         sizer = PositionSizer()
 
-        adj_2pct = sizer._calculate_dd_adjust(0.02)
+        adj_1_5pct = sizer._calculate_dd_adjust(0.015)
         adj_5pct = sizer._calculate_dd_adjust(0.05)
         adj_10pct = sizer._calculate_dd_adjust(0.10)
 
-        # 2%でちょうど0.7
-        assert adj_2pct == pytest.approx(0.7, abs=0.01)
+        # 1.5%でちょうど0.7
+        assert adj_1_5pct == pytest.approx(0.7, abs=0.01)
         # 5%で更に減額
-        assert adj_5pct < adj_2pct
-        # 10%で更に強い減額
-        assert adj_10pct < adj_5pct
+        assert adj_5pct < adj_1_5pct
+        # 2%以上: 最大減額0.5維持
+        assert adj_10pct == pytest.approx(0.5, abs=0.01)
 
     def test_dd_monotonic_decrease(self) -> None:
         """DD増加で単調減少"""
@@ -526,34 +526,34 @@ class TestDd2025Reduction:
     """2025年DD対策のテスト"""
 
     def test_early_dd_threshold_1pct(self) -> None:
-        """DD早期減額が1%から開始"""
+        """DD早期減額が0.8%から開始"""
         sizer = PositionSizer()
 
         adj_0pct = sizer._calculate_dd_adjust(0.0)
-        adj_1pct = sizer._calculate_dd_adjust(0.01)
-        adj_1_5pct = sizer._calculate_dd_adjust(0.015)
+        adj_0_8pct = sizer._calculate_dd_adjust(0.008)
+        adj_1_1pct = sizer._calculate_dd_adjust(0.011)
 
         # 0%: 減額なし
         assert adj_0pct == 1.0
-        # 1%: 減額開始（ちょうど閾値なので1.0）
-        assert adj_1pct == 1.0
-        # 1.5%: 早期減額域
-        assert adj_1_5pct < 1.0
+        # 0.8%: 減額開始（ちょうど閾値なので1.0）
+        assert adj_0_8pct == 1.0
+        # 1.1%: 早期減額域
+        assert adj_1_1pct < 1.0
 
     def test_main_dd_threshold_2pct(self) -> None:
-        """DD本格減額が2%から開始"""
+        """DD本格減額が1.5%から開始"""
         sizer = PositionSizer()
 
-        adj_1_9pct = sizer._calculate_dd_adjust(0.019)
-        adj_2pct = sizer._calculate_dd_adjust(0.02)
-        adj_2_5pct = sizer._calculate_dd_adjust(0.025)
+        adj_1_4pct = sizer._calculate_dd_adjust(0.014)
+        adj_1_5pct = sizer._calculate_dd_adjust(0.015)
+        adj_1_8pct = sizer._calculate_dd_adjust(0.018)
 
-        # 2%未満: 早期減額域
-        assert adj_1_9pct > 0.7
-        # 2%: 本格減額開始（0.7）
-        assert adj_2pct == pytest.approx(0.7, abs=0.01)
-        # 2.5%: 本格減額域
-        assert adj_2_5pct < 0.7
+        # 1.5%未満: 早期減額域
+        assert adj_1_4pct > 0.7
+        # 1.5%: 本格減額開始（0.7）
+        assert adj_1_5pct == pytest.approx(0.7, abs=0.01)
+        # 1.8%: 本格減額域
+        assert adj_1_8pct < 0.7
 
     def test_consecutive_loss_2start(self) -> None:
         """連敗減額が2連敗から開始"""

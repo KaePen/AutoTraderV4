@@ -77,9 +77,9 @@ class PositionSizerConfig:
     max_lot: float = 10.0
     confidence_high_threshold: float = 0.7
     confidence_low_threshold: float = 0.5
-    dd_reduction_threshold: float = 0.02  # 2%DD本格減額（強化）
+    dd_reduction_threshold: float = 0.015  # 1.5%DD本格減額（強化）
     dd_max_reduction: float = 0.5         # 最大50%減額（強化）
-    dd_early_threshold: float = 0.01      # 1%DD早期減額開始（強化）
+    dd_early_threshold: float = 0.008    # 0.8%DD早期減額開始（強化）
     consecutive_loss_start: int = 2       # 2連敗から減額開始（強化）
     consecutive_loss_max: int = 5         # 5連敗で最大減額（強化）
     consecutive_loss_min_adjust: float = 0.2  # 最大減額時0.2x（強化）
@@ -451,7 +451,7 @@ class PositionSizer(PositionSizerProtocol):
 
         # 本格減額域（main超過→最大減額0.5）
         excess = current_dd_pct - main
-        max_excess = 0.15  # 17%DDで最大減額
+        max_excess = 0.005  # 2%DDで最大減額（強化）
         reduction = (
             min(excess / max_excess, 1.0)
             * self.config.dd_max_reduction
