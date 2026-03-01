@@ -95,6 +95,8 @@ class LiveTradingEngine:
         config: LiveTradingConfig,
         shared_conn: MT5ConnectionManager | None = None,
         shared_data_provider: MT5DataProvider | None = None,
+        shared_fundamental_collector=None,
+        shared_rss_collector=None,
     ) -> None:
         """初期化
 
@@ -102,6 +104,10 @@ class LiveTradingEngine:
             config: ライブトレーディング設定
             shared_conn: 共有MT5接続（マルチエンジン時）
             shared_data_provider: 共有データプロバイダ
+            shared_fundamental_collector: 共有ファンダメンタル
+                コレクター（EngineManager経由）
+            shared_rss_collector: 共有RSSコレクター
+                （EngineManager経由）
         """
         self._config = config
         self._conn = shared_conn or MT5ConnectionManager(
@@ -171,6 +177,15 @@ class LiveTradingEngine:
         self._rss_collector = None
         self._news_analyzer = None
         self._news_buffer: list = []
+        # 共有コレクター（EngineManager経由）
+        self._shared_fundamental_collector = (
+            shared_fundamental_collector
+        )
+        self._shared_rss_collector = shared_rss_collector
+        # コレクター所有フラグ（共有時は起動/停止しない）
+        self._owns_collectors = (
+            shared_fundamental_collector is None
+        )
         # キーワードセンチメント分析・永続化（常時有効）
         from autotrader.adapters.fundamental.keyword_sentiment import (
             KeywordSentimentScorer,
@@ -2449,12 +2464,28 @@ class LiveTradingEngine:
             # 決定論的イベント分析器（リアルタイム用）
             analyzer = DeterministicEventAnalyzer()
 
-            self._fundamental_collector = FundamentalDataCollector(
-                fetch_interval_minutes=cfg.fetch_interval_minutes,
-                use_mt5_calendar=cfg.use_mt5_calendar,
-                use_forex_factory=cfg.use_forex_factory,
-                use_ff_holidays=cfg.use_ff_holidays,
-            )
+            # 共有コレクターがあれば再利用
+            if self._shared_fundamental_collector:
+                self._fundamental_collector = (
+                    self._shared_fundamental_collector
+                )
+            else:
+                self._fundamental_collector = (
+                    FundamentalDataCollector(
+                        fetch_interval_minutes=(
+                            cfg.fetch_interval_minutes
+                        ),
+                        use_mt5_calendar=(
+                            cfg.use_mt5_calendar
+                        ),
+                        use_forex_factory=(
+                            cfg.use_forex_factory
+                        ),
+                        use_ff_holidays=(
+                            cfg.use_ff_holidays
+                        ),
+                    )
+                )
             self._fundamental_memory = FundamentalMemoryService(
                 event_guard_minutes=cfg.event_guard_minutes,
                 cached_events_getter=(
@@ -2471,12 +2502,18 @@ class LiveTradingEngine:
                     NewsLLMAnalyzer,
                 )
 
-                # 全通貨対応の単一インスタンス
-                self._rss_collector = RSSCollector(
-                    poll_interval=(
-                        cfg.rss_poll_interval_minutes * 60
-                    ),
-                )
+                # 共有RSSコレクターがあれば再利用
+                if self._shared_rss_collector:
+                    self._rss_collector = (
+                        self._shared_rss_collector
+                    )
+                else:
+                    self._rss_collector = RSSCollector(
+                        poll_interval=(
+                            cfg.rss_poll_interval_minutes
+                            * 60
+                        ),
+                    )
                 self._news_analyzer = NewsLLMAnalyzer(
                     sentiment_ttl_hours=(
                         cfg.rss_sentiment_ttl_hours
@@ -2491,7 +2528,8 @@ class LiveTradingEngine:
             )
         except Exception as e:
             logger.error(
-                f"[Fundamental] 初期化失敗（無効化）: {e}"
+                "[Fundamental] 初期化失敗（無効化）: %s",
+                e,
             )
             self._fundamental_memory = None
             self._fundamental_collector = None
@@ -2508,19 +2546,27 @@ class LiveTradingEngine:
                 FundamentalDataCollector,
             )
 
-            self._fundamental_collector = FundamentalDataCollector(
-                fetch_interval_minutes=60,
-                use_mt5_calendar=True,
-                use_forex_factory=False,
-                use_ff_holidays=True,
-            )
+            # 共有コレクターがあれば再利用
+            if self._shared_fundamental_collector:
+                self._fundamental_collector = (
+                    self._shared_fundamental_collector
+                )
+            else:
+                self._fundamental_collector = (
+                    FundamentalDataCollector(
+                        fetch_interval_minutes=60,
+                        use_mt5_calendar=True,
+                        use_forex_factory=False,
+                        use_ff_holidays=True,
+                    )
+                )
             logger.info(
                 "[Calendar] 軽量カレンダー初期化完了"
                 "（MT5 CSV + FF休日）"
             )
         except Exception as e:
             logger.error(
-                f"[Calendar] 軽量初期化失敗: {e}"
+                "[Calendar] 軽量初期化失敗: %s", e
             )
             self._fundamental_collector = None
 
@@ -2530,21 +2576,32 @@ class LiveTradingEngine:
                 RSSCollector,
             )
 
-            # 全通貨対応の単一インスタンス
-            self._rss_collector = RSSCollector(
-                poll_interval=300,
-            )
+            # 共有RSSコレクターがあれば再利用
+            if self._shared_rss_collector:
+                self._rss_collector = (
+                    self._shared_rss_collector
+                )
+            else:
+                self._rss_collector = RSSCollector(
+                    poll_interval=300,
+                )
             logger.info(
                 "[RSS] 軽量RSSポーリング初期化完了"
             )
         except Exception as e:
             logger.warning(
-                f"[RSS] RSS初期化スキップ: {e}"
+                "[RSS] RSS初期化スキップ: %s", e
             )
             self._rss_collector = None
 
     async def _start_fundamental_tasks(self) -> None:
-        """ファンダメンタル収集タスクを起動"""
+        """ファンダメンタル収集タスクを起動
+
+        共有コレクター使用時（_owns_collectors=False）は
+        最初のエンジンが起動済みのため、起動をスキップする。
+        """
+        if not self._owns_collectors:
+            return
         if self._fundamental_collector:
             await self._fundamental_collector.start()
             logger.info(
@@ -2559,11 +2616,16 @@ class LiveTradingEngine:
             )
 
     async def _stop_fundamental_tasks(self) -> None:
-        """ファンダメンタル収集タスクを停止"""
-        if self._fundamental_collector:
-            await self._fundamental_collector.stop()
-        if self._rss_collector:
-            await self._rss_collector.stop()
+        """ファンダメンタル収集タスクを停止
+
+        共有コレクター使用時（_owns_collectors=False）は
+        停止をスキップし、バッファのみクリアする。
+        """
+        if self._owns_collectors:
+            if self._fundamental_collector:
+                await self._fundamental_collector.stop()
+            if self._rss_collector:
+                await self._rss_collector.stop()
         self._news_buffer.clear()
 
     def get_news_for_symbol(
