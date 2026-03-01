@@ -23,6 +23,9 @@ input int LookbackDays = 1;
 input int ForwardDays = 7;
 // 出力ファイル名
 input string OutputFile = "calendar_events.csv";
+// ブローカーGMTオフセット（時間） - 自動検出失敗時のフォールバック
+// 冬: UTC+2, 夏: UTC+3 が一般的（Exness, IC Markets等）
+input int BrokerGMTOffsetHours = 2;
 
 //+------------------------------------------------------------------+
 //| インパクトレベルを文字列に変換                                    |
@@ -56,11 +59,17 @@ string FormatValue(long raw_value)
 
 //+------------------------------------------------------------------+
 //| ブローカーサーバー時刻とGMTの差分（秒）を取得                    |
-//| ※TimeCurrent()はサーバー時刻、TimeGMT()はUTC                    |
+//| 市場閉鎖中はTimeCurrent()が金曜値のまま止まるため                |
+//| バリデーション付きで算出し、異常値時はinputフォールバック          |
 //+------------------------------------------------------------------+
 int GetBrokerGMTOffsetSec()
   {
-   return (int)(TimeCurrent() - TimeGMT());
+   int runtime = (int)(TimeCurrent() - TimeGMT());
+   // 妥当なタイムゾーン範囲: -12h ～ +14h（秒換算）
+   if(runtime >= -43200 && runtime <= 50400)
+      return runtime;
+   // 市場閉鎖中等で異常値 → inputパラメータにフォールバック
+   return BrokerGMTOffsetHours * 3600;
   }
 
 //+------------------------------------------------------------------+
