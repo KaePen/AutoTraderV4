@@ -32,6 +32,7 @@ from autotrader.web.schemas.responses import (
     AccountPresetResponse,
     AccountPresetsResponse,
 )
+from autotrader.web.utils import sanitize_error_message
 
 _accounts_loader = AccountsLoader()
 
@@ -236,10 +237,9 @@ async def connect_mt5(
             )
             return _build_mt5_status_response(engine)
         except Exception as e:
-            logger.error("MT5接続失敗: %s", e)
             return ApiResponse(
                 success=False,
-                error=str(e),
+                error=sanitize_error_message(e, "MT5接続"),
                 data=MT5StatusResponse(
                     connected=False
                 ),
@@ -255,10 +255,11 @@ async def connect_mt5(
             request.app.state.live_engine = engine
             logger.info("エンジンをオンデマンド作成")
         except Exception as e:
-            logger.error("エンジン作成失敗: %s", e)
             return ApiResponse(
                 success=False,
-                error=f"エンジン作成失敗: {e}",
+                error=sanitize_error_message(
+                    e, "エンジン作成"
+                ),
                 data=MT5StatusResponse(
                     connected=False
                 ),
@@ -268,10 +269,9 @@ async def connect_mt5(
         await engine.start()
         logger.info("MT5接続成功（API経由）")
     except Exception as e:
-        logger.error("MT5接続失敗: %s", e)
         return ApiResponse(
             success=False,
-            error=str(e),
+            error=sanitize_error_message(e, "MT5接続"),
             data=MT5StatusResponse(connected=False),
         )
 
@@ -422,12 +422,11 @@ async def toggle_symbol_auto_trade(
                 try:
                     await target.start()
                 except Exception as e:
-                    logger.error(
-                        "エンジン起動失敗: %s", e
-                    )
                     return ApiResponse(
                         success=False,
-                        error=f"エンジン起動失敗: {e}",
+                        error=sanitize_error_message(
+                            e, "エンジン起動"
+                        ),
                         data=TradingModeResponse(),
                     )
         elif target.running:
@@ -461,10 +460,11 @@ async def toggle_symbol_auto_trade(
         try:
             await engine.start()
         except Exception as e:
-            logger.error("エンジン起動失敗: %s", e)
             return ApiResponse(
                 success=False,
-                error=f"エンジン起動失敗: {e}",
+                error=sanitize_error_message(
+                    e, "エンジン起動"
+                ),
                 data=TradingModeResponse(),
             )
     elif engine.running:
@@ -508,7 +508,9 @@ async def switch_symbol(
     except ValueError as e:
         return ApiResponse(
             success=False,
-            error=str(e),
+            error=sanitize_error_message(
+                e, "シンボル切替"
+            ),
             data=TradingModeResponse(),
         )
     logger.info(
@@ -568,12 +570,11 @@ async def toggle_symbol_demo_mode(
             try:
                 await target.start()
             except Exception as e:
-                logger.error(
-                    "エンジン起動失敗: %s", e
-                )
                 return ApiResponse(
                     success=False,
-                    error=f"エンジン起動失敗: {e}",
+                    error=sanitize_error_message(
+                        e, "エンジン起動"
+                    ),
                     data=TradingModeResponse(),
                 )
         else:
@@ -605,10 +606,11 @@ async def toggle_symbol_demo_mode(
         try:
             await engine.start()
         except Exception as e:
-            logger.error("エンジン起動失敗: %s", e)
             return ApiResponse(
                 success=False,
-                error=f"エンジン起動失敗: {e}",
+                error=sanitize_error_message(
+                    e, "エンジン起動"
+                ),
                 data=TradingModeResponse(),
             )
     else:
@@ -705,10 +707,9 @@ async def switch_account(
             body.server,
         )
     except Exception as e:
-        logger.error("口座切替失敗: %s", e)
         return ApiResponse(
             success=False,
-            error=f"口座切替失敗: {e}",
+            error=sanitize_error_message(e, "口座切替"),
             data=MT5StatusResponse(connected=False),
         )
 
