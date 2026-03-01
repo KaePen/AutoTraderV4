@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import bisect
 import csv
+import math
 import re
 from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta, timezone
@@ -1276,50 +1277,71 @@ class BacktestFundamentalProvider:
     def _parse_row(
         self, row: dict, fetched_at: datetime
     ) -> EconomicEvent | None:
-        """CSVの1行をEconomicEventに変換
+        """CSV/Parquetの1行をEconomicEventに変換
+
+        CSV読み込み時は全フィールドが文字列だが、
+        Parquet読み込み時はfloat/Timestamp等のネイティブ型が来る。
 
         Args:
-            row: CSV行辞書
+            row: 行辞書（CSV or Parquet由来）
             fetched_at: 取得時刻
 
         Returns:
             EconomicEvent | None: 変換済みイベント
         """
-        event_time_str = row.get("event_time", "")
-        if not event_time_str:
+        # --- event_time: str / pandas.Timestamp / datetime ---
+        event_time_raw = row.get("event_time", "")
+        if not event_time_raw:
             return None
 
         try:
-            event_time = datetime.fromisoformat(event_time_str)
+            if isinstance(event_time_raw, datetime):
+                # pandas.Timestamp は datetime のサブクラス
+                event_time = event_time_raw
+            else:
+                event_time = datetime.fromisoformat(
+                    str(event_time_raw)
+                )
             if event_time.tzinfo is None:
                 event_time = event_time.replace(
                     tzinfo=timezone.utc
                 )
-        except ValueError:
+        except (ValueError, TypeError):
             return None
 
-        currency = row.get("currency", "").upper()
+        # --- currency / event_name: str or NaN ---
+        currency = str(row.get("currency", "")).strip().upper()
         if not currency:
             return None
 
-        event_name = row.get("event_name", "")
+        event_name = str(row.get("event_name", "")).strip()
         if not event_name:
             return None
 
-        impact_str = row.get("impact", "low").lower()
+        # --- impact: str or NaN ---
+        impact_raw = row.get("impact", "low")
+        if not isinstance(impact_raw, str):
+            # Parquetで NaN が来た場合のフォールバック
+            impact_raw = "low"
+        impact_str = impact_raw.lower()
         impact = {
             "high": ImpactLevel.HIGH,
             "medium": ImpactLevel.MEDIUM,
             "low": ImpactLevel.LOW,
         }.get(impact_str, ImpactLevel.LOW)
 
-        def parse_float(val: str) -> float | None:
-            """文字列をfloatに変換"""
-            if not val or val.strip() == "":
+        def parse_float(val: any) -> float | None:
+            """値をfloatに変換（str/float/int/NaN対応）"""
+            if val is None:
+                return None
+            if isinstance(val, (int, float)):
+                return None if math.isnan(val) else float(val)
+            val_str = str(val).strip()
+            if not val_str:
                 return None
             try:
-                return float(val)
-            except ValueError:
+                return float(val_str)
+            except (ValueError, TypeError):
                 return None
 
         return EconomicEvent(
@@ -1332,7 +1354,7 @@ class BacktestFundamentalProvider:
             impact=impact,
             source=EventSource.MT5,
             fetched_at=fetched_at,
-            actual=parse_float(row.get("actual", "")),
-            forecast=parse_float(row.get("forecast", "")),
-            previous=parse_float(row.get("previous", "")),
+            actual=parse_float(row.get("actual")),
+            forecast=parse_float(row.get("forecast")),
+            previous=parse_float(row.get("previous")),
         )
