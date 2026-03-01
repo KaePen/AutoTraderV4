@@ -21,7 +21,12 @@ from autotrader.adapters.mt5.data_provider import MT5DataProvider
 from autotrader.adapters.mt5.trade_executor import MT5TradeExecutor
 from autotrader.adapters.mt5.exceptions import MT5Error, MT5DataError
 from autotrader.core.entities import AccountInfo, Signal
-from autotrader.core.enums import MarketRegime, SignalType, Timeframe
+from autotrader.core.enums import (
+    ExitReason,
+    MarketRegime,
+    SignalType,
+    Timeframe,
+)
 from autotrader.core.exceptions import TradingError, ValidationError
 from autotrader.core.interfaces.position_sizing import SizingContext
 from autotrader.decision.unified.config import UnifiedBotConfig
@@ -43,6 +48,29 @@ from autotrader.live.tick_entry_optimizer import TickEntryOptimizer
 from autotrader.calculator.technical.batch import TechnicalIndicatorBatch
 
 logger = logging.getLogger(__name__)
+
+
+def _mt5_reason_to_exit_reason(reason_code: int) -> str:
+    """MT5 DEAL_REASONコードをExitReason.valueに変換
+
+    Args:
+        reason_code: MT5のDEAL_REASONコード
+
+    Returns:
+        str: ExitReason の文字列値
+    """
+    _map = {
+        0: ExitReason.MANUAL_CLOSE,    # CLIENT
+        1: ExitReason.MANUAL_CLOSE,    # MOBILE
+        2: ExitReason.MANUAL_CLOSE,    # WEB
+        3: ExitReason.EXTERNAL_CLOSE,  # EXPERT（他EA）
+        4: ExitReason.STOP_LOSS,       # SL
+        5: ExitReason.TAKE_PROFIT,     # TP
+        6: ExitReason.STOP_OUT,        # ストップアウト
+    }
+    return _map.get(
+        reason_code, ExitReason.EXTERNAL_CLOSE
+    ).value
 
 
 class LiveTradingEngine:
@@ -1437,21 +1465,15 @@ class LiveTradingEngine:
         logger.info(
             "外部決済検出（手動/SL/TP）: ticket=%d", ticket
         )
-        from autotrader.core.enums import ExitReason
         deal = await self._executor.get_deal_by_position_async(
             ticket
         )
         if deal:
             exit_price = deal["price"]
             profit_loss = deal["profit"]
-            # MT5 DEAL_REASON: 4=SL, 5=TP, その他=手動/外部
-            rc = deal["reason_code"]
-            if rc == 4:
-                exit_reason = ExitReason.STOP_LOSS.value
-            elif rc == 5:
-                exit_reason = ExitReason.TAKE_PROFIT.value
-            else:
-                exit_reason = ExitReason.EXTERNAL_CLOSE.value
+            exit_reason = _mt5_reason_to_exit_reason(
+                deal["reason_code"]
+            )
             logger.info(
                 "外部決済詳細: ticket=%d reason=%s"
                 " price=%.5f profit=%.2f",
@@ -1943,7 +1965,7 @@ class LiveTradingEngine:
             if positions
             else set()
         )
-        self._close_ghost_db_records(active_tickets)
+        await self._close_ghost_db_records(active_tickets)
 
         if not positions:
             logger.info("同期対象ポジションなし")
@@ -2025,13 +2047,14 @@ class LiveTradingEngine:
         }
         self._cleanup_stale_states(active_ids)
 
-    def _close_ghost_db_records(
+    async def _close_ghost_db_records(
         self, active_tickets: set[int]
     ) -> None:
         """MT5に存在しないDBゴーストレコードを決済済みに更新
 
         エンジン停止中にMT5側で決済されたポジションの
         is_open=trueレコードをクリーンアップする。
+        MT5口座履歴から正確な決済データを復元する。
 
         Note:
             _active_symbolのレコードのみ対象。
@@ -2064,17 +2087,55 @@ class LiveTradingEngine:
                 for r in ghost_records:
                     if r.ticket not in active_tickets:
                         r.is_open = False
-                        r.exit_reason = "GHOST_CLEANUP"
-                        r.closed_at = datetime.now(
-                            timezone.utc
+                        # MT5履歴から正確な決済データを復元
+                        deal = await (
+                            self._executor
+                            .get_deal_by_position_id_async(
+                                r.ticket
+                            )
                         )
+                        if deal:
+                            r.exit_price = deal["price"]
+                            r.profit_loss = deal["profit"]
+                            r.exit_reason = (
+                                _mt5_reason_to_exit_reason(
+                                    deal["reason_code"]
+                                )
+                            )
+                            if deal["time"] > 0:
+                                r.closed_at = (
+                                    datetime.fromtimestamp(
+                                        deal["time"],
+                                        tz=timezone.utc,
+                                    )
+                                )
+                            else:
+                                r.closed_at = datetime.now(
+                                    timezone.utc
+                                )
+                            logger.info(
+                                "ゴースト復元(MT5履歴):"
+                                " ticket=%s reason=%s"
+                                " price=%.5f profit=%.2f",
+                                r.ticket,
+                                r.exit_reason,
+                                r.exit_price,
+                                r.profit_loss,
+                            )
+                        else:
+                            r.exit_reason = (
+                                ExitReason.GHOST_CLEANUP.value
+                            )
+                            r.closed_at = datetime.now(
+                                timezone.utc
+                            )
+                            logger.info(
+                                "ゴーストレコード掃除:"
+                                " ticket=%s trade_id=%s",
+                                r.ticket,
+                                r.trade_id,
+                            )
                         closed_count += 1
-                        logger.info(
-                            "ゴーストレコード掃除:"
-                            " ticket=%s trade_id=%s",
-                            r.ticket,
-                            r.trade_id,
-                        )
                 if closed_count > 0:
                     db.flush()
                     logger.info(

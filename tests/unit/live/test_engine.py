@@ -452,10 +452,212 @@ class TestExecuteEntryNullSafety:
 class TestCloseGhostDbRecords:
     """_close_ghost_db_records テスト"""
 
-    def test_ゴーストレコードをis_open_falseに更新(
+    def _make_db_mocks(
+        self, records: list[MagicMock],
+    ) -> tuple[MagicMock, MagicMock]:
+        """DB関連モックを生成するヘルパー
+
+        Returns:
+            tuple: (mock_session, context_managers_dict)
+        """
+        mock_query = MagicMock()
+        mock_query.filter.return_value.all.return_value = (
+            records
+        )
+        mock_session = MagicMock()
+        mock_session.query.return_value = mock_query
+        return mock_session
+
+    @pytest.mark.asyncio
+    async def test_MT5履歴でゴースト復元_SL(
         self, engine: LiveTradingEngine
     ) -> None:
-        """MT5に存在しないDBレコードが決済済みになる"""
+        """MT5 deal取得成功(SL)でexit_price等が復元される"""
+        mock_ghost = MagicMock()
+        mock_ghost.ticket = 99999
+        mock_ghost.trade_id = "ghost-001"
+        mock_ghost.is_open = True
+
+        mock_session = self._make_db_mocks([mock_ghost])
+
+        engine._executor = MagicMock()
+        engine._executor.get_deal_by_position_id_async = (
+            AsyncMock(return_value={
+                "price": 150.123,
+                "profit": -500.0,
+                "reason_code": 4,
+                "time": 1700000000,
+            })
+        )
+
+        with (
+            patch(
+                "autotrader.config.settings.get_settings"
+            ) as mock_settings,
+            patch(
+                "autotrader.adapters.database.connection"
+                ".get_session"
+            ) as mock_get_session,
+        ):
+            mock_settings.return_value.database_url = (
+                "sqlite://"
+            )
+            mock_get_session.return_value.__enter__ = (
+                MagicMock(return_value=mock_session)
+            )
+            mock_get_session.return_value.__exit__ = (
+                MagicMock(return_value=False)
+            )
+
+            await engine._close_ghost_db_records(set())
+
+        assert mock_ghost.is_open is False
+        assert mock_ghost.exit_price == 150.123
+        assert mock_ghost.profit_loss == -500.0
+        assert mock_ghost.exit_reason == "SL_HIT"
+        assert mock_ghost.closed_at is not None
+        mock_session.flush.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_MT5履歴でゴースト復元_手動決済(
+        self, engine: LiveTradingEngine
+    ) -> None:
+        """MT5 deal取得成功(手動reason=0)でMANUAL_CLOSE"""
+        mock_ghost = MagicMock()
+        mock_ghost.ticket = 88888
+        mock_ghost.trade_id = "ghost-manual"
+        mock_ghost.is_open = True
+
+        mock_session = self._make_db_mocks([mock_ghost])
+
+        engine._executor = MagicMock()
+        engine._executor.get_deal_by_position_id_async = (
+            AsyncMock(return_value={
+                "price": 149.500,
+                "profit": 200.0,
+                "reason_code": 0,
+                "time": 1700000000,
+            })
+        )
+
+        with (
+            patch(
+                "autotrader.config.settings.get_settings"
+            ) as mock_settings,
+            patch(
+                "autotrader.adapters.database.connection"
+                ".get_session"
+            ) as mock_get_session,
+        ):
+            mock_settings.return_value.database_url = (
+                "sqlite://"
+            )
+            mock_get_session.return_value.__enter__ = (
+                MagicMock(return_value=mock_session)
+            )
+            mock_get_session.return_value.__exit__ = (
+                MagicMock(return_value=False)
+            )
+
+            await engine._close_ghost_db_records(set())
+
+        assert mock_ghost.exit_reason == "MANUAL_CLOSE"
+        assert mock_ghost.exit_price == 149.500
+        assert mock_ghost.profit_loss == 200.0
+
+    @pytest.mark.asyncio
+    async def test_MT5履歴でゴースト復元_ストップアウト(
+        self, engine: LiveTradingEngine
+    ) -> None:
+        """MT5 deal取得成功(reason=6)でSTOP_OUT"""
+        mock_ghost = MagicMock()
+        mock_ghost.ticket = 77777
+        mock_ghost.trade_id = "ghost-so"
+        mock_ghost.is_open = True
+
+        mock_session = self._make_db_mocks([mock_ghost])
+
+        engine._executor = MagicMock()
+        engine._executor.get_deal_by_position_id_async = (
+            AsyncMock(return_value={
+                "price": 148.000,
+                "profit": -1000.0,
+                "reason_code": 6,
+                "time": 1700000000,
+            })
+        )
+
+        with (
+            patch(
+                "autotrader.config.settings.get_settings"
+            ) as mock_settings,
+            patch(
+                "autotrader.adapters.database.connection"
+                ".get_session"
+            ) as mock_get_session,
+        ):
+            mock_settings.return_value.database_url = (
+                "sqlite://"
+            )
+            mock_get_session.return_value.__enter__ = (
+                MagicMock(return_value=mock_session)
+            )
+            mock_get_session.return_value.__exit__ = (
+                MagicMock(return_value=False)
+            )
+
+            await engine._close_ghost_db_records(set())
+
+        assert mock_ghost.exit_reason == "STOP_OUT"
+
+    @pytest.mark.asyncio
+    async def test_MT5履歴取得失敗でGHOST_CLEANUPフォールバック(
+        self, engine: LiveTradingEngine
+    ) -> None:
+        """deal取得失敗時はGHOST_CLEANUPにフォールバック"""
+        mock_ghost = MagicMock()
+        mock_ghost.ticket = 99999
+        mock_ghost.trade_id = "ghost-001"
+        mock_ghost.is_open = True
+
+        mock_session = self._make_db_mocks([mock_ghost])
+
+        engine._executor = MagicMock()
+        engine._executor.get_deal_by_position_id_async = (
+            AsyncMock(return_value=None)
+        )
+
+        with (
+            patch(
+                "autotrader.config.settings.get_settings"
+            ) as mock_settings,
+            patch(
+                "autotrader.adapters.database.connection"
+                ".get_session"
+            ) as mock_get_session,
+        ):
+            mock_settings.return_value.database_url = (
+                "sqlite://"
+            )
+            mock_get_session.return_value.__enter__ = (
+                MagicMock(return_value=mock_session)
+            )
+            mock_get_session.return_value.__exit__ = (
+                MagicMock(return_value=False)
+            )
+
+            await engine._close_ghost_db_records(set())
+
+        assert mock_ghost.is_open is False
+        assert mock_ghost.exit_reason == "GHOST_CLEANUP"
+        assert mock_ghost.closed_at is not None
+        mock_session.flush.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_アクティブレコードは更新されない(
+        self, engine: LiveTradingEngine
+    ) -> None:
+        """MT5に存在するレコードは変更されない"""
         mock_ghost = MagicMock()
         mock_ghost.ticket = 99999
         mock_ghost.trade_id = "ghost-001"
@@ -466,12 +668,14 @@ class TestCloseGhostDbRecords:
         mock_active.trade_id = "active-001"
         mock_active.is_open = True
 
-        mock_query = MagicMock()
-        mock_query.filter.return_value.all.return_value = [
-            mock_ghost, mock_active,
-        ]
-        mock_session = MagicMock()
-        mock_session.query.return_value = mock_query
+        mock_session = self._make_db_mocks(
+            [mock_ghost, mock_active]
+        )
+
+        engine._executor = MagicMock()
+        engine._executor.get_deal_by_position_id_async = (
+            AsyncMock(return_value=None)
+        )
 
         with (
             patch(
@@ -493,17 +697,16 @@ class TestCloseGhostDbRecords:
             )
 
             # ticket=12345のみMT5に存在
-            engine._close_ghost_db_records({12345})
+            await engine._close_ghost_db_records({12345})
 
         # ゴーストのみ更新される
         assert mock_ghost.is_open is False
-        assert mock_ghost.exit_reason == "GHOST_CLEANUP"
-        assert mock_ghost.closed_at is not None
         # アクティブは変更なし
         assert mock_active.is_open is True
         mock_session.flush.assert_called_once()
 
-    def test_ゴーストなしの場合flushされない(
+    @pytest.mark.asyncio
+    async def test_ゴーストなしの場合flushされない(
         self, engine: LiveTradingEngine
     ) -> None:
         """全レコードがMT5に存在する場合はflushなし"""
@@ -511,12 +714,7 @@ class TestCloseGhostDbRecords:
         mock_record.ticket = 12345
         mock_record.is_open = True
 
-        mock_query = MagicMock()
-        mock_query.filter.return_value.all.return_value = [
-            mock_record,
-        ]
-        mock_session = MagicMock()
-        mock_session.query.return_value = mock_query
+        mock_session = self._make_db_mocks([mock_record])
 
         with (
             patch(
@@ -537,57 +735,12 @@ class TestCloseGhostDbRecords:
                 MagicMock(return_value=False)
             )
 
-            engine._close_ghost_db_records({12345})
+            await engine._close_ghost_db_records({12345})
 
         mock_session.flush.assert_not_called()
 
-    def test_空セットで全レコードがゴーストになる(
-        self, engine: LiveTradingEngine
-    ) -> None:
-        """MT5にポジション0件→全DBレコードがゴースト"""
-        mock_r1 = MagicMock()
-        mock_r1.ticket = 11111
-        mock_r1.trade_id = "ghost-a"
-        mock_r1.is_open = True
-
-        mock_r2 = MagicMock()
-        mock_r2.ticket = 22222
-        mock_r2.trade_id = "ghost-b"
-        mock_r2.is_open = True
-
-        mock_query = MagicMock()
-        mock_query.filter.return_value.all.return_value = [
-            mock_r1, mock_r2,
-        ]
-        mock_session = MagicMock()
-        mock_session.query.return_value = mock_query
-
-        with (
-            patch(
-                "autotrader.config.settings.get_settings"
-            ) as mock_settings,
-            patch(
-                "autotrader.adapters.database.connection"
-                ".get_session"
-            ) as mock_get_session,
-        ):
-            mock_settings.return_value.database_url = (
-                "sqlite://"
-            )
-            mock_get_session.return_value.__enter__ = (
-                MagicMock(return_value=mock_session)
-            )
-            mock_get_session.return_value.__exit__ = (
-                MagicMock(return_value=False)
-            )
-
-            engine._close_ghost_db_records(set())
-
-        assert mock_r1.is_open is False
-        assert mock_r2.is_open is False
-        mock_session.flush.assert_called_once()
-
-    def test_DB例外時にログ出力しスキップ(
+    @pytest.mark.asyncio
+    async def test_DB例外時にログ出力しスキップ(
         self, engine: LiveTradingEngine
     ) -> None:
         """DB接続エラーでも例外は伝播しない"""
@@ -598,7 +751,54 @@ class TestCloseGhostDbRecords:
             ),
         ):
             # 例外が伝播しないことを確認
-            engine._close_ghost_db_records({12345})
+            await engine._close_ghost_db_records({12345})
+
+
+class TestMt5ReasonToExitReason:
+    """_mt5_reason_to_exit_reason マッパーテスト"""
+
+    def test_全reason_codeのマッピング(self) -> None:
+        """reason_code 0-6 が期待値を返す"""
+        from autotrader.live.engine import (
+            _mt5_reason_to_exit_reason,
+        )
+        # CLIENT/MOBILE/WEB → MANUAL_CLOSE
+        assert (
+            _mt5_reason_to_exit_reason(0) == "MANUAL_CLOSE"
+        )
+        assert (
+            _mt5_reason_to_exit_reason(1) == "MANUAL_CLOSE"
+        )
+        assert (
+            _mt5_reason_to_exit_reason(2) == "MANUAL_CLOSE"
+        )
+        # EXPERT → EXTERNAL_CLOSE
+        assert (
+            _mt5_reason_to_exit_reason(3)
+            == "EXTERNAL_CLOSE"
+        )
+        # SL → SL_HIT
+        assert _mt5_reason_to_exit_reason(4) == "SL_HIT"
+        # TP → TP_HIT
+        assert _mt5_reason_to_exit_reason(5) == "TP_HIT"
+        # STOP_OUT
+        assert _mt5_reason_to_exit_reason(6) == "STOP_OUT"
+
+    def test_未知のreason_codeはEXTERNAL_CLOSE(
+        self,
+    ) -> None:
+        """未定義のreason_codeはEXTERNAL_CLOSEにフォールバック"""
+        from autotrader.live.engine import (
+            _mt5_reason_to_exit_reason,
+        )
+        assert (
+            _mt5_reason_to_exit_reason(99)
+            == "EXTERNAL_CLOSE"
+        )
+        assert (
+            _mt5_reason_to_exit_reason(-1)
+            == "EXTERNAL_CLOSE"
+        )
 
 
 class TestWriteCloseToDbPopTiming:

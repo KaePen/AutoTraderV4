@@ -505,3 +505,51 @@ class MT5TradeExecutor(TradeExecutor):
                     "reason_code": int(deal.get("reason", -1)),
                 }
         return None
+
+    async def get_deal_by_position_id_async(
+        self,
+        ticket: int,
+    ) -> dict | None:
+        """ポジションIDで決済約定をMT5全履歴から取得（ゴースト用）
+
+        時間範囲を指定しないため、エンジン停止が
+        数日間でも確実にdealを取得可能。
+
+        Args:
+            ticket: MT5ポジションID
+
+        Returns:
+            dict | None: price, profit, reason_code, time
+                を含む辞書。未取得の場合はNone。
+        """
+        try:
+            async with self._conn.session() as transport:
+                deals = (
+                    await transport
+                    .history_deals_get_by_position(ticket)
+                )
+        except Exception as e:
+            logger.warning(
+                "約定履歴取得失敗(position=%d): %s",
+                ticket, e,
+            )
+            return None
+
+        # DEAL_ENTRY_OUT = 1（決済約定）
+        for deal in deals:
+            if deal.get("entry") == 1:
+                return {
+                    "price": float(
+                        deal.get("price", 0.0)
+                    ),
+                    "profit": float(
+                        deal.get("profit", 0.0)
+                    ),
+                    "reason_code": int(
+                        deal.get("reason", -1)
+                    ),
+                    "time": int(
+                        deal.get("time", 0)
+                    ),
+                }
+        return None
