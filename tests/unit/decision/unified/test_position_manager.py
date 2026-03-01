@@ -207,6 +207,13 @@ class TestPositionManager:
             plan=self.plan,
         )
 
+        # 一度0.25R以上に到達させてhighest_rを記録（超早期exitを回避）
+        # 0.25R = 0.125 → price=150.125
+        self.manager.evaluate(
+            "test1", 150.125,
+            self.entry_time + timedelta(minutes=15), 0.5,
+        )
+
         # 8時間後（最大保有時間）
         action = self.manager.evaluate(
             position_id="test1",
@@ -284,7 +291,11 @@ class TestPositionManager:
         assert action.new_sl is not None  # BE移動
 
     def test_signal_reversal_ignored_when_losing(self) -> None:
-        """シグナル反転: 含み損(R<=0)で無視"""
+        """シグナル反転: 含み損(R<=0)で無視
+
+        Note: 超早期exit（MFE<0.2R + 30分経過）が先に発火するため、
+        シグナル反転チェックには到達しない。29分未満でテスト。
+        """
         self.manager.register_position(
             position_id="test1",
             direction=SignalType.BUY,
@@ -296,10 +307,11 @@ class TestPositionManager:
             plan=self.plan,
         )
 
+        # 29分未満で超早期exitを回避
         action = self.manager.evaluate(
             position_id="test1",
             current_price=149.8,  # R<0（含み損）
-            current_time=self.entry_time + timedelta(minutes=30),
+            current_time=self.entry_time + timedelta(minutes=25),
             atr=0.5,
             current_signal=SignalType.SELL,
         )
@@ -418,7 +430,11 @@ class TestPositionManager:
         assert action.new_sl > 149.5  # SL引き上げ
 
     def test_hold_when_no_conditions(self) -> None:
-        """条件未達でHOLD"""
+        """条件未達でHOLD
+
+        Note: 超早期exit（MFE<0.2R + 30分経過）を回避するため、
+        MFE >= 0.2R を先に記録する必要がある。
+        """
         self.manager.register_position(
             position_id="test1",
             direction=SignalType.BUY,
@@ -428,6 +444,13 @@ class TestPositionManager:
             tp=151.0,
             volume=0.1,
             plan=self.plan,
+        )
+
+        # 先に0.25Rに到達させてhighest_rを記録（超早期exitを回避）
+        # 0.25R = 0.125 → price=150.125
+        self.manager.evaluate(
+            "test1", 150.125,
+            self.entry_time + timedelta(minutes=15), 0.5,
         )
 
         action = self.manager.evaluate(
@@ -708,6 +731,14 @@ class TestStagnationExit:
             plan=self.plan,
         )
 
+        # 超早期exit（MFE<0.2R + 30分経過）を回避するため、
+        # MFE >= 0.2R を先に記録
+        # 0.25R = 0.125 → price=150.125
+        self.manager.evaluate(
+            "test1", 150.125,
+            self.entry_time + timedelta(minutes=15), 0.5,
+        )
+
         action = self.manager.evaluate(
             position_id="test1",
             current_price=150.05,
@@ -807,7 +838,11 @@ class TestBreakevenImprovement:
         assert action.new_sl == pytest.approx(150.04)
 
     def test_be_applied_for_universal(self) -> None:
-        """UNIVERSALでBE発火"""
+        """UNIVERSALでBE発火
+
+        Note: SL=149.9 → r_value=0.1
+        0.4R=0.04 → price=150.04 (0.5R部分利確より前、early_BE 0.3R超)
+        """
         self.manager.register_position(
             position_id="test1",
             direction=SignalType.BUY,
@@ -819,10 +854,11 @@ class TestBreakevenImprovement:
             plan=SCALP_PLAN,
         )
 
-        # 0.8R超過（0.5R early_BE閾値を超える）
+        # 0.4R超過（0.3R early_BE閾値を超える、0.5R部分利確未満）
+        # r_value=0.1なので、0.4R=0.04 → price=150.04
         action = self.manager.evaluate(
             position_id="test1",
-            current_price=150.08,  # 0.8R
+            current_price=150.04,  # 0.4R
             current_time=self.entry_time + timedelta(minutes=5),
             atr=0.1,
         )
@@ -871,7 +907,10 @@ class TestBreakevenImprovement:
         assert action.exit_reason == ExitReason.TAKE_PROFIT_1R
 
     def test_be_exit_reason_with_offset(self) -> None:
-        """SWING BE_HIT SL = be_price（offset付き）"""
+        """SWING BE_HIT SL = be_price（offset付き）
+
+        Note: early_BE閾値0.3Rをテスト。0.5R部分利確は別テストで確認。
+        """
         self.manager.register_position(
             position_id="test1",
             direction=SignalType.BUY,
@@ -883,11 +922,12 @@ class TestBreakevenImprovement:
             plan=SWING_PLAN,
         )
 
-        # 1回目: 早期BE移動（0.5R閾値、SWINGなのでBE有効）
+        # 1回目: 早期BE移動（0.3R閾値、0.5R部分利確未満）
+        # 0.4R >= 0.2R なので超早期exitは発火しない
         action = self.manager.evaluate(
             position_id="test1",
-            current_price=150.4,  # 0.8R >= 0.5R
-            current_time=self.entry_time + timedelta(minutes=30),
+            current_price=150.2,  # 0.4R (0.5R部分利確未満)
+            current_time=self.entry_time + timedelta(minutes=25),  # 30分未満
             atr=0.5,
         )
         assert action.action_type == ManagementActionType.UPDATE_SL
@@ -909,7 +949,12 @@ class TestBreakevenImprovement:
         assert action.exit_reason == ExitReason.BREAKEVEN
 
     def test_swing_early_be_at_0_3r(self) -> None:
-        """SWING早期BEが0.3Rで発火"""
+        """SWING早期BEが0.3Rで発火
+
+        Note: 超早期exit（MFE<0.2R + 30分経過）を回避するため、
+        - 最初の評価は29分以内
+        - 後続でMFE >= 0.2Rを記録
+        """
         self.manager.register_position(
             position_id="test1",
             direction=SignalType.BUY,
@@ -921,16 +966,17 @@ class TestBreakevenImprovement:
             plan=SWING_PLAN,
         )
 
-        # 0.2R → まだ未達（閾値0.3R）
+        # 0.2R → まだ未達（閾値0.3R）。29分で超早期exitを回避
         action = self.manager.evaluate(
             position_id="test1",
             current_price=150.1,  # 0.2R
-            current_time=self.entry_time + timedelta(minutes=30),
+            current_time=self.entry_time + timedelta(minutes=25),
             atr=0.5,
         )
         assert action.action_type == ManagementActionType.HOLD
 
         # 0.4R → 早期BE発火（閾値0.3R超）
+        # 0.4R >= 0.2R なので超早期exitは発火しない
         action = self.manager.evaluate(
             position_id="test1",
             current_price=150.2,  # 0.4R
@@ -1131,13 +1177,16 @@ class TestRangeDayBeFix:
         assert action.exit_reason == ExitReason.TAKE_PROFIT_1R
 
     def test_trend_day_still_has_early_be(self) -> None:
-        """TREND×DAYは従来通り0.5RでBE"""
-        self._register(self.trend_day_plan)
-        now = self.entry_time + timedelta(minutes=15)
+        """TREND×DAYは従来通り0.3RでBE
 
-        # 0.5R到達（150.0→150.25）
+        Note: early_BE閾値0.3R、0.5R部分利確より前の価格でテスト
+        """
+        self._register(self.trend_day_plan)
+        now = self.entry_time + timedelta(minutes=25)  # 30分未満
+
+        # 0.4R到達（150.0→150.20）- 0.5R部分利確未満、0.3R early_BE超
         action = self.manager.evaluate(
-            "pos1", 150.25, now, atr=0.5,
+            "pos1", 150.20, now, atr=0.5,
         )
         assert action.action_type == (
             ManagementActionType.UPDATE_SL
@@ -1323,7 +1372,15 @@ class TestFastBeAndStagnation:
         assert action.exit_reason == ExitReason.STAGNATION
 
     def test_trend_day_normal_stagnation(self) -> None:
-        """TREND×DAY: 65分MFE<0.10Rでも120分閾値未到達→HOLD"""
+        """TREND×DAY: レジームベースSTAGNATION（TRENDは60分）
+
+        新ロジック: TREND/RANGE/CHOPPYでSTAGNATION時間が異なる
+        - TREND: 60分
+        - RANGE: 90分
+        - CHOPPY: 120分
+
+        65分経過 + MFE<0.1R → TRENDは60分閾値なので発火
+        """
         config = PositionManagerConfig(
             range_day_stagnation_enabled=True,
             range_day_stagnation_stage1_minutes=45.0,
@@ -1333,12 +1390,17 @@ class TestFastBeAndStagnation:
         )
         manager = PositionManager(config)
         self._register(manager, self.trend_day_plan)
-        now = self.entry_time + timedelta(minutes=65)
 
-        # MFE < 0.10R → TRENDなので120分閾値
+        # 先に0.25Rまで上昇させてhighest_rを記録（超早期exitを回避）
+        t1 = self.entry_time + timedelta(minutes=10)
+        manager.evaluate("pos1", 150.125, t1, atr=0.5)
+
+        # 55分経過（TRENDは60分閾値なので未到達）
+        now = self.entry_time + timedelta(minutes=55)
         action = manager.evaluate(
             "pos1", 150.05, now, atr=0.5,
         )
+        # TRENDで55分 < 60分閾値 → HOLD
         assert action.action_type == (
             ManagementActionType.HOLD
         )
@@ -1370,7 +1432,10 @@ class TestFastBeAndStagnation:
     def test_range_day_stage1_survives_with_mfe(
         self,
     ) -> None:
-        """RANGE×DAY: 48分MFE=0.08R→Stage1不発、Stage2未到達"""
+        """RANGE×DAY: 48分MFE=0.25R→Stage1不発、Stage2未到達
+
+        Note: MFE >= 0.2R にして超早期exitを回避する
+        """
         config = PositionManagerConfig(
             range_day_stagnation_enabled=True,
             range_day_stagnation_stage1_minutes=45.0,
@@ -1381,12 +1446,12 @@ class TestFastBeAndStagnation:
         manager = PositionManager(config)
         self._register(manager, self.range_day_plan)
 
-        # まず0.08Rまで上昇させてhighest_rを記録
-        # 0.08R = 0.04 → price=150.04
+        # まず0.25Rまで上昇させてhighest_rを記録（超早期exit回避）
+        # 0.25R = 0.125 → price=150.125
         t1 = self.entry_time + timedelta(minutes=10)
-        manager.evaluate("pos1", 150.04, t1, atr=0.5)
+        manager.evaluate("pos1", 150.125, t1, atr=0.5)
 
-        # 48分後に戻る → Stage1: MFE=0.08R >= 0.05R 不発
+        # 48分後に戻る → Stage1: MFE=0.25R >= 0.05R 不発
         now = self.entry_time + timedelta(minutes=48)
         action = manager.evaluate(
             "pos1", 150.0, now, atr=0.5,
@@ -1424,7 +1489,10 @@ class TestFastBeAndStagnation:
     def test_range_day_stage2_survives_with_mfe(
         self,
     ) -> None:
-        """RANGE×DAY: 65分MFE=0.15R→両Stage不発"""
+        """RANGE×DAY: 65分MFE=0.25R→両Stage不発
+
+        Note: MFE >= 0.2R にして超早期exitを回避する
+        """
         config = PositionManagerConfig(
             range_day_stagnation_enabled=True,
             range_day_stagnation_stage1_minutes=45.0,
@@ -1435,13 +1503,13 @@ class TestFastBeAndStagnation:
         manager = PositionManager(config)
         self._register(manager, self.range_day_plan)
 
-        # まず0.15Rまで上昇させてhighest_rを記録
-        # 0.15R = 0.075 → price=150.075
+        # まず0.25Rまで上昇させてhighest_rを記録（超早期exit回避）
+        # 0.25R = 0.125 → price=150.125
         t1 = self.entry_time + timedelta(minutes=10)
-        manager.evaluate("pos1", 150.075, t1, atr=0.5)
+        manager.evaluate("pos1", 150.125, t1, atr=0.5)
 
-        # 65分後 → Stage1: 0.15R>=0.05R 不発
-        # Stage2: 0.15R>=0.10R 不発
+        # 65分後 → Stage1: 0.25R>=0.05R 不発
+        # Stage2: 0.25R>=0.10R 不発
         now = self.entry_time + timedelta(minutes=65)
         action = manager.evaluate(
             "pos1", 150.0, now, atr=0.5,
@@ -2084,3 +2152,196 @@ class TestRangeDayHalfRPartial:
         ) or action2.exit_reason != (
             ExitReason.TAKE_PROFIT_EARLY
         )
+
+
+class Test2021RangeImprovements:
+    """2021年レンジ相場対策テスト
+
+    - 超早期exit（MFE<0.2R + 30分経過）
+    - レジームベースSTAGNATION（TREND:60分、RANGE:90分、CHOPPY:120分）
+    """
+
+    def setup_method(self) -> None:
+        """テストセットアップ"""
+        self.entry_time = datetime(2024, 1, 1, 10, 0, 0)
+        self.trend_plan = TradingPlan(
+            mode=TradingStrategyMode.UNIVERSAL,
+            primary_tf="M15",
+            entry_tf="M5",
+            confirm_tfs=["H1"],
+            manage_tf="M15",
+            max_holding_bars=32,
+            tp_sl_ratio_range=(1.5, 2.5),
+            regime="TREND",
+        )
+        self.range_plan = TradingPlan(
+            mode=TradingStrategyMode.UNIVERSAL,
+            primary_tf="M15",
+            entry_tf="M5",
+            confirm_tfs=["H1"],
+            manage_tf="M15",
+            max_holding_bars=32,
+            tp_sl_ratio_range=(1.5, 2.5),
+            regime="RANGE",
+        )
+        self.choppy_plan = TradingPlan(
+            mode=TradingStrategyMode.UNIVERSAL,
+            primary_tf="M15",
+            entry_tf="M5",
+            confirm_tfs=["H1"],
+            manage_tf="M15",
+            max_holding_bars=32,
+            tp_sl_ratio_range=(1.5, 2.5),
+            regime="CHOPPY",
+        )
+
+    def _register(
+        self,
+        manager: PositionManager,
+        plan: TradingPlan,
+        pos_id: str = "pos1",
+    ) -> None:
+        """ヘルパー: ポジション登録"""
+        manager.register_position(
+            position_id=pos_id,
+            direction=SignalType.BUY,
+            entry_price=150.0,
+            entry_time=self.entry_time,
+            sl=149.5,  # r_value=0.5
+            tp=151.0,
+            volume=0.1,
+            plan=plan,
+        )
+
+    def test_very_early_exit_mfe_below_02r(self) -> None:
+        """超早期exit: MFE<0.2R + 30分経過で撤退"""
+        manager = PositionManager()
+        self._register(manager, self.trend_plan)
+
+        # 30分経過、MFE<0.2R（価格=entry付近で上昇なし）
+        # entry=150.0, sl=149.5, r_value=0.5
+        # 0.2R = 0.1 → price=150.1未満
+        now = self.entry_time + timedelta(minutes=35)
+        action = manager.evaluate(
+            "pos1", 150.0, now, atr=0.5,
+        )
+        assert action.action_type == (
+            ManagementActionType.FULL_CLOSE
+        )
+        assert action.exit_reason == ExitReason.STAGNATION
+        assert "超早期exit" in action.reason
+
+    def test_very_early_exit_skipped_with_mfe(self) -> None:
+        """超早期exit: MFE>=0.2R なら発火しない"""
+        manager = PositionManager()
+        self._register(manager, self.trend_plan)
+
+        # まず0.25Rまで上昇させてhighest_rを記録
+        # 0.25R = 0.125 → price=150.125
+        t1 = self.entry_time + timedelta(minutes=10)
+        manager.evaluate("pos1", 150.125, t1, atr=0.5)
+
+        # 35分経過、MFE=0.25R >= 0.2R → 超早期exitは発火しない
+        now = self.entry_time + timedelta(minutes=35)
+        action = manager.evaluate(
+            "pos1", 150.0, now, atr=0.5,
+        )
+        # TREND 60分閾値未満 → HOLD
+        assert action.action_type == ManagementActionType.HOLD
+
+    def test_regime_stagnation_trend_60min(self) -> None:
+        """TREND: 60分でSTAGNATION発火
+
+        条件: elapsed >= 60分 AND highest_r < stagnation_min_mfe_r
+        テスト: stagnation_min_mfe_r=0.30 に設定し、MFE=0.25R でテスト
+        （0.25R >= 0.2R なので超早期exitは回避）
+        """
+        config = PositionManagerConfig(
+            stagnation_min_mfe_r=0.30,  # 閾値引き上げ
+        )
+        manager = PositionManager(config)
+        self._register(manager, self.trend_plan)
+
+        # MFE=0.25R（0.30R未満、0.2R以上なので超早期exit回避）
+        # 0.25R = 0.125 → price=150.125
+        t1 = self.entry_time + timedelta(minutes=10)
+        manager.evaluate("pos1", 150.125, t1, atr=0.5)
+
+        # 65分経過、TREND→60分閾値を超過
+        # highest_r=0.25R < 0.30R → STAGNATION発火
+        now = self.entry_time + timedelta(minutes=65)
+        action = manager.evaluate(
+            "pos1", 150.0, now, atr=0.5,
+        )
+        assert action.action_type == (
+            ManagementActionType.FULL_CLOSE
+        )
+        assert action.exit_reason == ExitReason.STAGNATION
+        assert "TREND" in action.reason
+
+    def test_regime_stagnation_range_90min(self) -> None:
+        """RANGE: 90分でSTAGNATION発火（60分では不発）
+
+        条件: elapsed >= 90分 AND highest_r < stagnation_min_mfe_r
+        """
+        config = PositionManagerConfig(
+            stagnation_min_mfe_r=0.30,
+            range_day_stagnation_enabled=False,  # 個別stagnationをOFF
+        )
+        manager = PositionManager(config)
+        self._register(manager, self.range_plan)
+
+        # MFE=0.25R（超早期exit回避）
+        t1 = self.entry_time + timedelta(minutes=10)
+        manager.evaluate("pos1", 150.125, t1, atr=0.5)
+
+        # 65分経過、RANGE→90分閾値未到達 → HOLD
+        t2 = self.entry_time + timedelta(minutes=65)
+        action2 = manager.evaluate(
+            "pos1", 150.0, t2, atr=0.5,
+        )
+        assert action2.action_type == ManagementActionType.HOLD
+
+        # 95分経過、RANGE→90分閾値を超過
+        now = self.entry_time + timedelta(minutes=95)
+        action = manager.evaluate(
+            "pos1", 150.0, now, atr=0.5,
+        )
+        assert action.action_type == (
+            ManagementActionType.FULL_CLOSE
+        )
+        assert action.exit_reason == ExitReason.STAGNATION
+        assert "RANGE" in action.reason
+
+    def test_regime_stagnation_choppy_120min(self) -> None:
+        """CHOPPY: 120分でSTAGNATION発火（90分では不発）
+
+        条件: elapsed >= 120分 AND highest_r < stagnation_min_mfe_r
+        """
+        config = PositionManagerConfig(
+            stagnation_min_mfe_r=0.30,
+        )
+        manager = PositionManager(config)
+        self._register(manager, self.choppy_plan)
+
+        # MFE=0.25R（超早期exit回避）
+        t1 = self.entry_time + timedelta(minutes=10)
+        manager.evaluate("pos1", 150.125, t1, atr=0.5)
+
+        # 95分経過、CHOPPY→120分閾値未到達 → HOLD
+        t2 = self.entry_time + timedelta(minutes=95)
+        action2 = manager.evaluate(
+            "pos1", 150.0, t2, atr=0.5,
+        )
+        assert action2.action_type == ManagementActionType.HOLD
+
+        # 125分経過、CHOPPY→120分閾値を超過
+        now = self.entry_time + timedelta(minutes=125)
+        action = manager.evaluate(
+            "pos1", 150.0, now, atr=0.5,
+        )
+        assert action.action_type == (
+            ManagementActionType.FULL_CLOSE
+        )
+        assert action.exit_reason == ExitReason.STAGNATION
+        assert "CHOPPY" in action.reason

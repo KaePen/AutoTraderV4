@@ -204,6 +204,10 @@ class PositionManagerConfig:
     signal_rev_close_ratio: float = 0.0
     stagnation_exit_minutes: float = 120.0
     stagnation_min_mfe_r: float = 0.10
+    # 超早期exit（MFE<0.2R + 30分経過）
+    very_early_exit_enabled: bool = True
+    very_early_exit_minutes: float = 30.0
+    very_early_exit_mfe_r: float = 0.2
     # P0-1: RANGE×DAY BE制御
     range_day_be_disabled: bool = True
     range_day_early_be_r: float = 0.3
@@ -655,14 +659,32 @@ class PositionManager:
         """進捗なしExit
 
         一定時間経過後、MFE(highest_r)が閾値未満なら撤退。
+        レジームベースで動的に閾値を設定:
+        - TREND: 60分（早期検知）
+        - RANGE: 90分（レンジ内での停滞を許容）
+        - CHOPPY: 120分（従来値）
         """
-        is_range = (
-            getattr(position.plan, "regime", None) == "RANGE"
-        )
+        regime = getattr(position.plan, "regime", None)
+        is_range = regime == "RANGE"
         elapsed = (
             (current_time - position.entry_time).total_seconds()
             / 60
         )
+
+        # MFE<0.2R + 30分経過: 超早期exit（全レジーム共通）
+        cfg = self.config
+        if (
+            cfg.very_early_exit_enabled
+            and elapsed >= cfg.very_early_exit_minutes
+            and position.highest_r < cfg.very_early_exit_mfe_r
+        ):
+            return ManagementAction.full_close(
+                f"超早期exit: {elapsed:.0f}分経過,"
+                f" MFE={position.highest_r:.2f}R"
+                f"<{cfg.very_early_exit_mfe_r}R",
+                ExitReason.STAGNATION,
+                trigger_price=current_price,
+            )
 
         if (
             is_range
@@ -742,16 +764,21 @@ class PositionManager:
                     trigger_price=current_price,
                 )
 
-        # UNIVERSALモード: stagnation設定を使用
-        stag_minutes = self.config.stagnation_exit_minutes
+        # レジームベース動的STAGNATION時間
+        # TREND: 60分、RANGE: 90分、CHOPPY/その他: 120分
+        regime_stag_minutes = {
+            "TREND": 60.0,
+            "RANGE": 90.0,
+            "CHOPPY": 120.0,
+        }.get(regime, self.config.stagnation_exit_minutes)
         stag_mfe = self.config.stagnation_min_mfe_r
 
         if (
-            elapsed >= stag_minutes
+            elapsed >= regime_stag_minutes
             and position.highest_r < stag_mfe
         ):
             return ManagementAction.full_close(
-                f"進捗なし: {elapsed:.0f}分経過,"
+                f"進捗なし({regime}): {elapsed:.0f}分経過,"
                 f" MFE={position.highest_r:.2f}R",
                 ExitReason.STAGNATION,
                 trigger_price=current_price,
