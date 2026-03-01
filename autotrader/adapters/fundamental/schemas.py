@@ -44,6 +44,7 @@ class EconomicEvent:
         previous: 前回値
         source: データソース
         fetched_at: データ取得時刻
+        is_holiday: 休日イベントフラグ
     """
 
     event_id: str
@@ -57,6 +58,7 @@ class EconomicEvent:
     actual: float | None = None
     forecast: float | None = None
     previous: float | None = None
+    is_holiday: bool = False
 
     @property
     def is_released(self) -> bool:

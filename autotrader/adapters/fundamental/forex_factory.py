@@ -264,6 +264,11 @@ class ForexFactoryClient:
                     )
                 )
 
+                # 休日検出
+                is_holiday = self._detect_holiday(
+                    row, event_name, impact
+                )
+
                 events.append(EconomicEvent(
                     event_id=f"ff_{uuid4().hex[:8]}",
                     event_time=event_time,
@@ -275,6 +280,7 @@ class ForexFactoryClient:
                     actual=actual,
                     forecast=forecast,
                     previous=previous,
+                    is_holiday=is_holiday,
                 ))
 
             except Exception as e:
@@ -282,6 +288,83 @@ class ForexFactoryClient:
                 continue
 
         return events
+
+    def _detect_holiday(
+        self,
+        row,
+        event_name: str,
+        impact: ImpactLevel,
+    ) -> bool:
+        """休日イベントかどうかを検出
+
+        ForexFactoryの休日イベント特徴:
+        - event_name に "Holiday" or "Bank Holiday" を含む
+        - impact span に "holiday" クラスが含まれる
+        - event_name が "Day" で終わる祝日名
+
+        Args:
+            row: BeautifulSoup の <tr> 要素
+            event_name: イベント名
+            impact: インパクトレベル
+
+        Returns:
+            bool: 休日ならTrue
+        """
+        name_lower = event_name.lower()
+        # 名前ベース検出
+        holiday_keywords = [
+            "holiday", "bank holiday", "day off",
+            "market closed", "market close",
+        ]
+        if any(kw in name_lower for kw in holiday_keywords):
+            return True
+
+        # CSSクラスベース検出
+        impact_cell = row.select_one(
+            "td.calendar__cell.calendar__impact"
+        )
+        if impact_cell:
+            span = impact_cell.find("span")
+            if span:
+                classes = " ".join(span.get("class", []))
+                if "holiday" in classes.lower():
+                    return True
+
+        return False
+
+    def fetch_holidays_only(
+        self, currencies: list[str] | None = None
+    ) -> list[EconomicEvent]:
+        """休日イベントのみを取得
+
+        レートリミットを共有するため、通常の fetch_events
+        と同じタイミングで呼ぶ。結果から is_holiday=True の
+        もののみフィルタして返す。
+
+        Args:
+            currencies: 対象通貨リスト
+
+        Returns:
+            list[EconomicEvent]: 休日イベントリスト
+        """
+        all_events = self.fetch_events(currencies=currencies)
+        return [ev for ev in all_events if ev.is_holiday]
+
+    async def fetch_holidays_only_async(
+        self, currencies: list[str] | None = None
+    ) -> list[EconomicEvent]:
+        """休日イベントのみを非同期取得
+
+        Args:
+            currencies: 対象通貨リスト
+
+        Returns:
+            list[EconomicEvent]: 休日イベントリスト
+        """
+        return await asyncio.to_thread(
+            self.fetch_holidays_only,
+            currencies=currencies,
+        )
 
     def _parse_date(
         self,

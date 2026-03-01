@@ -2302,6 +2302,7 @@ class LiveTradingEngine:
                 fetch_interval_minutes=cfg.fetch_interval_minutes,
                 use_mt5_calendar=cfg.use_mt5_calendar,
                 use_forex_factory=cfg.use_forex_factory,
+                use_ff_holidays=cfg.use_ff_holidays,
             )
             self._fundamental_memory = FundamentalMemoryService(
                 session_factory=db_manager.get_session,
