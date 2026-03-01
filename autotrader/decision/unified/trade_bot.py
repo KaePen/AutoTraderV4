@@ -22,6 +22,9 @@ from autotrader.constraint.soft_guard import (
     SoftGuardConfig,
     SoftGuardResult,
 )
+from autotrader.constraint.filters.session_transition_filter import (
+    SessionTransitionFilter,
+)
 from autotrader.core.enums import MarketRegime, SignalType
 from autotrader.core.interfaces.position_sizing import SizingContext
 
@@ -328,6 +331,12 @@ class UnifiedTradeBot:
         )
         self.risk_manager = RiskManager(risk_config)
 
+        # セッション切替待機フィルタ
+        self._session_transition_filter = SessionTransitionFilter(
+            wait_minutes=self.config.session_transition_wait_minutes,
+            enabled=self.config.session_transition_wait_enabled,
+        )
+
 
     def set_market_data(
         self,
@@ -474,6 +483,11 @@ class UnifiedTradeBot:
         can_trade, reason = self.risk_manager.can_trade(py_time)
         if not can_trade:
             return self._hold_signal(reason)
+
+        # 2b. セッション切替待機チェック
+        session_result = self._session_transition_filter.check(py_time)
+        if session_result.should_filter:
+            return self._hold_signal(session_result.reason)
 
         # 3. 初期プラン（デフォルトTF値）
         plan = self.mode_selector.select()

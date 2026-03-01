@@ -2,6 +2,7 @@
 
 リスク量に応じたロット数を動的に算出する。
 資金管理機能を統合し、資金ショートを防止する。
+流動性ゾーン連動TP計算機能も提供する。
 """
 
 from __future__ import annotations
@@ -14,6 +15,80 @@ from autotrader.core.interfaces.position_sizing import (
     SizingContext,
     SizingResult,
 )
+
+
+def calculate_tp_with_liquidity(
+    direction: int,
+    entry_price: float,
+    sl_price: float,
+    atr: float,
+    buy_side_liquidity: float | None,
+    sell_side_liquidity: float | None,
+    default_rr: float = 1.5,
+    liquidity_margin_pct: float = 0.01,
+) -> float:
+    """流動性ゾーンを考慮したTP計算
+
+    流動性プールの位置を考慮してTPを設定する。
+    流動性ゾーンが妥当な距離にある場合、そこをTPターゲットとする。
+
+    Args:
+        direction: 方向（1=買い、-1=売り）
+        entry_price: エントリー価格
+        sl_price: ストップロス価格
+        atr: 現在のATR値
+        buy_side_liquidity: 買い側（上部）の流動性ゾーン価格
+        sell_side_liquidity: 売り側（下部）の流動性ゾーン価格
+        default_rr: デフォルトのリスクリワード比
+        liquidity_margin_pct: 流動性ゾーン手前のマージン（%）
+
+    Returns:
+        float: 計算されたTP価格
+    """
+    # SL距離を計算
+    sl_distance = abs(entry_price - sl_price)
+
+    # 基本TP（ATRベース）
+    base_tp = entry_price + direction * sl_distance * default_rr
+
+    if direction == 1:
+        # 買いの場合、上の流動性ゾーンをターゲット
+        if buy_side_liquidity is not None and buy_side_liquidity > 0:
+            # マージンを考慮（少し手前で利確）
+            liquidity_tp = buy_side_liquidity * (1 - liquidity_margin_pct)
+
+            # 妥当な距離かチェック（基本TPの1.5倍以内）
+            if entry_price < liquidity_tp < base_tp * 1.5:
+                return liquidity_tp
+
+    elif direction == -1:
+        # 売りの場合、下の流動性ゾーンをターゲット
+        if sell_side_liquidity is not None and sell_side_liquidity > 0:
+            # マージンを考慮（少し手前で利確）
+            liquidity_tp = sell_side_liquidity * (1 + liquidity_margin_pct)
+
+            # 妥当な距離かチェック（基本TPの0.67倍以上）
+            if base_tp * 0.67 < liquidity_tp < entry_price:
+                return liquidity_tp
+
+    return base_tp
+
+
+@dataclass(frozen=True)
+class LiquidityTPResult:
+    """流動性TP計算結果
+
+    Attributes:
+        tp_price: TP価格
+        used_liquidity: 流動性ゾーンを使用したか
+        liquidity_zone: 使用した流動性ゾーン価格
+        base_tp: 基本TP（比較用）
+    """
+
+    tp_price: float
+    used_liquidity: bool = False
+    liquidity_zone: float | None = None
+    base_tp: float = 0.0
 
 # クォート通貨別pip_value（1ロット=100,000通貨、JPY建て口座）
 _SIZER_PIP_VALUE_BY_QUOTE: dict[str, float] = {

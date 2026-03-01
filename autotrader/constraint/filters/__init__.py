@@ -22,6 +22,10 @@ from autotrader.constraint.filters.trend_filter import TrendFilter
 from autotrader.constraint.filters.volatility_filter import (
     VolatilityFilter,
 )
+from autotrader.constraint.filters.session_transition_filter import (
+    SessionTransitionFilter,
+    SessionTransitionResult,
+)
 
 __all__ = [
     "ADXFilter",
@@ -31,6 +35,8 @@ __all__ = [
     "FilterResult",
     "ManagerFilterResult",
     "SessionFilter",
+    "SessionTransitionFilter",
+    "SessionTransitionResult",
     "TrendFilter",
     "VolatilityFilter",
 ]
