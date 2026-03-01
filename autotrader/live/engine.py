@@ -2364,8 +2364,8 @@ class LiveTradingEngine:
             self._fundamental_collector = FundamentalDataCollector(
                 session_factory=None,
                 fetch_interval_minutes=60,
-                use_mt5_calendar=True,
-                use_forex_factory=False,
+                use_mt5_calendar=False,
+                use_forex_factory=True,
                 use_ff_holidays=False,
             )
             logger.info(
