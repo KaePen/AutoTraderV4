@@ -6,7 +6,11 @@ from typing import Any
 
 from fastapi import WebSocket, WebSocketDisconnect
 
-from autotrader.web.websocket.manager import ConnectionManager, EventType, manager
+from autotrader.web.websocket.manager import (
+    ConnectionManager,
+    EventType,
+    manager,
+)
 
 
 async def handle_market_websocket(
@@ -112,7 +116,9 @@ async def broadcast_position_update(position_data: dict[str, Any]) -> None:
     Args:
         position_data: ポジションデータ
     """
-    await manager.broadcast(EventType.POSITION_UPDATE, position_data, "dashboard")
+    await manager.broadcast(
+        EventType.POSITION_UPDATE, position_data, "dashboard"
+    )
 
 
 async def broadcast_account_update(account_data: dict[str, Any]) -> None:
@@ -121,7 +127,9 @@ async def broadcast_account_update(account_data: dict[str, Any]) -> None:
     Args:
         account_data: 口座データ
     """
-    await manager.broadcast(EventType.ACCOUNT_UPDATE, account_data, "dashboard")
+    await manager.broadcast(
+        EventType.ACCOUNT_UPDATE, account_data, "dashboard"
+    )
 
 
 async def broadcast_tick_update(tick_data: dict[str, Any]) -> None:
@@ -156,3 +164,27 @@ async def broadcast_alert(alert_data: dict[str, Any]) -> None:
     """
     await manager.broadcast(EventType.ALERT, alert_data, "signals")
     await manager.broadcast(EventType.ALERT, alert_data, "dashboard")
+
+
+async def broadcast_news_update(
+    news_data: dict[str, Any],
+) -> None:
+    """ニュース新着をブロードキャスト
+
+    Args:
+        news_data: ニュースデータ
+    """
+    await manager.broadcast(EventType.NEWS_UPDATE, news_data, "dashboard")
+
+
+async def broadcast_calendar_update(
+    calendar_data: dict[str, Any],
+) -> None:
+    """経済カレンダー更新をブロードキャスト
+
+    Args:
+        calendar_data: カレンダーデータ
+    """
+    await manager.broadcast(
+        EventType.CALENDAR_UPDATE, calendar_data, "dashboard"
+    )

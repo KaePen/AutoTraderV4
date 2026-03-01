@@ -21,15 +21,22 @@ from autotrader.web.middleware import (
     SecurityHeadersMiddleware,
     configure_rate_limit,
 )
-from autotrader.web.routers import dashboard, signals, positions, trades
-from autotrader.web.routers import indicators, candles
+from autotrader.web.routers import (
+    candles,
+    dashboard,
+    fundamental,
+    indicators,
+    positions,
+    signals,
+    trades,
+    trading,
+)
 from autotrader.web.routers import settings as settings_router
-from autotrader.web.routers import trading
 from autotrader.web.schemas import ApiResponse, HealthResponse
 from autotrader.web.websocket.handlers import (
+    handle_dashboard_websocket,
     handle_market_websocket,
     handle_signals_websocket,
-    handle_dashboard_websocket,
 )
 
 # 起動時刻
@@ -58,9 +65,7 @@ def _get_mt5_config():
         login=int(os.environ.get("MT5_LOGIN", "0")),
         password=os.environ.get("MT5_PASSWORD", ""),
         server=os.environ.get("MT5_SERVER", ""),
-        terminal_path=os.environ.get(
-            "MT5_TERMINAL_PATH", ""
-        ),
+        terminal_path=os.environ.get("MT5_TERMINAL_PATH", ""),
     )
 
 
@@ -90,9 +95,8 @@ def build_engine_config(symbol: str) -> object:
         bot_config=bot_config,
         mt5_config=mt5_config,
         pm_config=pm_config,
-        enable_auto_trade=os.environ.get(
-            "AUTOTRADER_AUTO_TRADE", ""
-        ).lower() in ("1", "true", "yes"),
+        enable_auto_trade=os.environ.get("AUTOTRADER_AUTO_TRADE", "").lower()
+        in ("1", "true", "yes"),
     )
 
 
@@ -121,9 +125,7 @@ def _create_live_engine():
     """
     from autotrader.live.engine import LiveTradingEngine
 
-    config = build_engine_config(
-        os.environ.get("AUTOTRADER_SYMBOL", "USDJPY")
-    )
+    config = build_engine_config(os.environ.get("AUTOTRADER_SYMBOL", "USDJPY"))
     return LiveTradingEngine(config)
 
 
@@ -144,8 +146,11 @@ async def lifespan(app: FastAPI):
             init_local_db,
         )
         from autotrader.config.settings import get_settings
+
         db_url = get_settings().database_url
-        logger.info("DB初期化: %s", db_url.split("@")[-1] if "@" in db_url else db_url)
+        logger.info(
+            "DB初期化: %s", db_url.split("@")[-1] if "@" in db_url else db_url
+        )
         init_db(db_url)
         init_local_db()
         logger.info("DB初期化完了")
@@ -162,6 +167,7 @@ async def lifespan(app: FastAPI):
         from autotrader.web.services.settings_service import (
             get_settings_service,
         )
+
         svc = get_settings_service()
         svc.set_engine_manager(mgr)
 
@@ -170,9 +176,7 @@ async def lifespan(app: FastAPI):
             await mgr.connect()
 
             # デフォルトシンボルのエンジンを追加
-            default_symbol = os.environ.get(
-                "AUTOTRADER_SYMBOL", "USDJPY"
-            )
+            default_symbol = os.environ.get("AUTOTRADER_SYMBOL", "USDJPY")
             config = build_engine_config(default_symbol)
             engine = await mgr.add_symbol(config)
 
@@ -183,17 +187,16 @@ async def lifespan(app: FastAPI):
             acct = mgr.account_info
             if acct:
                 logger.info(
-                    "MT5接続成功: balance=%.0f "
-                    "equity=%.0f",
-                    acct.balance, acct.equity,
+                    "MT5接続成功: balance=%.0f equity=%.0f",
+                    acct.balance,
+                    acct.equity,
                 )
             else:
                 logger.info("MT5接続成功 (Direct)")
         except Exception as e:
             logger.warning("MT5自動接続失敗: %s", e)
             logger.info(
-                "後からAPI経由で接続可能: "
-                "POST /api/v1/trading/mt5/connect"
+                "後からAPI経由で接続可能: POST /api/v1/trading/mt5/connect"
             )
     except Exception as e:
         logger.error("エンジン初期化失敗: %s", e)
@@ -249,34 +252,25 @@ def create_app() -> FastAPI:
     )
 
     # ルーター登録
-    app.include_router(
-        auth_router.router, prefix="/api/v1", tags=["auth"]
-    )
-    app.include_router(
-        dashboard.router, prefix="/api/v1", tags=["dashboard"]
-    )
-    app.include_router(
-        signals.router, prefix="/api/v1", tags=["signals"]
-    )
-    app.include_router(
-        positions.router, prefix="/api/v1", tags=["positions"]
-    )
-    app.include_router(
-        trades.router, prefix="/api/v1", tags=["trades"]
-    )
+    app.include_router(auth_router.router, prefix="/api/v1", tags=["auth"])
+    app.include_router(dashboard.router, prefix="/api/v1", tags=["dashboard"])
+    app.include_router(signals.router, prefix="/api/v1", tags=["signals"])
+    app.include_router(positions.router, prefix="/api/v1", tags=["positions"])
+    app.include_router(trades.router, prefix="/api/v1", tags=["trades"])
     app.include_router(
         indicators.router, prefix="/api/v1", tags=["indicators"]
     )
-    app.include_router(
-        candles.router, prefix="/api/v1", tags=["candles"]
-    )
+    app.include_router(candles.router, prefix="/api/v1", tags=["candles"])
     app.include_router(
         settings_router.router,
         prefix="/api/v1",
         tags=["settings"],
     )
+    app.include_router(trading.router, prefix="/api/v1", tags=["trading"])
     app.include_router(
-        trading.router, prefix="/api/v1", tags=["trading"]
+        fundamental.router,
+        prefix="/api/v1",
+        tags=["fundamental"],
     )
 
     # ヘルスチェック
@@ -290,9 +284,7 @@ def create_app() -> FastAPI:
         Returns:
             ApiResponse[HealthResponse]: ヘルスチェック結果
         """
-        uptime = (
-            time.time() - _start_time if _start_time else 0.0
-        )
+        uptime = time.time() - _start_time if _start_time else 0.0
         return ApiResponse(
             data=HealthResponse(
                 status="ok",
@@ -303,9 +295,7 @@ def create_app() -> FastAPI:
 
     # WebSocketエンドポイント
     @app.websocket("/ws/market/{symbol}")
-    async def websocket_market(
-        websocket: WebSocket, symbol: str
-    ):
+    async def websocket_market(websocket: WebSocket, symbol: str):
         """市場データWebSocket
 
         Args:

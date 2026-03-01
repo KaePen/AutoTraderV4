@@ -2,33 +2,37 @@
 
 from __future__ import annotations
 
-from autotrader.web.schemas.responses import (
-    ApiResponse,
-    HealthResponse,
-    DashboardResponse,
-    SignalResponse,
-    PositionResponse,
-    TradeResponse,
-    TradeSummaryResponse,
-    IndicatorResponse,
-    IndicatorSeriesResponse,
-    CandleResponse,
-    SettingsResponse,
-    TradingConfigResponse,
-    EntryFilterConfigResponse,
-    CapitalManagementConfigResponse,
-    PositionManagementConfigResponse,
-    MT5StatusResponse,
-    TradingModeResponse,
-    AnalysisResponse,
-    AccountPresetResponse,
-    AccountPresetsResponse,
-)
 from autotrader.web.schemas.requests import (
+    AccountPresetRequest,
     SettingsUpdateRequest,
     SwitchAccountRequest,
-    AccountPresetRequest,
     TradingConfigUpdate,
+)
+from autotrader.web.schemas.responses import (
+    AccountPresetResponse,
+    AccountPresetsResponse,
+    AnalysisResponse,
+    ApiResponse,
+    CandleResponse,
+    CapitalManagementConfigResponse,
+    DashboardResponse,
+    EconomicEventResponse,
+    EntryFilterConfigResponse,
+    FundamentalCalendarResponse,
+    FundamentalNewsResponse,
+    HealthResponse,
+    IndicatorResponse,
+    IndicatorSeriesResponse,
+    MT5StatusResponse,
+    NewsItemResponse,
+    PositionManagementConfigResponse,
+    PositionResponse,
+    SettingsResponse,
+    SignalResponse,
+    TradeResponse,
+    TradeSummaryResponse,
+    TradingConfigResponse,
+    TradingModeResponse,
 )
 
 __all__ = [
@@ -56,4 +60,8 @@ __all__ = [
     "AccountPresetResponse",
     "AccountPresetsResponse",
     "AccountPresetRequest",
+    "NewsItemResponse",
+    "EconomicEventResponse",
+    "FundamentalNewsResponse",
+    "FundamentalCalendarResponse",
 ]

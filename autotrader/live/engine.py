@@ -2378,6 +2378,7 @@ class LiveTradingEngine:
 
         受信したNewsItemをシンボル別バッファに蓄積する。
         バッファは _tick() 内でLLM分析に使用後クリアされる。
+        WebSocket経由でダッシュボードにもリアルタイム配信する。
 
         Args:
             news_item: 受信したNewsItem
@@ -2398,6 +2399,44 @@ class LiveTradingEngine:
                 self._news_buffer[symbol] = (
                     self._news_buffer[symbol][-_MAX_BUFFER:]
                 )
+            # WebSocketダッシュボードにリアルタイム配信
+            try:
+                from autotrader.web.websocket.handlers import (
+                    broadcast_news_update,
+                )
+                import asyncio
+
+                news_dict = {
+                    "news_id": getattr(
+                        news_item, "news_id", ""
+                    ),
+                    "published_at": str(
+                        getattr(
+                            news_item, "published_at", ""
+                        )
+                    ),
+                    "title": getattr(
+                        news_item, "title", ""
+                    ),
+                    "source_name": getattr(
+                        news_item, "source_name", ""
+                    ),
+                    "source_url": getattr(
+                        news_item, "source_url", ""
+                    ),
+                    "currencies": getattr(
+                        news_item, "currencies", []
+                    ),
+                    "snippet": getattr(
+                        news_item, "snippet", None
+                    ),
+                    "symbol": symbol,
+                }
+                asyncio.create_task(
+                    broadcast_news_update(news_dict)
+                )
+            except Exception:
+                pass
 
     @staticmethod
     def _blend_news_sentiment(
