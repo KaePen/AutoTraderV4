@@ -85,6 +85,8 @@ class SimulatorConfig:
     )
     # UnifiedBotConfig（TradingPlan生成用）
     bot_config: Any = None
+    # 実スプレッドデータを使用（CSVの<SPREAD>列、デフォルトOFF）
+    use_actual_spread_data: bool = False
 
     @classmethod
     def from_preset(
@@ -283,6 +285,7 @@ class TradeSimulator:
         signal: Signal | None = None,
         consensus_scores: tuple[float, float] | None = None,
         fundamental_assessment: object | None = None,
+        row_data: dict | None = None,
     ) -> list[Trade]:
         """足データを処理
 
@@ -295,6 +298,7 @@ class TradeSimulator:
             signal: トレードシグナル（任意）
             consensus_scores: (buy_score, sell_score) コンセンサス逆転exit用
             fundamental_assessment: ファンダメンタル評価結果
+            row_data: 元データ行（実スプレッド等を含む）
 
         Returns:
             list[Trade]: この足で発生したトレード（決済含む）
@@ -307,7 +311,7 @@ class TradeSimulator:
 
         # 現在足スプレッド保存（exit_metrics用）
         self._current_candle_spread = (
-            self._get_spread_for_candle(candle)
+            self._get_spread_for_candle(candle, row_data)
         )
 
         # MFE/MAE更新（決済判定前に実行し、最終足を含める）
@@ -1104,21 +1108,46 @@ class TradeSimulator:
             )
         return fill
 
-    def _get_spread_for_candle(self, candle: Candle) -> float:
-        """足のセッション別スプレッド（価格単位）を取得
+    def _get_spread_for_candle(
+        self,
+        candle: Candle,
+        row_data: dict | None = None,
+    ) -> float:
+        """足のスプレッド（価格単位）を取得
+
+        優先順位:
+        1. 実スプレッドデータ（CSVの<SPREAD>列、use_actual_spread_data=True時）
+        2. セッション別スプレッド（use_session_spread=True時）
+        3. 固定スプレッド（spread_pips設定値）
 
         Args:
             candle: 足データ
+            row_data: 元データ行（spread_pointsを含む可能性）
 
         Returns:
             float: スプレッド（価格単位）
         """
-        if not self._use_session_spread:
-            return self._spread_price
+        # 1. 実スプレッドデータを優先使用
+        if (
+            self.config.use_actual_spread_data
+            and row_data is not None
+            and "spread_points" in row_data
+        ):
+            spread_points = row_data.get("spread_points")
+            if spread_points is not None and spread_points > 0:
+                # MT5のspread_pointsは最小価格単位（points）
+                # JPY系: 1 point = 0.001、非JPY系: 1 point = 0.00001
+                # pip_unit（JPY=0.01、非JPY=0.0001）の1/10がpoint単位
+                return spread_points * self._pip_unit / 10
 
-        hour = candle.time.hour
-        spread_pips = self._hourly_spread[hour]
-        return spread_pips * self._pip_unit
+        # 2. セッション別スプレッド
+        if self._use_session_spread:
+            hour = candle.time.hour
+            spread_pips = self._hourly_spread[hour]
+            return spread_pips * self._pip_unit
+
+        # 3. 固定スプレッド
+        return self._spread_price
 
     def _is_opposite_signal(
         self,

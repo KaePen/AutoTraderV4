@@ -242,6 +242,19 @@ class UnifiedBotConfig:
     bca_min_edge: float = 0.55
     # ペナルティスケール係数
     bca_penalty_scale: float = 1.0
+    # --- 構造的改善設定 ---
+    # セッション切替待機フィルター有効化
+    session_transition_wait_enabled: bool = True
+    # セッション切替後の待機時間（分）
+    session_transition_wait_minutes: int = 30
+    # 流動性ゾーン連動TP有効化
+    liquidity_based_tp_enabled: bool = True
+    # 流動性ゾーン手前のマージン（%）
+    liquidity_tp_margin_pct: float = 0.01
+    # デフォルトリスクリワード比（流動性TPフォールバック用）
+    liquidity_tp_default_rr: float = 1.5
+    # 実スプレッドデータ使用（CSVの<SPREAD>列）
+    use_actual_spread_data: bool = True
 
     def get_evaluator_config(self, timeframe: str) -> EvaluatorConfig:
         """時間足別評価器設定を取得

@@ -201,6 +201,9 @@ class DataLoader:
                 column_mapping[col] = "close"
             elif col_lower in ("volume", "vol", "tick_volume"):
                 column_mapping[col] = "volume"
+            elif col_lower in ("spread", "spread_points"):
+                # 実スプレッドデータ（MT5 <SPREAD>列対応）
+                column_mapping[col] = "spread_points"
 
         return df.rename(column_mapping)
 
@@ -313,16 +316,22 @@ class DataLoader:
         df = pl.read_csv(file_path, separator="\t", has_header=True)
         columns = df.columns
 
+        # SPREAD列の有無をチェック
+        has_spread = "<SPREAD>" in columns
+
         if "<TIME>" not in columns:
             # 日足形式（TIME列なし）
-            df = df.rename({
+            rename_map = {
                 "<DATE>": "date",
                 "<OPEN>": "open",
                 "<HIGH>": "high",
                 "<LOW>": "low",
                 "<CLOSE>": "close",
                 "<TICKVOL>": "volume",
-            })
+            }
+            if has_spread:
+                rename_map["<SPREAD>"] = "spread_points"
+            df = df.rename(rename_map)
             df = df.with_columns(
                 pl.col("date")
                 .str.strptime(pl.Datetime, "%Y.%m.%d")
@@ -330,7 +339,7 @@ class DataLoader:
             )
         else:
             # 時間足形式（TIME列あり）
-            df = df.rename({
+            rename_map = {
                 "<DATE>": "date",
                 "<TIME>": "time_str",
                 "<OPEN>": "open",
@@ -338,7 +347,10 @@ class DataLoader:
                 "<LOW>": "low",
                 "<CLOSE>": "close",
                 "<TICKVOL>": "volume",
-            })
+            }
+            if has_spread:
+                rename_map["<SPREAD>"] = "spread_points"
+            df = df.rename(rename_map)
             df = df.with_columns(
                 pl.concat_str([
                     pl.col("date"),
@@ -352,5 +364,9 @@ class DataLoader:
                 .alias("time")
             )
 
-        df = df.select(["time", "open", "high", "low", "close", "volume"])
+        # 出力カラムを選択（spread_pointsがあれば含める）
+        select_cols = ["time", "open", "high", "low", "close", "volume"]
+        if has_spread:
+            select_cols.append("spread_points")
+        df = df.select(select_cols)
         return df.to_pandas()
