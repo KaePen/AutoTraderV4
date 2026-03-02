@@ -47,6 +47,11 @@ class EventFilter:
             "USDCAD": ["USD", "CAD"],
             "NZDUSD": ["NZD", "USD"],
             "USDCHF": ["USD", "CHF"],
+            "EURJPY": ["EUR", "JPY"],
+            "GBPJPY": ["GBP", "JPY"],
+            "AUDJPY": ["AUD", "JPY"],
+            "CADJPY": ["CAD", "JPY"],
+            "CHFJPY": ["CHF", "JPY"],
         }
 
     def load_calendar(self, file_path: Path | str) -> None:
