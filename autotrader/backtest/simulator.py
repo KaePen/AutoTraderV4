@@ -208,6 +208,8 @@ class TradeSimulator:
         self._signal_cache: dict[str, Signal] = {}
         # MFE/MAE追跡（pips単位）
         self._mfe_mae: dict[str, dict[str, float]] = {}
+        # Exit詳細理由（PM reason文字列を保持）
+        self._exit_details: dict[str, str] = {}
         # エントリー時メトリクス保存
         self._entry_metrics: dict[str, dict[str, float]] = {}
         # Exit時メトリクス保存
@@ -273,6 +275,7 @@ class TradeSimulator:
             self._pm.reset()
         self._signal_cache.clear()
         self._mfe_mae.clear()
+        self._exit_details.clear()
         self._entry_metrics.clear()
         self._exit_metrics.clear()
         self._consecutive_losses = 0
@@ -560,6 +563,10 @@ class TradeSimulator:
                 position.signal_type, candle,
                 action.trigger_price, action.exit_reason,
             )
+            # Exit詳細理由を保存（CSV診断用）
+            self._exit_details[
+                position.position_id
+            ] = action.reason
             return (
                 exit_price,
                 action.exit_reason,
@@ -1256,6 +1263,24 @@ class TradeSimulator:
                 "mfe_r": 0.0, "mae_r": 0.0,
                 "mfe_time": None,
             },
+        )
+
+    def get_exit_detail(
+        self, position_id: str,
+    ) -> str:
+        """Exit詳細理由を取得・消費
+
+        PositionManagerのreason文字列を返す。
+        一度取得すると内部から削除される。
+
+        Args:
+            position_id: ポジションID
+
+        Returns:
+            str: Exit詳細理由（なければ空文字列）
+        """
+        return self._exit_details.pop(
+            position_id, "",
         )
 
     def get_entry_metrics(

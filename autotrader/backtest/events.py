@@ -171,6 +171,10 @@ class TradeEvent(BacktestEvent):
     # D) trigger/fill価格分離
     trigger_price: float = 0.0
     fill_price: float = 0.0
+    # E) Exit詳細診断（PM reason文字列）
+    exit_reason_detail: str = ""
+    stag_minutes_used: str = ""
+    stag_mfe_r_used: str = ""
 
     def __post_init__(self):
         if self.exit_price is not None:
@@ -1049,6 +1053,7 @@ class BacktestEventEmitter:
         strategy_id: str = "",
         trigger_price: float = 0.0,
         fill_price: float = 0.0,
+        exit_reason_detail: str = "",
     ) -> None:
         """ポジション決済イベント"""
         event = TradeEvent(
@@ -1096,6 +1101,7 @@ class BacktestEventEmitter:
             session=session,
             trigger_price=trigger_price,
             fill_price=fill_price,
+            exit_reason_detail=exit_reason_detail,
         )
         # シグナルデータをevent.dataに格納（リスナーで参照）
         if signal_data:

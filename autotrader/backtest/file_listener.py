@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import csv
 import json
+import re
 from datetime import datetime
 from pathlib import Path
 
@@ -77,9 +78,21 @@ CSV_COLUMNS = [
     "mae_r",
     "time_to_mfe_minutes",
     "session",
+    # E) Exit詳細診断
+    "exit_reason_detail",
+    "stag_minutes_used",
+    "stag_mfe_r_used",
     # 理由
     "rationale",
 ]
+
+# STAGNATION reason文字列からminutes/MFE_Rを抽出する正規表現
+_RE_STAG_MINUTES = re.compile(
+    r"(\d+(?:\.\d+)?)分(?:経過)?",
+)
+_RE_STAG_MFE_R = re.compile(
+    r"MFE=(-?\d+(?:\.\d+)?)R",
+)
 
 
 class FileEventListener(EventListener):
@@ -642,6 +655,19 @@ class FileEventListener(EventListener):
         )
         row["session"] = event.session
 
+        # E) Exit詳細診断
+        _detail = event.exit_reason_detail or ""
+        row["exit_reason_detail"] = _detail
+        # STAGNATION系のreason文字列からパラメータ抽出
+        _m_min = _RE_STAG_MINUTES.search(_detail)
+        _m_mfe = _RE_STAG_MFE_R.search(_detail)
+        row["stag_minutes_used"] = (
+            _m_min.group(1) if _m_min else ""
+        )
+        row["stag_mfe_r_used"] = (
+            _m_mfe.group(1) if _m_mfe else ""
+        )
+
         self._trade_rows.append(row)
 
     def _handle_metrics(self, event: BacktestEvent) -> None:
@@ -957,6 +983,18 @@ class TradeRowCollector(EventListener):
             f"{event.time_to_mfe_minutes:.0f}"
         )
         row["session"] = event.session
+
+        # E) Exit詳細診断
+        _detail = event.exit_reason_detail or ""
+        row["exit_reason_detail"] = _detail
+        _m_min = _RE_STAG_MINUTES.search(_detail)
+        _m_mfe = _RE_STAG_MFE_R.search(_detail)
+        row["stag_minutes_used"] = (
+            _m_min.group(1) if _m_min else ""
+        )
+        row["stag_mfe_r_used"] = (
+            _m_mfe.group(1) if _m_mfe else ""
+        )
 
         self._trade_rows.append(row)
 
