@@ -154,5 +154,42 @@ class EventBus:
                 )
 
 
-# モジュールレベルシングルトン
-event_bus = EventBus()
+# --- singleton 管理 ---
+# 後方互換: `from autotrader.core.event_bus import event_bus` を維持
+# テスト時は set_event_bus() で差し替え可能
+
+_default_bus: EventBus | None = None
+
+
+def get_event_bus() -> EventBus:
+    """デフォルト EventBus を取得
+
+    テスト時は set_event_bus() で差し替え可能。
+
+    Returns:
+        EventBus: イベントバスインスタンス
+    """
+    global _default_bus
+    if _default_bus is None:
+        _default_bus = EventBus()
+    return _default_bus
+
+
+def set_event_bus(bus: EventBus | None) -> None:
+    """EventBus を差し替え（テスト用）
+
+    Args:
+        bus: 差し替えるインスタンス（Noneでリセット）
+    """
+    global _default_bus
+    _default_bus = bus
+
+
+def reset_event_bus() -> None:
+    """EventBus をリセットし新規インスタンスを生成"""
+    global _default_bus
+    _default_bus = None
+
+
+# 後方互換エイリアス — 既存 import を壊さない
+event_bus: EventBus = get_event_bus()  # type: ignore[assignment]

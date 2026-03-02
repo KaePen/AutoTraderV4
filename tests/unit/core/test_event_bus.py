@@ -6,7 +6,12 @@ import asyncio
 
 import pytest
 
-from autotrader.core.event_bus import EventBus
+from autotrader.core.event_bus import (
+    EventBus,
+    get_event_bus,
+    reset_event_bus,
+    set_event_bus,
+)
 from autotrader.core.events import (
     ErrorEvent,
     SignalGeneratedEvent,
@@ -353,3 +358,41 @@ class TestTypedEventBus:
         )
         assert len(str_results) == 1
         assert len(typed_results) == 1
+
+
+class TestEventBusSingleton:
+    """get_event_bus / set_event_bus / reset_event_bus テスト"""
+
+    def setup_method(self) -> None:
+        """各テスト前に EventBus をリセット"""
+        reset_event_bus()
+
+    def teardown_method(self) -> None:
+        """各テスト後にリセット"""
+        reset_event_bus()
+
+    def test_get_event_bus_returns_same_instance(self) -> None:
+        """get_event_bus は同一インスタンスを返す"""
+        bus1 = get_event_bus()
+        bus2 = get_event_bus()
+        assert bus1 is bus2
+
+    def test_set_event_bus_replaces_instance(self) -> None:
+        """set_event_bus で差し替えたインスタンスが返される"""
+        custom = EventBus()
+        set_event_bus(custom)
+        assert get_event_bus() is custom
+
+    def test_reset_event_bus_creates_new(self) -> None:
+        """reset 後は新しいインスタンスが生成される"""
+        old = get_event_bus()
+        reset_event_bus()
+        new = get_event_bus()
+        assert old is not new
+
+    def test_set_none_resets(self) -> None:
+        """set_event_bus(None) でリセットされる"""
+        old = get_event_bus()
+        set_event_bus(None)
+        new = get_event_bus()
+        assert old is not new

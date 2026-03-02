@@ -46,7 +46,7 @@ from autotrader.decision.unified.signal_consolidator import (
 )
 from autotrader.live.tick_entry_optimizer import TickEntryOptimizer
 from autotrader.calculator.technical.batch import TechnicalIndicatorBatch
-from autotrader.core.event_bus import event_bus
+from autotrader.core.event_bus import get_event_bus
 
 logger = logging.getLogger(__name__)
 
@@ -601,7 +601,7 @@ class LiveTradingEngine:
         # 1秒サイクルのフル処理で使うためキャッシュ
         self._last_tick_data = tick
 
-        event_bus.publish_nowait("price.updated", {
+        get_event_bus().publish_nowait("price.updated", {
             "symbol": self._active_symbol,
             "bid": bid,
             "ask": ask,
@@ -744,7 +744,7 @@ class LiveTradingEngine:
             )
 
             # EventBus経由でシグナルブロードキャスト
-            event_bus.publish_nowait("signal.generated", {
+            get_event_bus().publish_nowait("signal.generated", {
                 "signal_id": converted.signal_id,
                 "symbol": converted.symbol,
                 "timeframe": converted.timeframe,
@@ -793,7 +793,7 @@ class LiveTradingEngine:
         フロントエンドはこのイベントを受信してUIを全更新する。
         """
         payload = self._build_tick_payload()
-        await event_bus.publish("tick.completed", payload)
+        await get_event_bus().publish("tick.completed", payload)
 
     def _build_tick_payload(self) -> dict:
         """tick_updateペイロードを構築
@@ -1319,7 +1319,7 @@ class LiveTradingEngine:
             # TradeBotに通知（取引時刻を渡す）
             self._bot.on_trade_executed(signal.created_at)
             # EventBus経由でポジション更新ブロードキャスト
-            event_bus.publish_nowait(
+            get_event_bus().publish_nowait(
                 "position.opened",
                 {"symbol": self._active_symbol},
             )
@@ -1613,7 +1613,7 @@ class LiveTradingEngine:
                 trade_id, ticket, pnl_pips, profit_loss,
             )
             # EventBus経由で決済イベントをUIに即時通知
-            event_bus.publish_nowait(
+            get_event_bus().publish_nowait(
                 "position.closed",
                 {"symbol": self._active_symbol},
             )
@@ -2726,7 +2726,7 @@ class LiveTradingEngine:
             base in news_item.currencies
             or quote in news_item.currencies
         ):
-            event_bus.publish_nowait("news.received", {
+            get_event_bus().publish_nowait("news.received", {
                 "news_id": getattr(
                     news_item, "news_id", ""
                 ),

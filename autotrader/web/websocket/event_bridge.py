@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from autotrader.core.event_bus import event_bus
+from autotrader.core.event_bus import get_event_bus
 from autotrader.web.websocket.manager import (
     EventType,
     manager,
@@ -84,24 +84,24 @@ def setup_event_bridge() -> None:
 
     アプリケーション起動時（lifespan）で1回呼ぶ。
     """
-    event_bus.subscribe(
+    get_event_bus().subscribe(
         "price.updated", _on_price_updated
     )
-    event_bus.subscribe(
+    get_event_bus().subscribe(
         "signal.generated", _on_signal_generated
     )
-    event_bus.subscribe(
+    get_event_bus().subscribe(
         "tick.completed", _on_tick_completed
     )
-    event_bus.subscribe(
+    get_event_bus().subscribe(
         "position.opened", _on_position_opened
     )
-    event_bus.subscribe(
+    get_event_bus().subscribe(
         "position.closed", _on_position_closed
     )
-    event_bus.subscribe(
+    get_event_bus().subscribe(
         "news.received", _on_news_received
     )
-    event_bus.subscribe(
+    get_event_bus().subscribe(
         "calendar.updated", _on_calendar_updated
     )

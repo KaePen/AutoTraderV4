@@ -12,6 +12,8 @@ from typing import Any
 import threading
 import uuid
 
+from autotrader.core.clock import Clock, SystemClock
+
 
 class BacktestStatus(str, Enum):
     """バックテスト状態"""
@@ -101,10 +103,15 @@ class BacktestStateManager:
     スレッドセーフな実装。
     """
 
-    def __init__(self):
-        """初期化"""
+    def __init__(self, clock: Clock | None = None):
+        """初期化
+
+        Args:
+            clock: 時刻プロバイダー（デフォルト: SystemClock）
+        """
         self._states: dict[str, BacktestState] = {}
         self._lock = threading.Lock()
+        self._clock = clock or SystemClock()
 
     def create(
         self,
@@ -162,7 +169,7 @@ class BacktestStateManager:
                 return False
 
             state.status = BacktestStatus.RUNNING
-            state.started_at = datetime.now()
+            state.started_at = self._clock.now()
             return True
 
     def update_progress(
@@ -216,7 +223,7 @@ class BacktestStateManager:
                 return False
 
             state.status = status
-            state.completed_at = datetime.now()
+            state.completed_at = self._clock.now()
             state.current_progress = 100.0
 
             if error_message:
@@ -280,7 +287,7 @@ class BacktestStateManager:
         Returns:
             int: クリーンアップされた数
         """
-        now = datetime.now()
+        now = self._clock.now()
         cleaned = 0
 
         with self._lock:
