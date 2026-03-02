@@ -1,3 +1,7 @@
+# [DEPRECATED] このファイルは廃止予定です。
+# 全設定は config/symbol_presets.yaml に移行してください。
+# このファイルの値は symbol_presets.yaml のデフォルトを上書きします。
+#
 # ライブトレード用設定（本番環境）
 # バックテストはCLI引数で別管理
 
@@ -7,8 +11,8 @@ symbol: USDJPY
 bot_config:
   # 戦略パラメータ（通貨ペア非依存）
   # リスク管理パラメータは symbol_presets.yaml (SSOT) を参照
-  # コンセンサス設定（2026-02 Round2: 閾値8.0+ペナルティ/トレンド上限フィルタ）
-  consensus_threshold: 8.0
+  # コンセンサス設定（Round3: 閾値9.0）
+  consensus_threshold: 9.0
   consensus_primary_weight: 2.0
   consensus_entry_weight: 1.5
   consensus_confirm_weight: 3.0
