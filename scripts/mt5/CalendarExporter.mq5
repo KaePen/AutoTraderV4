@@ -192,7 +192,7 @@ bool ExportCalendar()
 
 //+------------------------------------------------------------------+
 //| 次のHIGHイベントまでの秒数を返す（なければ INT_MAX）             |
-//| 発表後2分以内のHIGHイベントも検出（actual値キャッチ用）          |
+//| actual未取得のHIGHイベントは発表後10分間高頻度ポーリング継続     |
 //+------------------------------------------------------------------+
 int SecondsToNextHighEvent()
   {
@@ -200,7 +200,7 @@ int SecondsToNextHighEvent()
    datetime gmt_now = TimeGMT();
    if(gmt_now > 0 && (now == 0 || MathAbs(now - gmt_now) > 86400))
       now = gmt_now + GetBrokerGMTOffsetSec();
-   datetime from = now - 120; // 過去2分も確認（発表直後キャッチ）
+   datetime from = now - 600; // 過去10分も確認（actual未取得キャッチ）
    datetime to = now + 3600;  // 1時間先まで確認
    MqlCalendarValue values[];
    int count = CalendarValueHistory(values, from, to);
@@ -222,11 +222,17 @@ int SecondsToNextHighEvent()
         {
          if(diff < min_sec) min_sec = diff;
         }
-      // 発表済みで過去2分以内 → 発表直後キャッチ
+      // 発表時刻を過ぎたがactual未取得（10分以内）→ 取得まで高頻度継続
+      else if(values[i].actual_value == LONG_MIN
+              && diff < 0 && diff >= -600)
+        {
+         min_sec = 0;
+        }
+      // 発表済みでactual取得済み、過去2分以内 → 念のため高頻度
       else if(values[i].actual_value != LONG_MIN
               && diff >= -120 && diff <= 0)
         {
-         min_sec = 0; // 即座に3秒モード
+         if(min_sec > 0) min_sec = 0;
         }
      }
    return min_sec;
