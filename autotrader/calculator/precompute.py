@@ -281,6 +281,25 @@ class PrecomputeEngine:
         result["buy_side_liquidity"] = liquidity_df["buy_side_liquidity"]
         result["sell_side_liquidity"] = liquidity_df["sell_side_liquidity"]
 
+        # Look-ahead bias 修正: スイング判定は lookforward 本先の
+        # 未来データを参照するため、全スイング依存カラムを
+        # lookforward 分だけ遅延させる（遅延確認方式）
+        lookforward = swing_analyzer.lookforward
+        smc_columns = [
+            # SwingAnalyzer 出力
+            "swing_high", "swing_low",
+            "last_swing_high", "last_swing_low",
+            # StructureAnalyzer 出力
+            "bos_signal", "choch_signal",
+            "structure_direction", "trend_state_smc",
+            # LiquidityAnalyzer 出力
+            "liquidity_grab_bullish", "liquidity_grab_bearish",
+            "buy_side_liquidity", "sell_side_liquidity",
+        ]
+        for col in smc_columns:
+            if col in result.columns:
+                result[col] = result[col].shift(lookforward)
+
         return result
 
     def compute_features(self, df: pd.DataFrame) -> pd.DataFrame:
