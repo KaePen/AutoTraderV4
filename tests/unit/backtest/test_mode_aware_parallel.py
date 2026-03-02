@@ -117,6 +117,8 @@ class TestModeAwareScoreConsensus:
         """BUYシグナルの統合"""
         from autotrader.decision.unified.mode_aware_consensus import (
             ModeAwareScoreConsensus,
+        )
+        from autotrader.decision.unified.timeframe_evaluator import (
             TimeframeSignal,
         )
         from autotrader.decision.unified.mode_selector import (
@@ -129,22 +131,34 @@ class TestModeAwareScoreConsensus:
 
         tf_signals = {
             "M5": TimeframeSignal(
+                timeframe="M5",
                 direction=SignalType.BUY,
-                strength=0.95,
+                buy_strength=0.95,
+                sell_strength=0.0,
+                confidence=0.95,
                 sl_pips=20.0,
                 tp_pips=30.0,
+                reason="test",
             ),
             "M15": TimeframeSignal(
+                timeframe="M15",
                 direction=SignalType.BUY,
-                strength=0.90,
+                buy_strength=0.90,
+                sell_strength=0.0,
+                confidence=0.90,
                 sl_pips=25.0,
                 tp_pips=40.0,
+                reason="test",
             ),
             "H1": TimeframeSignal(
+                timeframe="H1",
                 direction=SignalType.BUY,
-                strength=0.85,
+                buy_strength=0.85,
+                sell_strength=0.0,
+                confidence=0.85,
                 sl_pips=30.0,
                 tp_pips=50.0,
+                reason="test",
             ),
         }
 
@@ -158,6 +172,8 @@ class TestModeAwareScoreConsensus:
         """entry_tf確定時のエントリー条件チェック"""
         from autotrader.decision.unified.mode_aware_consensus import (
             ModeAwareScoreConsensus,
+        )
+        from autotrader.decision.unified.timeframe_evaluator import (
             TimeframeSignal,
         )
         from autotrader.decision.unified.mode_selector import (
@@ -170,16 +186,24 @@ class TestModeAwareScoreConsensus:
 
         tf_signals = {
             "M5": TimeframeSignal(
+                timeframe="M5",
                 direction=SignalType.BUY,
-                strength=0.8,
+                buy_strength=0.8,
+                sell_strength=0.0,
+                confidence=0.8,
                 sl_pips=20.0,
                 tp_pips=30.0,
+                reason="test",
             ),
             "M15": TimeframeSignal(
+                timeframe="M15",
                 direction=SignalType.BUY,
-                strength=0.7,
+                buy_strength=0.7,
+                sell_strength=0.0,
+                confidence=0.7,
                 sl_pips=25.0,
                 tp_pips=40.0,
+                reason="test",
             ),
         }
 
@@ -196,6 +220,8 @@ class TestModeAwareScoreConsensus:
         """entry_tf以外ではHOLD"""
         from autotrader.decision.unified.mode_aware_consensus import (
             ModeAwareScoreConsensus,
+        )
+        from autotrader.decision.unified.timeframe_evaluator import (
             TimeframeSignal,
         )
         from autotrader.decision.unified.mode_selector import (
@@ -208,10 +234,14 @@ class TestModeAwareScoreConsensus:
 
         tf_signals = {
             "M5": TimeframeSignal(
+                timeframe="M5",
                 direction=SignalType.BUY,
-                strength=0.8,
+                buy_strength=0.8,
+                sell_strength=0.0,
+                confidence=0.8,
                 sl_pips=20.0,
                 tp_pips=30.0,
+                reason="test",
             ),
         }
 

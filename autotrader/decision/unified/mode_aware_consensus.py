@@ -9,27 +9,13 @@ from dataclasses import dataclass
 
 from autotrader.core.enums import SignalType, TradingStrategyMode
 from autotrader.decision.unified.mode_selector import TradingPlan
+from autotrader.decision.unified.timeframe_evaluator import (
+    TimeframeSignal,
+)
 from autotrader.decision.unified.timeframe_router import (
     TimeframeRole,
     TimeframeSet,
 )
-
-
-@dataclass(frozen=True)
-class TimeframeSignal:
-    """時間足別シグナル
-
-    Attributes:
-        direction: シグナル方向
-        strength: シグナル強度（0-1）
-        sl_pips: SL距離（pips）
-        tp_pips: TP距離（pips）
-    """
-
-    direction: SignalType
-    strength: float
-    sl_pips: float
-    tp_pips: float
 
 
 @dataclass(frozen=True)
@@ -145,8 +131,9 @@ class ModeAwareScoreConsensus:
             weight = self._get_weight(tf, tf_set, plan.mode)
             direction_value = self._direction_to_value(signal.direction)
 
-            # 強度を考慮したスコア
-            weighted_score = weight * abs(direction_value) * signal.strength
+            # 強度を考慮したスコア（net_strength: 買い-売りの純強度）
+            strength = abs(signal.net_strength)
+            weighted_score = weight * abs(direction_value) * strength
 
             if direction_value > 0:
                 buy_score += weighted_score

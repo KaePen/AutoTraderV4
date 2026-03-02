@@ -39,7 +39,6 @@ from .mode_aware_consensus import (
     ConsensusConfig,
     ConsensusResult,
     ModeAwareScoreConsensus,
-    TimeframeSignal as ConsensusTimeframeSignal,
 )
 from .mode_selector import ModeSelectorConfig, TradingModeSelector, TradingPlan
 from .position_sizer import PositionSizer, PositionSizerConfig
@@ -562,7 +561,6 @@ class UnifiedTradeBot:
 
         # 4. 全TF評価 → tf_signals
         tf_signals: dict[str, TimeframeSignal] = {}
-        consensus_signals: dict[str, ConsensusTimeframeSignal] = {}
 
         _PARALLEL_TF_THRESHOLD = 12
         _eval_tfs = [
@@ -620,22 +618,11 @@ class UnifiedTradeBot:
         tf_set = self.tf_router.route(plan)
 
         # 9. コンセンサスはモード別TFセットのみ対象（役割重みを保持）
-        for tf in tf_set.all_tfs:
-            if tf not in tf_signals:
-                continue
-            signal = tf_signals[tf]
-            # 強度を0-1に正規化（net_strengthは-1から1の範囲）
-            strength = (
-                abs(signal.net_strength)
-                if signal.direction != SignalType.HOLD
-                else 0.0
-            )
-            consensus_signals[tf] = ConsensusTimeframeSignal(
-                direction=signal.direction,
-                strength=strength,
-                sl_pips=signal.sl_pips,
-                tp_pips=signal.tp_pips,
-            )
+        consensus_signals: dict[str, TimeframeSignal] = {
+            tf: tf_signals[tf]
+            for tf in tf_set.all_tfs
+            if tf in tf_signals
+        }
 
         # Phase 2b: ファンダメンタル評価（consolidate前に実行）
         # conviction boost適用のため方向判定前に評価する
