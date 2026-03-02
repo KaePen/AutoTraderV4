@@ -180,8 +180,7 @@ class PositionSizer(PositionSizerProtocol):
     リスク調整係数は以下の要素で決定:
     - 確度調整: 0.7以上→1.2倍、0.5以下→0.5倍
     - レジーム調整: TREND=1.0, RANGE=0.7, HIGH_VOL=0.5, LOW_VOL=0.8
-    - DD調整: 1%から緩やかに開始、2%超で本格減額（2025年強化）
-    - 連敗調整: 2連敗から段階的に減額（5連敗で0.2x）（2025年強化）
+    - DD/連敗調整: min(DD, 連敗)で最も厳しい1つだけ適用（二重適用排除）
 
     資金管理:
     - 資金下限（初期の30%）で取引停止
@@ -411,21 +410,20 @@ class PositionSizer(PositionSizerProtocol):
             f"{context.regime.value}{regime_adjust:.1f}x"
         )
 
-        # DD調整（平滑化）
+        # DD調整・連敗調整: 最も厳しい1つだけ適用（二重適用排除）
         dd_adjust = self._calculate_dd_adjust(
             context.current_dd_pct
         )
-        adjust *= dd_adjust
-        if dd_adjust < 1.0:
-            reasons.append(f"DD{dd_adjust:.2f}x")
-
-        # 連敗調整（段階的）
         loss_adjust = self._calculate_consecutive_loss_adjust(
             context.consecutive_losses
         )
-        adjust *= loss_adjust
-        if loss_adjust < 1.0:
-            reasons.append(f"連敗{loss_adjust:.2f}x")
+        protective_adjust = min(dd_adjust, loss_adjust)
+        adjust *= protective_adjust
+        if protective_adjust < 1.0:
+            if dd_adjust <= loss_adjust:
+                reasons.append(f"DD{dd_adjust:.2f}x")
+            else:
+                reasons.append(f"連敗{loss_adjust:.2f}x")
 
         # ファンダメンタル調整（流動性・ボラティリティ）
         fund_adjust = self._calculate_fundamental_adjust(

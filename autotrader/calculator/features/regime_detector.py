@@ -58,8 +58,8 @@ class MarketRegimeDetector:
     ADX、正規化ATR、MA整列度からレジームを判定する。
 
     判定ロジック（優先度順）:
-    1. HIGH_VOL: 正規化ATR > 1.5 かつ ADX < 25
-    2. TREND: ADX >= 20 かつ MA整列
+    1. TREND: ADX >= 20 かつ MA整列
+    2. HIGH_VOL: 正規化ATR > 1.5 かつ ADX < 20（方向性なし）
     3. LOW_VOL: 正規化ATR < 0.7
     4. RANGE: その他
     """
@@ -187,18 +187,7 @@ class MarketRegimeDetector:
         """
         cfg = self.config
 
-        # 1. HIGH_VOL: 高ボラティリティ（ADXが低い＝方向性なし）
-        if normalized_atr > cfg.high_vol_atr_threshold and adx < 25:
-            confidence = min(
-                (normalized_atr - cfg.high_vol_atr_threshold) / 0.5, 1.0
-            )
-            return (
-                MarketRegime.HIGH_VOL,
-                confidence,
-                f"高ボラ(ATR={normalized_atr:.2f})で方向性なし(ADX={adx:.1f})",
-            )
-
-        # 2. TREND: ADXが高く、MA整列
+        # 1. TREND: ADXが高く、MA整列（最優先）
         is_aligned = abs(ma_alignment) > cfg.ma_alignment_threshold
         if adx >= cfg.trend_adx_threshold and is_aligned:
             # 強トレンド判定
@@ -216,6 +205,21 @@ class MarketRegimeDetector:
                     confidence,
                     f"トレンド(ADX={adx:.1f}, MA整列={ma_alignment:.2f})",
                 )
+
+        # 2. HIGH_VOL: 高ボラティリティ（方向性なし）
+        # TREND判定後なので、ADX>=20はTRENDに吸収済み
+        if (
+            normalized_atr > cfg.high_vol_atr_threshold
+            and adx < cfg.trend_adx_threshold
+        ):
+            confidence = min(
+                (normalized_atr - cfg.high_vol_atr_threshold) / 0.5, 1.0
+            )
+            return (
+                MarketRegime.HIGH_VOL,
+                confidence,
+                f"高ボラ(ATR={normalized_atr:.2f})で方向性なし(ADX={adx:.1f})",
+            )
 
         # 3. LOW_VOL: 低ボラティリティ
         if normalized_atr < cfg.low_vol_atr_threshold:
