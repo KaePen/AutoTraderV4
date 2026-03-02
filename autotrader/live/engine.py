@@ -1589,16 +1589,14 @@ class LiveTradingEngine:
             db_url = get_settings().database_url
             with get_session(db_url) as db:
                 repo = TradeRepository(db)
-                trade_record = repo.get_by_id(trade_id)
-                if trade_record:
-                    repo.close(
-                        trade=trade_record,
-                        exit_price=current_price,
-                        closed_at=closed_at,
-                        exit_reason=action_reason,
-                        profit_loss=profit_loss,
-                        profit_loss_pips=pnl_pips,
-                    )
+                repo.close(
+                    trade_id=trade_id,
+                    exit_price=current_price,
+                    closed_at=closed_at,
+                    exit_reason=action_reason,
+                    profit_loss=profit_loss,
+                    profit_loss_pips=pnl_pips,
+                )
             # DB書き込み成功後にpop（失敗時は次回tickで再試行）
             self._open_trades.pop(ticket, None)
             self._closed_trades.append({
