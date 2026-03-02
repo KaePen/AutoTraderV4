@@ -66,8 +66,8 @@ class SimulatorConfig:
     # consensus_score が bonus_score_threshold 以上の時のみ追加枠を解放
     bonus_max_positions: int = 0
     bonus_score_threshold: float = 7.0
-    # PositionManager統合（デフォルトOFF=ベースライン保持）
-    use_position_manager: bool = False
+    # PositionManager統合（デフォルトON=ライブと整合）
+    use_position_manager: bool = True
     # PositionManagerConfig（外部から注入）
     pm_config: PositionManagerConfig | None = None
     # 動的ロットサイズ（signal.lotを使用、OFFならdefault_volume固定）

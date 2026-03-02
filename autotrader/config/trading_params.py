@@ -92,7 +92,7 @@ class SymbolPreset:
     max_total_exposure_lot: float = 5.0
     equity_floor_pct: float = 0.30
     # トレーリングストップ設定
-    use_position_manager: bool = False
+    use_position_manager: bool = True
     trailing_start_r: float = 1.5
     trailing_atr_multiplier: float = 1.5
     breakeven_at_1r: bool = True
