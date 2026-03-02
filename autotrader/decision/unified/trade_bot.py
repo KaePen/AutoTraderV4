@@ -953,17 +953,6 @@ class UnifiedTradeBot:
                     f"<{_tn_threshold:.1f}"
                 )
 
-            # off_hours TREND完全ブロック
-            # optimal_hours(UTC 8-17)外のTRENDを全てブロック
-            if (
-                self.config.off_hours_trend_block
-                and hour_utc not in range(8, 18)
-                and regime_result.regime == MarketRegime.TREND
-            ):
-                return _filt_hold(
-                    f"OffHoursTRENDBlock: hour={hour_utc}"
-                )
-
             # RANGE/LOW_VOLフィルタ群
             _range_hold = self._check_range_regime_filter(
                 regime_result=regime_result,
@@ -1017,40 +1006,6 @@ class UnifiedTradeBot:
                     f"<={self.config.low_atr_trend_ratio_max}"
                 )
 
-        # 高alignment時スコアペナルティ
-        if (
-            self.config.high_align_penalty_threshold
-            is not None
-            and abs(htf_alignment)
-            > self.config.high_align_penalty_threshold
-        ):
-            _penalty = self.config.high_align_penalty_score
-            consensus = ConsensusResult(
-                direction=consensus.direction,
-                score=consensus.score - _penalty,
-                threshold=consensus.threshold,
-                aligned_tfs=consensus.aligned_tfs,
-                reasoning=(
-                    f"{consensus.reasoning}, "
-                    f"AlignPenalty(-{_penalty:.1f},"
-                    f" |align|="
-                    f"{abs(htf_alignment):.2f}"
-                    f">{self.config.high_align_penalty_threshold})"
-                ),
-                buy_score=consensus.buy_score,
-                sell_score=consensus.sell_score,
-                dynamic_entry_tf=(
-                    consensus.dynamic_entry_tf
-                ),
-            )
-            # ペナルティ後にスコアが閾値未満ならHOLD
-            if consensus.score < consensus.threshold:
-                return _filt_hold(
-                    f"高alignment penalty: score="
-                    f"{consensus.score:.1f}"
-                    f"<{consensus.threshold:.1f}"
-                )
-
         # SL/TP計算（primary_tf由来）
         primary_signal = tf_signals.get(plan.primary_tf)
         if primary_signal is None:
@@ -1076,14 +1031,6 @@ class UnifiedTradeBot:
             return _filt_hold("primary_tfデータなし")
 
         sl_pips = primary_signal.sl_pips * _overrides.sl_multiplier
-        # TREND時のSL下限上書き
-        if (
-            self.config.trend_sl_min_pips is not None
-            and regime_result.regime == MarketRegime.TREND
-        ):
-            sl_pips = max(
-                sl_pips, self.config.trend_sl_min_pips,
-            )
         tp_sl_ratio = (
             plan.get_recommended_tp_sl_ratio()
             * self.config.tp_sl_ratio

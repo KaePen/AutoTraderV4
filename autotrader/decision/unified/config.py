@@ -259,15 +259,6 @@ class UnifiedBotConfig:
     liquidity_tp_default_rr: float = 1.5
     # 実スプレッドデータ使用（CSVの<SPREAD>列）
     use_actual_spread_data: bool = False
-    # --- 改善検証パラメータ ---
-    # off_hours時間帯でTRENDエントリーを完全ブロック
-    off_hours_trend_block: bool = False
-    # TREND時のsl_min_pips上書き（None=sl_min_pipsを使用）
-    trend_sl_min_pips: float | None = None
-    # 高alignment時スコアペナルティ閾値（None=無効）
-    high_align_penalty_threshold: float | None = None
-    # 高alignment時のスコアペナルティ量
-    high_align_penalty_score: float = 1.0
 
     def get_evaluator_config(self, timeframe: str) -> EvaluatorConfig:
         """時間足別評価器設定を取得

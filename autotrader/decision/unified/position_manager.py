@@ -268,9 +268,6 @@ class PositionManagerConfig:
     stagnation_stage2_minutes: float = 90.0
     stagnation_stage2_mfe_r: float = 0.10
     stagnation_stage2_max_r: float = -0.10
-    # レジーム別stagnation時間の上書き（None=ハードコード値を使用）
-    stag_trend_minutes: float | None = None
-    stag_range_minutes: float | None = None
 
 
 class PositionManager:
@@ -769,20 +766,10 @@ class PositionManager:
 
         # レジームベース動的STAGNATION時間
         # TREND: 60分、RANGE: 90分、CHOPPY/その他: 120分
-        _trend_min = (
-            self.config.stag_trend_minutes
-            if self.config.stag_trend_minutes is not None
-            else 60.0
-        )
-        _range_min = (
-            self.config.stag_range_minutes
-            if self.config.stag_range_minutes is not None
-            else 90.0
-        )
         regime_stag_minutes = {
-            "TREND": _trend_min,
-            "RANGE": _range_min,
-            "CHOPPY": self.config.stagnation_exit_minutes,
+            "TREND": 60.0,
+            "RANGE": 90.0,
+            "CHOPPY": 120.0,
         }.get(regime, self.config.stagnation_exit_minutes)
         stag_mfe = self.config.stagnation_min_mfe_r
 

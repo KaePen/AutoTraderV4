@@ -805,60 +805,6 @@ def parse_args() -> argparse.Namespace:
         ),
     )
 
-    # --- 改善検証パラメータ ---
-    parser.add_argument(
-        "--off-hours-trend-block",
-        action="store_true",
-        default=False,
-        help=(
-            "off_hours時間帯でTRENDエントリーを完全ブロック"
-        ),
-    )
-    parser.add_argument(
-        "--trend-sl-min",
-        type=float,
-        default=None,
-        help=(
-            "TREND時のsl_min_pips上書き（例: 30, 40）"
-        ),
-    )
-    parser.add_argument(
-        "--stag-trend-minutes",
-        type=float,
-        default=None,
-        help=(
-            "TRENDレジームのstagnation時間を上書き"
-            "（デフォルト: 60）"
-        ),
-    )
-    parser.add_argument(
-        "--stag-range-minutes",
-        type=float,
-        default=None,
-        help=(
-            "RANGEレジームのstagnation時間を上書き"
-            "（デフォルト: 90）"
-        ),
-    )
-    parser.add_argument(
-        "--high-align-penalty-threshold",
-        type=float,
-        default=None,
-        help=(
-            "ma_alignment超過閾値（例: 0.55）、"
-            "超過するとスコアペナルティ"
-        ),
-    )
-    parser.add_argument(
-        "--high-align-penalty-score",
-        type=float,
-        default=1.0,
-        help=(
-            "高alignment時のスコアペナルティ量"
-            "（デフォルト: 1.0）"
-        ),
-    )
-
     return parser.parse_args()
 
 
@@ -1365,14 +1311,6 @@ def run_single_backtest(args: argparse.Namespace):
             else _default_bot.bca_min_edge
         ),
         bca_penalty_scale=args.bca_penalty_scale,
-        off_hours_trend_block=args.off_hours_trend_block,
-        trend_sl_min_pips=args.trend_sl_min,
-        high_align_penalty_threshold=(
-            args.high_align_penalty_threshold
-        ),
-        high_align_penalty_score=(
-            args.high_align_penalty_score
-        ),
     )
 
     # PositionManagerConfig構築
@@ -1425,8 +1363,6 @@ def run_single_backtest(args: argparse.Namespace):
         progressive_stagnation_enabled=args.progressive_stagnation,
         universal_half_r_enabled=args.universal_half_r,
         universal_half_r_ratio=args.universal_half_r_ratio,
-        stag_trend_minutes=args.stag_trend_minutes,
-        stag_range_minutes=args.stag_range_minutes,
     )
 
     # ファンダメンタルCSVリスト構築
