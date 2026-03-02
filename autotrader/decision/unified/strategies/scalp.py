@@ -10,9 +10,11 @@ from autotrader.core.enums import MarketRegime
 
 from .base import BaseStrategy, StrategyConfig
 from .in_strategy_consensus import InStrategyConsensusConfig
+from .registry import register_strategy
 from .types import StrategyId, StrategyTimeframes
 
 
+@register_strategy("scalp")
 class ScalpStrategy(BaseStrategy):
     """スキャルピング戦略
 
@@ -82,9 +84,3 @@ class ScalpStrategy(BaseStrategy):
         """時間足設定を返す"""
         return self.TIMEFRAMES
 
-    def _get_regime_fit_factor(self, regime: MarketRegime) -> float:
-        """レジーム適合係数を返す"""
-        weights = self.config.regime_weights or self.DEFAULT_CONFIG.regime_weights
-        if weights:
-            return weights.get(regime, 1.0)
-        return 1.0
