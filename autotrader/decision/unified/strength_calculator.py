@@ -6,6 +6,11 @@ from dataclasses import dataclass
 
 import pandas as pd
 
+from autotrader.calculator.scoring import (
+    normalize_atr_by_price,
+    score_rsi_continuous,
+)
+
 from .config import StrengthConfig
 
 
@@ -100,7 +105,7 @@ class IndicatorStrengthCalculator:
         )
 
     def _calculate_rsi_strength(self, row: pd.Series) -> float:
-        """RSIから強度を計算（-1.0 ~ 1.0）
+        """RSIから強度を計算（calculator/scoring.pyに委譲）
 
         Args:
             row: データ行
@@ -112,21 +117,11 @@ class IndicatorStrengthCalculator:
         if rsi is None or pd.isna(rsi):
             return 0.0
 
-        oversold = self.config.rsi_oversold
-        overbought = self.config.rsi_overbought
-
-        if rsi <= oversold:
-            # 売られすぎ → 買いシグナル
-            return (oversold - rsi) / oversold
-        elif rsi >= overbought:
-            # 買われすぎ → 売りシグナル
-            return -(rsi - overbought) / (100 - overbought)
-        elif rsi < 50:
-            # 中立帯（やや買い寄り）
-            return (50 - rsi) / (50 - oversold) * 0.3
-        else:
-            # 中立帯（やや売り寄り）
-            return -(rsi - 50) / (overbought - 50) * 0.3
+        return score_rsi_continuous(
+            rsi,
+            oversold=self.config.rsi_oversold,
+            overbought=self.config.rsi_overbought,
+        )
 
     def _calculate_macd_strength(self, row: pd.Series) -> float:
         """MACDから強度を計算（-1.0 ~ 1.0）
@@ -303,13 +298,13 @@ class IndicatorStrengthCalculator:
         return max(-1.0, min(1.0, strength))
 
     def _calculate_atr_normalized(self, row: pd.Series) -> float:
-        """ATRを正規化（0.0 ~ 1.0）
+        """ATRを正規化（calculator/scoring.pyに委譲）
 
         Args:
             row: データ行
 
         Returns:
-            float: 正規化ATR
+            float: 正規化ATR（0.0 ~ 1.0）
         """
         atr = row.get("atr_14")
         close = row.get("close")
@@ -320,8 +315,4 @@ class IndicatorStrengthCalculator:
         if pd.isna(atr) or pd.isna(close) or close == 0:
             return 0.0
 
-        # ATRを価格比率で正規化
-        atr_ratio = atr / close
-        # 一般的なFXの日足ATR比率は0.5-2%程度
-        normalized = min(atr_ratio / 0.02, 1.0)
-        return normalized
+        return normalize_atr_by_price(atr, close)

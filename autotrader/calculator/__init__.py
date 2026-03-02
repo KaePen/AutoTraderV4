@@ -11,5 +11,15 @@ Modules:
 from __future__ import annotations
 
 from autotrader.calculator.precompute import PrecomputeEngine
+from autotrader.calculator.scoring import (
+    normalize_atr_by_price,
+    score_rsi_continuous,
+    score_rsi_discrete,
+)
 
-__all__ = ["PrecomputeEngine"]
+__all__ = [
+    "PrecomputeEngine",
+    "normalize_atr_by_price",
+    "score_rsi_continuous",
+    "score_rsi_discrete",
+]

@@ -15,6 +15,7 @@ from autotrader.config.tf_params_registry import (
     get_sl_multiplier,
     get_structure_sl_mult,
 )
+from autotrader.calculator.scoring import score_rsi_discrete
 from autotrader.core.enums import SignalType
 
 from .config import EvaluatorConfig
@@ -529,31 +530,16 @@ class TimeframeEvaluator:
         return buy_bonus, sell_bonus, reasons
 
     def _score_rsi(self, row: pd.Series) -> tuple[float, str]:
-        """RSIスコアリング"""
+        """RSIスコアリング（calculator/scoring.pyに委譲）"""
         rsi = row.get("rsi_14")
         if rsi is None or pd.isna(rsi):
             return 0.0, ""
 
-        oversold = self.config.strength_config.rsi_oversold
-        overbought = self.config.strength_config.rsi_overbought
-
-        # 極端な売られすぎ → 強い買いシグナル
-        if rsi < oversold - 10:
-            return 3.0, f"RSI極低({rsi:.1f})"
-        # 売られすぎ → 買いシグナル
-        elif rsi < oversold - 5:
-            return 2.0, f"RSI低({rsi:.1f})"
-        elif rsi < oversold:
-            return 1.0, ""
-        # 極端な買われすぎ → 強い売りシグナル
-        elif rsi > overbought + 10:
-            return -3.0, f"RSI極高({rsi:.1f})"
-        # 買われすぎ → 売りシグナル
-        elif rsi > overbought + 5:
-            return -2.0, f"RSI高({rsi:.1f})"
-        elif rsi > overbought:
-            return -1.0, ""
-        return 0.0, ""
+        return score_rsi_discrete(
+            rsi,
+            oversold=self.config.strength_config.rsi_oversold,
+            overbought=self.config.strength_config.rsi_overbought,
+        )
 
     def _score_macd(self, row: pd.Series) -> tuple[float, str]:
         """MACDスコアリング"""
