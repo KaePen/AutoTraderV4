@@ -320,10 +320,10 @@ class TestBacktestConfigFromPresetOverrides:
 class TestTrailingStopDefaults:
     """トレーリングストップフィールドのデフォルト値"""
 
-    def test_use_position_manager_default_false(self):
-        """デフォルトで use_position_manager=False"""
+    def test_use_position_manager_default_true(self):
+        """デフォルトで use_position_manager=True"""
         preset = SymbolPreset()
-        assert preset.use_position_manager is False
+        assert preset.use_position_manager is True
 
     def test_trailing_start_r_default(self):
         """trailing_start_r デフォルト値 1.5"""
@@ -365,9 +365,9 @@ class TestTrailingStopYamlLoad:
         assert preset.breakeven_at_1r is True
 
     def test_usdjpy_use_position_manager_from_defaults(self):
-        """USDJPY は defaults の use_position_manager=False"""
+        """USDJPY は defaults の use_position_manager=True"""
         preset = get_preset("USDJPY")
-        assert preset.use_position_manager is False
+        assert preset.use_position_manager is True
 
     def test_custom_yaml_trailing_fields(self, tmp_path: Path):
         """カスタムYAMLからトレーリング設定が読まれる"""

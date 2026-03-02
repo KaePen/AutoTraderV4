@@ -18,8 +18,8 @@ defaults:
   max_lot_per_trade: 2.5      # 2025年DD対策: 2.0 → 2.5
   max_total_exposure_lot: 4.0 # 2025年DD対策: 5.0 → 4.0
   equity_floor_pct: 0.30
-  # トレーリングストップ設定（デフォルトOFF）
-  use_position_manager: false
+  # トレーリングストップ設定（デフォルトON）
+  use_position_manager: true
   trailing_start_r: 2.0
   trailing_atr_multiplier: 2.0
   breakeven_at_1r: true
