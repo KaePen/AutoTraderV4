@@ -313,6 +313,10 @@ class UnifiedTradeBot:
         # Phase 2b: 直近のファンダメンタル評価結果
         self._last_fundamental_assessment: Any = None
 
+        # シグナル生成パイプライン
+        from .pipeline import build_default_pipeline
+        self._pipeline = build_default_pipeline()
+
     def _init_new_components(self) -> None:
         """新アーキテクチャコンポーネントを初期化"""
         # レジーム検出器
