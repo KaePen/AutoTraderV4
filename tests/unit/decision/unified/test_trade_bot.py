@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 from datetime import datetime
 
 import pandas as pd
@@ -42,7 +43,7 @@ class TestBotState:
     def test_update_pnl_profit(self) -> None:
         """利益更新テスト"""
         state = BotState()
-        state.update_pnl(10000.0)
+        state = state.with_pnl(10000.0)
         assert state.equity == 1_010_000.0
         assert state.consecutive_wins == 1
         assert state.consecutive_losses == 0
@@ -51,7 +52,7 @@ class TestBotState:
     def test_update_pnl_loss(self) -> None:
         """損失更新テスト"""
         state = BotState()
-        state.update_pnl(-10000.0)
+        state = state.with_pnl(-10000.0)
         assert state.equity == 990_000.0
         assert state.consecutive_wins == 0
         assert state.consecutive_losses == 1
@@ -60,30 +61,36 @@ class TestBotState:
     def test_update_pnl_multiple(self) -> None:
         """連続損益更新テスト"""
         state = BotState()
-        state.update_pnl(5000.0)
-        state.update_pnl(5000.0)
+        state = state.with_pnl(5000.0)
+        state = state.with_pnl(5000.0)
         assert state.consecutive_wins == 2
-        state.update_pnl(-3000.0)
+        state = state.with_pnl(-3000.0)
         assert state.consecutive_wins == 0
         assert state.consecutive_losses == 1
 
     def test_reset_daily(self) -> None:
         """日次リセットテスト"""
-        state = BotState()
-        state.daily_pnl = 5000.0
-        state.daily_trades = 10
-        state.reset_daily()
+        state = BotState(daily_pnl=5000.0, daily_trades=10)
+        state = state.with_daily_reset()
         assert state.daily_pnl == 0.0
         assert state.daily_trades == 0
 
     def test_drawdown_calculation(self) -> None:
         """ドローダウン計算テスト"""
         state = BotState()
-        state.update_pnl(100000.0)  # peak = 1.1M
-        state.update_pnl(-50000.0)  # equity = 1.05M
+        state = state.with_pnl(100000.0)  # peak = 1.1M
+        state = state.with_pnl(-50000.0)  # equity = 1.05M
         # DD = (1.1M - 1.05M) / 1.1M ≈ 0.045
         assert state.current_dd_pct > 0
         assert state.current_dd_pct < 0.1
+
+    def test_frozen_immutability(self) -> None:
+        """frozen=Trueによるイミュータブル性テスト"""
+        state = BotState()
+        import pytest
+
+        with pytest.raises(dataclasses.FrozenInstanceError):
+            state.equity = 999_999.0  # type: ignore[misc]
 
 
 class TestRiskManager:

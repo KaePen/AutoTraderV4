@@ -11,7 +11,7 @@
 from __future__ import annotations
 
 import dataclasses
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta
 from typing import TYPE_CHECKING
 
@@ -62,18 +62,24 @@ if TYPE_CHECKING:
     )
 
 
-@dataclass
+@dataclass(frozen=True)
 class BotState:
-    """ボット状態
+    """ボット状態（イミュータブル）
+
+    frozen=True により全フィールドが読み取り専用。
+    状態変更は with_xxx メソッドで新インスタンスを返す。
 
     Attributes:
         equity: 現在の有効証拠金
+        initial_equity: 初期資金
         consecutive_losses: 連敗数
         consecutive_wins: 連勝数
         current_dd_pct: 現在のドローダウン率
         peak_equity: 最高証拠金
         daily_pnl: 日次損益
         daily_trades: 日次トレード数
+        open_exposure_lot: 未決済エクスポージャー
+        open_same_direction_lot: 同方向最大ロット
     """
 
     equity: float = 1_000_000.0
@@ -87,32 +93,90 @@ class BotState:
     open_exposure_lot: float = 0.0
     open_same_direction_lot: float = 0.0
 
-    def update_pnl(self, pnl: float) -> None:
-        """損益更新
+    def with_pnl(self, pnl: float) -> BotState:
+        """PnL適用後の新しいBotStateを返す
 
         Args:
             pnl: 損益
+
+        Returns:
+            BotState: 更新後の新インスタンス
         """
-        self.equity += pnl
-        self.daily_pnl += pnl
+        new_equity = self.equity + pnl
+        new_daily_pnl = self.daily_pnl + pnl
 
         if pnl > 0:
-            self.consecutive_wins += 1
-            self.consecutive_losses = 0
+            new_wins = self.consecutive_wins + 1
+            new_losses = 0
         elif pnl < 0:
-            self.consecutive_losses += 1
-            self.consecutive_wins = 0
+            new_losses = self.consecutive_losses + 1
+            new_wins = 0
+        else:
+            new_wins = self.consecutive_wins
+            new_losses = self.consecutive_losses
 
-        self.peak_equity = max(self.peak_equity, self.equity)
-        if self.peak_equity > 0:
-            self.current_dd_pct = (
-                self.peak_equity - self.equity
-            ) / self.peak_equity
+        new_peak = max(self.peak_equity, new_equity)
+        new_dd = (
+            (new_peak - new_equity) / new_peak
+            if new_peak > 0
+            else 0.0
+        )
 
-    def reset_daily(self) -> None:
-        """日次リセット"""
-        self.daily_pnl = 0.0
-        self.daily_trades = 0
+        return replace(
+            self,
+            equity=new_equity,
+            daily_pnl=new_daily_pnl,
+            consecutive_wins=new_wins,
+            consecutive_losses=new_losses,
+            peak_equity=new_peak,
+            current_dd_pct=new_dd,
+        )
+
+    def with_daily_reset(self) -> BotState:
+        """日次リセット後の新しいBotStateを返す
+
+        Returns:
+            BotState: リセット後の新インスタンス
+        """
+        return replace(self, daily_pnl=0.0, daily_trades=0)
+
+    def with_exposure(
+        self,
+        open_exposure_lot: float,
+        open_same_direction_lot: float,
+    ) -> BotState:
+        """エクスポージャー更新後の新しいBotStateを返す
+
+        Args:
+            open_exposure_lot: 未決済エクスポージャー
+            open_same_direction_lot: 同方向最大ロット
+
+        Returns:
+            BotState: 更新後の新インスタンス
+        """
+        return replace(
+            self,
+            open_exposure_lot=open_exposure_lot,
+            open_same_direction_lot=open_same_direction_lot,
+        )
+
+    def with_initial_equity(
+        self, initial_balance: float,
+    ) -> BotState:
+        """初期資金設定後の新しいBotStateを返す
+
+        Args:
+            initial_balance: 初期資金
+
+        Returns:
+            BotState: 更新後の新インスタンス
+        """
+        return replace(
+            self,
+            equity=initial_balance,
+            initial_equity=initial_balance,
+            peak_equity=initial_balance,
+        )
 
 
 class RiskManager:
@@ -1937,7 +2001,7 @@ class UnifiedTradeBot:
         self.risk_manager.record_trade(timestamp)
         if pnl is not None:
             self.risk_manager.update_pnl(pnl)
-            self.state.update_pnl(pnl)
+            self.state = self.state.with_pnl(pnl)
         if trade_record is not None and self._adaptive_tuner:
             self._adaptive_tuner.record_trade(trade_record)
 
