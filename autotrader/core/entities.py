@@ -6,6 +6,7 @@ Pydanticベースのイミュータブルなエンティティ。
 from __future__ import annotations
 
 from datetime import datetime
+from enum import Enum
 from typing import Any
 
 from pydantic import BaseModel, Field, ConfigDict
@@ -16,6 +17,39 @@ from autotrader.core.enums import (
     ExitReason,
     Timeframe,
 )
+from autotrader.core.exceptions import InvalidTransitionError
+
+
+class PositionState(str, Enum):
+    """ポジション状態"""
+
+    PENDING = "pending"
+    OPEN = "open"
+    TRAILING = "trailing"
+    PARTIAL_CLOSED = "partial_closed"
+    CLOSED = "closed"
+
+
+# 有効な状態遷移マップ
+VALID_TRANSITIONS: dict[PositionState, set[PositionState]] = {
+    PositionState.PENDING: {
+        PositionState.OPEN,
+        PositionState.CLOSED,
+    },
+    PositionState.OPEN: {
+        PositionState.TRAILING,
+        PositionState.PARTIAL_CLOSED,
+        PositionState.CLOSED,
+    },
+    PositionState.TRAILING: {
+        PositionState.PARTIAL_CLOSED,
+        PositionState.CLOSED,
+    },
+    PositionState.PARTIAL_CLOSED: {
+        PositionState.CLOSED,
+    },
+    PositionState.CLOSED: set(),
+}
 
 
 class Candle(BaseModel):
@@ -159,6 +193,64 @@ class Position(BaseModel):
     mode: str | None = None
     consensus_score: float | None = None
     unrealized_pnl: float = 0.0
+    state: PositionState = PositionState.OPEN
+
+
+class PositionStateMachine:
+    """ポジション状態遷移の管理
+
+    Attributes:
+        _state: 現在の状態
+    """
+
+    def __init__(
+        self,
+        initial_state: PositionState = PositionState.PENDING,
+    ) -> None:
+        self._state = initial_state
+
+    @property
+    def state(self) -> PositionState:
+        """現在の状態を取得"""
+        return self._state
+
+    def transition(self, new_state: PositionState) -> None:
+        """状態遷移を実行
+
+        Args:
+            new_state: 遷移先の状態
+
+        Raises:
+            InvalidTransitionError: 不正な遷移の場合
+        """
+        if new_state not in VALID_TRANSITIONS[self._state]:
+            allowed = [
+                s.value for s in VALID_TRANSITIONS[self._state]
+            ]
+            raise InvalidTransitionError(
+                f"不正な状態遷移: {self._state.value}"
+                f" → {new_state.value}. "
+                f"許可: {allowed}"
+            )
+        self._state = new_state
+
+    def can_transition(
+        self, new_state: PositionState,
+    ) -> bool:
+        """遷移可能か判定
+
+        Args:
+            new_state: 遷移先の状態
+
+        Returns:
+            bool: 遷移可能ならTrue
+        """
+        return new_state in VALID_TRANSITIONS[self._state]
+
+    @property
+    def is_terminal(self) -> bool:
+        """終端状態か"""
+        return self._state == PositionState.CLOSED
 
 
 class Trade(BaseModel):

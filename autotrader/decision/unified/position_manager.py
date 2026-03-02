@@ -9,8 +9,16 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 
+import logging
+
+from autotrader.core.entities import (
+    PositionState,
+    PositionStateMachine,
+)
 from autotrader.core.enums import ExitReason, SignalType, TradingStrategyMode
 from autotrader.decision.unified.mode_selector import TradingPlan
+
+logger = logging.getLogger(__name__)
 
 
 class ManagementActionType(str, Enum):
@@ -136,6 +144,11 @@ class ManagedPosition:
     current_r: float = 0.0
     highest_r: float = 0.0
     trailing_activated: bool = False
+    state_machine: PositionStateMachine = field(
+        default_factory=lambda: PositionStateMachine(
+            PositionState.OPEN,
+        ),
+    )
 
     @property
     def r_value(self) -> float:
@@ -501,6 +514,7 @@ class PositionManager:
         # 1. SL到達チェック
         action = self._check_sl(position, current_price)
         if action is not None:
+            self._try_state_transition(position, action)
             return action
 
         # 2. 部分利確チェック（1R, 2R）※TP前に実行
@@ -508,11 +522,13 @@ class PositionManager:
             position, current_price, current_time,
         )
         if action is not None:
+            self._try_state_transition(position, action)
             return action
 
         # 3. TP到達チェック（1R後は無効化可能）
         action = self._check_tp(position, current_price)
         if action is not None:
+            self._try_state_transition(position, action)
             return action
 
         # 3.5 利益反転ガード
@@ -521,6 +537,9 @@ class PositionManager:
                 position, current_price,
             )
             if action is not None:
+                self._try_state_transition(
+                    position, action,
+                )
                 return action
 
         # 4. 進捗なしExitチェック
@@ -528,6 +547,7 @@ class PositionManager:
             position, current_time, current_price,
         )
         if action is not None:
+            self._try_state_transition(position, action)
             return action
 
         # 5. 時間決済チェック
@@ -536,6 +556,9 @@ class PositionManager:
                 position, current_time, current_price,
             )
             if action is not None:
+                self._try_state_transition(
+                    position, action,
+                )
                 return action
 
         # 6. シグナル反転チェック
@@ -544,6 +567,9 @@ class PositionManager:
                 position, current_signal, current_price,
             )
             if action is not None:
+                self._try_state_transition(
+                    position, action,
+                )
                 return action
 
         # 6.5 コンセンサス逆転exit
@@ -553,6 +579,9 @@ class PositionManager:
                 buy_score, sell_score,
             )
             if action is not None:
+                self._try_state_transition(
+                    position, action,
+                )
                 return action
 
         # 7. トレーリング更新
@@ -561,9 +590,58 @@ class PositionManager:
             fundamental_assessment=fundamental_assessment,
         )
         if action is not None:
+            self._try_state_transition(position, action)
             return action
 
         return ManagementAction.hold("条件未達")
+
+    # --- 状態遷移マッピング ---
+    _ACTION_TO_STATE: dict[
+        ManagementActionType, PositionState
+    ] = {
+        ManagementActionType.UPDATE_SL: (
+            PositionState.TRAILING
+        ),
+        ManagementActionType.PARTIAL_CLOSE: (
+            PositionState.PARTIAL_CLOSED
+        ),
+        ManagementActionType.FULL_CLOSE: (
+            PositionState.CLOSED
+        ),
+    }
+
+    def _try_state_transition(
+        self,
+        position: ManagedPosition,
+        action: ManagementAction,
+    ) -> None:
+        """アクションに応じた状態遷移を試行（警告のみ）
+
+        段階的導入: 遷移不可でもブロックせず警告ログのみ出力。
+
+        Args:
+            position: 管理対象ポジション
+            action: 実行予定のアクション
+        """
+        target = self._ACTION_TO_STATE.get(
+            action.action_type,
+        )
+        if target is None:
+            return
+
+        sm = position.state_machine
+        if sm.can_transition(target):
+            sm.transition(target)
+        else:
+            logger.warning(
+                "状態遷移スキップ: %s (%s → %s), "
+                "アクション=%s, 理由=%s",
+                position.position_id,
+                sm.state.value,
+                target.value,
+                action.action_type.value,
+                action.reason,
+            )
 
     def _get_be_price(
         self,
