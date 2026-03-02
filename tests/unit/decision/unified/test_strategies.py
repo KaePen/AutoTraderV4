@@ -11,6 +11,9 @@ from autotrader.decision.unified.strategies import (
     StrategyId,
     StrategyTimeframes,
     StrategyConfig,
+    get_registered_strategies,
+    get_registry,
+    get_strategy_class,
 )
 
 
@@ -145,3 +148,69 @@ class TestStrategyConfig:
             }
         )
         assert config.regime_weights[MarketRegime.HIGH_VOL] == 1.5
+
+
+class TestStrategyRegistry:
+    """戦略レジストリのテスト"""
+
+    def test_all_strategies_registered(self) -> None:
+        """全戦略がレジストリに登録されていること"""
+        registry = get_registry()
+        assert "scalp" in registry
+        assert "short_mid" in registry
+        assert "swing" in registry
+        assert "no_trade" in registry
+
+    def test_get_registered_strategies(self) -> None:
+        """レジストリから全戦略インスタンスを取得"""
+        strategies = get_registered_strategies()
+        assert len(strategies) == 4
+        ids = {s.strategy_id for s in strategies}
+        assert StrategyId.SCALP in ids
+        assert StrategyId.SHORT_MID in ids
+        assert StrategyId.SWING in ids
+        assert StrategyId.NO_TRADE in ids
+
+    def test_get_strategy_class(self) -> None:
+        """名前から戦略クラスを取得"""
+        cls = get_strategy_class("scalp")
+        assert cls is ScalpStrategy
+
+    def test_get_strategy_class_not_found(self) -> None:
+        """未登録名でNoneを返す"""
+        cls = get_strategy_class("nonexistent")
+        assert cls is None
+
+
+class TestRegimeFitFactor:
+    """_get_regime_fit_factor テンプレートメソッドのテスト"""
+
+    def test_scalp_regime_fit(self) -> None:
+        """Scalpのレジーム適合係数がconfigから取得される"""
+        strategy = ScalpStrategy()
+        factor = strategy._get_regime_fit_factor(MarketRegime.TREND)
+        assert factor == 1.2
+
+    def test_short_mid_regime_fit(self) -> None:
+        """ShortMidのレジーム適合係数がconfigから取得される"""
+        strategy = ShortMidStrategy()
+        factor = strategy._get_regime_fit_factor(MarketRegime.TREND)
+        assert factor == 1.3
+
+    def test_swing_regime_fit(self) -> None:
+        """Swingのレジーム適合係数がconfigから取得される"""
+        strategy = SwingStrategy()
+        factor = strategy._get_regime_fit_factor(MarketRegime.TREND)
+        assert factor == 1.4
+
+    def test_unknown_regime_returns_default(self) -> None:
+        """未知レジームはデフォルト1.0を返す"""
+        strategy = ScalpStrategy()
+        # regime_weightsに含まれないレジームの場合
+        # 全レジームが定義済みなのでconfigなしで確認
+        config = StrategyConfig(regime_weights=None)
+        strategy_custom = ScalpStrategy(config=config)
+        factor = strategy_custom._get_regime_fit_factor(
+            MarketRegime.TREND
+        )
+        assert factor == 1.0

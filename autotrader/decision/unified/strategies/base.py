@@ -93,9 +93,11 @@ class BaseStrategy(ABC):
         """時間足設定を返す"""
         ...
 
-    @abstractmethod
     def _get_regime_fit_factor(self, regime: MarketRegime) -> float:
         """レジーム適合係数を返す
+
+        config.regime_weights から対応するレジームの係数を返す。
+        サブクラスでオーバーライド可能（テンプレートメソッド）。
 
         Args:
             regime: 現在のレジーム
@@ -103,7 +105,10 @@ class BaseStrategy(ABC):
         Returns:
             float: 適合係数（1.0=標準、>1.0=有利、<1.0=不利）
         """
-        ...
+        weights = self.config.regime_weights
+        if weights:
+            return weights.get(regime, 1.0)
+        return 1.0
 
     def set_evaluators(
         self, evaluators: dict[str, TimeframeEvaluator]

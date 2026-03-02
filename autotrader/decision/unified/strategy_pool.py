@@ -12,17 +12,15 @@ import pandas as pd
 
 from .strategies import (
     BaseStrategy,
-    NoTradeStrategy,
     PoolEvaluationResult,
-    ScalpStrategy,
-    ShortMidStrategy,
     StrategyContext,
     StrategyId,
-    SwingStrategy,
+    get_registered_strategies,
 )
 
 if TYPE_CHECKING:
     from autotrader.core.entities import Candle
+
     from .timeframe_evaluator import TimeframeEvaluator
 
 
@@ -40,15 +38,12 @@ class StrategyPool:
         """初期化
 
         Args:
-            strategies: 戦略リスト（Noneの場合はデフォルト3戦略）
+            strategies: 戦略リスト（Noneの場合はレジストリから自動取得）
         """
         if strategies is None:
-            self._strategies: list[BaseStrategy] = [
-                ScalpStrategy(),
-                ShortMidStrategy(),
-                SwingStrategy(),
-                NoTradeStrategy(),
-            ]
+            self._strategies: list[BaseStrategy] = (
+                get_registered_strategies()
+            )
         else:
             self._strategies = strategies
 

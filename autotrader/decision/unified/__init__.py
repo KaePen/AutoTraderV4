@@ -12,16 +12,36 @@ from .config import (
     StrengthConfig,
     UnifiedBotConfig,
 )
+from .dynamic_tf_selector import DynamicTFResult, DynamicTFSelector
 from .mode_aware_consensus import (
     ConsensusConfig,
     ConsensusResult,
     ModeAwareScoreConsensus,
+)
+from .mode_aware_consensus import (
     TimeframeSignal as ConsensusTimeframeSignal,
+)
+from .mode_monitor import (
+    UNIVERSAL_CONFIG,
+    ModeConfig,
+    ModeMonitor,
+    ModeSignal,
 )
 from .mode_selector import (
     ModeSelectorConfig,
     TradingModeSelector,
     TradingPlan,
+)
+from .multi_mode_controller import (
+    MultiModeConfig,
+    MultiModeController,
+    MultiModeSignal,
+)
+from .position_aggregator import (
+    AggregatorConfig,
+    AggregatorState,
+    ModePosition,
+    PositionAggregator,
 )
 from .position_manager import (
     ManagedPosition,
@@ -39,31 +59,6 @@ from .signal_consolidator import (
     PortfolioState,
     SignalConsolidator,
 )
-from .strength_calculator import IndicatorStrength, IndicatorStrengthCalculator
-from .timeframe_evaluator import TimeframeEvaluator, TimeframeSignal
-from .timeframe_router import (
-    TimeframeRole,
-    TimeframeRouter,
-    TimeframeSet,
-)
-from .trade_bot import BotState, RiskManager, UnifiedTradeBot
-from .mode_monitor import (
-    ModeConfig,
-    ModeMonitor,
-    ModeSignal,
-    UNIVERSAL_CONFIG,
-)
-from .multi_mode_controller import (
-    MultiModeConfig,
-    MultiModeController,
-    MultiModeSignal,
-)
-from .position_aggregator import (
-    AggregatorConfig,
-    AggregatorState,
-    ModePosition,
-    PositionAggregator,
-)
 from .strategies import (
     BaseStrategy,
     EdgeScoreComponents,
@@ -80,10 +75,21 @@ from .strategies import (
     StrategyId,
     StrategyTimeframes,
     SwingStrategy,
+    get_registered_strategies,
+    get_registry,
+    get_strategy_class,
+    register_strategy,
 )
 from .strategy_pool import StrategyPool
 from .strategy_selector import SelectorConfig, StrategySelector
-from .dynamic_tf_selector import DynamicTFSelector, DynamicTFResult
+from .strength_calculator import IndicatorStrength, IndicatorStrengthCalculator
+from .timeframe_evaluator import TimeframeEvaluator, TimeframeSignal
+from .timeframe_router import (
+    TimeframeRole,
+    TimeframeRouter,
+    TimeframeSet,
+)
+from .trade_bot import BotState, RiskManager, UnifiedTradeBot
 
 __all__ = [
     # 設定
@@ -159,6 +165,10 @@ __all__ = [
     "StrategyId",
     "StrategyTimeframes",
     "SwingStrategy",
+    "register_strategy",
+    "get_registered_strategies",
+    "get_strategy_class",
+    "get_registry",
     "StrategyPool",
     "SelectorConfig",
     "StrategySelector",

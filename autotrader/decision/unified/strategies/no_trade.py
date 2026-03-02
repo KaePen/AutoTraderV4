@@ -14,6 +14,7 @@ from autotrader.core.enums import MarketRegime, SignalType
 
 from .base import BaseStrategy, StrategyConfig
 from .in_strategy_consensus import InStrategyConsensusConfig
+from .registry import register_strategy
 from .types import (
     EdgeScoreComponents,
     InStrategyConsensusResult,
@@ -59,6 +60,7 @@ _NOTRADE_CONSENSUS = InStrategyConsensusConfig(
 )
 
 
+@register_strategy("no_trade")
 class NoTradeStrategy(BaseStrategy):
     """NoTrade戦略
 
@@ -83,10 +85,6 @@ class NoTradeStrategy(BaseStrategy):
     def timeframes(self) -> StrategyTimeframes:
         """時間足設定を返す"""
         return _NOTRADE_TIMEFRAMES
-
-    def _get_regime_fit_factor(self, regime: MarketRegime) -> float:
-        """レジーム適合係数を返す"""
-        return 1.0
 
     def evaluate(
         self,
