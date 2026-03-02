@@ -9,12 +9,13 @@ RSSフィードを非同期ポーリングして新着ニュースを収集す�
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections import OrderedDict
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from email.utils import parsedate_to_datetime
 
-from loguru import logger
+logger = logging.getLogger(__name__)
 
 from autotrader.adapters.fundamental.news_schemas import (
     CURRENCY_KEYWORDS,

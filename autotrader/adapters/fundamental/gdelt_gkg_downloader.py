@@ -27,11 +27,12 @@ GKG v1 カラム:
 from __future__ import annotations
 
 import io
+import logging
 import time
 import zipfile
 from datetime import date, datetime, timedelta, timezone
 
-from loguru import logger
+logger = logging.getLogger(__name__)
 
 from autotrader.adapters.fundamental.news_schemas import (
     CURRENCY_KEYWORDS,

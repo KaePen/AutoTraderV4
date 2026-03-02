@@ -21,7 +21,9 @@ from pathlib import Path
 _ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_ROOT))
 
-from loguru import logger
+import logging
+
+logger = logging.getLogger(__name__)
 
 # デフォルト出力ディレクトリ
 _DEFAULT_OUTPUT = "data/fundamental"

@@ -7,10 +7,11 @@ ForexFactoryの経済カレンダーをHTMLスクレイピングで取得。
 from __future__ import annotations
 
 import asyncio
-from datetime import datetime, timezone, timedelta
+import logging
+from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
-from loguru import logger
+logger = logging.getLogger(__name__)
 
 from autotrader.adapters.fundamental.schemas import (
     EconomicEvent,
@@ -114,8 +115,8 @@ class ForexFactoryClient:
             return []
 
         try:
-            from curl_cffi import requests as cffi_requests
             from bs4 import BeautifulSoup  # noqa: F401
+            from curl_cffi import requests as cffi_requests
         except ImportError:
             logger.warning(
                 "[ForexFactory] curl-cffi/beautifulsoup4未インストール。"
@@ -511,6 +512,7 @@ class ForexFactoryClient:
         """
         try:
             import time
+
             from curl_cffi import requests as cffi_requests
         except ImportError:
             logger.warning(

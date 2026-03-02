@@ -6,14 +6,12 @@ NFP、FOMC、CPI等の重要イベント時の高ボラティリティを回避�
 
 from __future__ import annotations
 
-from autotrader.constraint.filters.filter_result import FilterResult
-
 from datetime import datetime, timedelta
 from pathlib import Path
 
 import pandas as pd
 
-
+from autotrader.constraint.filters.filter_result import FilterResult
 
 
 class EventFilter:

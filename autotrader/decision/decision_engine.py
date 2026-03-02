@@ -12,9 +12,9 @@ from typing import Any
 import pandas as pd
 
 from autotrader.core.enums import SignalType
-from autotrader.decision.signal_generator import SignalGenerator
 from autotrader.decision.confidence_calculator import ConfidenceCalculator
 from autotrader.decision.exit_manager import ExitManager
+from autotrader.decision.signal_generator import SignalGenerator
 
 
 @dataclass(frozen=True)

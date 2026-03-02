@@ -43,7 +43,9 @@ try:
 except ImportError:
     _ollama_check = None  # type: ignore[assignment]
 
-from loguru import logger
+import logging
+
+logger = logging.getLogger(__name__)
 
 from autotrader.adapters.fundamental.news_csv_writer import (
     read_news_csv,

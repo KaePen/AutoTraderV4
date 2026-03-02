@@ -6,21 +6,20 @@ FundamentalMemoryの代替実装。
 
 from __future__ import annotations
 
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 
-
-from autotrader.adapters.fundamental.schemas import (
-    FundamentalContext,
-    ImpactLevel,
-)
 from autotrader.adapters.fundamental.memory import (
+    _TTL_MAP,
     MEMORY_TYPE_MACRO_BIAS,
     MEMORY_TYPE_POST_EVENT_BIAS,
     MEMORY_TYPE_SENTIMENT_SCORE,
-    _TTL_MAP,
 )
 from autotrader.adapters.fundamental.normalizer import (
     EconomicEventNormalizer,
+)
+from autotrader.adapters.fundamental.schemas import (
+    FundamentalContext,
+    ImpactLevel,
 )
 
 

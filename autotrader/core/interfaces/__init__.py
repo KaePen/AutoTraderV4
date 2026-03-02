@@ -14,12 +14,12 @@ from autotrader.core.interfaces.decision import (
     DecisionResult,
 )
 from autotrader.core.interfaces.data_provider import DataProvider
-from autotrader.core.interfaces.trade_executor import TradeExecutor
 from autotrader.core.interfaces.position_sizing import (
+    PositionSizerProtocol,
     SizingContext,
     SizingResult,
-    PositionSizerProtocol,
 )
+from autotrader.core.interfaces.trade_executor import TradeExecutor
 
 __all__ = [
     # Calculator

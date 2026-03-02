@@ -14,12 +14,12 @@ from autotrader.decision.unified.position_manager import (
 from autotrader.web.schemas import SettingsResponse
 from autotrader.web.schemas.requests import SettingsUpdateRequest
 from autotrader.web.schemas.responses import (
-    EntryFilterConfigResponse,
     CapitalManagementConfigResponse,
-    PositionManagementConfigResponse,
-    TradingConfigResponse,
-    RiskConfigResponse,
+    EntryFilterConfigResponse,
     NotificationConfigResponse,
+    PositionManagementConfigResponse,
+    RiskConfigResponse,
+    TradingConfigResponse,
 )
 
 logger = logging.getLogger(__name__)

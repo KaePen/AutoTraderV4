@@ -12,10 +12,11 @@ API制約:
 
 from __future__ import annotations
 
+import logging
 import time
 from datetime import datetime, timedelta, timezone
 
-from loguru import logger
+logger = logging.getLogger(__name__)
 
 from autotrader.adapters.fundamental.news_schemas import (
     CURRENCY_KEYWORDS,

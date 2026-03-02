@@ -18,13 +18,13 @@ from autotrader.constraint.filters.filter_result import (
 from autotrader.constraint.filters.session_filter import (
     SessionFilter,
 )
-from autotrader.constraint.filters.trend_filter import TrendFilter
-from autotrader.constraint.filters.volatility_filter import (
-    VolatilityFilter,
-)
 from autotrader.constraint.filters.session_transition_filter import (
     SessionTransitionFilter,
     SessionTransitionResult,
+)
+from autotrader.constraint.filters.trend_filter import TrendFilter
+from autotrader.constraint.filters.volatility_filter import (
+    VolatilityFilter,
 )
 
 __all__ = [

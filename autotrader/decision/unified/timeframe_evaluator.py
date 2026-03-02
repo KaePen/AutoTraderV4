@@ -23,6 +23,7 @@ from .strength_calculator import IndicatorStrength, IndicatorStrengthCalculator
 
 if TYPE_CHECKING:
     from autotrader.core.entities import Candle
+
     from .mode_selector import TradingPlan
 
 

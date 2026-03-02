@@ -13,7 +13,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
-from typing import Callable, Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any, Callable
 
 import pandas as pd
 

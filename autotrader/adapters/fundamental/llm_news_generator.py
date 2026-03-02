@@ -8,11 +8,12 @@ llm_news_SYMBOL_YYYY.csv に出力する。
 from __future__ import annotations
 
 import json
+import logging
 from collections import defaultdict
 from datetime import date
 from pathlib import Path
 
-from loguru import logger
+logger = logging.getLogger(__name__)
 
 from autotrader.adapters.fundamental.llm_generator_base import (
     LLMGeneratorBase,

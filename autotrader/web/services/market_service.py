@@ -9,12 +9,12 @@ from sqlalchemy.orm import Session
 from autotrader.adapters.database.models import TradeRecord
 from autotrader.core.enums import ExitReason, Timeframe
 from autotrader.web.schemas import (
+    CandleResponse,
     DashboardResponse,
+    IndicatorResponse,
     PositionResponse,
     TradeResponse,
     TradeSummaryResponse,
-    IndicatorResponse,
-    CandleResponse,
 )
 from autotrader.web.schemas.responses import AccountInfoResponse
 from autotrader.web.services.candle_service import CandleService

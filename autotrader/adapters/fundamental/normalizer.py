@@ -5,9 +5,10 @@
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timedelta
 
-from loguru import logger
+logger = logging.getLogger(__name__)
 
 from autotrader.adapters.fundamental.schemas import (
     EconomicEvent,

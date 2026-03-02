@@ -9,19 +9,20 @@ from __future__ import annotations
 import asyncio
 import csv
 import hashlib
+import logging
 import os
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from loguru import logger
+logger = logging.getLogger(__name__)
 
+from autotrader.adapters.fundamental.normalizer import (
+    EconomicEventNormalizer,
+)
 from autotrader.adapters.fundamental.schemas import (
     EconomicEvent,
     EventSource,
     ImpactLevel,
-)
-from autotrader.adapters.fundamental.normalizer import (
-    EconomicEventNormalizer,
 )
 
 # CSVファイルの古さ上限（これ以上古いと警告）

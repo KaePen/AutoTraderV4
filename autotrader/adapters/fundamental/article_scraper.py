@@ -18,13 +18,14 @@ FX専門ニュースサイトからHTML記事本文を取得し、
 
 from __future__ import annotations
 
+import logging
 import re
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from urllib.parse import urlparse
 
-from loguru import logger
+logger = logging.getLogger(__name__)
 
 from autotrader.core.exceptions import ConfigurationError
 

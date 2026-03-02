@@ -10,19 +10,19 @@ from datetime import datetime
 from typing import Any
 from uuid import uuid4
 
+from autotrader.backtest.position_event_logger import (
+    PositionEventLogger,
+    PositionEventType,
+)
 from autotrader.config import DEFAULT_TRADING_PARAMS
 from autotrader.config.trading_params import get_preset
-from autotrader.core.entities import Signal, Trade, Position, Candle
-from autotrader.core.enums import SignalType, ExitReason, TradingStrategyMode
+from autotrader.core.entities import Candle, Position, Signal, Trade
+from autotrader.core.enums import ExitReason, SignalType, TradingStrategyMode
 from autotrader.core.exceptions import BacktestError
 from autotrader.decision.unified.position_manager import (
     ManagementActionType,
     PositionManager,
     PositionManagerConfig,
-)
-from autotrader.backtest.position_event_logger import (
-    PositionEventLogger,
-    PositionEventType,
 )
 
 
@@ -855,10 +855,11 @@ class TradeSimulator:
         # PositionManager登録
         if self._pm and position.stop_loss and position.take_profit:
             # mode→TradingPlanを構築
+            import dataclasses as _dc
+
             from autotrader.decision.unified.mode_selector import (
                 TradingPlan,
             )
-            import dataclasses as _dc
             plan = TradingPlan.create_universal(
                 self._bot_config,
             )

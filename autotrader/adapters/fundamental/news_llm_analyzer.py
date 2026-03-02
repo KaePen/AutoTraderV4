@@ -9,10 +9,11 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 import re
 from datetime import UTC, datetime, timedelta
 
-from loguru import logger
+logger = logging.getLogger(__name__)
 
 from autotrader.adapters.fundamental.news_schemas import (
     NewsItem,

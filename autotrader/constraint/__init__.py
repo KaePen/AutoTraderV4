@@ -10,10 +10,10 @@ Modules:
 
 from __future__ import annotations
 
+from autotrader.constraint.filters import ADXFilter, TrendFilter
 from autotrader.constraint.hard_guard import HardGuard, HardGuardResult
+from autotrader.constraint.result import ConstraintChecker, ConstraintResult
 from autotrader.constraint.soft_guard import SoftGuard, SoftGuardResult
-from autotrader.constraint.result import ConstraintResult, ConstraintChecker
-from autotrader.constraint.filters import TrendFilter, ADXFilter
 
 __all__ = [
     "HardGuard",

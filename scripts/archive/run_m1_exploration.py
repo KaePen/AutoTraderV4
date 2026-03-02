@@ -248,7 +248,8 @@ def run_backtest(
 ) -> dict:
     """バックテスト1回実行。"""
     from autotrader.backtest.runner import (
-        BacktestConfig, BacktestRunner,
+        BacktestConfig,
+        BacktestRunner,
     )
     from autotrader.decision.unified import (
         UnifiedBotConfig,

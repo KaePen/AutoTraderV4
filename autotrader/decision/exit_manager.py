@@ -11,7 +11,7 @@ from enum import Enum
 
 import pandas as pd
 
-from autotrader.core.enums import SignalType, ExitReason
+from autotrader.core.enums import ExitReason, SignalType
 
 
 class TrailingMode(Enum):

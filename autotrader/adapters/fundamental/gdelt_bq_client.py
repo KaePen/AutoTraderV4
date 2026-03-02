@@ -17,10 +17,11 @@ BigQuery 無料枠: 月1TB（1年分 ≈ 1-3GB 消費）。
 
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
 from typing import Any
 
-from loguru import logger
+logger = logging.getLogger(__name__)
 
 from autotrader.adapters.fundamental.news_schemas import (
     CURRENCY_KEYWORDS,

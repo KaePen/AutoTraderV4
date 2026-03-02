@@ -7,7 +7,6 @@ from __future__ import annotations
 
 from typing import Any
 
-
 SYSTEM_PROMPT_TRADING = """あなたはFX自動売買システムのリスク評価エンジンです。
 以下の原則に従って分析と判断を行ってください：
 

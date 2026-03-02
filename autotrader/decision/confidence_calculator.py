@@ -9,8 +9,8 @@ from dataclasses import dataclass
 
 import pandas as pd
 
-from autotrader.decision.signal_generator import SignalStrength
 from autotrader.core.enums import SignalType
+from autotrader.decision.signal_generator import SignalStrength
 
 
 @dataclass(frozen=True)

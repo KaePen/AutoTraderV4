@@ -400,11 +400,11 @@ class RichEventListener(EventListener):
         try:
             from rich.console import Console
             from rich.progress import (
+                BarColumn,
                 Progress,
                 SpinnerColumn,
-                TextColumn,
-                BarColumn,
                 TaskProgressColumn,
+                TextColumn,
                 TimeRemainingColumn,
             )
             self._console = Console()

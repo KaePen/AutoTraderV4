@@ -5,12 +5,13 @@ JSONL形式でセンチメントレコードを保存・復元する。
 from __future__ import annotations
 
 import json
+import logging
 import shutil
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from loguru import logger
+logger = logging.getLogger(__name__)
 
 
 @dataclass

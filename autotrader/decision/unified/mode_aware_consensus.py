@@ -114,7 +114,9 @@ class ModeAwareScoreConsensus:
         Returns:
             ConsensusResult: コンセンサス結果
         """
-        from autotrader.decision.unified.timeframe_router import TimeframeRouter
+        from autotrader.decision.unified.timeframe_router import (
+            TimeframeRouter,
+        )
 
         router = TimeframeRouter()
         tf_set = router.route(plan)

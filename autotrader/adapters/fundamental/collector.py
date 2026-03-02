@@ -7,10 +7,11 @@
 from __future__ import annotations
 
 import asyncio
+import logging
 from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 
-from loguru import logger
+logger = logging.getLogger(__name__)
 
 from autotrader.adapters.fundamental.forex_factory import (
     ForexFactoryClient,

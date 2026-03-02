@@ -9,7 +9,7 @@ from __future__ import annotations
 from typing import Annotated
 
 from fastapi import Depends, HTTPException, status
-from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
 from autotrader.web.auth.config import get_auth_settings
 from autotrader.web.auth.security import verify_token

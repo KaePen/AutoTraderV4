@@ -17,13 +17,13 @@ from typing import TYPE_CHECKING
 
 import pandas as pd
 
+from autotrader.constraint.filters.session_transition_filter import (
+    SessionTransitionFilter,
+)
 from autotrader.constraint.soft_guard import (
     SoftGuard,
     SoftGuardConfig,
     SoftGuardResult,
-)
-from autotrader.constraint.filters.session_transition_filter import (
-    SessionTransitionFilter,
 )
 from autotrader.core.enums import MarketRegime, SignalType
 from autotrader.core.interfaces.position_sizing import SizingContext
@@ -35,6 +35,7 @@ from .adaptive import (
     TunerConfig,
 )
 from .config import RiskConfig, UnifiedBotConfig
+from .directional_edge import DirectionalEdgeAssessor
 from .mode_aware_consensus import (
     ConsensusConfig,
     ConsensusResult,
@@ -43,7 +44,6 @@ from .mode_aware_consensus import (
 from .mode_selector import ModeSelectorConfig, TradingModeSelector, TradingPlan
 from .position_sizer import PositionSizer, PositionSizerConfig
 from .signal_consolidator import ConsolidatedSignal
-from .directional_edge import DirectionalEdgeAssessor
 from .timeframe_evaluator import TimeframeEvaluator, TimeframeSignal
 from .timeframe_router import TimeframeRouter
 
