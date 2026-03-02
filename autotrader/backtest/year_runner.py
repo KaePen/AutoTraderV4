@@ -77,9 +77,7 @@ def run_unified_year(
         bot_config,
         adaptive_config=adaptive_config,
     )
-    bot.state.initial_equity = sim_config.initial_balance
-    bot.state.equity = sim_config.initial_balance
-    bot.state.peak_equity = sim_config.initial_balance
+    bot.state = bot.state.with_initial_equity(sim_config.initial_balance)
     bot.set_market_data(market_data)
 
     # イベントエミッター（並列時はリスナーなしの no-op emitter）
@@ -182,7 +180,7 @@ def run_unified_year(
 
         # 資金管理: botのequityとエクスポージャーを同期
         open_positions = simulator.get_open_positions()
-        bot.state.open_exposure_lot = sum(
+        exposure_lot = sum(
             p.volume for p in open_positions
         )
         # 同方向ロット: BUY/SELLの大きい方を設定
@@ -194,8 +192,9 @@ def run_unified_year(
             p.volume for p in open_positions
             if p.signal_type == SignalType.SELL
         )
-        bot.state.open_same_direction_lot = max(
-            buy_lot, sell_lot
+        bot.state = bot.state.with_exposure(
+            open_exposure_lot=exposure_lot,
+            open_same_direction_lot=max(buy_lot, sell_lot),
         )
 
         # [FUNDAMENTAL] 重要指標前スキップチェック
