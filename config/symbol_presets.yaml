@@ -1,7 +1,79 @@
 # 通貨ペア別取引パラメータプリセット
-# defaults: 全シンボル共通フォールバック
+# defaults: 全シンボル共通フォールバック（SSOT）
 # symbols[X]: 個別シンボル設定（defaultsを上書き）
+#
+# 構造:
+#   defaults/symbols[X] 直下 = SymbolPreset フィールド（通貨ペア固有）
+#   signal:     = SignalConfig（シグナル生成・コンセンサス）
+#   risk_mgmt:  = RiskManagementConfig（SL/TP・資金管理）
+#   filter:     = FilterConfig（レジーム・時間帯フィルター）
+#
+# live_trading.yaml は廃止予定。全設定はこのファイルで管理する。
 
+# --- シグナル生成設定（全通貨ペア共通デフォルト）---
+signal:
+  consensus_threshold: 9.0
+  consensus_primary_weight: 2.0
+  consensus_entry_weight: 1.5
+  consensus_confirm_weight: 3.0
+  consensus_manage_weight: 0.5
+  consensus_other_weight: 1.0
+  bca_enabled: true
+  bca_min_edge: 0.55
+  bca_penalty_scale: 1.0
+  htf_score_filter_enabled: true
+  htf_score_filter_min_alignment: 0.1
+  htf_score_filter_threshold_add: 1.0
+  macd_slope_filter_threshold: -2.0
+  trend_strength_max: 0.8
+
+# --- リスク管理設定（全通貨ペア共通デフォルト）---
+risk_mgmt:
+  sl_min_pips: 20.0
+  sl_max_pips_default: 50.0
+  penalty_cap: 0.3
+  default_tp_sl_ratio_range: [1.1, 1.4]
+  use_dynamic_lot: true
+  slippage_buffer_pips: 2.0
+
+# --- フィルター設定（全通貨ペア共通デフォルト）---
+filter:
+  range_day_bbw_threshold: 0.25
+  range_day_score_premium: 0.3
+  weak_hours_enabled: true
+  weak_hours_score_premium: 0.5
+  sg_spread_penalty_rate: 0.2
+  sg_off_hours_penalty: 0.25
+  sg_volatility_penalty: 0.05
+  sg_recent_loss_penalty: 0.1
+  regime_threshold_enabled: true
+  regime_trend_threshold_add: 1.5
+
+# --- PM設定（全通貨ペア共通デフォルト）---
+pm_config:
+  partial_close_1r_ratio: 0.05
+  partial_close_2r_ratio: 0.05
+  breakeven_at_1r: true
+  trailing_start_r: 0.5
+  trailing_atr_multiplier: 2.5
+  early_breakeven_r: 0.3
+  signal_rev_close_ratio: 0.0
+  range_day_be_disabled: true
+  range_day_early_be_r: 0.3
+  range_day_fast_be_enabled: true
+  range_day_fast_be_minutes: 90.0
+  stagnation_exit_minutes: 120.0
+  stagnation_min_mfe_r: 0.10
+  be_cushion_pips: 3.0
+  range_day_insurance_enabled: true
+  insurance_trigger_r: 1.0
+  insurance_block_high_mfe_r: 0.8
+  insurance_min_holding_minutes: 15.0
+  range_day_half_r_partial_enabled: true
+  range_day_half_r_partial_ratio: 0.20
+  range_day_half_r_trigger: 0.5
+
+# --- 通貨ペア別プリセット ---
 defaults:
   pip_value: 100.0
   spread_pips: 1.5
@@ -128,9 +200,8 @@ symbols:
     base_risk_pct: 0.02
     max_lot_per_trade: 1.5
     # EURJPY最適化結果 (2026-03-02)
-    # bca_min_edge: 0.65 (デフォルト0.55→0.65, +182K)
-    # profit_reversal: false (デフォルトON→OFF, +460K)
-    # 上記はUnifiedBotConfig管理のため、通貨ペア別適用は要実装
+    signal:
+      bca_min_edge: 0.65  # デフォルト0.55→0.65, +182K
 
   GBPJPY:
     pip_value: 100.0

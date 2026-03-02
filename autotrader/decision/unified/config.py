@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass, field
 
 
@@ -100,6 +101,161 @@ class RiskConfig:
     default_tp_pips: float = 25.0
     cooldown_minutes: int = 5
     max_daily_trades: int = 0
+
+
+
+# ===================================================================
+# 論理サブConfig（UnifiedBotConfig の責務分割）
+# ===================================================================
+
+
+@dataclass(frozen=True)
+class SignalConfig:
+    """シグナル生成・コンセンサス関連設定
+
+    Attributes:
+        consensus_threshold: コンセンサス閾値
+        consensus_primary_weight: プライマリTF重み
+        consensus_entry_weight: エントリーTF重み
+        consensus_confirm_weight: 確認TF重み
+        consensus_manage_weight: 管理TF重み
+        consensus_other_weight: その他TF重み
+        bca_enabled: BCA有効化フラグ
+        bca_min_edge: BCA最小方向性エッジ
+        bca_penalty_scale: BCAペナルティ係数
+        htf_score_filter_enabled: HTFスコアフィルター有効化
+        htf_score_filter_min_alignment: HTF整合度閾値
+        htf_score_filter_threshold_add: HTF不一致時追加閾値
+        regime_detection_tf: レジーム検出TF
+        htf_alignment_tfs: HTF整合性チェックTF
+        macd_slope_filter_threshold: MACDスロープ閾値
+        trend_strength_max: トレンド強度上限
+    """
+
+    consensus_threshold: float = 9.0
+    consensus_primary_weight: float = 2.0
+    consensus_entry_weight: float = 1.5
+    consensus_confirm_weight: float = 3.0
+    consensus_manage_weight: float = 0.5
+    consensus_other_weight: float = 1.0
+    bca_enabled: bool = True
+    bca_min_edge: float = 0.55
+    bca_penalty_scale: float = 1.0
+    htf_score_filter_enabled: bool = True
+    htf_score_filter_min_alignment: float = 0.1
+    htf_score_filter_threshold_add: float = 1.0
+    regime_detection_tf: str = "H1"
+    htf_alignment_tfs: list[str] = field(
+        default_factory=lambda: ["H4", "D1"]
+    )
+    macd_slope_filter_threshold: float = -2.0
+    trend_strength_max: float = 0.8
+
+
+@dataclass(frozen=True)
+class RiskManagementConfig:
+    """SL/TP・資金管理・ポジションサイジング設定
+
+    Attributes:
+        sl_min_pips: SL最小値（pips）
+        sl_max_pips_default: SLデフォルト最大値
+        trend_sl_min_pips: TREND時SL最小値上書き
+        trend_sl_max_pips: TREND時SL上限キャップ
+        penalty_cap: ペナルティ上限
+        default_tp_sl_ratio_range: TP/SLレンジ
+        max_positions: 最大同時ポジション数
+        bonus_max_positions: 品質ベース追加枠
+        bonus_score_threshold: 追加枠スコア閾値
+        max_lot_per_trade: 1トレード最大ロット
+        max_total_exposure_lot: 総エクスポージャー上限
+        base_risk_pct: 基本リスク率
+        max_risk_pct_absolute: リスク率絶対上限
+        equity_floor_pct: 資金下限率
+        equity_caution_pct: 資金警告率
+        slippage_buffer_pips: スリッページバッファ
+        use_dynamic_lot: 動的ロット使用
+        enable_position_sizing: ポジションサイジング有効
+        use_position_manager: ポジション管理有効
+    """
+
+    sl_min_pips: float = 20.0
+    sl_max_pips_default: float = 50.0
+    trend_sl_min_pips: float | None = None
+    trend_sl_max_pips: float | None = None
+    penalty_cap: float = 0.3
+    default_tp_sl_ratio_range: tuple[float, float] = (1.1, 1.4)
+    max_positions: int = 3
+    bonus_max_positions: int = 0
+    bonus_score_threshold: float = 7.0
+    max_lot_per_trade: float = 5.0
+    max_total_exposure_lot: float = 10.0
+    base_risk_pct: float = 0.04
+    max_risk_pct_absolute: float = 0.07
+    equity_floor_pct: float = 0.30
+    equity_caution_pct: float = 0.50
+    slippage_buffer_pips: float = 2.0
+    use_dynamic_lot: bool = True
+    enable_position_sizing: bool = True
+    use_position_manager: bool = True
+
+
+@dataclass(frozen=True)
+class FilterConfig:
+    """レジームフィルター・時間帯フィルター・SoftGuard設定
+
+    Attributes:
+        range_day_bbw_threshold: BBW閾値
+        range_day_score_premium: RANGEプレミアム
+        weak_hours_enabled: Weak Hours有効化
+        weak_hours_score_premium: Weak Hoursプレミアム
+        sg_spread_penalty_rate: スプレッドペナルティ率
+        sg_off_hours_penalty: オフアワーペナルティ
+        sg_volatility_penalty: ボラティリティペナルティ
+        sg_recent_loss_penalty: 直近損失ペナルティ
+        regime_threshold_enabled: レジーム閾値調整有効
+        regime_trend_threshold_add: TREND時追加閾値
+        fundamental_assessor_enabled: ファンダメンタルアセッサー
+        off_hours_trend_block: オフアワーTRENDブロック
+        off_hours_high_align_block: オフアワー高alignment複合ブロック
+        off_hours_high_align_threshold: 複合ブロック閾値
+        high_align_penalty_threshold: 高alignmentペナルティ閾値
+        high_align_penalty_score: ペナルティスコア
+    """
+
+    range_day_bbw_threshold: float = 0.25
+    range_day_score_premium: float = 0.3
+    weak_hours_enabled: bool = True
+    weak_hours_score_premium: float = 0.5
+    sg_spread_penalty_rate: float = 0.2
+    sg_off_hours_penalty: float = 0.25
+    sg_volatility_penalty: float = 0.05
+    sg_recent_loss_penalty: float = 0.1
+    regime_threshold_enabled: bool = True
+    regime_trend_threshold_add: float = 1.5
+    low_atr_trend_filter_enabled: bool = False
+    low_atr_trend_ratio_max: float = 0.75
+    fundamental_caution_block_level: int = 2
+    fundamental_holiday_liquidity_block: float = 0.3
+    fundamental_decay_coefficient: float = 2.0
+    fundamental_assessor_enabled: bool = False
+    fundamental_softguard_enabled: bool = False
+    fundamental_pm_enabled: bool = False
+    fundamental_post_event_lag_seconds: int = 30
+    range_filter_consolidated: bool = False
+    range_filter_block_threshold: float = 0.6
+    bb_width_trend_filter_enabled: bool = False
+    tokyo_session_filter_enabled: bool = False
+    session_transition_wait_enabled: bool = False
+    session_transition_wait_minutes: int = 30
+    liquidity_based_tp_enabled: bool = False
+    liquidity_tp_margin_pct: float = 0.01
+    liquidity_tp_default_rr: float = 1.5
+    use_actual_spread_data: bool = False
+    off_hours_trend_block: bool = False
+    off_hours_high_align_block: bool = False
+    off_hours_high_align_threshold: float = 0.55
+    high_align_penalty_threshold: float | None = None
+    high_align_penalty_score: float = 1.0
 
 
 @dataclass(frozen=True)
@@ -299,3 +455,175 @@ class UnifiedBotConfig:
         if timeframe in self.timeframe_configs:
             return self.timeframe_configs[timeframe]
         return TimeframeConfig(timeframe=timeframe)
+
+    def to_signal_config(self) -> SignalConfig:
+        """シグナル関連設定を抽出
+
+        Returns:
+            SignalConfig: シグナル設定
+        """
+        return SignalConfig(
+            consensus_threshold=self.consensus_threshold,
+            consensus_primary_weight=self.consensus_primary_weight,
+            consensus_entry_weight=self.consensus_entry_weight,
+            consensus_confirm_weight=self.consensus_confirm_weight,
+            consensus_manage_weight=self.consensus_manage_weight,
+            consensus_other_weight=self.consensus_other_weight,
+            bca_enabled=self.bca_enabled,
+            bca_min_edge=self.bca_min_edge,
+            bca_penalty_scale=self.bca_penalty_scale,
+            htf_score_filter_enabled=self.htf_score_filter_enabled,
+            htf_score_filter_min_alignment=(
+                self.htf_score_filter_min_alignment
+            ),
+            htf_score_filter_threshold_add=(
+                self.htf_score_filter_threshold_add
+            ),
+            regime_detection_tf=self.regime_detection_tf,
+            htf_alignment_tfs=list(self.htf_alignment_tfs),
+            macd_slope_filter_threshold=(
+                self.macd_slope_filter_threshold
+            ),
+            trend_strength_max=self.trend_strength_max,
+        )
+
+    def to_risk_management_config(self) -> RiskManagementConfig:
+        """リスク管理設定を抽出
+
+        Returns:
+            RiskManagementConfig: リスク管理設定
+        """
+        return RiskManagementConfig(
+            sl_min_pips=self.sl_min_pips,
+            sl_max_pips_default=self.sl_max_pips_default,
+            trend_sl_min_pips=self.trend_sl_min_pips,
+            trend_sl_max_pips=self.trend_sl_max_pips,
+            penalty_cap=self.penalty_cap,
+            default_tp_sl_ratio_range=(
+                self.default_tp_sl_ratio_range
+            ),
+            max_positions=self.max_positions,
+            bonus_max_positions=self.bonus_max_positions,
+            bonus_score_threshold=self.bonus_score_threshold,
+            max_lot_per_trade=self.max_lot_per_trade,
+            max_total_exposure_lot=self.max_total_exposure_lot,
+            base_risk_pct=self.base_risk_pct,
+            max_risk_pct_absolute=self.max_risk_pct_absolute,
+            equity_floor_pct=self.equity_floor_pct,
+            equity_caution_pct=self.equity_caution_pct,
+            slippage_buffer_pips=self.slippage_buffer_pips,
+            use_dynamic_lot=self.use_dynamic_lot,
+            enable_position_sizing=self.enable_position_sizing,
+            use_position_manager=self.use_position_manager,
+        )
+
+    def to_filter_config(self) -> FilterConfig:
+        """フィルター設定を抽出
+
+        Returns:
+            FilterConfig: フィルター設定
+        """
+        return FilterConfig(
+            range_day_bbw_threshold=self.range_day_bbw_threshold,
+            range_day_score_premium=self.range_day_score_premium,
+            weak_hours_enabled=self.weak_hours_enabled,
+            weak_hours_score_premium=self.weak_hours_score_premium,
+            sg_spread_penalty_rate=self.sg_spread_penalty_rate,
+            sg_off_hours_penalty=self.sg_off_hours_penalty,
+            sg_volatility_penalty=self.sg_volatility_penalty,
+            sg_recent_loss_penalty=self.sg_recent_loss_penalty,
+            regime_threshold_enabled=self.regime_threshold_enabled,
+            regime_trend_threshold_add=(
+                self.regime_trend_threshold_add
+            ),
+            low_atr_trend_filter_enabled=(
+                self.low_atr_trend_filter_enabled
+            ),
+            low_atr_trend_ratio_max=self.low_atr_trend_ratio_max,
+            fundamental_caution_block_level=(
+                self.fundamental_caution_block_level
+            ),
+            fundamental_holiday_liquidity_block=(
+                self.fundamental_holiday_liquidity_block
+            ),
+            fundamental_decay_coefficient=(
+                self.fundamental_decay_coefficient
+            ),
+            fundamental_assessor_enabled=(
+                self.fundamental_assessor_enabled
+            ),
+            fundamental_softguard_enabled=(
+                self.fundamental_softguard_enabled
+            ),
+            fundamental_pm_enabled=self.fundamental_pm_enabled,
+            fundamental_post_event_lag_seconds=(
+                self.fundamental_post_event_lag_seconds
+            ),
+            range_filter_consolidated=(
+                self.range_filter_consolidated
+            ),
+            range_filter_block_threshold=(
+                self.range_filter_block_threshold
+            ),
+            bb_width_trend_filter_enabled=(
+                self.bb_width_trend_filter_enabled
+            ),
+            tokyo_session_filter_enabled=(
+                self.tokyo_session_filter_enabled
+            ),
+            session_transition_wait_enabled=(
+                self.session_transition_wait_enabled
+            ),
+            session_transition_wait_minutes=(
+                self.session_transition_wait_minutes
+            ),
+            liquidity_based_tp_enabled=(
+                self.liquidity_based_tp_enabled
+            ),
+            liquidity_tp_margin_pct=self.liquidity_tp_margin_pct,
+            liquidity_tp_default_rr=self.liquidity_tp_default_rr,
+            use_actual_spread_data=self.use_actual_spread_data,
+            off_hours_trend_block=self.off_hours_trend_block,
+            off_hours_high_align_block=(
+                self.off_hours_high_align_block
+            ),
+            off_hours_high_align_threshold=(
+                self.off_hours_high_align_threshold
+            ),
+            high_align_penalty_threshold=(
+                self.high_align_penalty_threshold
+            ),
+            high_align_penalty_score=self.high_align_penalty_score,
+        )
+
+    @classmethod
+    def from_sub_configs(
+        cls,
+        signal: SignalConfig | None = None,
+        risk_mgmt: RiskManagementConfig | None = None,
+        filter_cfg: FilterConfig | None = None,
+        **kwargs: object,
+    ) -> UnifiedBotConfig:
+        """サブConfigからUnifiedBotConfigを構築
+
+        Args:
+            signal: シグナル設定
+            risk_mgmt: リスク管理設定
+            filter_cfg: フィルター設定
+            **kwargs: その他フィールド上書き
+
+        Returns:
+            UnifiedBotConfig: 統合設定
+        """
+        merged: dict[str, object] = {}
+        if signal is not None:
+            for f in signal.__dataclass_fields__:
+                merged[f] = getattr(signal, f)
+        if risk_mgmt is not None:
+            for f in risk_mgmt.__dataclass_fields__:
+                merged[f] = getattr(risk_mgmt, f)
+        if filter_cfg is not None:
+            for f in filter_cfg.__dataclass_fields__:
+                merged[f] = getattr(filter_cfg, f)
+        merged.update(kwargs)
+        return cls(**merged)  # type: ignore[arg-type]
