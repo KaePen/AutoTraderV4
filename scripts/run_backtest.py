@@ -1330,11 +1330,21 @@ def run_single_backtest(args: argparse.Namespace):
     # --timeframes 解決チェーン:
     # CLI > SymbolPreset.timeframes > デフォルト8TF
     _tf_list = None
+    _valid_tfs = {
+        "M1", "M5", "M15", "M30",
+        "H1", "H4", "H8", "D1", "W1",
+    }
     if args.timeframes:
         _tf_list = [
             t.strip() for t in args.timeframes.split(",")
             if t.strip()
         ]
+        for _tf in _tf_list:
+            if _tf not in _valid_tfs:
+                raise SystemExit(
+                    f"不正な時間足: '{_tf}'. "
+                    f"有効値: {sorted(_valid_tfs)}"
+                )
 
     # 1. --config YAML からの overrides
     _yaml_bot: dict[str, object] = {}

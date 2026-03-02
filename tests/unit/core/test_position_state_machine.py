@@ -69,8 +69,12 @@ class TestValidTransitions:
         )
 
     def test_partial_closed_transitions(self) -> None:
-        """PARTIAL_CLOSED → CLOSED のみ"""
-        expected = {PositionState.CLOSED}
+        """PARTIAL_CLOSED → TRAILING, PARTIAL_CLOSED, CLOSED"""
+        expected = {
+            PositionState.TRAILING,
+            PositionState.PARTIAL_CLOSED,
+            PositionState.CLOSED,
+        }
         assert (
             VALID_TRANSITIONS[PositionState.PARTIAL_CLOSED]
             == expected
@@ -149,6 +153,26 @@ class TestPositionStateMachine:
         sm = PositionStateMachine(PositionState.PENDING)
         with pytest.raises(InvalidTransitionError):
             sm.transition(PositionState.TRAILING)
+
+    def test_valid_transition_partial_to_trailing(
+        self,
+    ) -> None:
+        """PARTIAL_CLOSED → TRAILING は有効（SL更新）"""
+        sm = PositionStateMachine(
+            PositionState.PARTIAL_CLOSED,
+        )
+        sm.transition(PositionState.TRAILING)
+        assert sm.state == PositionState.TRAILING
+
+    def test_valid_transition_partial_to_partial(
+        self,
+    ) -> None:
+        """PARTIAL_CLOSED → PARTIAL_CLOSED は有効（再部分決済）"""
+        sm = PositionStateMachine(
+            PositionState.PARTIAL_CLOSED,
+        )
+        sm.transition(PositionState.PARTIAL_CLOSED)
+        assert sm.state == PositionState.PARTIAL_CLOSED
 
     def test_invalid_transition_partial_to_open(
         self,
