@@ -768,16 +768,16 @@ class PositionManager:
                 )
 
         # レジームベース動的STAGNATION時間
-        # TREND: 60分、RANGE: 90分、CHOPPY/その他: 120分
+        # TREND: 90分、RANGE: 120分、CHOPPY/その他: 120分
         _trend_min = (
             self.config.stag_trend_minutes
             if self.config.stag_trend_minutes is not None
-            else 60.0
+            else 90.0
         )
         _range_min = (
             self.config.stag_range_minutes
             if self.config.stag_range_minutes is not None
-            else 90.0
+            else 120.0
         )
         regime_stag_minutes = {
             "TREND": _trend_min,
