@@ -97,3 +97,9 @@ class StrategyError(AutoTraderError):
     """戦略実行関連エラー"""
 
     pass
+
+
+class InvalidTransitionError(AutoTraderError):
+    """不正な状態遷移エラー"""
+
+    pass
