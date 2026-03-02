@@ -112,6 +112,9 @@ class ConfigLoader:
 
         # プリセット値をデフォルトとして使用（YAML 明示値で上書き）
         preset_bot_defaults = {
+            "max_positions": preset.max_positions,
+            "bonus_max_positions": preset.bonus_max_positions,
+            "bonus_score_threshold": preset.bonus_score_threshold,
             "base_risk_pct": preset.base_risk_pct,
             "max_lot_per_trade": preset.max_lot_per_trade,
             "max_total_exposure_lot": preset.max_total_exposure_lot,
