@@ -43,7 +43,7 @@ class DivergenceDetector:
         self.max_swing_distance = max_swing_distance
 
     def find_swing_highs(self, series: pd.Series) -> pd.Series:
-        """スイング高値を検出
+        """スイング高値を検出（左側のみ参照）
 
         Args:
             series: 価格系列
@@ -51,18 +51,20 @@ class DivergenceDetector:
         Returns:
             pd.Series: スイング高値（Trueの位置がスイング高値）
         """
-        n = self.swing_lookback
+        # 品質維持のため左側の幅を2倍に拡大
+        extended_n = self.swing_lookback * 2
         swing_highs = pd.Series(False, index=series.index)
 
-        for i in range(n, len(series) - n):
-            window = series.iloc[i - n : i + n + 1]
+        for i in range(extended_n, len(series)):
+            # i自身は含む、未来は含まない
+            window = series.iloc[i - extended_n : i + 1]
             if series.iloc[i] == window.max():
                 swing_highs.iloc[i] = True
 
         return swing_highs
 
     def find_swing_lows(self, series: pd.Series) -> pd.Series:
-        """スイング安値を検出
+        """スイング安値を検出（左側のみ参照）
 
         Args:
             series: 価格系列
@@ -70,11 +72,13 @@ class DivergenceDetector:
         Returns:
             pd.Series: スイング安値（Trueの位置がスイング安値）
         """
-        n = self.swing_lookback
+        # 品質維持のため左側の幅を2倍に拡大
+        extended_n = self.swing_lookback * 2
         swing_lows = pd.Series(False, index=series.index)
 
-        for i in range(n, len(series) - n):
-            window = series.iloc[i - n : i + n + 1]
+        for i in range(extended_n, len(series)):
+            # i自身は含む、未来は含まない
+            window = series.iloc[i - extended_n : i + 1]
             if series.iloc[i] == window.min():
                 swing_lows.iloc[i] = True
 
