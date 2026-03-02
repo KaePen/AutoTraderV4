@@ -201,7 +201,7 @@ class FundamentalDataCollector:
         """1回の収集処理"""
         events: list[EconomicEvent] = []
         now = datetime.now(UTC)
-        from_date = now - timedelta(hours=1)
+        from_date = now - timedelta(days=1)
         to_date = now + timedelta(days=7)
 
         # MT5カレンダー取得
@@ -290,7 +290,7 @@ class FundamentalDataCollector:
         if not self._use_mt5:
             return []
         now = datetime.now(UTC)
-        from_date = now - timedelta(hours=1)
+        from_date = now - timedelta(days=1)
         to_date = now + timedelta(days=7)
         try:
             events = (
