@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from typing import Protocol, runtime_checkable
 
 from autotrader.core.enums import MarketRegime
 
@@ -58,10 +58,10 @@ class SizingResult:
     blocked: bool = False
 
 
-class PositionSizerProtocol(ABC):
-    """ポジションサイザープロトコル"""
+@runtime_checkable
+class PositionSizerProtocol(Protocol):
+    """ポジションサイザーProtocol"""
 
-    @abstractmethod
     def calculate(self, context: SizingContext) -> SizingResult:
         """ロット数を計算
 

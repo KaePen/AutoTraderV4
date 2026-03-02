@@ -2,18 +2,18 @@
 
 from __future__ import annotations
 
-from abc import ABC, abstractmethod
 from datetime import datetime
+from typing import Protocol, runtime_checkable
 
 import pandas as pd
 
 from autotrader.core.enums import Timeframe
 
 
-class DataProvider(ABC):
-    """データプロバイダー抽象クラス"""
+@runtime_checkable
+class DataProvider(Protocol):
+    """データプロバイダーProtocol"""
 
-    @abstractmethod
     def get_candles(
         self,
         symbol: str,
@@ -34,7 +34,6 @@ class DataProvider(ABC):
         """
         ...
 
-    @abstractmethod
     def get_latest_candle(
         self,
         symbol: str,
@@ -51,7 +50,6 @@ class DataProvider(ABC):
         """
         ...
 
-    @abstractmethod
     def get_spread(self, symbol: str) -> float:
         """現在のスプレッドを取得
 

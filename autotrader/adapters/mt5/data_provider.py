@@ -1,6 +1,6 @@
 """MT5データプロバイダー
 
-DataProvider ABCのMT5実装。
+DataProvider ProtocolのMT5実装。
 """
 
 from __future__ import annotations
@@ -20,12 +20,10 @@ from autotrader.adapters.mt5.converters import (
 from autotrader.adapters.mt5.exceptions import MT5DataError
 from autotrader.core.entities import AccountInfo, SymbolInfo
 from autotrader.core.enums import Timeframe
-from autotrader.core.interfaces.data_provider import DataProvider
-
 logger = logging.getLogger(__name__)
 
 
-class MT5DataProvider(DataProvider):
+class MT5DataProvider:
     """MT5データプロバイダー
 
     MT5接続経由でローソク足・ティック・口座情報を取得。

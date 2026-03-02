@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from abc import ABC, abstractmethod
 from dataclasses import dataclass
+from typing import Protocol, runtime_checkable
 
 from autotrader.core.entities import Position, Signal
 
@@ -25,10 +25,10 @@ class ExecutionResult:
     exit_price: float | None = None
 
 
-class TradeExecutor(ABC):
-    """トレード実行抽象クラス"""
+@runtime_checkable
+class TradeExecutor(Protocol):
+    """トレード実行Protocol"""
 
-    @abstractmethod
     def open_position(
         self,
         signal: Signal,
@@ -45,7 +45,6 @@ class TradeExecutor(ABC):
         """
         ...
 
-    @abstractmethod
     def close_position(
         self,
         position: Position,
@@ -62,7 +61,6 @@ class TradeExecutor(ABC):
         """
         ...
 
-    @abstractmethod
     def modify_position(
         self,
         position: Position,
@@ -81,7 +79,6 @@ class TradeExecutor(ABC):
         """
         ...
 
-    @abstractmethod
     def close_partial(
         self,
         position: Position,
@@ -100,8 +97,9 @@ class TradeExecutor(ABC):
         """
         ...
 
-    @abstractmethod
-    def get_open_positions(self, symbol: str | None = None) -> list[Position]:
+    def get_open_positions(
+        self, symbol: str | None = None,
+    ) -> list[Position]:
         """オープンポジションを取得
 
         Args:

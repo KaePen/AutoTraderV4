@@ -1,11 +1,11 @@
 """制約機インターフェース
 
-取引可否・リスク統制の抽象インターフェース。
+取引可否・リスク統制のデータ型。
+未使用の Guard / ConstraintCheckerInterface は削除済み。
 """
 
 from __future__ import annotations
 
-from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from enum import Enum
 
@@ -44,51 +44,3 @@ class ConstraintCheckResult:
             float: 調整後の確度
         """
         return original * (1 - self.penalty)
-
-
-class Guard(ABC):
-    """ガードインターフェース（ハード/ソフト共通）"""
-
-    @abstractmethod
-    def check(self, context: dict, is_entry: bool = True) -> dict:
-        """チェックを実行
-
-        Args:
-            context: コンテキスト情報
-            is_entry: エントリー時のチェックか
-
-        Returns:
-            dict: チェック結果
-        """
-        ...
-
-
-class ConstraintCheckerInterface(ABC):
-    """制約チェッカーインターフェース
-
-    ハードガードとソフトガードを統合してチェック。
-    """
-
-    @abstractmethod
-    def check_entry(self, context: dict) -> ConstraintCheckResult:
-        """エントリー時の制約チェック
-
-        Args:
-            context: コンテキスト情報
-
-        Returns:
-            ConstraintCheckResult: チェック結果
-        """
-        ...
-
-    @abstractmethod
-    def check_holding(self, context: dict) -> ConstraintCheckResult:
-        """保有中の制約チェック
-
-        Args:
-            context: コンテキスト情報
-
-        Returns:
-            ConstraintCheckResult: チェック結果
-        """
-        ...
