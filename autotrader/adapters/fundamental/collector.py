@@ -371,7 +371,14 @@ class FundamentalDataCollector:
             # 未発表で未来 → 発表前カウントダウン
             if ev.actual is None and diff >= 0:
                 min_sec = min(min_sec, diff)
-            # 発表済みで過去2分以内 → 直後キャッチ
+            # 発表時刻を過ぎたがactual未取得（10分以内）
+            elif (
+                ev.actual is None
+                and -600 <= diff < 0
+            ):
+                min_sec = 0
+                break
+            # 発表済みでactual取得済み、過去2分以内
             elif (
                 ev.actual is not None
                 and -120 <= diff <= 0
