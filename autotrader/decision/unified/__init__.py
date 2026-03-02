@@ -18,9 +18,6 @@ from .mode_aware_consensus import (
     ConsensusResult,
     ModeAwareScoreConsensus,
 )
-from .mode_aware_consensus import (
-    TimeframeSignal as ConsensusTimeframeSignal,
-)
 from .mode_monitor import (
     UNIVERSAL_CONFIG,
     ModeConfig,
@@ -113,7 +110,6 @@ __all__ = [
     "ConsensusConfig",
     "ConsensusResult",
     "ModeAwareScoreConsensus",
-    "ConsensusTimeframeSignal",
     # ポジションサイジング
     "PositionSizer",
     "PositionSizerConfig",
