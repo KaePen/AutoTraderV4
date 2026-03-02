@@ -47,7 +47,6 @@ const FundamentalWidget = {
       this.nextHighImpactMinutes = null;
     }
     this.renderCalendar();
-    this.renderNextEventWarning();
   },
 
   /** WebSocket: ニュース更新ハンドラ */
@@ -180,21 +179,6 @@ const FundamentalWidget = {
     container.innerHTML = html;
   },
 
-  /** 次のHIGHイベント警告バナー */
-  renderNextEventWarning() {
-    var banner = document.getElementById('fundamental-next-event');
-    var textEl = document.getElementById('fundamental-next-event-text');
-    if (!banner || !textEl) return;
-
-    if (this.nextHighImpactMinutes !== null && this.nextHighImpactMinutes <= 60 && this.nextHighImpactMinutes > 0) {
-      var mins = Math.round(this.nextHighImpactMinutes);
-      textEl.textContent = '重要指標まで ' + mins + ' 分';
-      banner.classList.remove('hidden');
-    } else {
-      banner.classList.add('hidden');
-    }
-  },
-
   /** カウントダウン更新タイマー開始 */
   startCountdown() {
     if (this._countdownInterval) {
@@ -212,7 +196,6 @@ const FundamentalWidget = {
       }
       if (self.nextHighImpactMinutes !== null) {
         self.nextHighImpactMinutes -= 1;
-        self.renderNextEventWarning();
       }
     }, 60000);
   },
