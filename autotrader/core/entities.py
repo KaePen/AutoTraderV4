@@ -42,10 +42,13 @@ VALID_TRANSITIONS: dict[PositionState, set[PositionState]] = {
         PositionState.CLOSED,
     },
     PositionState.TRAILING: {
+        PositionState.TRAILING,
         PositionState.PARTIAL_CLOSED,
         PositionState.CLOSED,
     },
     PositionState.PARTIAL_CLOSED: {
+        PositionState.TRAILING,
+        PositionState.PARTIAL_CLOSED,
         PositionState.CLOSED,
     },
     PositionState.CLOSED: set(),
