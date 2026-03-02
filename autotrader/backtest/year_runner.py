@@ -538,6 +538,10 @@ def run_unified_year(
             _position_id = (
                 new_trade.position_id or ""
             )
+            # Exit詳細理由を取得（STAGNATION等の診断用）
+            _exit_detail = simulator.get_exit_detail(
+                _pos_id,
+            )
             _emitter.emit_trade_closed(
                 trade_id=new_trade.trade_id,
                 symbol=new_trade.symbol,
@@ -628,6 +632,7 @@ def run_unified_year(
                 fill_price=_xm.get(
                     "fill_price", 0.0,
                 ),
+                exit_reason_detail=_exit_detail,
             )
 
             # メトリクス発行
