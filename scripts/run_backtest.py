@@ -854,7 +854,7 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help=(
             "TRENDレジームのstagnation時間を上書き"
-            "（デフォルト: 60）"
+            "（デフォルト: 90）"
         ),
     )
     parser.add_argument(
@@ -863,7 +863,7 @@ def parse_args() -> argparse.Namespace:
         default=None,
         help=(
             "RANGEレジームのstagnation時間を上書き"
-            "（デフォルト: 90）"
+            "（デフォルト: 120）"
         ),
     )
     parser.add_argument(
