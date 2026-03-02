@@ -964,6 +964,18 @@ class UnifiedTradeBot:
                     f"OffHoursTRENDBlock: hour={hour_utc}"
                 )
 
+            # off_hours + 高htf_alignment 複合ブロック
+            if (
+                self.config.off_hours_high_align_block
+                and hour_utc not in range(8, 18)
+                and abs(htf_alignment)
+                >= self.config.off_hours_high_align_threshold
+            ):
+                return _filt_hold(
+                    f"OffHoursHighAlignBlock: hour={hour_utc},"
+                    f" |align|={abs(htf_alignment):.2f}"
+                )
+
             # RANGE/LOW_VOLフィルタ群
             _range_hold = self._check_range_regime_filter(
                 regime_result=regime_result,
@@ -1083,6 +1095,14 @@ class UnifiedTradeBot:
         ):
             sl_pips = max(
                 sl_pips, self.config.trend_sl_min_pips,
+            )
+        # TREND時のSL上限キャップ
+        if (
+            self.config.trend_sl_max_pips is not None
+            and regime_result.regime == MarketRegime.TREND
+        ):
+            sl_pips = min(
+                sl_pips, self.config.trend_sl_max_pips,
             )
         tp_sl_ratio = (
             plan.get_recommended_tp_sl_ratio()

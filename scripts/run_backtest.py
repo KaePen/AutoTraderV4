@@ -841,11 +841,36 @@ def parse_args() -> argparse.Namespace:
         ),
     )
     parser.add_argument(
+        "--off-hours-high-align-block",
+        action="store_true",
+        default=False,
+        help=(
+            "off_hours + 高htf_alignment複合ブロック"
+        ),
+    )
+    parser.add_argument(
+        "--off-hours-high-align-threshold",
+        type=float,
+        default=0.55,
+        help=(
+            "off_hours複合ブロックのalignment閾値"
+            "（デフォルト: 0.55）"
+        ),
+    )
+    parser.add_argument(
         "--trend-sl-min",
         type=float,
         default=None,
         help=(
             "TREND時のsl_min_pips上書き（例: 30, 40）"
+        ),
+    )
+    parser.add_argument(
+        "--trend-sl-max",
+        type=float,
+        default=None,
+        help=(
+            "TREND時のsl_max_pips上限キャップ（例: 40, 50）"
         ),
     )
     parser.add_argument(
@@ -1394,7 +1419,14 @@ def run_single_backtest(args: argparse.Namespace):
         ),
         bca_penalty_scale=args.bca_penalty_scale,
         off_hours_trend_block=args.off_hours_trend_block,
+        off_hours_high_align_block=(
+            args.off_hours_high_align_block
+        ),
+        off_hours_high_align_threshold=(
+            args.off_hours_high_align_threshold
+        ),
         trend_sl_min_pips=args.trend_sl_min,
+        trend_sl_max_pips=args.trend_sl_max,
         high_align_penalty_threshold=(
             args.high_align_penalty_threshold
         ),

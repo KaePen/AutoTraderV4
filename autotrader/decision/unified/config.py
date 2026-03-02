@@ -262,8 +262,13 @@ class UnifiedBotConfig:
     # --- 改善検証パラメータ ---
     # off_hours時間帯でTRENDエントリーを完全ブロック
     off_hours_trend_block: bool = False
+    # off_hours + htf_alignment 複合ブロック
+    off_hours_high_align_block: bool = False
+    off_hours_high_align_threshold: float = 0.55
     # TREND時のsl_min_pips上書き（None=sl_min_pipsを使用）
     trend_sl_min_pips: float | None = None
+    # TREND時のSL上限キャップ（None=無制限）
+    trend_sl_max_pips: float | None = None
     # 高alignment時スコアペナルティ閾値（None=無効）
     high_align_penalty_threshold: float | None = None
     # 高alignment時のスコアペナルティ量
