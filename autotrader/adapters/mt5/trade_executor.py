@@ -1,6 +1,6 @@
 """MT5トレード実行
 
-TradeExecutor ABCのMT5実装。
+TradeExecutor ProtocolのMT5実装。
 """
 
 from __future__ import annotations
@@ -24,15 +24,12 @@ from autotrader.adapters.mt5.converters import (
 )
 from autotrader.core.entities import Position, Signal
 from autotrader.core.enums import SignalType
-from autotrader.core.interfaces.trade_executor import (
-    ExecutionResult,
-    TradeExecutor,
-)
+from autotrader.core.interfaces.trade_executor import ExecutionResult
 
 logger = logging.getLogger(__name__)
 
 
-class MT5TradeExecutor(TradeExecutor):
+class MT5TradeExecutor:
     """MT5トレード実行
 
     magic_numberフィルタでAutoTraderV4のポジションのみ操作。

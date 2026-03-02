@@ -1,18 +1,18 @@
 """判定機インターフェース
 
-最終意思決定の抽象インターフェース。
+判断タイプ・判断結果のデータ型。
+未使用の SignalGeneratorInterface / ExitManagerInterface /
+DecisionEngineInterface は削除済み。
 """
 
 from __future__ import annotations
 
-from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    import pandas as pd
     from autotrader.core.enums import SignalType
 
 
@@ -67,72 +67,3 @@ class DecisionResult:
             bool: 決済ならTrue
         """
         return self.decision_type == DecisionType.EXIT
-
-
-class SignalGeneratorInterface(ABC):
-    """シグナル生成インターフェース"""
-
-    @abstractmethod
-    def generate(
-        self,
-        indicators: "pd.DataFrame",
-        features: "pd.DataFrame",
-    ) -> DecisionResult:
-        """シグナルを生成
-
-        Args:
-            indicators: テクニカル指標
-            features: 特徴量
-
-        Returns:
-            DecisionResult: 判断結果
-        """
-        ...
-
-
-class ExitManagerInterface(ABC):
-    """決済管理インターフェース"""
-
-    @abstractmethod
-    def should_exit(
-        self,
-        position: dict,
-        current_price: float,
-        indicators: "pd.DataFrame",
-    ) -> tuple[bool, str]:
-        """決済すべきか判断
-
-        Args:
-            position: ポジション情報
-            current_price: 現在価格
-            indicators: テクニカル指標
-
-        Returns:
-            tuple[bool, str]: (決済すべきか, 理由)
-        """
-        ...
-
-
-class DecisionEngineInterface(ABC):
-    """判定機インターフェース"""
-
-    @abstractmethod
-    def decide(
-        self,
-        indicators: "pd.DataFrame",
-        features: "pd.DataFrame",
-        constraint_result: dict,
-        position: dict | None = None,
-    ) -> DecisionResult:
-        """判断を実行
-
-        Args:
-            indicators: テクニカル指標
-            features: 特徴量
-            constraint_result: 制約チェック結果
-            position: 現在のポジション
-
-        Returns:
-            DecisionResult: 判断結果
-        """
-        ...

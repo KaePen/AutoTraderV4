@@ -11,7 +11,6 @@ from dataclasses import dataclass
 
 from autotrader.core.enums import MarketRegime
 from autotrader.core.interfaces.position_sizing import (
-    PositionSizerProtocol,
     SizingContext,
     SizingResult,
 )
@@ -171,7 +170,7 @@ class PositionSizerConfig:
     liquidity_tp_safety_margin: float = 0.01  # 流動性ゾーンの1%手前でTP
 
 
-class PositionSizer(PositionSizerProtocol):
+class PositionSizer:
     """ポジションサイザー
 
     lot = (equity × risk_pct × risk_adjust)
