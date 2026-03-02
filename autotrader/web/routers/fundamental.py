@@ -72,7 +72,7 @@ def _get_engine_for_symbol(engine, mgr, symbol: str):
 async def get_fundamental_news(
     request: Request,
     symbol: str = Query(default="USDJPY"),
-    limit: int = Query(default=30, ge=1, le=100),
+    limit: int = Query(default=100, ge=1, le=200),
     engine=Depends(get_live_engine),
     mgr=Depends(get_engine_manager),
 ) -> ApiResponse[FundamentalNewsResponse]:

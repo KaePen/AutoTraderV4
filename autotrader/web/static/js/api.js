@@ -198,7 +198,7 @@ function switchAccountPreset(login, server) {
 /** ファンダメンタルニュース取得 */
 function getFundamentalNews(symbol, limit) {
   symbol = symbol || 'USDJPY';
-  limit = limit || 30;
+  limit = limit || 100;
   return fetchApi(`/fundamental/news?symbol=${symbol}&limit=${limit}`);
 }
 
