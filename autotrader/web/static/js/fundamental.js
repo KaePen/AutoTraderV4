@@ -6,6 +6,7 @@ const FundamentalWidget = {
   calendarEvents: [],
   nextHighImpactMinutes: null,
   _countdownInterval: null,
+  _pollInterval: null,
 
   /** 初期化 */
   init(symbol) {
@@ -13,6 +14,7 @@ const FundamentalWidget = {
     this.fetchNews();
     this.fetchCalendar();
     this.startCountdown();
+    this.startPolling();
   },
 
   /** シンボル変更時の軽量更新（カウントダウン再起動なし） */
@@ -198,6 +200,18 @@ const FundamentalWidget = {
         self.nextHighImpactMinutes -= 1;
       }
     }, 60000);
+  },
+
+  /** カレンダー・ニュース定期ポーリング開始（5分間隔） */
+  startPolling() {
+    if (this._pollInterval) {
+      clearInterval(this._pollInterval);
+    }
+    var self = this;
+    this._pollInterval = setInterval(function() {
+      self.fetchCalendar();
+      self.fetchNews();
+    }, 300000);
   },
 
   // ── ヘルパー ──
