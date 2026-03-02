@@ -8,7 +8,6 @@ from __future__ import annotations
 
 from typing import Any
 
-
 # ワーカープロセスの進捗キュー（initializerが設定）
 _WORKER_PROGRESS_QUEUE: Any = None
 

@@ -1,8 +1,9 @@
 """損失深掘り分析: TREND×SWING + SL_HIT MFE帯"""
 from __future__ import annotations
 
-import pandas as pd
 import sys
+
+import pandas as pd
 
 
 def load_trades(csv_path: str) -> pd.DataFrame:

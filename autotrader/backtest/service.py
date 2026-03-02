@@ -9,8 +9,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
 
-from autotrader.backtest.runner import BacktestRunner, BacktestConfig, BacktestResult
 from autotrader.backtest.events import BacktestEventEmitter
+from autotrader.backtest.runner import (
+    BacktestConfig,
+    BacktestResult,
+    BacktestRunner,
+)
 from autotrader.config import DEFAULT_TRADING_PARAMS
 from autotrader.config.trading_params import get_preset
 

@@ -5,12 +5,14 @@ UNIVERSALモードで全TFを評価し、統合されたトレード機会を検
 
 from __future__ import annotations
 
+import logging
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING
 
 import pandas as pd
-from loguru import logger
+
+logger = logging.getLogger(__name__)
 
 from autotrader.core.enums import SignalType, TradingStrategyMode
 from autotrader.core.exceptions import CalculationError

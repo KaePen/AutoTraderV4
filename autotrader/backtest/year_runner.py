@@ -20,7 +20,7 @@ from autotrader.backtest.metrics import MetricsCalculator
 from autotrader.backtest.position_event_logger import (
     PositionEventLogger,
 )
-from autotrader.backtest.simulator import TradeSimulator, SimulatorConfig
+from autotrader.backtest.simulator import SimulatorConfig, TradeSimulator
 from autotrader.core.entities import Signal
 from autotrader.core.enums import (
     ExitReason,
@@ -70,7 +70,10 @@ def run_unified_year(
     Returns:
         年別結果（monthly_results フィールドを含む）
     """
-    from autotrader.decision.unified import UnifiedTradeBot, UnifiedBotConfig  # noqa: F401
+    from autotrader.decision.unified import (  # noqa: F401
+        UnifiedBotConfig,
+        UnifiedTradeBot,
+    )
 
     # 年ごとに fresh な bot を生成（状態の累積を防止）
     bot = UnifiedTradeBot(

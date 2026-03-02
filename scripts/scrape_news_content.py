@@ -26,7 +26,9 @@ from pathlib import Path
 _ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(_ROOT))
 
-from loguru import logger  # noqa: E402
+import logging  # noqa: E402
+
+logger = logging.getLogger(__name__)
 
 from autotrader.adapters.fundamental.article_scraper import (  # noqa: E402
     ArticleFetcher,

@@ -10,10 +10,11 @@ LLMを一切使わず、ヒューリスティックルールのみで
 from __future__ import annotations
 
 import csv
+import logging
 import re
 from pathlib import Path
 
-from loguru import logger
+logger = logging.getLogger(__name__)
 
 from autotrader.adapters.fundamental.llm_generator_base import (
     LLMGeneratorBase,

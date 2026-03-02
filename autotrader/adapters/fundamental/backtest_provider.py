@@ -14,13 +14,14 @@ from __future__ import annotations
 
 import bisect
 import csv
+import logging
 import math
 import re
 from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
-from loguru import logger
+logger = logging.getLogger(__name__)
 
 from autotrader.adapters.fundamental.news_csv_writer import (
     read_news_csv,

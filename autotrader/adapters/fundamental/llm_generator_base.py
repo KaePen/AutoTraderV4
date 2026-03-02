@@ -20,10 +20,16 @@ try:
 except ImportError:
     _ollama_module = None  # type: ignore[assignment]
 
-from loguru import logger
+import logging
+
+logger = logging.getLogger(__name__)
 
 from autotrader.config.llm_settings import OllamaSettings
-from autotrader.core.exceptions import ConfigurationError, LLMResponseError, ValidationError
+from autotrader.core.exceptions import (
+    ConfigurationError,
+    LLMResponseError,
+    ValidationError,
+)
 
 # シンボル→通貨ペア（基軸・決済）の正規マッピング
 SYMBOL_CURRENCIES: dict[str, tuple[str, str]] = {

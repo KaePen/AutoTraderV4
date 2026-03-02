@@ -18,8 +18,9 @@ import pandas as pd
 
 from autotrader.adapters.mt5.connection import MT5ConnectionManager
 from autotrader.adapters.mt5.data_provider import MT5DataProvider
+from autotrader.adapters.mt5.exceptions import MT5DataError, MT5Error
 from autotrader.adapters.mt5.trade_executor import MT5TradeExecutor
-from autotrader.adapters.mt5.exceptions import MT5Error, MT5DataError
+from autotrader.calculator.technical.batch import TechnicalIndicatorBatch
 from autotrader.core.entities import AccountInfo, Signal
 from autotrader.core.enums import (
     ExitReason,
@@ -27,6 +28,7 @@ from autotrader.core.enums import (
     SignalType,
     Timeframe,
 )
+from autotrader.core.event_bus import event_bus
 from autotrader.core.exceptions import TradingError, ValidationError
 from autotrader.core.interfaces.position_sizing import SizingContext
 from autotrader.decision.unified.config import UnifiedBotConfig
@@ -39,11 +41,11 @@ from autotrader.decision.unified.position_sizer import (
     PositionSizer,
     PositionSizerConfig,
 )
-from autotrader.decision.unified.trade_bot import UnifiedTradeBot
-from autotrader.live.config import FundamentalConfig, LiveTradingConfig
 from autotrader.decision.unified.signal_consolidator import (
     ConsolidatedSignal,
 )
+from autotrader.decision.unified.trade_bot import UnifiedTradeBot
+from autotrader.live.config import FundamentalConfig, LiveTradingConfig
 from autotrader.live.tick_entry_optimizer import TickEntryOptimizer
 from autotrader.calculator.technical.batch import TechnicalIndicatorBatch
 from autotrader.core.event_bus import get_event_bus
@@ -1341,10 +1343,10 @@ class LiveTradingEngine:
             volume: ロット数
             entry_tick: エントリー時のtick情報（ask/bid）
         """
+        from autotrader.core.enums import TradingStrategyMode
         from autotrader.decision.unified.mode_selector import (
             TradingModeSelector,
         )
-        from autotrader.core.enums import TradingStrategyMode
 
         # エントリー価格（実際のask/bid価格）
         is_buy = signal.signal_type == SignalType.BUY
@@ -2011,10 +2013,11 @@ class LiveTradingEngine:
             # PMに未登録なら簡易登録
             pos_id = str(pos.ticket)
             if self._pm.get_position(pos_id) is None:
+                import dataclasses as _dc
+
                 from autotrader.decision.unified.mode_selector import (
                     TradingPlan,
                 )
-                import dataclasses as _dc
 
                 plan = TradingPlan.create_universal(
                     self._bot.config,
@@ -2493,11 +2496,11 @@ class LiveTradingEngine:
             )
             # RSSニュース収集・分析（オプション）
             if cfg.use_rss_news:
-                from autotrader.adapters.fundamental.rss_collector import (
-                    RSSCollector,
-                )
                 from autotrader.adapters.fundamental.news_llm_analyzer import (
                     NewsLLMAnalyzer,
+                )
+                from autotrader.adapters.fundamental.rss_collector import (
+                    RSSCollector,
                 )
 
                 # 共有RSSコレクターがあれば再利用

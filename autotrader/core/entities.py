@@ -9,12 +9,12 @@ from datetime import datetime
 from enum import Enum
 from typing import Any
 
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, ConfigDict, Field
 
 from autotrader.core.enums import (
-    SignalType,
     ConfidenceLevel,
     ExitReason,
+    SignalType,
     Timeframe,
 )
 from autotrader.core.exceptions import InvalidTransitionError

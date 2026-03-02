@@ -3,8 +3,8 @@
 from __future__ import annotations
 
 from autotrader.adapters.ollama import (
-    OllamaClient,
     ConfidenceAdjustmentOutput,
+    OllamaClient,
     VetoCheckOutput,
 )
 

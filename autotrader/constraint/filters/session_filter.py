@@ -6,10 +6,10 @@ Kill Zones（ロンドン/NYセッション）のみでトレード。
 
 from __future__ import annotations
 
-from autotrader.constraint.filters.filter_result import FilterResult
-
 from dataclasses import dataclass
 from datetime import datetime
+
+from autotrader.constraint.filters.filter_result import FilterResult
 
 
 @dataclass

@@ -155,6 +155,7 @@ def _load_presets(path: Path | None = None) -> None:
     """
     global _presets_loaded, _loaded_path
     import dataclasses  # noqa: PLC0415
+
     import yaml  # noqa: PLC0415
 
     target = path or _DEFAULT_PRESET_PATH

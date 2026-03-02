@@ -7,31 +7,33 @@ Parquet形式で保存・キャッシュする。
 from __future__ import annotations
 
 import hashlib
+import logging
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
 import pandas as pd
 import polars as pl
-from loguru import logger
 
-from autotrader.calculator.technical.trend import TrendIndicators
-from autotrader.calculator.technical.momentum import MomentumIndicators
-from autotrader.calculator.technical.volatility import VolatilityIndicators
-from autotrader.calculator.technical.price_structure import (
-    PriceStructureIndicators,
-)
-from autotrader.calculator.market_structure.swing_analyzer import SwingAnalyzer
-from autotrader.calculator.market_structure.structure_analyzer import (
-    StructureAnalyzer,
-)
-from autotrader.calculator.market_structure.liquidity_analyzer import (
-    LiquidityAnalyzer,
-)
+logger = logging.getLogger(__name__)
+
 from autotrader.calculator.features.trend_features import TrendFeatures
 from autotrader.calculator.features.volatility_features import (
     VolatilityFeatures,
 )
+from autotrader.calculator.market_structure.liquidity_analyzer import (
+    LiquidityAnalyzer,
+)
+from autotrader.calculator.market_structure.structure_analyzer import (
+    StructureAnalyzer,
+)
+from autotrader.calculator.market_structure.swing_analyzer import SwingAnalyzer
+from autotrader.calculator.technical.momentum import MomentumIndicators
+from autotrader.calculator.technical.price_structure import (
+    PriceStructureIndicators,
+)
+from autotrader.calculator.technical.trend import TrendIndicators
+from autotrader.calculator.technical.volatility import VolatilityIndicators
 from autotrader.core.enums import Timeframe
 
 

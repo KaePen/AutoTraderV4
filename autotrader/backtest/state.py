@@ -5,12 +5,12 @@
 
 from __future__ import annotations
 
+import threading
+import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
 from enum import Enum
 from typing import Any
-import threading
-import uuid
 
 from autotrader.core.clock import Clock, SystemClock
 

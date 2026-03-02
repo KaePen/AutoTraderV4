@@ -24,8 +24,8 @@ import pandas as pd
 from autotrader.backtest.candle_arrays import CandleArrays
 from autotrader.backtest.data_loader import DataLoader
 from autotrader.backtest.engine import (
-    ParallelMultiTFBacktestEngine,
     ParallelEngineConfig,
+    ParallelMultiTFBacktestEngine,
 )
 from autotrader.backtest.events import (
     BacktestEventEmitter,
@@ -33,11 +33,24 @@ from autotrader.backtest.events import (
 )
 from autotrader.backtest.file_listener import FileEventListener
 from autotrader.backtest.metrics import MetricsCalculator
+
+# 分割モジュール
+from autotrader.backtest.metrics_aggregator import (
+    aggregate_results,
+    aggregate_results_from_yearly,
+)
+from autotrader.backtest.parallel_worker import (
+    _run_year_worker,
+    _worker_process_init,
+)
 from autotrader.backtest.position_event_logger import (
     PositionEventLogger,
 )
-from autotrader.backtest.simulator import TradeSimulator, SimulatorConfig
+from autotrader.backtest.simulator import SimulatorConfig, TradeSimulator
 from autotrader.backtest.strategy_factory import StrategyFactory
+from autotrader.backtest.year_runner import (
+    run_unified_year,
+)
 from autotrader.calculator.features.divergence_features import (
     DivergenceDetector,
 )
@@ -51,19 +64,6 @@ from autotrader.core.enums import (
 )
 from autotrader.decision.unified.position_manager import (
     PositionManagerConfig,
-)
-
-# 分割モジュール
-from autotrader.backtest.metrics_aggregator import (
-    aggregate_results,
-    aggregate_results_from_yearly,
-)
-from autotrader.backtest.year_runner import (
-    run_unified_year,
-)
-from autotrader.backtest.parallel_worker import (
-    _worker_process_init,
-    _run_year_worker,
 )
 
 

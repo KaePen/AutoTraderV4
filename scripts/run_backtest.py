@@ -53,8 +53,8 @@ def setup_logging(verbose: bool = False) -> None:
         verbose: 詳細出力モード
     """
     try:
-        from rich.logging import RichHandler
         from rich.console import Console
+        from rich.logging import RichHandler
 
         console = Console()
         level = logging.DEBUG if verbose else logging.INFO
@@ -876,8 +876,8 @@ def print_results(result) -> None:
     """結果を表示"""
     try:
         from rich.console import Console
-        from rich.table import Table
         from rich.panel import Panel
+        from rich.table import Table
 
         console = Console()
 
@@ -1284,14 +1284,15 @@ def _collect_legacy_pm_overrides(
 
 def run_single_backtest(args: argparse.Namespace):
     """単一バックテスト実行"""
+    from datetime import datetime as _dt
+    from datetime import timedelta as _td
+
+    from autotrader.backtest.events import RichEventListener
     from autotrader.backtest.service import (
         BacktestService,
         BacktestServiceConfig,
     )
-    from autotrader.backtest.events import RichEventListener
     from autotrader.config.trading_params import get_preset as _get_preset
-
-    from datetime import datetime as _dt, timedelta as _td
 
     start_year, end_year = parse_years(args.years)
 
@@ -1729,7 +1730,7 @@ def run_single_backtest(args: argparse.Namespace):
 
 def run_walk_forward(args: argparse.Namespace):
     """ウォークフォワード検証実行"""
-    from autotrader.backtest.runner import BacktestRunner, BacktestConfig
+    from autotrader.backtest.runner import BacktestConfig, BacktestRunner
 
     start_year, end_year = parse_years(args.years)
 

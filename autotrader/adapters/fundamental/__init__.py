@@ -5,17 +5,17 @@
 
 from __future__ import annotations
 
-from autotrader.adapters.fundamental.schemas import (
-    EconomicEvent,
-    FundamentalContext,
-    ImpactLevel,
-    EventSource,
+from autotrader.adapters.fundamental.memory import (
+    FundamentalMemoryService,
 )
 from autotrader.adapters.fundamental.normalizer import (
     EconomicEventNormalizer,
 )
-from autotrader.adapters.fundamental.memory import (
-    FundamentalMemoryService,
+from autotrader.adapters.fundamental.schemas import (
+    EconomicEvent,
+    EventSource,
+    FundamentalContext,
+    ImpactLevel,
 )
 
 __all__ = [

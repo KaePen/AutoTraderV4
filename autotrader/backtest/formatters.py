@@ -9,10 +9,10 @@ from abc import ABC, abstractmethod
 from typing import Any
 
 from autotrader.backtest.config import (
-    UnifiedBacktestConfig,
-    UnifiedBacktestResult,
     BacktestMetrics,
     MonthlyResult,
+    UnifiedBacktestConfig,
+    UnifiedBacktestResult,
     YearlyResult,
 )
 

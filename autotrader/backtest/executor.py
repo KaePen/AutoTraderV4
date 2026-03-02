@@ -11,7 +11,6 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TYPE_CHECKING, Callable
 
-
 from autotrader.config import DEFAULT_TRADING_PARAMS
 
 if TYPE_CHECKING:

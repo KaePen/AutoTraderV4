@@ -8,10 +8,11 @@ from __future__ import annotations
 
 import csv
 import json
+import logging
 from datetime import UTC, datetime
 from pathlib import Path
 
-from loguru import logger
+logger = logging.getLogger(__name__)
 
 from autotrader.adapters.fundamental.news_schemas import (
     NewsItem,

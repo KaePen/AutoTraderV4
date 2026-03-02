@@ -14,7 +14,10 @@ import pandas as pd
 from autotrader.constraint.soft_guard import SoftGuard
 from autotrader.core.enums import MarketRegime, SignalType
 
-from .in_strategy_consensus import InStrategyConsensus, InStrategyConsensusConfig
+from .in_strategy_consensus import (
+    InStrategyConsensus,
+    InStrategyConsensusConfig,
+)
 from .types import (
     EdgeScoreComponents,
     ProposedTrade,

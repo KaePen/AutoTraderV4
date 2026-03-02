@@ -6,12 +6,9 @@
 
 from __future__ import annotations
 
-from autotrader.constraint.filters.filter_result import FilterResult
-
-
 import pandas as pd
 
-
+from autotrader.constraint.filters.filter_result import FilterResult
 
 
 class VolatilityFilter:

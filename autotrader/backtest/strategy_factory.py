@@ -6,7 +6,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Protocol, runtime_checkable, Any
+from typing import Any, Protocol, runtime_checkable
 
 
 @runtime_checkable
@@ -98,8 +98,8 @@ class StrategyFactory:
             シグナルジェネレータインスタンス
         """
         from autotrader.decision.high_win_rate_generator import (
-            HighWinRateGenerator,
             HighWinRateConfig,
+            HighWinRateGenerator,
         )
 
         # バランス設定を使用

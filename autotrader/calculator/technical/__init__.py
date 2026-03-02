@@ -11,15 +11,15 @@ Modules:
 
 from __future__ import annotations
 
-from autotrader.calculator.technical.trend import TrendIndicators
-from autotrader.calculator.technical.momentum import MomentumIndicators
-from autotrader.calculator.technical.volatility import VolatilityIndicators
-from autotrader.calculator.technical.price_structure import (
-    PriceStructureIndicators,
-)
 from autotrader.calculator.technical.batch import (
     TechnicalIndicatorBatch,
 )
+from autotrader.calculator.technical.momentum import MomentumIndicators
+from autotrader.calculator.technical.price_structure import (
+    PriceStructureIndicators,
+)
+from autotrader.calculator.technical.trend import TrendIndicators
+from autotrader.calculator.technical.volatility import VolatilityIndicators
 
 __all__ = [
     "TrendIndicators",
