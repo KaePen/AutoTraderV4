@@ -26,6 +26,10 @@
           <span id="ap-direction-badge" class="inline-flex items-center px-2 py-0.5 rounded text-xs font-bold bg-gray-700 text-gray-400">--</span>
           <span id="ap-score-text" class="text-[11px] tabular-nums text-gray-300 font-medium">-- / --</span>
         </div>
+        <div id="ap-next-event" class="hidden mb-2 px-3 py-1.5 rounded bg-red-900/40 border border-red-700/50 text-xs text-red-300 flex items-center gap-2">
+          <span class="w-1.5 h-1.5 rounded-full bg-red-400 animate-pulse flex-shrink-0"></span>
+          <span id="ap-next-event-text">--</span>
+        </div>
         <!-- スコアバー（中央0基準・左SELL/右BUY） -->
         <div class="mb-3">
           <!-- SELL/BUYラベル -->
@@ -156,5 +160,5 @@
 {% block scripts %}
 <script src="/static/js/chart.js?v=8"></script>
 <script src="/static/js/fundamental.js?v=2"></script>
-<script src="/static/js/dashboard.js?v=28"></script>
+<script src="/static/js/dashboard.js?v=29"></script>
 {% endblock %}

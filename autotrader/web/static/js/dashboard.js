@@ -215,6 +215,19 @@ const DashboardApp = {
     }
     panel.classList.remove('hidden');
 
+    // 重要指標発表警告
+    const apEventBanner = document.getElementById('ap-next-event');
+    const apEventText = document.getElementById('ap-next-event-text');
+    if (apEventBanner && apEventText) {
+      const mins = (typeof FundamentalWidget !== 'undefined') ? FundamentalWidget.nextHighImpactMinutes : null;
+      if (mins !== null && mins <= 60 && mins > 0) {
+        apEventText.textContent = '重要指標まで ' + Math.round(mins) + ' 分';
+        apEventBanner.classList.remove('hidden');
+      } else {
+        apEventBanner.classList.add('hidden');
+      }
+    }
+
     // データなし or エンジン未起動（シンボル不一致）: プレースホルダ表示
     const noData = !a || (!a.engine_running && (!a.tf_scores || Object.keys(a.tf_scores).length === 0));
     if (noData) {
