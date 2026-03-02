@@ -41,6 +41,13 @@ from autotrader.backtest.walk_forward import (
     PeriodMetrics,
     OverfittingWarning,
     create_walk_forward_periods,
+    WalkForwardWindow,
+    RollingWFResult,
+    RollingWFReport,
+    RollingWalkForwardValidator,
+    ParameterStabilityTest,
+    StabilityResult,
+    StabilityReport,
 )
 from autotrader.backtest.strategy_factory import (
     StrategyFactory,
@@ -154,6 +161,15 @@ __all__ = [
     "PeriodMetrics",
     "OverfittingWarning",
     "create_walk_forward_periods",
+    # ウォークフォワード（年単位ローリング）
+    "WalkForwardWindow",
+    "RollingWFResult",
+    "RollingWFReport",
+    "RollingWalkForwardValidator",
+    # パラメータ安定性テスト
+    "ParameterStabilityTest",
+    "StabilityResult",
+    "StabilityReport",
     # 戦略
     "StrategyFactory",
     "StrategyInfo",

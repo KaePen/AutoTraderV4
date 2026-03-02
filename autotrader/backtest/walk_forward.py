@@ -2,10 +2,15 @@
 
 過学習を検出し、堅牢なパラメータ最適化を実現する。
 In-Sample (IS) と Out-of-Sample (OOS) の分割検証を提供。
+
+年単位ローリングウォークフォワード検証:
+- RollingWalkForwardValidator: 年単位IS/OOSローリング検証
+- ParameterStabilityTest: 最適値近傍での安定性検証
 """
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Callable, Any, TYPE_CHECKING
@@ -14,6 +19,8 @@ import pandas as pd
 
 if TYPE_CHECKING:
     pass
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -514,3 +521,402 @@ def create_walk_forward_periods(
         current += oos_years
 
     return periods
+
+
+# ============================================================
+# 年単位ローリングウォークフォワード検証
+# ============================================================
+
+
+@dataclass(frozen=True)
+class WalkForwardWindow:
+    """ウォークフォワードのIS/OOS期間（年単位）
+
+    Attributes:
+        is_start_year: IS開始年
+        is_end_year: IS終了年
+        oos_year: OOS年
+    """
+
+    is_start_year: int
+    is_end_year: int
+    oos_year: int
+
+    @property
+    def label(self) -> str:
+        """ウィンドウラベル"""
+        return (
+            f"IS:{self.is_start_year}-{self.is_end_year}"
+            f"_OOS:{self.oos_year}"
+        )
+
+
+@dataclass
+class RollingWFResult:
+    """1ウィンドウの検証結果
+
+    Attributes:
+        window: ウィンドウ定義
+        is_metrics: IS期間のメトリクス
+        oos_metrics: OOS期間のメトリクス
+    """
+
+    window: WalkForwardWindow
+    is_metrics: dict[str, float]
+    oos_metrics: dict[str, float]
+
+    @property
+    def oos_profit(self) -> float:
+        """OOS期間の総利益"""
+        return self.oos_metrics.get("total_profit", 0.0)
+
+    @property
+    def oos_sharpe(self) -> float:
+        """OOS期間のシャープレシオ"""
+        return self.oos_metrics.get("sharpe_ratio", 0.0)
+
+    @property
+    def degradation_pct(self) -> float:
+        """IS→OOS のパフォーマンス劣化率（%）"""
+        is_profit = self.is_metrics.get("total_profit", 0.0)
+        if is_profit <= 0:
+            return 0.0
+        return (
+            (is_profit - self.oos_profit) / is_profit * 100
+        )
+
+
+@dataclass
+class RollingWFReport:
+    """全ウィンドウの集計結果
+
+    Attributes:
+        results: 各ウィンドウの結果リスト
+    """
+
+    results: list[RollingWFResult] = field(
+        default_factory=list
+    )
+
+    @property
+    def avg_oos_profit(self) -> float:
+        """OOS利益の平均"""
+        if not self.results:
+            return 0.0
+        return sum(
+            r.oos_profit for r in self.results
+        ) / len(self.results)
+
+    @property
+    def avg_degradation(self) -> float:
+        """平均劣化率（%）"""
+        if not self.results:
+            return 0.0
+        return sum(
+            r.degradation_pct for r in self.results
+        ) / len(self.results)
+
+    @property
+    def all_oos_profitable(self) -> bool:
+        """全OOS期間が黒字か"""
+        return all(
+            r.oos_profit > 0 for r in self.results
+        )
+
+    def summary(self) -> str:
+        """サマリーレポートを文字列で返す
+
+        Returns:
+            str: レポート文字列
+        """
+        lines = ["=== Walk-Forward Validation Report ==="]
+        for r in self.results:
+            is_profit = r.is_metrics.get(
+                "total_profit", 0
+            )
+            lines.append(
+                f"{r.window.label}: "
+                f"IS={is_profit:+,.0f} "
+                f"OOS={r.oos_profit:+,.0f} "
+                f"Degradation={r.degradation_pct:.1f}%"
+            )
+        lines.append("")
+        lines.append(
+            f"Avg OOS Profit: {self.avg_oos_profit:+,.0f}"
+        )
+        lines.append(
+            f"Avg Degradation: {self.avg_degradation:.1f}%"
+        )
+        lines.append(
+            f"All OOS Profitable: "
+            f"{self.all_oos_profitable}"
+        )
+        return "\n".join(lines)
+
+
+class RollingWalkForwardValidator:
+    """年単位ローリングウォークフォワード検証
+
+    IS期間（複数年）で学習し、OOS期間（1年）で検証する
+    ローリング方式のウォークフォワード分析を実行。
+
+    Args:
+        symbol: 通貨ペア名
+        is_years: IS期間の年数（デフォルト3）
+        oos_years: OOS期間の年数（デフォルト1）
+        start_year: データ開始年（デフォルト2020）
+        end_year: データ終了年（デフォルト2025）
+    """
+
+    def __init__(
+        self,
+        symbol: str,
+        is_years: int = 3,
+        oos_years: int = 1,
+        start_year: int = 2020,
+        end_year: int = 2025,
+    ) -> None:
+        self.symbol = symbol
+        self.is_years = is_years
+        self.oos_years = oos_years
+        self.start_year = start_year
+        self.end_year = end_year
+
+    def generate_windows(self) -> list[WalkForwardWindow]:
+        """ローリングウィンドウを生成
+
+        Returns:
+            list[WalkForwardWindow]: ウィンドウリスト
+        """
+        windows: list[WalkForwardWindow] = []
+        is_start = self.start_year
+        while (
+            is_start + self.is_years + self.oos_years - 1
+            <= self.end_year
+        ):
+            is_end = is_start + self.is_years - 1
+            oos_year = is_end + 1
+            windows.append(
+                WalkForwardWindow(
+                    is_start, is_end, oos_year
+                )
+            )
+            # 1年ずつスライド
+            is_start += self.oos_years
+        return windows
+
+    def run(
+        self,
+        backtest_fn: Callable[
+            [str, int, int], dict[str, float]
+        ],
+    ) -> RollingWFReport:
+        """検証実行
+
+        Args:
+            backtest_fn: バックテスト実行関数
+                signature: (symbol, start_year, end_year)
+                    -> dict[str, float]
+                返すdict例:
+                    {"total_profit": float,
+                     "win_rate": float,
+                     "profit_factor": float,
+                     "sharpe_ratio": float, ...}
+
+        Returns:
+            RollingWFReport: 全ウィンドウの集計結果
+        """
+        report = RollingWFReport()
+        windows = self.generate_windows()
+
+        for window in windows:
+            logger.info(
+                "ウォークフォワード実行: %s",
+                window.label,
+            )
+
+            # IS期間のバックテスト
+            is_metrics = backtest_fn(
+                self.symbol,
+                window.is_start_year,
+                window.is_end_year,
+            )
+
+            # OOS期間のバックテスト（同じ設定）
+            oos_metrics = backtest_fn(
+                self.symbol,
+                window.oos_year,
+                window.oos_year,
+            )
+
+            result = RollingWFResult(
+                window, is_metrics, oos_metrics
+            )
+            report.results.append(result)
+            logger.info(
+                "%s: IS=%+.0f, OOS=%+.0f, "
+                "Degradation=%.1f%%",
+                window.label,
+                is_metrics.get("total_profit", 0),
+                result.oos_profit,
+                result.degradation_pct,
+            )
+
+        return report
+
+
+# ============================================================
+# パラメータ安定性テスト
+# ============================================================
+
+
+@dataclass
+class StabilityResult:
+    """安定性テスト1バリエーションの結果
+
+    Attributes:
+        multiplier: ベース値に対する倍率
+        actual_value: 実際のパラメータ値
+        metrics: バックテスト結果メトリクス
+    """
+
+    multiplier: float
+    actual_value: float
+    metrics: dict[str, float]
+
+
+@dataclass
+class StabilityReport:
+    """パラメータ安定性テストの集計結果
+
+    Attributes:
+        param_name: テスト対象パラメータ名
+        base_value: ベース値
+        results: 各バリエーションの結果
+    """
+
+    param_name: str
+    base_value: float
+    results: list[StabilityResult] = field(
+        default_factory=list
+    )
+
+    @property
+    def profit_range(self) -> float:
+        """利益の最大-最小幅"""
+        if not self.results:
+            return 0.0
+        profits = [
+            r.metrics.get("total_profit", 0.0)
+            for r in self.results
+        ]
+        return max(profits) - min(profits)
+
+    @property
+    def is_stable(self) -> bool:
+        """全バリエーションが黒字かどうか"""
+        return all(
+            r.metrics.get("total_profit", 0.0) > 0
+            for r in self.results
+        )
+
+    def summary(self) -> str:
+        """サマリーレポートを文字列で返す
+
+        Returns:
+            str: レポート文字列
+        """
+        lines = [
+            f"=== Parameter Stability: "
+            f"{self.param_name} "
+            f"(base={self.base_value}) ==="
+        ]
+        for r in self.results:
+            profit = r.metrics.get("total_profit", 0)
+            lines.append(
+                f"  x{r.multiplier:.2f} "
+                f"(value={r.actual_value:.4f}): "
+                f"Profit={profit:+,.0f}"
+            )
+        lines.append(
+            f"  Profit Range: {self.profit_range:,.0f}"
+        )
+        lines.append(f"  All Profitable: {self.is_stable}")
+        return "\n".join(lines)
+
+
+class ParameterStabilityTest:
+    """最適値近傍でのパラメータ安定性テスト
+
+    最適パラメータの値を一定範囲で変動させ、
+    性能への影響を検証する。
+
+    Args:
+        base_config: ベースとなる設定辞書
+        param_name: テスト対象のパラメータ名
+        variations: 倍率リスト
+            （例: [0.9, 0.95, 1.0, 1.05, 1.1]）
+    """
+
+    # 倍率±10%のデフォルトバリエーション
+    DEFAULT_VARIATIONS = [0.90, 0.95, 1.0, 1.05, 1.10]
+
+    def __init__(
+        self,
+        base_config: dict[str, Any],
+        param_name: str,
+        variations: list[float] | None = None,
+    ) -> None:
+        self.base_config = base_config
+        self.param_name = param_name
+        self.variations = (
+            variations or self.DEFAULT_VARIATIONS
+        )
+
+    def run(
+        self,
+        backtest_fn: Callable[
+            [dict[str, Any]], dict[str, float]
+        ],
+    ) -> StabilityReport:
+        """安定性テスト実行
+
+        Args:
+            backtest_fn: バックテスト実行関数
+                signature: (config_dict) -> dict[str, float]
+                返すdict例:
+                    {"total_profit": float, ...}
+
+        Returns:
+            StabilityReport: 安定性テスト結果
+        """
+        base_value = self.base_config[self.param_name]
+        report = StabilityReport(
+            param_name=self.param_name,
+            base_value=base_value,
+        )
+
+        for mult in self.variations:
+            varied_value = base_value * mult
+            varied_config = {
+                **self.base_config,
+                self.param_name: varied_value,
+            }
+
+            logger.info(
+                "安定性テスト %s: x%.2f (%.4f)",
+                self.param_name,
+                mult,
+                varied_value,
+            )
+
+            metrics = backtest_fn(varied_config)
+            report.results.append(
+                StabilityResult(
+                    multiplier=mult,
+                    actual_value=varied_value,
+                    metrics=metrics,
+                )
+            )
+
+        return report
