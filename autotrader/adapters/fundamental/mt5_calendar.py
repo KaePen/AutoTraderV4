@@ -119,7 +119,7 @@ class MT5CalendarClient:
         """
         now = datetime.now(timezone.utc)
         if from_date is None:
-            from_date = now - timedelta(hours=1)
+            from_date = now - timedelta(days=1)
         if to_date is None:
             to_date = now + timedelta(days=7)
 
