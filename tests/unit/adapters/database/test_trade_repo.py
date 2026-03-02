@@ -12,6 +12,8 @@ from autotrader.adapters.database.models import Base
 from autotrader.adapters.database.repositories import (
     TradeRepository,
 )
+from autotrader.core.entities import Trade
+from autotrader.core.enums import ExitReason, SignalType
 
 
 @pytest.fixture()
@@ -34,7 +36,7 @@ class TestTradeRepository:
     """TradeRepository CRUDテスト"""
 
     def test_create_trade(self, session) -> None:
-        """トレード作成"""
+        """トレード作成 - Trade エンティティが返る"""
         repo = TradeRepository(session)
         now = datetime.now(timezone.utc)
         trade = repo.create(
@@ -49,19 +51,20 @@ class TestTradeRepository:
         )
         session.commit()
 
+        assert isinstance(trade, Trade)
         assert trade.trade_id is not None
         assert trade.symbol == "USDJPY"
-        assert trade.signal_type == "BUY"
+        assert trade.signal_type == SignalType.BUY
         assert trade.volume == 0.1
         assert trade.entry_price == 150.0
         assert trade.stop_loss == 149.0
         assert trade.take_profit == 152.0
         assert trade.ticket == 12345
-        assert trade.is_open is True
+        assert trade.closed_at is None
         assert trade.exit_price is None
 
     def test_close_trade(self, session) -> None:
-        """トレード決済"""
+        """トレード決済 - trade_id で指定"""
         repo = TradeRepository(session)
         now = datetime.now(timezone.utc)
         trade = repo.create(
@@ -74,7 +77,7 @@ class TestTradeRepository:
         session.commit()
 
         closed = repo.close(
-            trade=trade,
+            trade_id=trade.trade_id,
             exit_price=1.0950,
             closed_at=now,
             exit_reason="TP_HIT",
@@ -83,14 +86,27 @@ class TestTradeRepository:
         )
         session.commit()
 
-        assert closed.is_open is False
+        assert isinstance(closed, Trade)
+        assert closed.closed_at is not None
         assert closed.exit_price == 1.0950
-        assert closed.exit_reason == "TP_HIT"
+        assert closed.exit_reason == ExitReason.TAKE_PROFIT
         assert closed.profit_loss == 100.0
         assert closed.profit_loss_pips == 5.0
 
+    def test_close_trade_not_found(self, session) -> None:
+        """存在しない trade_id で close は None"""
+        repo = TradeRepository(session)
+        result = repo.close(
+            trade_id="nonexistent",
+            exit_price=1.0,
+            closed_at=datetime.now(timezone.utc),
+            exit_reason="MANUAL",
+            profit_loss=0.0,
+        )
+        assert result is None
+
     def test_get_by_id(self, session) -> None:
-        """IDでトレード取得"""
+        """IDでトレード取得 - Trade エンティティ"""
         repo = TradeRepository(session)
         now = datetime.now(timezone.utc)
         trade = repo.create(
@@ -104,6 +120,7 @@ class TestTradeRepository:
 
         found = repo.get_by_id(trade.trade_id)
         assert found is not None
+        assert isinstance(found, Trade)
         assert found.trade_id == trade.trade_id
 
     def test_get_by_id_not_found(self, session) -> None:
@@ -112,7 +129,7 @@ class TestTradeRepository:
         assert repo.get_by_id("nonexistent") is None
 
     def test_get_open_trades(self, session) -> None:
-        """オープントレード取得"""
+        """オープントレード取得 - Trade エンティティリスト"""
         repo = TradeRepository(session)
         now = datetime.now(timezone.utc)
 
@@ -133,7 +150,7 @@ class TestTradeRepository:
         )
         # 1件クローズ
         repo.close(
-            trade=trade2,
+            trade_id=trade2.trade_id,
             exit_price=1.0950,
             closed_at=now,
             exit_reason="SL_HIT",
@@ -144,6 +161,7 @@ class TestTradeRepository:
         # 全シンボル
         all_open = repo.get_open_trades()
         assert len(all_open) == 1
+        assert isinstance(all_open[0], Trade)
         assert all_open[0].symbol == "USDJPY"
 
         # シンボル指定
@@ -152,3 +170,33 @@ class TestTradeRepository:
 
         eurusd = repo.get_open_trades(symbol="EURUSD")
         assert len(eurusd) == 0
+
+    def test_to_entity_to_record_roundtrip(
+        self, session,
+    ) -> None:
+        """_to_entity と _to_record の往復変換"""
+        repo = TradeRepository(session)
+        now = datetime.now(timezone.utc)
+        trade = repo.create(
+            symbol="GBPUSD",
+            signal_type="BUY",
+            volume=0.5,
+            entry_price=1.2500,
+            opened_at=now,
+            stop_loss=1.2400,
+            take_profit=1.2700,
+            ticket=99999,
+        )
+        session.commit()
+
+        # Trade → TradeRecord → Trade の往復
+        record = TradeRepository._to_record(trade)
+        roundtrip = TradeRepository._to_entity(record)
+        assert roundtrip.trade_id == trade.trade_id
+        assert roundtrip.symbol == trade.symbol
+        assert roundtrip.signal_type == trade.signal_type
+        assert roundtrip.volume == trade.volume
+        assert roundtrip.entry_price == trade.entry_price
+        assert roundtrip.stop_loss == trade.stop_loss
+        assert roundtrip.take_profit == trade.take_profit
+        assert roundtrip.ticket == trade.ticket
