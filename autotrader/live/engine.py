@@ -12,7 +12,7 @@ import dataclasses
 import logging
 import time as _time
 import uuid
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import pandas as pd
 
@@ -28,7 +28,7 @@ from autotrader.core.enums import (
     SignalType,
     Timeframe,
 )
-from autotrader.core.event_bus import event_bus
+from autotrader.core.event_bus import get_event_bus
 from autotrader.core.exceptions import TradingError, ValidationError
 from autotrader.core.interfaces.position_sizing import SizingContext
 from autotrader.decision.unified.config import UnifiedBotConfig
@@ -47,8 +47,6 @@ from autotrader.decision.unified.signal_consolidator import (
 from autotrader.decision.unified.trade_bot import UnifiedTradeBot
 from autotrader.live.config import FundamentalConfig, LiveTradingConfig
 from autotrader.live.tick_entry_optimizer import TickEntryOptimizer
-from autotrader.calculator.technical.batch import TechnicalIndicatorBatch
-from autotrader.core.event_bus import get_event_bus
 
 logger = logging.getLogger(__name__)
 
@@ -63,17 +61,15 @@ def _mt5_reason_to_exit_reason(reason_code: int) -> str:
         str: ExitReason の文字列値
     """
     _map = {
-        0: ExitReason.MANUAL_CLOSE,    # CLIENT
-        1: ExitReason.MANUAL_CLOSE,    # MOBILE
-        2: ExitReason.MANUAL_CLOSE,    # WEB
+        0: ExitReason.MANUAL_CLOSE,  # CLIENT
+        1: ExitReason.MANUAL_CLOSE,  # MOBILE
+        2: ExitReason.MANUAL_CLOSE,  # WEB
         3: ExitReason.EXTERNAL_CLOSE,  # EXPERT（他EA）
-        4: ExitReason.STOP_LOSS,       # SL
-        5: ExitReason.TAKE_PROFIT,     # TP
-        6: ExitReason.STOP_OUT,        # ストップアウト
+        4: ExitReason.STOP_LOSS,  # SL
+        5: ExitReason.TAKE_PROFIT,  # TP
+        6: ExitReason.STOP_OUT,  # ストップアウト
     }
-    return _map.get(
-        reason_code, ExitReason.EXTERNAL_CLOSE
-    ).value
+    return _map.get(reason_code, ExitReason.EXTERNAL_CLOSE).value
 
 
 class LiveTradingEngine:
@@ -112,11 +108,9 @@ class LiveTradingEngine:
                 （EngineManager経由）
         """
         self._config = config
-        self._conn = shared_conn or MT5ConnectionManager(
-            config.mt5_config
-        )
-        self._data_provider = (
-            shared_data_provider or MT5DataProvider(self._conn)
+        self._conn = shared_conn or MT5ConnectionManager(config.mt5_config)
+        self._data_provider = shared_data_provider or MT5DataProvider(
+            self._conn
         )
         # 共有接続の場合、接続/切断はEngineManagerが管理
         self._owns_connection = shared_conn is None
@@ -180,14 +174,10 @@ class LiveTradingEngine:
         self._news_analyzer = None
         self._news_buffer: list = []
         # 共有コレクター（EngineManager経由）
-        self._shared_fundamental_collector = (
-            shared_fundamental_collector
-        )
+        self._shared_fundamental_collector = shared_fundamental_collector
         self._shared_rss_collector = shared_rss_collector
         # コレクター所有フラグ（共有時は起動/停止しない）
-        self._owns_collectors = (
-            shared_fundamental_collector is None
-        )
+        self._owns_collectors = shared_fundamental_collector is None
         # キーワードセンチメント分析・永続化（常時有効）
         from autotrader.adapters.fundamental.keyword_sentiment import (
             KeywordSentimentScorer,
@@ -195,6 +185,7 @@ class LiveTradingEngine:
         from autotrader.adapters.fundamental.sentiment_store import (
             SentimentStore,
         )
+
         self._keyword_scorer = KeywordSentimentScorer()
         self._sentiment_store = SentimentStore()
         if config.fundamental_config.enabled:
@@ -247,9 +238,7 @@ class LiveTradingEngine:
     @property
     def demo_mode_enabled(self) -> bool:
         """デモモード状態"""
-        return getattr(
-            self._bot.config, "demo_mode", False
-        )
+        return getattr(self._bot.config, "demo_mode", False)
 
     @property
     def symbol_auto_trade_states(self) -> dict[str, bool]:
@@ -289,24 +278,18 @@ class LiveTradingEngine:
             return
 
         old = self._active_symbol
-        logger.info(
-            "シンボル変更: %s → %s", old, symbol
-        )
+        logger.info("シンボル変更: %s → %s", old, symbol)
 
         # 1. ティック監視キャンセル
         if self._tick_optimizer.is_active:
-            self._tick_optimizer.cancel_monitoring(
-                "シンボル変更"
-            )
+            self._tick_optimizer.cancel_monitoring("シンボル変更")
 
         # 2. アクティブシンボル更新
         self._active_symbol = symbol
 
         # 3. PositionSizer再構築
         self._sizer = PositionSizer(
-            self._build_sizer_config(
-                self._bot.config, symbol
-            )
+            self._build_sizer_config(self._bot.config, symbol)
         )
 
         # 4. TickEntryOptimizer再構築
@@ -333,13 +316,9 @@ class LiveTradingEngine:
             await self._load_historical_data()
             await self._sync_positions()
 
-        logger.info(
-            "シンボル変更完了: %s", symbol
-        )
+        logger.info("シンボル変更完了: %s", symbol)
 
-    async def set_symbol_auto_trade(
-        self, symbol: str, enable: bool
-    ) -> None:
+    async def set_symbol_auto_trade(self, symbol: str, enable: bool) -> None:
         """シンボルごとの自動取引ON/OFF設定
 
         シンボルが現在と異なる場合はコンポーネントを再初期化する。
@@ -359,9 +338,7 @@ class LiveTradingEngine:
             "ON" if enable else "OFF",
         )
 
-    def set_symbol_demo_mode(
-        self, symbol: str, enable: bool
-    ) -> None:
+    def set_symbol_demo_mode(self, symbol: str, enable: bool) -> None:
         """シンボルごとのデモモードON/OFF設定
 
         Args:
@@ -381,7 +358,8 @@ class LiveTradingEngine:
         logger.debug("データ更新タイマーリセット")
 
     def get_current_entry_threshold(
-        self, mode_str: str | None = None,
+        self,
+        mode_str: str | None = None,
     ) -> float | None:
         """現在のbot設定からエントリー閾値を取得（デモ/ライブ切替即時反映）
 
@@ -420,9 +398,7 @@ class LiveTradingEngine:
         self._sizer = PositionSizer(
             self._build_sizer_config(new_config, self._active_symbol)
         )
-        logger.info(
-            "BotConfig更新完了 demo_mode=%s", new_config.demo_mode
-        )
+        logger.info("BotConfig更新完了 demo_mode=%s", new_config.demo_mode)
 
     def update_pm_config(self, new_config: PositionManagerConfig) -> None:
         """PositionManagerの設定を動的に更新する
@@ -508,9 +484,7 @@ class LiveTradingEngine:
         await self._load_historical_data()
 
         # 口座情報取得
-        self._account_info = (
-            await self._data_provider.get_account_info()
-        )
+        self._account_info = await self._data_provider.get_account_info()
 
         # 既存ポジション同期
         await self._sync_positions()
@@ -535,9 +509,7 @@ class LiveTradingEngine:
 
         # ティック監視中ならキャンセル
         if self._tick_optimizer.is_active:
-            self._tick_optimizer.cancel_monitoring(
-                "エンジン停止"
-            )
+            self._tick_optimizer.cancel_monitoring("エンジン停止")
 
         if self._task:
             self._task.cancel()
@@ -571,9 +543,7 @@ class LiveTradingEngine:
                 else:
                     await self._tick_price_update()
             except Exception as e:
-                logger.error(
-                    "ティック処理エラー: %s", e, exc_info=True
-                )
+                logger.error("ティック処理エラー: %s", e, exc_info=True)
             await asyncio.sleep(0.1)
 
     async def _tick_price_update(self) -> None:
@@ -583,9 +553,7 @@ class LiveTradingEngine:
         前回と同じtickであればbroadcastをスキップする。
         """
         try:
-            tick = await self._data_provider.get_tick_fast(
-                self._active_symbol
-            )
+            tick = await self._data_provider.get_tick_fast(self._active_symbol)
         except MT5DataError:
             return
 
@@ -603,12 +571,15 @@ class LiveTradingEngine:
         # 1秒サイクルのフル処理で使うためキャッシュ
         self._last_tick_data = tick
 
-        get_event_bus().publish_nowait("price.updated", {
-            "symbol": self._active_symbol,
-            "bid": bid,
-            "ask": ask,
-            "time_ms": tick_ms,
-        })
+        get_event_bus().publish_nowait(
+            "price.updated",
+            {
+                "symbol": self._active_symbol,
+                "bid": bid,
+                "ask": ask,
+                "time_ms": tick_ms,
+            },
+        )
 
     async def _tick(self) -> None:
         """1ティック分の処理
@@ -618,9 +589,7 @@ class LiveTradingEngine:
         ポジション減少を即座にエントリー判断へ反映する。
         """
         # 1. 口座情報更新
-        self._account_info = (
-            await self._data_provider.get_account_info()
-        )
+        self._account_info = await self._data_provider.get_account_info()
 
         # 2. 最新ローソク足データ取得・設定
         await self._update_market_data()
@@ -631,17 +600,13 @@ class LiveTradingEngine:
         await self._manage_positions()
 
         # [FUNDAMENTAL] ファンダメンタルコンテキスト取得・指標前スキップ
-        now_utc = datetime.now(timezone.utc)
+        now_utc = datetime.now(UTC)
         if self._fundamental_memory:
-            fundamental_ctx = (
-                self._fundamental_memory.get_context_for_llm(
-                    self._active_symbol, now_utc
-                )
+            fundamental_ctx = self._fundamental_memory.get_context_for_llm(
+                self._active_symbol, now_utc
             )
             if fundamental_ctx.has_high_impact_within_30min:
-                logger.info(
-                    "[Fundamental] 重要指標直前のためスキップ"
-                )
+                logger.info("[Fundamental] 重要指標直前のためスキップ")
                 return
         else:
             fundamental_ctx = None
@@ -653,21 +618,15 @@ class LiveTradingEngine:
                 from autotrader.adapters.fundamental.schemas import (
                     FundamentalContext,
                 )
+
                 fundamental_ctx = FundamentalContext(
                     sentiment_score=persisted.score,
-                    direction_bias=(
-                        persisted.score * 0.15
-                    ),
+                    direction_bias=(persisted.score * 0.15),
                 )
 
         # [NEWS] ニュースセンチメントをブレンド
-        if (
-            fundamental_ctx is not None
-            and self._news_analyzer is not None
-        ):
-            news_items = self.get_news_for_symbol(
-                self._active_symbol
-            )
+        if fundamental_ctx is not None and self._news_analyzer is not None:
+            news_items = self.get_news_for_symbol(self._active_symbol)
             if news_items:
                 sentiment = await self._news_analyzer.analyze(
                     news_items, self._active_symbol
@@ -679,41 +638,36 @@ class LiveTradingEngine:
                 from autotrader.adapters.fundamental.sentiment_store import (
                     SentimentRecord,
                 )
+
                 self._sentiment_store.save(
                     self._active_symbol,
                     SentimentRecord(
                         timestamp=datetime.now(
-                            timezone.utc,
+                            UTC,
                         ).isoformat(),
                         score=sentiment,
                         method="llm",
                         confidence=0.7,
                         news_count=len(news_items),
-                        top_headlines=[
-                            n.title for n in news_items[:3]
-                        ],
+                        top_headlines=[n.title for n in news_items[:3]],
                     ),
                 )
                 # active_symbolの関連ニュースのみ除去
                 base = self._active_symbol[:3].upper()
                 quote = self._active_symbol[3:6].upper()
                 self._news_buffer = [
-                    n for n in self._news_buffer
-                    if base not in n.currencies
-                    and quote not in n.currencies
+                    n
+                    for n in self._news_buffer
+                    if base not in n.currencies and quote not in n.currencies
                 ]
             else:
                 # バッファ空でもキャッシュから取得
-                sentiment = (
-                    self._news_analyzer.get_current_sentiment(
-                        self._active_symbol
-                    )
+                sentiment = self._news_analyzer.get_current_sentiment(
+                    self._active_symbol
                 )
                 if sentiment != 0.0:
-                    fundamental_ctx = (
-                        self._blend_news_sentiment(
-                            fundamental_ctx, sentiment
-                        )
+                    fundamental_ctx = self._blend_news_sentiment(
+                        fundamental_ctx, sentiment
                     )
 
         # 4. シグナル生成
@@ -728,7 +682,7 @@ class LiveTradingEngine:
         # 表示データを保持し、UIの空表示を防止
         if signal and signal.scores:
             self._last_analysis = signal
-        self._last_tick_time = datetime.now(timezone.utc)
+        self._last_tick_time = datetime.now(UTC)
 
         if signal and signal.direction != SignalType.HOLD:
             self._last_signal = signal
@@ -736,9 +690,7 @@ class LiveTradingEngine:
             self._signal_history.append(converted)
             # 履歴上限
             if len(self._signal_history) > 200:
-                self._signal_history = (
-                    self._signal_history[-200:]
-                )
+                self._signal_history = self._signal_history[-200:]
             logger.info(
                 "シグナル生成: %s conf=%.2f",
                 signal.direction.value,
@@ -746,30 +698,27 @@ class LiveTradingEngine:
             )
 
             # EventBus経由でシグナルブロードキャスト
-            get_event_bus().publish_nowait("signal.generated", {
-                "signal_id": converted.signal_id,
-                "symbol": converted.symbol,
-                "timeframe": converted.timeframe,
-                "signal_type": converted.signal_type.value,
-                "confidence": converted.confidence,
-                "confidence_level": (
-                    converted.confidence_level.value
-                ),
-                "stop_loss": converted.stop_loss,
-                "take_profit": converted.take_profit,
-                "reasoning": converted.reasoning,
-                "created_at": (
-                    converted.created_at.isoformat()
-                ),
-            })
+            get_event_bus().publish_nowait(
+                "signal.generated",
+                {
+                    "signal_id": converted.signal_id,
+                    "symbol": converted.symbol,
+                    "timeframe": converted.timeframe,
+                    "signal_type": converted.signal_type.value,
+                    "confidence": converted.confidence,
+                    "confidence_level": (converted.confidence_level.value),
+                    "stop_loss": converted.stop_loss,
+                    "take_profit": converted.take_profit,
+                    "reasoning": converted.reasoning,
+                    "created_at": (converted.created_at.isoformat()),
+                },
+            )
 
             # 4. エントリー判定
             if self._enable_auto_trade:
                 entry_signal = self._consolidated_to_signal(signal)
                 if self._should_use_tick_optimizer():
-                    self._tick_optimizer.start_monitoring(
-                        entry_signal
-                    )
+                    self._tick_optimizer.start_monitoring(entry_signal)
                 else:
                     await self._execute_entry(entry_signal)
 
@@ -778,9 +727,7 @@ class LiveTradingEngine:
             result = await self._tick_optimizer.poll_tick()
             if result is not None:
                 if result.should_execute:
-                    pending = (
-                        self._tick_optimizer.pending_signal
-                    )
+                    pending = self._tick_optimizer.pending_signal
                     if pending is not None:
                         await self._execute_entry(pending)
                 self._tick_optimizer.reset()
@@ -826,9 +773,7 @@ class LiveTradingEngine:
                 "aligned_tfs": list(cs.aligned_tfs),
                 "tf_scores": dict(cs.scores),
                 "tf_breakdowns": {
-                    k: dict(v)
-                    for k, v
-                    in cs.tf_score_breakdowns.items()
+                    k: dict(v) for k, v in cs.tf_score_breakdowns.items()
                 },
                 "tf_directions": dict(cs.tf_directions),
                 "last_tick_time": (
@@ -866,9 +811,7 @@ class LiveTradingEngine:
             if s.signal_type.value != "HOLD":
                 grouped.setdefault(s.symbol, []).append(s)
         radar = {
-            sym: sorted(
-                sigs, key=lambda x: x.confidence, reverse=True
-            )
+            sym: sorted(sigs, key=lambda x: x.confidence, reverse=True)
             for sym, sigs in grouped.items()
         }
         radar_serialized = {
@@ -905,7 +848,10 @@ class LiveTradingEngine:
         }
 
     async def get_candles(
-        self, symbol: str, timeframe: str, limit: int,
+        self,
+        symbol: str,
+        timeframe: str,
+        limit: int,
     ):
         """ローソク足データ取得（public API）
 
@@ -939,17 +885,11 @@ class LiveTradingEngine:
         Returns:
             pd.DataFrame: ローソク足DataFrame
         """
-        tf_val = (
-            timeframe.value
-            if hasattr(timeframe, "value")
-            else timeframe
-        )
+        tf_val = timeframe.value if hasattr(timeframe, "value") else timeframe
         tf_enum = Timeframe(tf_val)
         tf_sec = tf_enum.minutes() * 60
         # 休場日を考慮して3倍マージンで開始時刻を推定
-        start = end_time - timedelta(
-            seconds=tf_sec * limit * 3
-        )
+        start = end_time - timedelta(seconds=tf_sec * limit * 3)
         df = await self._data_provider.get_candles_async(
             symbol, tf_enum, start, end_time
         )
@@ -1013,7 +953,8 @@ class LiveTradingEngine:
         }
 
     def _consolidated_to_signal(
-        self, cs: ConsolidatedSignal,
+        self,
+        cs: ConsolidatedSignal,
     ) -> Signal:
         """ConsolidatedSignalをSignalエンティティに変換
 
@@ -1032,7 +973,7 @@ class LiveTradingEngine:
             stop_loss=cs.sl_pips,
             take_profit=cs.tp_pips,
             reasoning=cs.rationale,
-            created_at=datetime.now(timezone.utc),
+            created_at=datetime.now(UTC),
             indicators_snapshot={},
             regime=cs.regime,
             mode=cs.mode,
@@ -1051,7 +992,9 @@ class LiveTradingEngine:
 
         logger.info(
             "過去データ読込: %s %d本 x %d時間足",
-            symbol, lookback, len(timeframes),
+            symbol,
+            lookback,
+            len(timeframes),
         )
 
         all_data: dict[str, pd.DataFrame] = {}
@@ -1066,23 +1009,21 @@ class LiveTradingEngine:
                 symbol, tf, lookback
             )
             if df.empty:
-                logger.warning(
-                    "データなし: %s %s", symbol, tf_str
-                )
+                logger.warning("データなし: %s %s", symbol, tf_str)
                 continue
 
             all_data[tf_str] = df
             logger.info(
                 "データ読込完了: %s %s %d本",
-                symbol, tf_str, len(df),
+                symbol,
+                tf_str,
+                len(df),
             )
 
         if all_data:
             all_data = self._calc_indicators(all_data)
             self._bot.set_market_data(all_data)
-            logger.info(
-                "全TFデータ設定完了: %d時間足", len(all_data)
-            )
+            logger.info("全TFデータ設定完了: %d時間足", len(all_data))
 
     async def _update_market_data(self) -> None:
         """最新ローソク足データを取得してTradeBotに設定
@@ -1151,9 +1092,7 @@ class LiveTradingEngine:
             try:
                 result[tf] = calc.calculate_basic(df.copy())
             except Exception as e:
-                logger.warning(
-                    "指標計算失敗: %s %s", tf, e
-                )
+                logger.warning("指標計算失敗: %s %s", tf, e)
                 result[tf] = df
         return result
 
@@ -1185,15 +1124,11 @@ class LiveTradingEngine:
         )
         # MT5接続エラー時はエントリーを安全にスキップ
         if positions is None:
-            logger.warning(
-                "MT5ポジション取得失敗 — エントリースキップ"
-            )
+            logger.warning("MT5ポジション取得失敗 — エントリースキップ")
             return
         cfg = self._bot.config
         base_max = (
-            cfg.demo_max_positions
-            if cfg.demo_mode
-            else cfg.max_positions
+            cfg.demo_max_positions if cfg.demo_mode else cfg.max_positions
         )
         bonus = getattr(cfg, "bonus_max_positions", 0)
         threshold = getattr(cfg, "bonus_score_threshold", 7.0)
@@ -1244,9 +1179,7 @@ class LiveTradingEngine:
         sizing_result = self._sizer.calculate(sizing_ctx)
 
         if sizing_result.blocked:
-            logger.warning(
-                "サイジング拒否: %s", sizing_result.reasoning
-            )
+            logger.warning("サイジング拒否: %s", sizing_result.reasoning)
             return
 
         lot = sizing_result.lot
@@ -1259,17 +1192,14 @@ class LiveTradingEngine:
         signal_with_lot = signal.model_copy(update={"lot": lot})
 
         # MT5発注（発注直前のtick価格を取得してentry_priceに使用）
-        entry_tick = await self._data_provider.get_tick(
-            self._active_symbol
-        )
-        result = await self._executor.open_position_async(
-            signal_with_lot, lot
-        )
+        entry_tick = await self._data_provider.get_tick(self._active_symbol)
+        result = await self._executor.open_position_async(signal_with_lot, lot)
 
         if result.success:
             logger.info(
                 "エントリー成功: ticket=%d %.2f lots",
-                result.ticket or 0, lot,
+                result.ticket or 0,
+                lot,
             )
             # PositionManagerに登録
             trade_id = ""
@@ -1278,9 +1208,12 @@ class LiveTradingEngine:
                     result.ticket, signal_with_lot, lot, entry_tick
                 )
                 # DB書き込み（エントリー記録）
-                trade_id = self._write_entry_to_db(
-                    result.ticket, signal_with_lot, lot, entry_tick
-                ) or ""
+                trade_id = (
+                    self._write_entry_to_db(
+                        result.ticket, signal_with_lot, lot, entry_tick
+                    )
+                    or ""
+                )
                 if trade_id:
                     self._open_trades[result.ticket] = trade_id
 
@@ -1292,31 +1225,29 @@ class LiveTradingEngine:
                     if signal_with_lot.signal_type == SignalType.BUY
                     else "bid"
                 )
-                entry_price = float(
-                    entry_tick.get(price_key, 0)
-                ) or entry_price
-            self._cached_positions.append({
-                "position_id": str(result.ticket or 0),
-                "trade_id": trade_id,
-                "ticket": result.ticket or 0,
-                "symbol": self._active_symbol,
-                "signal_type": (
-                    signal_with_lot.signal_type.value
-                ),
-                "volume": lot,
-                "entry_price": entry_price,
-                "current_price": entry_price,
-                "stop_loss": signal_with_lot.stop_loss,
-                "take_profit": signal_with_lot.take_profit,
-                "opened_at": datetime.now(
-                    timezone.utc
-                ).isoformat(),
-                "unrealized_pnl": 0.0,
-                "unrealized_pnl_pips": 0.0,
-                "remaining_minutes": None,
-                "max_hold_minutes": None,
-                "elapsed_minutes": 0,
-            })
+                entry_price = (
+                    float(entry_tick.get(price_key, 0)) or entry_price
+                )
+            self._cached_positions.append(
+                {
+                    "position_id": str(result.ticket or 0),
+                    "trade_id": trade_id,
+                    "ticket": result.ticket or 0,
+                    "symbol": self._active_symbol,
+                    "signal_type": (signal_with_lot.signal_type.value),
+                    "volume": lot,
+                    "entry_price": entry_price,
+                    "current_price": entry_price,
+                    "stop_loss": signal_with_lot.stop_loss,
+                    "take_profit": signal_with_lot.take_profit,
+                    "opened_at": datetime.now(UTC).isoformat(),
+                    "unrealized_pnl": 0.0,
+                    "unrealized_pnl_pips": 0.0,
+                    "remaining_minutes": None,
+                    "max_hold_minutes": None,
+                    "elapsed_minutes": 0,
+                }
+            )
 
             # TradeBotに通知（取引時刻を渡す）
             self._bot.on_trade_executed(signal.created_at)
@@ -1352,7 +1283,8 @@ class LiveTradingEngine:
         is_buy = signal.signal_type == SignalType.BUY
         if entry_tick:
             entry_price = float(
-                entry_tick.get("ask", 0) if is_buy
+                entry_tick.get("ask", 0)
+                if is_buy
                 else entry_tick.get("bid", 0)
             )
         else:
@@ -1366,19 +1298,20 @@ class LiveTradingEngine:
             if signal.stop_loss and signal.stop_loss > 0:
                 sl_dist = signal.stop_loss * pip_size
                 sl_price = (
-                    entry_price - sl_dist if is_buy
-                    else entry_price + sl_dist
+                    entry_price - sl_dist if is_buy else entry_price + sl_dist
                 )
             if signal.take_profit and signal.take_profit > 0:
                 tp_dist = signal.take_profit * pip_size
                 tp_price = (
-                    entry_price + tp_dist if is_buy
-                    else entry_price - tp_dist
+                    entry_price + tp_dist if is_buy else entry_price - tp_dist
                 )
 
         logger.info(
             "PM登録: ticket=%d entry=%.3f sl=%.3f tp=%.3f",
-            ticket, entry_price, sl_price, tp_price,
+            ticket,
+            entry_price,
+            sl_price,
+            tp_price,
         )
 
         # signal.modeから実際のモードを解決（デフォルト: UNIVERSAL）
@@ -1410,7 +1343,7 @@ class LiveTradingEngine:
             position_id=str(ticket),
             direction=signal.signal_type,
             entry_price=entry_price,
-            entry_time=datetime.now(timezone.utc),
+            entry_time=datetime.now(UTC),
             sl=sl_price,
             tp=tp_price,
             volume=volume,
@@ -1442,11 +1375,13 @@ class LiveTradingEngine:
             TradeRepository,
         )
         from autotrader.config.settings import get_settings
+
         try:
             is_buy = signal.signal_type == SignalType.BUY
             if entry_tick:
                 entry_price = float(
-                    entry_tick.get("ask", 0) if is_buy
+                    entry_tick.get("ask", 0)
+                    if is_buy
                     else entry_tick.get("bid", 0)
                 )
             else:
@@ -1458,13 +1393,15 @@ class LiveTradingEngine:
                 if signal.stop_loss and signal.stop_loss > 0:
                     sl_dist = signal.stop_loss * pip_size
                     sl_price = (
-                        entry_price - sl_dist if is_buy
+                        entry_price - sl_dist
+                        if is_buy
                         else entry_price + sl_dist
                     )
                 if signal.take_profit and signal.take_profit > 0:
                     tp_dist = signal.take_profit * pip_size
                     tp_price = (
-                        entry_price + tp_dist if is_buy
+                        entry_price + tp_dist
+                        if is_buy
                         else entry_price - tp_dist
                     )
             db_url = get_settings().database_url
@@ -1475,7 +1412,7 @@ class LiveTradingEngine:
                     signal_type=signal.signal_type.value,
                     volume=lot,
                     entry_price=entry_price,
-                    opened_at=datetime.now(timezone.utc),
+                    opened_at=datetime.now(UTC),
                     stop_loss=sl_price,
                     take_profit=tp_price,
                     ticket=ticket,
@@ -1483,45 +1420,38 @@ class LiveTradingEngine:
                 trade_id = trade.trade_id
             logger.info(
                 "DB記録（エントリー）: trade_id=%s ticket=%d",
-                trade_id, ticket,
+                trade_id,
+                ticket,
             )
             return trade_id
         except Exception as e:
             logger.error("DB書き込みエラー（エントリー）: %s", e)
             return None
 
-    async def _handle_external_close(
-        self, ticket: int
-    ) -> None:
+    async def _handle_external_close(self, ticket: int) -> None:
         """外部決済（SL/TP/手動）をMT5約定履歴から取得してDB記録。
 
         Args:
             ticket: MT5ポジションID
         """
-        logger.info(
-            "外部決済検出（手動/SL/TP）: ticket=%d", ticket
-        )
-        deal = await self._executor.get_deal_by_position_async(
-            ticket
-        )
+        logger.info("外部決済検出（手動/SL/TP）: ticket=%d", ticket)
+        deal = await self._executor.get_deal_by_position_async(ticket)
         if deal:
             exit_price = deal["price"]
             profit_loss = deal["profit"]
-            exit_reason = _mt5_reason_to_exit_reason(
-                deal["reason_code"]
-            )
+            exit_reason = _mt5_reason_to_exit_reason(deal["reason_code"])
             logger.info(
-                "外部決済詳細: ticket=%d reason=%s"
-                " price=%.5f profit=%.2f",
-                ticket, exit_reason, exit_price, profit_loss,
+                "外部決済詳細: ticket=%d reason=%s price=%.5f profit=%.2f",
+                ticket,
+                exit_reason,
+                exit_price,
+                profit_loss,
             )
         else:
             # 約定履歴取得失敗時はティック価格をフォールバックに使用
             exit_price = 0.0
             try:
-                tick = await self._data_provider.get_tick(
-                    self._active_symbol
-                )
+                tick = await self._data_provider.get_tick(self._active_symbol)
                 _bid = float(tick.get("bid", 0))
                 _ask = float(tick.get("ask", 0))
                 # 方向不明のためmid価格をフォールバック
@@ -1536,11 +1466,10 @@ class LiveTradingEngine:
             logger.warning(
                 "外部決済の約定履歴取得失敗: ticket=%d"
                 " → フォールバック価格=%.5f で記録",
-                ticket, exit_price,
+                ticket,
+                exit_price,
             )
-        self._write_close_to_db(
-            ticket, exit_price, exit_reason, profit_loss
-        )
+        self._write_close_to_db(ticket, exit_price, exit_reason, profit_loss)
         # ローカルDB管理状態を削除
         self._delete_position_state(str(ticket))
 
@@ -1564,6 +1493,7 @@ class LiveTradingEngine:
             TradeRepository,
         )
         from autotrader.config.settings import get_settings
+
         trade_id = self._open_trades.get(ticket)
         if not trade_id:
             return
@@ -1584,10 +1514,8 @@ class LiveTradingEngine:
                     pip_val = self._get_pip_value(self._active_symbol)
                     # ManagedPositionはremaining_volumeを使用
                     _vol = pos.remaining_volume
-                    profit_loss = round(
-                        pnl_pips * _vol * pip_val, 2
-                    )
-            closed_at = datetime.now(timezone.utc)
+                    profit_loss = round(pnl_pips * _vol * pip_val, 2)
+            closed_at = datetime.now(UTC)
             db_url = get_settings().database_url
             with get_session(db_url) as db:
                 repo = TradeRepository(db)
@@ -1601,18 +1529,23 @@ class LiveTradingEngine:
                 )
             # DB書き込み成功後にpop（失敗時は次回tickで再試行）
             self._open_trades.pop(ticket, None)
-            self._closed_trades.append({
-                "trade_id": trade_id,
-                "ticket": ticket,
-                "exit_price": current_price,
-                "exit_reason": action_reason,
-                "pnl_pips": round(pnl_pips, 1),
-                "closed_at": closed_at.isoformat(),
-            })
+            self._closed_trades.append(
+                {
+                    "trade_id": trade_id,
+                    "ticket": ticket,
+                    "exit_price": current_price,
+                    "exit_reason": action_reason,
+                    "pnl_pips": round(pnl_pips, 1),
+                    "closed_at": closed_at.isoformat(),
+                }
+            )
             logger.info(
                 "DB記録（決済）: trade_id=%s ticket=%d"
                 " pnl_pips=%.1f profit_loss=%.2f",
-                trade_id, ticket, pnl_pips, profit_loss,
+                trade_id,
+                ticket,
+                pnl_pips,
+                profit_loss,
             )
             # EventBus経由で決済イベントをUIに即時通知
             get_event_bus().publish_nowait(
@@ -1631,15 +1564,11 @@ class LiveTradingEngine:
         _cached_positionsをMT5の現在状態で更新する。
         """
         # 全通貨ペアのポジションを取得（UI表示用）
-        positions = await self._executor.get_open_positions_async(
-            None
-        )
+        positions = await self._executor.get_open_positions_async(None)
         # MT5接続エラー時は_cached_positionsを更新しない
         # （一時的な切断時にUIが空になるのを防ぐ）
         if positions is None:
-            logger.warning(
-                "MT5ポジション取得失敗 — 管理スキップ"
-            )
+            logger.warning("MT5ポジション取得失敗 — 管理スキップ")
             return
         current_tickets = {pos.ticket for pos in positions}
 
@@ -1652,9 +1581,7 @@ class LiveTradingEngine:
         # 外部決済（手動/SL/TP）の検出:
         # _open_tradesにあるが現在MT5に存在しないticket
         if self._open_trades:
-            externally_closed = (
-                set(self._open_trades.keys()) - current_tickets
-            )
+            externally_closed = set(self._open_trades.keys()) - current_tickets
             for ticket in externally_closed:
                 await self._handle_external_close(ticket)
 
@@ -1693,13 +1620,9 @@ class LiveTradingEngine:
             # ティック取得（キャッシュ＋管理評価で共用）
             current_price = position.entry_price
             try:
-                tick = await self._data_provider.get_tick(
-                    position.symbol
-                )
+                tick = await self._data_provider.get_tick(position.symbol)
                 price_key = (
-                    "bid"
-                    if position.signal_type == SignalType.BUY
-                    else "ask"
+                    "bid" if position.signal_type == SignalType.BUY else "ask"
                 )
                 fetched = float(tick.get(price_key, 0))
                 if fetched > 0:
@@ -1708,9 +1631,7 @@ class LiveTradingEngine:
                 pass
 
             # キャッシュエントリ構築（MT5全ポジションを対象）
-            pip_diff = (
-                (current_price - position.entry_price) / pip_factor
-            )
+            pip_diff = (current_price - position.entry_price) / pip_factor
             if position.signal_type == SignalType.SELL:
                 pip_diff = -pip_diff
             # 保有時間を計算
@@ -1720,48 +1641,34 @@ class LiveTradingEngine:
             elapsed_minutes = None
             # PM管理ポジション: entry_time（正確なUTC）を使用
             # MT5のopened_atはブローカータイムゾーン(UTC+2)のため不正確
-            if managed is not None and hasattr(
-                managed, "entry_time"
-            ):
+            if managed is not None and hasattr(managed, "entry_time"):
                 elapsed_sec = (
-                    datetime.now(timezone.utc)
-                    - managed.entry_time
+                    datetime.now(UTC) - managed.entry_time
                 ).total_seconds()
-                elapsed_minutes = max(
-                    0, int(elapsed_sec / 60)
-                )
+                elapsed_minutes = max(0, int(elapsed_sec / 60))
             elif hasattr(position.opened_at, "timestamp"):
                 # 非PM管理ポジション: opened_atを使用（TZオフセットあり）
                 elapsed_sec = (
-                    datetime.now(timezone.utc)
-                    - position.opened_at
+                    datetime.now(UTC) - position.opened_at
                 ).total_seconds()
-                elapsed_minutes = max(
-                    0, int(elapsed_sec / 60)
-                )
+                elapsed_minutes = max(0, int(elapsed_sec / 60))
             if managed is not None:
                 try:
                     from autotrader.config.tf_params_registry import (
                         get_holding_minutes,
                     )
-                    dtf = getattr(
-                        managed.plan, "dynamic_entry_tf", None
-                    )
-                    etf = getattr(
-                        managed.plan, "entry_tf", None
-                    )
+
+                    dtf = getattr(managed.plan, "dynamic_entry_tf", None)
+                    etf = getattr(managed.plan, "entry_tf", None)
                     entry_tf = (
-                        dtf if isinstance(dtf, str)
-                        else etf if isinstance(etf, str)
+                        dtf
+                        if isinstance(dtf, str)
+                        else etf
+                        if isinstance(etf, str)
                         else None
                     )
-                    if (
-                        entry_tf is not None
-                        and elapsed_minutes is not None
-                    ):
-                        max_hold_minutes = get_holding_minutes(
-                            entry_tf
-                        )
+                    if entry_tf is not None and elapsed_minutes is not None:
+                        max_hold_minutes = get_holding_minutes(entry_tf)
                         remaining_minutes = max(
                             0,
                             int(max_hold_minutes - elapsed_minutes),
@@ -1769,32 +1676,30 @@ class LiveTradingEngine:
                 except (KeyError, ValueError, TypeError, AttributeError):
                     pass
 
-            cache_list.append({
-                "position_id": str(position.ticket),
-                "trade_id": self._open_trades.get(
-                    position.ticket, ""
-                ),
-                "ticket": position.ticket,
-                "symbol": position.symbol,
-                "signal_type": position.signal_type.value,
-                "volume": position.volume,
-                "entry_price": position.entry_price,
-                "current_price": current_price,
-                "stop_loss": position.stop_loss,
-                "take_profit": position.take_profit,
-                "opened_at": (
-                    position.opened_at.isoformat()
-                    if hasattr(position.opened_at, "isoformat")
-                    else str(position.opened_at)
-                ),
-                "unrealized_pnl": (
-                    pip_diff * position.volume * pip_value
-                ),
-                "unrealized_pnl_pips": pip_diff,
-                "remaining_minutes": remaining_minutes,
-                "max_hold_minutes": max_hold_minutes,
-                "elapsed_minutes": elapsed_minutes,
-            })
+            cache_list.append(
+                {
+                    "position_id": str(position.ticket),
+                    "trade_id": self._open_trades.get(position.ticket, ""),
+                    "ticket": position.ticket,
+                    "symbol": position.symbol,
+                    "signal_type": position.signal_type.value,
+                    "volume": position.volume,
+                    "entry_price": position.entry_price,
+                    "current_price": current_price,
+                    "stop_loss": position.stop_loss,
+                    "take_profit": position.take_profit,
+                    "opened_at": (
+                        position.opened_at.isoformat()
+                        if hasattr(position.opened_at, "isoformat")
+                        else str(position.opened_at)
+                    ),
+                    "unrealized_pnl": (pip_diff * position.volume * pip_value),
+                    "unrealized_pnl_pips": pip_diff,
+                    "remaining_minutes": remaining_minutes,
+                    "max_hold_minutes": max_hold_minutes,
+                    "elapsed_minutes": elapsed_minutes,
+                }
+            )
 
             # PM未登録 or 自動取引OFFなら評価スキップ
             # OFF時はMT5手動決済に委ねる
@@ -1808,26 +1713,24 @@ class LiveTradingEngine:
                 action = self._pm.evaluate(
                     position_id=pos_id,
                     current_price=current_price,
-                    current_time=datetime.now(timezone.utc),
+                    current_time=datetime.now(UTC),
                     atr=atr,
                     current_signal=current_signal_type,
                 )
 
                 # アクション実行
-                await self._execute_action(
-                    position, action, current_price
-                )
+                await self._execute_action(position, action, current_price)
 
                 # 管理状態をローカルDBに保存（毎tick）
                 self._save_position_state(pos_id)
             except Exception as e:
                 logger.error(
                     "ポジション管理エラー(ticket=%d): %s",
-                    position.ticket, e,
+                    position.ticket,
+                    e,
                 )
 
         self._cached_positions = cache_list
-
 
     async def _execute_action(
         self, position, action, current_price: float = 0.0
@@ -1873,9 +1776,7 @@ class LiveTradingEngine:
                         )
 
         elif action.action_type == ManagementActionType.PARTIAL_CLOSE:
-            close_vol = round(
-                position.volume * action.close_ratio, 2
-            )
+            close_vol = round(position.volume * action.close_ratio, 2)
             if close_vol > 0:
                 result = await self._executor.close_partial_async(
                     position, close_vol, action.reason
@@ -1883,7 +1784,9 @@ class LiveTradingEngine:
                 if result.success:
                     logger.info(
                         "部分決済: ticket=%d %.2f lots (%s)",
-                        position.ticket, close_vol, action.reason,
+                        position.ticket,
+                        close_vol,
+                        action.reason,
                     )
                     # SL変更もあれば実行（バリデーション付き）
                     if action.new_sl is not None:
@@ -1905,7 +1808,8 @@ class LiveTradingEngine:
             if result.success:
                 logger.info(
                     "全決済: ticket=%d (%s)",
-                    position.ticket, action.reason,
+                    position.ticket,
+                    action.reason,
                 )
                 # DB記録（決済）
                 # unregister_positionより先に行うことで、
@@ -1939,13 +1843,9 @@ class LiveTradingEngine:
                         _profit_loss,
                     )
                 # ローカルDB管理状態を削除
-                self._delete_position_state(
-                    str(position.ticket)
-                )
+                self._delete_position_state(str(position.ticket))
                 # DB記録後にPMからポジションを削除
-                self._pm.unregister_position(
-                    str(position.ticket)
-                )
+                self._pm.unregister_position(str(position.ticket))
 
     async def sync_positions_on_toggle(self) -> None:
         """自動取引ON切替時のポジション同期
@@ -1981,17 +1881,12 @@ class LiveTradingEngine:
         # None=取得失敗、[]=ポジション0件の区別が必要
         if positions is None:
             logger.warning(
-                "MT5ポジション取得失敗 — "
-                "ゴースト掃除・復元をスキップ"
+                "MT5ポジション取得失敗 — ゴースト掃除・復元をスキップ"
             )
             return
 
         # DBゴーストレコード掃除（MT5に存在しないis_open=true）
-        active_tickets = (
-            {p.ticket for p in positions}
-            if positions
-            else set()
-        )
+        active_tickets = {p.ticket for p in positions} if positions else set()
         await self._close_ghost_db_records(active_tickets)
 
         if not positions:
@@ -1999,16 +1894,12 @@ class LiveTradingEngine:
             return
 
         # DBからopenトレードを復元（再起動対応）
-        self._restore_open_trades_from_db(
-            [pos.ticket for pos in positions]
-        )
+        self._restore_open_trades_from_db([pos.ticket for pos in positions])
 
         # ローカルDBから管理状態を一括取得
         saved_states = self._load_position_states()
 
-        logger.info(
-            "%d件のポジションを同期", len(positions)
-        )
+        logger.info("%d件のポジションを同期", len(positions))
         for pos in positions:
             # PMに未登録なら簡易登録
             pos_id = str(pos.ticket)
@@ -2047,37 +1938,27 @@ class LiveTradingEngine:
             # MT5最新値でSLとvolumeを補正
             managed = self._pm.get_position(pos_id)
             if managed is not None:
-                managed.current_sl = (
-                    pos.stop_loss or managed.current_sl
-                )
+                managed.current_sl = pos.stop_loss or managed.current_sl
                 managed.remaining_volume = pos.volume
 
                 # ローカルDB管理状態の復元
                 if pos_id in saved_states:
-                    self._pm.import_state(
-                        pos_id, saved_states[pos_id]
-                    )
+                    self._pm.import_state(pos_id, saved_states[pos_id])
                     logger.info(
-                        "管理状態復元: ticket=%s"
-                        " flags=%s",
+                        "管理状態復元: ticket=%s flags=%s",
                         pos_id,
                         {
                             k: v
-                            for k, v
-                            in saved_states[pos_id].items()
+                            for k, v in saved_states[pos_id].items()
                             if isinstance(v, bool) and v
                         },
                     )
 
         # MT5に存在しない陳腐化レコードを削除
-        active_ids = {
-            str(p.ticket) for p in positions
-        }
+        active_ids = {str(p.ticket) for p in positions}
         self._cleanup_stale_states(active_ids)
 
-    async def _close_ghost_db_records(
-        self, active_tickets: set[int]
-    ) -> None:
+    async def _close_ghost_db_records(self, active_tickets: set[int]) -> None:
         """MT5に存在しないDBゴーストレコードを決済済みに更新
 
         エンジン停止中にMT5側で決済されたポジションの
@@ -2106,33 +1987,30 @@ class LiveTradingEngine:
             # MT5履歴取得（非同期）でゴーストの決済データを収集
             updates: list[dict] = []
             for ticket, trade_id in ghost_data:
-                deal = await (
-                    self._executor
-                    .get_deal_by_position_id_async(
-                        ticket
-                    )
+                deal = await self._executor.get_deal_by_position_id_async(
+                    ticket
                 )
                 if deal:
                     closed_at = (
                         datetime.fromtimestamp(
                             deal["time"],
-                            tz=timezone.utc,
+                            tz=UTC,
                         )
                         if deal["time"] > 0
-                        else datetime.now(timezone.utc)
+                        else datetime.now(UTC)
                     )
-                    updates.append({
-                        "ticket": ticket,
-                        "trade_id": trade_id,
-                        "exit_price": deal["price"],
-                        "profit_loss": deal["profit"],
-                        "exit_reason": (
-                            _mt5_reason_to_exit_reason(
-                                deal["reason_code"]
-                            )
-                        ),
-                        "closed_at": closed_at,
-                    })
+                    updates.append(
+                        {
+                            "ticket": ticket,
+                            "trade_id": trade_id,
+                            "exit_price": deal["price"],
+                            "profit_loss": deal["profit"],
+                            "exit_reason": (
+                                _mt5_reason_to_exit_reason(deal["reason_code"])
+                            ),
+                            "closed_at": closed_at,
+                        }
+                    )
                     logger.info(
                         "ゴースト復元(MT5履歴):"
                         " ticket=%s reason=%s"
@@ -2143,21 +2021,18 @@ class LiveTradingEngine:
                         updates[-1]["profit_loss"],
                     )
                 else:
-                    updates.append({
-                        "ticket": ticket,
-                        "trade_id": trade_id,
-                        "exit_price": None,
-                        "profit_loss": None,
-                        "exit_reason": (
-                            ExitReason.GHOST_CLEANUP.value
-                        ),
-                        "closed_at": datetime.now(
-                            timezone.utc
-                        ),
-                    })
+                    updates.append(
+                        {
+                            "ticket": ticket,
+                            "trade_id": trade_id,
+                            "exit_price": None,
+                            "profit_loss": None,
+                            "exit_reason": (ExitReason.GHOST_CLEANUP.value),
+                            "closed_at": datetime.now(UTC),
+                        }
+                    )
                     logger.info(
-                        "ゴーストレコード掃除:"
-                        " ticket=%s trade_id=%s",
+                        "ゴーストレコード掃除: ticket=%s trade_id=%s",
                         ticket,
                         trade_id,
                     )
@@ -2165,17 +2040,15 @@ class LiveTradingEngine:
             # 同期DB更新をスレッドプールで実行
             if updates:
                 await asyncio.to_thread(
-                    self._apply_ghost_updates, updates,
+                    self._apply_ghost_updates,
+                    updates,
                 )
                 logger.info(
-                    "ゴーストレコード %d件を"
-                    " is_open=false に更新",
+                    "ゴーストレコード %d件を is_open=false に更新",
                     len(updates),
                 )
         except Exception as e:
-            logger.warning(
-                "ゴーストレコード掃除スキップ: %s", e
-            )
+            logger.warning("ゴーストレコード掃除スキップ: %s", e)
 
     def _fetch_ghost_records(
         self, active_tickets: set[int]
@@ -2205,9 +2078,7 @@ class LiveTradingEngine:
                 db.query(TradeRecord)
                 .filter(
                     TradeRecord.is_open.is_(True),
-                    TradeRecord.symbol == (
-                        self._active_symbol
-                    ),
+                    TradeRecord.symbol == (self._active_symbol),
                 )
                 .all()
             )
@@ -2217,9 +2088,7 @@ class LiveTradingEngine:
                 if r.ticket not in active_tickets
             ]
 
-    def _apply_ghost_updates(
-        self, updates: list[dict]
-    ) -> None:
+    def _apply_ghost_updates(self, updates: list[dict]) -> None:
         """ゴーストレコードの決済情報をDBに同期書き込み
 
         イベントループをブロックしないよう
@@ -2258,9 +2127,7 @@ class LiveTradingEngine:
                     record.profit_loss = upd["profit_loss"]
             db.flush()
 
-    def _restore_open_trades_from_db(
-        self, tickets: list[int]
-    ) -> None:
+    def _restore_open_trades_from_db(self, tickets: list[int]) -> None:
         """DBからオープントレードのtrade_idを復元
 
         エンジン再起動時に _open_trades マッピングを
@@ -2276,6 +2143,7 @@ class LiveTradingEngine:
             TradeRecord,
         )
         from autotrader.config.settings import get_settings
+
         try:
             db_url = get_settings().database_url
             with get_session(db_url) as db:
@@ -2289,18 +2157,14 @@ class LiveTradingEngine:
                 )
                 for r in records:
                     if r.ticket not in self._open_trades:
-                        self._open_trades[r.ticket] = (
-                            r.trade_id
-                        )
+                        self._open_trades[r.ticket] = r.trade_id
                         logger.info(
-                            "trade_id復元: ticket=%d"
-                            " trade_id=%s",
-                            r.ticket, r.trade_id,
+                            "trade_id復元: ticket=%d trade_id=%s",
+                            r.ticket,
+                            r.trade_id,
                         )
         except Exception as e:
-            logger.warning(
-                "trade_id復元スキップ: %s", e
-            )
+            logger.warning("trade_id復元スキップ: %s", e)
 
     # ==== ポジション管理状態の永続化 ====
 
@@ -2318,6 +2182,7 @@ class LiveTradingEngine:
         from autotrader.adapters.database.repositories import (
             PositionStateRepository,
         )
+
         result: dict[str, dict] = {}
         try:
             with get_local_session() as session:
@@ -2329,37 +2194,24 @@ class LiveTradingEngine:
                         "lowest_price": rec.lowest_price,
                         "highest_r": rec.highest_r,
                         "bars_held": rec.bars_held,
-                        "trailing_activated": (
-                            rec.trailing_activated
-                        ),
-                        "partial_closed_1r": (
-                            rec.partial_closed_1r
-                        ),
-                        "partial_closed_2r": (
-                            rec.partial_closed_2r
-                        ),
+                        "trailing_activated": (rec.trailing_activated),
+                        "partial_closed_1r": (rec.partial_closed_1r),
+                        "partial_closed_2r": (rec.partial_closed_2r),
                         "tp_disabled": rec.tp_disabled,
-                        "early_be_applied": (
-                            rec.early_be_applied
-                        ),
-                        "insurance_sl_applied": (
-                            rec.insurance_sl_applied
-                        ),
+                        "early_be_applied": (rec.early_be_applied),
+                        "insurance_sl_applied": (rec.insurance_sl_applied),
                         "insurance_partial_applied": (
                             rec.insurance_partial_applied
                         ),
-                        "half_r_partial_applied": (
-                            rec.half_r_partial_applied
-                        ),
+                        "half_r_partial_applied": (rec.half_r_partial_applied),
                     }
         except Exception as e:
-            logger.warning(
-                "管理状態ロードスキップ: %s", e
-            )
+            logger.warning("管理状態ロードスキップ: %s", e)
         return result
 
     def _save_position_state(
-        self, position_id: str,
+        self,
+        position_id: str,
     ) -> None:
         """ポジション管理状態をローカルDBに保存
 
@@ -2372,6 +2224,7 @@ class LiveTradingEngine:
         from autotrader.adapters.database.repositories import (
             PositionStateRepository,
         )
+
         state = self._pm.export_state(position_id)
         if state is None:
             return
@@ -2382,11 +2235,13 @@ class LiveTradingEngine:
         except Exception as e:
             logger.warning(
                 "管理状態保存エラー(pos=%s): %s",
-                position_id, e,
+                position_id,
+                e,
             )
 
     def _delete_position_state(
-        self, position_id: str,
+        self,
+        position_id: str,
     ) -> None:
         """ポジション管理状態をローカルDBから削除
 
@@ -2399,6 +2254,7 @@ class LiveTradingEngine:
         from autotrader.adapters.database.repositories import (
             PositionStateRepository,
         )
+
         try:
             with get_local_session() as session:
                 repo = PositionStateRepository(session)
@@ -2406,11 +2262,13 @@ class LiveTradingEngine:
         except Exception as e:
             logger.warning(
                 "管理状態削除エラー(pos=%s): %s",
-                position_id, e,
+                position_id,
+                e,
             )
 
     def _cleanup_stale_states(
-        self, active_ids: set[str],
+        self,
+        active_ids: set[str],
     ) -> None:
         """MT5に存在しない陳腐化レコードを削除
 
@@ -2423,6 +2281,7 @@ class LiveTradingEngine:
         from autotrader.adapters.database.repositories import (
             PositionStateRepository,
         )
+
         try:
             with get_local_session() as session:
                 repo = PositionStateRepository(session)
@@ -2434,18 +2293,15 @@ class LiveTradingEngine:
                 for pid in stale_ids:
                     repo.delete(pid)
                     logger.info(
-                        "陳腐化管理状態削除: %s", pid,
+                        "陳腐化管理状態削除: %s",
+                        pid,
                     )
         except Exception as e:
-            logger.warning(
-                "陳腐化状態クリーンアップエラー: %s", e
-            )
+            logger.warning("陳腐化状態クリーンアップエラー: %s", e)
 
     # ==== ファンダメンタル統合メソッド ====
 
-    def _init_fundamental(
-        self, cfg: FundamentalConfig
-    ) -> None:
+    def _init_fundamental(self, cfg: FundamentalConfig) -> None:
         """ファンダメンタル機能を初期化
 
         Args:
@@ -2471,21 +2327,11 @@ class LiveTradingEngine:
                     self._shared_fundamental_collector
                 )
             else:
-                self._fundamental_collector = (
-                    FundamentalDataCollector(
-                        fetch_interval_minutes=(
-                            cfg.fetch_interval_minutes
-                        ),
-                        use_mt5_calendar=(
-                            cfg.use_mt5_calendar
-                        ),
-                        use_forex_factory=(
-                            cfg.use_forex_factory
-                        ),
-                        use_ff_holidays=(
-                            cfg.use_ff_holidays
-                        ),
-                    )
+                self._fundamental_collector = FundamentalDataCollector(
+                    fetch_interval_minutes=(cfg.fetch_interval_minutes),
+                    use_mt5_calendar=(cfg.use_mt5_calendar),
+                    use_forex_factory=(cfg.use_forex_factory),
+                    use_ff_holidays=(cfg.use_ff_holidays),
                 )
             self._fundamental_memory = FundamentalMemoryService(
                 event_guard_minutes=cfg.event_guard_minutes,
@@ -2505,28 +2351,17 @@ class LiveTradingEngine:
 
                 # 共有RSSコレクターがあれば再利用
                 if self._shared_rss_collector:
-                    self._rss_collector = (
-                        self._shared_rss_collector
-                    )
+                    self._rss_collector = self._shared_rss_collector
                 else:
                     self._rss_collector = RSSCollector(
-                        poll_interval=(
-                            cfg.rss_poll_interval_minutes
-                            * 60
-                        ),
+                        poll_interval=(cfg.rss_poll_interval_minutes * 60),
                     )
                 self._news_analyzer = NewsLLMAnalyzer(
-                    sentiment_ttl_hours=(
-                        cfg.rss_sentiment_ttl_hours
-                    ),
+                    sentiment_ttl_hours=(cfg.rss_sentiment_ttl_hours),
                 )
-                logger.info(
-                    "[Fundamental] RSSニュース機能初期化完了"
-                )
+                logger.info("[Fundamental] RSSニュース機能初期化完了")
 
-            logger.info(
-                "[Fundamental] ファンダメンタル機能初期化完了"
-            )
+            logger.info("[Fundamental] ファンダメンタル機能初期化完了")
         except Exception as e:
             logger.error(
                 "[Fundamental] 初期化失敗（無効化）: %s",
@@ -2553,22 +2388,17 @@ class LiveTradingEngine:
                     self._shared_fundamental_collector
                 )
             else:
-                self._fundamental_collector = (
-                    FundamentalDataCollector(
-                        fetch_interval_minutes=60,
-                        use_mt5_calendar=True,
-                        use_forex_factory=False,
-                        use_ff_holidays=True,
-                    )
+                self._fundamental_collector = FundamentalDataCollector(
+                    fetch_interval_minutes=60,
+                    use_mt5_calendar=True,
+                    use_forex_factory=False,
+                    use_ff_holidays=True,
                 )
             logger.info(
-                "[Calendar] 軽量カレンダー初期化完了"
-                "（MT5 CSV + FF休日）"
+                "[Calendar] 軽量カレンダー初期化完了（MT5 CSV + FF休日）"
             )
         except Exception as e:
-            logger.error(
-                "[Calendar] 軽量初期化失敗: %s", e
-            )
+            logger.error("[Calendar] 軽量初期化失敗: %s", e)
             self._fundamental_collector = None
 
         # RSS軽量ポーリング（DB・LLM不要）
@@ -2579,20 +2409,14 @@ class LiveTradingEngine:
 
             # 共有RSSコレクターがあれば再利用
             if self._shared_rss_collector:
-                self._rss_collector = (
-                    self._shared_rss_collector
-                )
+                self._rss_collector = self._shared_rss_collector
             else:
                 self._rss_collector = RSSCollector(
                     poll_interval=300,
                 )
-            logger.info(
-                "[RSS] 軽量RSSポーリング初期化完了"
-            )
+            logger.info("[RSS] 軽量RSSポーリング初期化完了")
         except Exception as e:
-            logger.warning(
-                "[RSS] RSS初期化スキップ: %s", e
-            )
+            logger.warning("[RSS] RSS初期化スキップ: %s", e)
             self._rss_collector = None
 
     async def _start_fundamental_tasks(self) -> None:
@@ -2605,16 +2429,10 @@ class LiveTradingEngine:
             return
         if self._fundamental_collector:
             await self._fundamental_collector.start()
-            logger.info(
-                "[Fundamental] 収集タスク起動"
-            )
+            logger.info("[Fundamental] 収集タスク起動")
         if self._rss_collector:
-            await self._rss_collector.start(
-                callback=self._on_rss_news
-            )
-            logger.info(
-                "[Fundamental] RSSポーリング起動"
-            )
+            await self._rss_collector.start(callback=self._on_rss_news)
+            logger.info("[Fundamental] RSSポーリング起動")
 
     async def _stop_fundamental_tasks(self) -> None:
         """ファンダメンタル収集タスクを停止
@@ -2630,7 +2448,9 @@ class LiveTradingEngine:
         self._news_buffer.clear()
 
     def get_news_for_symbol(
-        self, symbol: str, limit: int = 50,
+        self,
+        symbol: str,
+        limit: int = 50,
     ) -> list:
         """指定シンボルに関連するニュースをフィルタリング
 
@@ -2644,14 +2464,12 @@ class LiveTradingEngine:
         base = symbol[:3].upper()
         quote = symbol[3:6].upper()
         filtered = [
-            n for n in self._news_buffer
-            if base in n.currencies
-            or quote in n.currencies
+            n
+            for n in self._news_buffer
+            if base in n.currencies or quote in n.currencies
         ]
         filtered.sort(
-            key=lambda n: getattr(
-                n, "published_at", datetime.min
-            ),
+            key=lambda n: getattr(n, "published_at", datetime.min),
             reverse=True,
         )
         return filtered[:limit]
@@ -2673,27 +2491,25 @@ class LiveTradingEngine:
         symbol = self._active_symbol
         base = symbol[:3].upper()
         quote = symbol[3:6].upper()
-        if (
-            base in news_item.currencies
-            or quote in news_item.currencies
-        ):
+        if base in news_item.currencies or quote in news_item.currencies:
             headlines = [
                 n.title
                 for n in self._news_buffer
-                if base in n.currencies
-                or quote in n.currencies
+                if base in n.currencies or quote in n.currencies
             ]
             if headlines:
                 from autotrader.adapters.fundamental.sentiment_store import (
                     SentimentRecord,
                 )
+
                 result = self._keyword_scorer.score(
-                    headlines, symbol,
+                    headlines,
+                    symbol,
                 )
                 if result.headlines_used > 0:
                     record = SentimentRecord(
                         timestamp=datetime.now(
-                            timezone.utc,
+                            UTC,
                         ).isoformat(),
                         score=result.score,
                         method="keyword",
@@ -2705,56 +2521,41 @@ class LiveTradingEngine:
                         top_headlines=headlines[:3],
                     )
                     self._sentiment_store.save(
-                        symbol, record,
+                        symbol,
+                        record,
                     )
 
         # 3日超の古いニュースを削除
         _TTL_HOURS = 72
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         self._news_buffer = [
-            n for n in self._news_buffer
-            if (now - getattr(
-                n, "published_at", now
-            )).total_seconds() < _TTL_HOURS * 3600
+            n
+            for n in self._news_buffer
+            if (now - getattr(n, "published_at", now)).total_seconds()
+            < _TTL_HOURS * 3600
         ]
         # バッファ上限（メモリリーク防止）
         _MAX_BUFFER = 500
         if len(self._news_buffer) > _MAX_BUFFER:
-            self._news_buffer = (
-                self._news_buffer[-_MAX_BUFFER:]
-            )
+            self._news_buffer = self._news_buffer[-_MAX_BUFFER:]
         # EventBus経由でダッシュボードにリアルタイム配信
         # （active_symbol 関連のみ配信）
-        if (
-            base in news_item.currencies
-            or quote in news_item.currencies
-        ):
-            get_event_bus().publish_nowait("news.received", {
-                "news_id": getattr(
-                    news_item, "news_id", ""
-                ),
-                "published_at": str(
-                    getattr(
-                        news_item, "published_at", ""
-                    )
-                ),
-                "title": getattr(
-                    news_item, "title", ""
-                ),
-                "source_name": getattr(
-                    news_item, "source_name", ""
-                ),
-                "source_url": getattr(
-                    news_item, "source_url", ""
-                ),
-                "currencies": getattr(
-                    news_item, "currencies", []
-                ),
-                "snippet": getattr(
-                    news_item, "snippet", None
-                ),
-                "symbol": symbol,
-            })
+        if base in news_item.currencies or quote in news_item.currencies:
+            get_event_bus().publish_nowait(
+                "news.received",
+                {
+                    "news_id": getattr(news_item, "news_id", ""),
+                    "published_at": str(
+                        getattr(news_item, "published_at", "")
+                    ),
+                    "title": getattr(news_item, "title", ""),
+                    "source_name": getattr(news_item, "source_name", ""),
+                    "source_url": getattr(news_item, "source_url", ""),
+                    "currencies": getattr(news_item, "currencies", []),
+                    "snippet": getattr(news_item, "snippet", None),
+                    "symbol": symbol,
+                },
+            )
 
     @staticmethod
     def _blend_news_sentiment(
@@ -2778,10 +2579,7 @@ class LiveTradingEngine:
         """
         from dataclasses import replace
 
-        blended_bias = (
-            ctx.direction_bias * (1.0 - weight)
-            + sentiment * weight
-        )
+        blended_bias = ctx.direction_bias * (1.0 - weight) + sentiment * weight
         return replace(
             ctx,
             direction_bias=blended_bias,
@@ -2797,7 +2595,7 @@ class LiveTradingEngine:
         if not self._fundamental_memory:
             return
 
-        now = datetime.now(timezone.utc)
+        now = datetime.now(UTC)
         today = now.date()
 
         # 当日実行済みチェック
@@ -2814,14 +2612,15 @@ class LiveTradingEngine:
 
         try:
             from autotrader.adapters.ollama.client import OllamaClient
+
             llm_client = OllamaClient()
 
             # 現在価格取得
             symbol = self._active_symbol
-            upcoming_events = (
-                self._fundamental_memory.get_upcoming_events(
-                    symbol, now, window_minutes=168  # 7日間
-                )
+            upcoming_events = self._fundamental_memory.get_upcoming_events(
+                symbol,
+                now,
+                window_minutes=168,  # 7日間
             )
             upcoming_dicts = [
                 {
@@ -2854,9 +2653,7 @@ class LiveTradingEngine:
             )
 
         except Exception as e:
-            logger.warning(
-                f"[Fundamental] 朝の市場観更新失敗: {e}"
-            )
+            logger.warning(f"[Fundamental] 朝の市場観更新失敗: {e}")
 
     async def _handle_post_event_analysis(
         self,
@@ -2886,8 +2683,9 @@ class LiveTradingEngine:
 
         try:
             from autotrader.adapters.ollama.client import OllamaClient
+
             llm_client = OllamaClient()
-            now = datetime.now(timezone.utc)
+            now = datetime.now(UTC)
             symbol = self._active_symbol
 
             result = await llm_client.analyze_post_event_async(
@@ -2916,6 +2714,4 @@ class LiveTradingEngine:
             )
 
         except Exception as e:
-            logger.warning(
-                f"[Fundamental] 指標後分析失敗: {e}"
-            )
+            logger.warning(f"[Fundamental] 指標後分析失敗: {e}")
