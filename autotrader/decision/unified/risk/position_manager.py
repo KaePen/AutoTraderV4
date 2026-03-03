@@ -284,6 +284,14 @@ class PositionManagerConfig:
     # レジーム別stagnation時間の上書き（None=ハードコード値を使用）
     stag_trend_minutes: float | None = None
     stag_range_minutes: float | None = None
+    # STAGNATION予防的SL引き締め
+    stag_pretighten_enabled: bool = False
+    # stag時間の何%で発動するか
+    stag_pretighten_pct: float = 0.80
+    # MFE閾値（これ未満で発動）
+    stag_pretighten_mfe_r: float = 0.10
+    # SLターゲットR値（エントリーからの距離）
+    stag_pretighten_sl_r: float = -0.05
 
 
 class PositionManager:
@@ -844,6 +852,60 @@ class PositionManager:
                     ExitReason.STAGNATION,
                     trigger_price=current_price,
                 )
+
+        # STAGNATION予防的SL引き締め（TREND限定）
+        if (
+            self.config.stag_pretighten_enabled
+            and regime == "TREND"
+        ):
+            _stag_min = (
+                self.config.stag_trend_minutes
+                if self.config.stag_trend_minutes is not None
+                else 90.0
+            )
+            _at = _stag_min * self.config.stag_pretighten_pct
+            if (
+                elapsed >= _at
+                and position.highest_r
+                < self.config.stag_pretighten_mfe_r
+            ):
+                # エントリー ± pretighten_sl_r のR値でSL計算
+                _r_val = position.r_value
+                if _r_val > 0:
+                    if position.direction == SignalType.BUY:
+                        _new_sl = (
+                            position.entry_price
+                            + self.config.stag_pretighten_sl_r
+                            * _r_val
+                        )
+                        # 現在SLより有利な場合のみ更新
+                        if _new_sl > position.current_sl:
+                            return ManagementAction.update_sl(
+                                new_sl=_new_sl,
+                                reason=(
+                                    f"STAG予防SL引締: "
+                                    f"{elapsed:.0f}分経過,"
+                                    f" MFE={position.highest_r:.2f}R,"
+                                    f" SL→{_new_sl:.5f}"
+                                ),
+                            )
+                    else:
+                        _new_sl = (
+                            position.entry_price
+                            - self.config.stag_pretighten_sl_r
+                            * _r_val
+                        )
+                        # 現在SLより有利な場合のみ更新
+                        if _new_sl < position.current_sl:
+                            return ManagementAction.update_sl(
+                                new_sl=_new_sl,
+                                reason=(
+                                    f"STAG予防SL引締: "
+                                    f"{elapsed:.0f}分経過,"
+                                    f" MFE={position.highest_r:.2f}R,"
+                                    f" SL→{_new_sl:.5f}"
+                                ),
+                            )
 
         # レジームベース動的STAGNATION時間
         # TREND: 90分、RANGE: 120分、CHOPPY/その他: 120分
