@@ -1535,6 +1535,9 @@ class LiveTradingEngine:
                     profit_loss = round(pnl_pips * _vol * pip_val, 2)
             closed_at = datetime.now(UTC)
             db_url = get_settings().database_url
+            # 最終SL/TP（トレーリング/BE移動後の値）
+            final_sl = pos.current_sl if pos else None
+            final_tp = pos.original_tp if pos else None
             with get_session(db_url) as db:
                 repo = TradeRepository(db)
                 repo.close(
@@ -1544,6 +1547,8 @@ class LiveTradingEngine:
                     exit_reason=action_reason,
                     profit_loss=profit_loss,
                     profit_loss_pips=pnl_pips,
+                    final_stop_loss=final_sl,
+                    final_take_profit=final_tp,
                 )
             # DB書き込み成功後にpop（失敗時は次回tickで再試行）
             self._open_trades.pop(ticket, None)
