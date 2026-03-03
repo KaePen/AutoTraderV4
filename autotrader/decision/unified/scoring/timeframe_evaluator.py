@@ -383,6 +383,11 @@ class TimeframeEvaluator:
                 reasons.append("弱気ダイバ+売り")
 
         # EMAクロス確認
+        _ema_penalty = (
+            self.config.ema_cross_penalty
+            if self.config.ema_cross_penalty is not None
+            else -2.5
+        )
         if ema_12 is not None and ema_26 is not None:
             if not pd.isna(ema_12) and not pd.isna(ema_26):
                 if buy_score > 0 and ema_12 > ema_26:
@@ -392,11 +397,11 @@ class TimeframeEvaluator:
                     sell_score += 0.5
                     _bd_ema_cross = 0.5
                 elif buy_score > 0 and ema_12 < ema_26:
-                    buy_score -= 2.5
-                    _bd_ema_cross = -2.5
+                    buy_score += _ema_penalty
+                    _bd_ema_cross = _ema_penalty
                 elif sell_score > 0 and ema_12 > ema_26:
-                    sell_score -= 2.5
-                    _bd_ema_cross = -2.5
+                    sell_score += _ema_penalty
+                    _bd_ema_cross = _ema_penalty
 
         # ストキャスティクス確認（過熱回避）
         stoch_k = row.get("stoch_k")

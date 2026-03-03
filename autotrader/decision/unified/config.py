@@ -67,6 +67,7 @@ class EvaluatorConfig:
     min_score: float = 5.0
     atr_sl_multiplier: float = 1.5
     atr_tp_multiplier: float = 2.0
+    ema_cross_penalty: float | None = None  # EMAクロス矛盾ペナルティ（None=-2.5）
 
 
 @dataclass(frozen=True)
@@ -429,6 +430,12 @@ class UnifiedBotConfig:
     high_align_penalty_threshold: float | None = None
     # 高alignment時のスコアペナルティ量
     high_align_penalty_score: float = 1.0
+    # ADXエントリー上限（None=無効, 例: 35.0で追いかけ防止）
+    adx_upper_limit: float | None = None
+    # TREND時整合TF上限（None=無効, 例: 6でTF過多ブロック）
+    trend_max_aligned_tfs: int | None = None
+    # EMAクロス矛盾ペナルティ上書き（None=デフォルト-2.5）
+    ema_cross_penalty: float | None = None
 
     def get_evaluator_config(self, timeframe: str) -> EvaluatorConfig:
         """時間足別評価器設定を取得
