@@ -110,6 +110,10 @@ class DashboardResponse(BaseModel):
         account: 口座情報
         daily_pnl: 本日の損益
         daily_pnl_pct: 本日の損益率
+        weekly_pnl: 今週（月曜起算）の損益
+        monthly_pnl: 今月の損益
+        total_pnl: 全履歴の損益
+        total_trades: 全履歴のトレード数
         active_signals: アクティブシグナル数
         open_positions: オープンポジション数
         today_trades: 本日のトレード数
@@ -119,6 +123,10 @@ class DashboardResponse(BaseModel):
     account: AccountInfoResponse
     daily_pnl: float = 0.0
     daily_pnl_pct: float = 0.0
+    weekly_pnl: float = 0.0
+    monthly_pnl: float = 0.0
+    total_pnl: float = 0.0
+    total_trades: int = 0
     active_signals: int = 0
     open_positions: int = 0
     today_trades: int = 0

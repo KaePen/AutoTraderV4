@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from autotrader.adapters.database.models import TradeRecord
@@ -95,6 +96,33 @@ class MarketService:
         total = len(today_trades)
         win_rate = (wins / total * 100) if total > 0 else 0.0
 
+        # 週間・月間・全履歴の損益集計
+        week_start = today - timedelta(days=today.weekday())
+        month_start = today.replace(day=1)
+
+        weekly_pnl = self._db.query(
+            func.coalesce(func.sum(TradeRecord.profit_loss), 0.0)
+        ).filter(
+            TradeRecord.closed_at >= week_start,
+            TradeRecord.is_open.is_(False),
+        ).scalar()
+
+        monthly_pnl = self._db.query(
+            func.coalesce(func.sum(TradeRecord.profit_loss), 0.0)
+        ).filter(
+            TradeRecord.closed_at >= month_start,
+            TradeRecord.is_open.is_(False),
+        ).scalar()
+
+        # 全履歴: countとsumを1クエリで
+        total_row = self._db.query(
+            func.coalesce(
+                func.sum(TradeRecord.profit_loss), 0.0
+            ),
+            func.count(),
+        ).filter(TradeRecord.is_open.is_(False)).one()
+        total_pnl, total_trades_count = total_row
+
         # オープンポジション数
         open_count = (
             self._db.query(TradeRecord)
@@ -110,6 +138,10 @@ class MarketService:
                 if account.balance > 0
                 else 0.0
             ),
+            weekly_pnl=float(weekly_pnl),
+            monthly_pnl=float(monthly_pnl),
+            total_pnl=float(total_pnl),
+            total_trades=int(total_trades_count),
             active_signals=0,
             open_positions=open_count,
             today_trades=total,

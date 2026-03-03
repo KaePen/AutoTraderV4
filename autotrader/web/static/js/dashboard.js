@@ -959,12 +959,25 @@ const DashboardApp = {
     const d = this.dashboard;
     const a = d.account;
 
+    const wp = d.weekly_pnl || 0;
+    const mp = d.monthly_pnl || 0;
+    const tp = d.total_pnl || 0;
+    const tt = d.total_trades || 0;
+
     el.innerHTML = `
       ${this.metricCard('残高', this.fmtCurrency(a.balance), '有効証拠金: ' + this.fmtCurrency(a.equity), 'neutral')}
       ${this.metricCard('本日損益',
         (d.daily_pnl >= 0 ? '+' : '') + this.fmtCurrency(d.daily_pnl),
         (d.daily_pnl_pct >= 0 ? '+' : '') + d.daily_pnl_pct.toFixed(2) + '%',
         d.daily_pnl >= 0 ? 'profit' : 'loss')}
+      ${this.metricCard('週間/月間',
+        (wp >= 0 ? '+' : '') + this.fmtCurrency(wp),
+        '月間: ' + (mp >= 0 ? '+' : '') + this.fmtCurrency(mp),
+        wp >= 0 ? 'profit' : 'loss')}
+      ${this.metricCard('全履歴損益',
+        (tp >= 0 ? '+' : '') + this.fmtCurrency(tp),
+        tt.toLocaleString() + ' トレード',
+        tp >= 0 ? 'profit' : 'loss')}
       ${this.metricCard('勝率',
         d.win_rate.toFixed(1) + '%',
         '本日 ' + d.today_trades + ' トレード',
