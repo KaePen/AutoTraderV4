@@ -1167,6 +1167,22 @@ class LiveTradingEngine:
             except ValueError:
                 pass
 
+        # 現在のエクスポージャーを計算
+        _buy_lot = sum(
+            p.volume for p in positions
+            if p.signal_type == SignalType.BUY
+        )
+        _sell_lot = sum(
+            p.volume for p in positions
+            if p.signal_type == SignalType.SELL
+        )
+        _exposure_lot = _buy_lot + _sell_lot
+        _same_dir_lot = (
+            _buy_lot
+            if signal.signal_type == SignalType.BUY
+            else _sell_lot
+        )
+
         sizing_ctx = SizingContext(
             equity=self._account_info.equity,
             sl_pips=sl_pips if sl_pips > 0 else 30.0,
@@ -1175,6 +1191,8 @@ class LiveTradingEngine:
             consecutive_losses=0,
             current_dd_pct=0.0,
             initial_equity=self._account_info.balance,
+            open_exposure_lot=_exposure_lot,
+            open_same_direction_lot=_same_dir_lot,
         )
         sizing_result = self._sizer.calculate(sizing_ctx)
 
