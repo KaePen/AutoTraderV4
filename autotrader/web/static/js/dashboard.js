@@ -1358,8 +1358,22 @@ const DashboardApp = {
           reasonHtml =
             '<span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border bg-blue-900/40 text-blue-300 border-blue-700/50">OPEN</span>';
         } else {
+          let effectiveReason = t.exit_reason;
+          // EXTERNAL_CLOSE または理由なしの場合、exit_price から SL/TP を推定
+          if (!effectiveReason || effectiveReason === 'EXTERNAL_CLOSE') {
+            const ep = t.exit_price;
+            if (ep != null) {
+              // 相対誤差 0.01% 以内で一致判定（スリッページ許容）
+              const tol = ep * 0.0001;
+              if (t.stop_loss != null && Math.abs(ep - t.stop_loss) <= tol) {
+                effectiveReason = 'SL_HIT';
+              } else if (t.take_profit != null && Math.abs(ep - t.take_profit) <= tol) {
+                effectiveReason = 'TP_HIT';
+              }
+            }
+          }
           const reason =
-            t.exit_reason && exitReasonConfig[t.exit_reason];
+            effectiveReason && exitReasonConfig[effectiveReason];
           reasonHtml = reason
             ? `<span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border ${reason.c}">${reason.l}</span>`
             : '';
