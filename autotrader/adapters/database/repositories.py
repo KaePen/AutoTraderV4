@@ -145,6 +145,8 @@ class TradeRepository:
         exit_reason: str,
         profit_loss: float,
         profit_loss_pips: float | None = None,
+        final_stop_loss: float | None = None,
+        final_take_profit: float | None = None,
     ) -> Trade | None:
         """トレードを決済
 
@@ -155,6 +157,8 @@ class TradeRepository:
             exit_reason: 決済理由
             profit_loss: 損益
             profit_loss_pips: 損益（pips）
+            final_stop_loss: 決済時点の最終SL価格
+            final_take_profit: 決済時点の最終TP価格
 
         Returns:
             Trade | None: 更新されたトレード（未発見時None）
@@ -171,6 +175,11 @@ class TradeRepository:
         record.exit_reason = exit_reason
         record.profit_loss = profit_loss
         record.profit_loss_pips = profit_loss_pips
+        # トレーリング/BE移動後の最終SL/TPでDB更新
+        if final_stop_loss is not None:
+            record.stop_loss = final_stop_loss
+        if final_take_profit is not None:
+            record.take_profit = final_take_profit
         record.is_open = False
         self.session.flush()
         return self._to_entity(record)
