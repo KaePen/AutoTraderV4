@@ -1382,8 +1382,18 @@ def run_single_backtest(args: argparse.Namespace):
     _legacy_bot = _collect_legacy_bot_overrides(args)
     _legacy_pm = _collect_legacy_pm_overrides(args)
 
-    # マージ: YAML < --override < 旧CLI < --bot/--pm（後者優先）
+    # マージ: preset < YAML < --override < 旧CLI < --bot/--pm（後者優先）
     _bot_overrides: dict[str, object] = {}
+    # プリセット値をベースレイヤーとして注入（最低優先、CLI/YAMLで上書き可能）
+    _bot_overrides.update({
+        "max_positions": _preset.max_positions,
+        "bonus_max_positions": _preset.bonus_max_positions,
+        "bonus_score_threshold": _preset.bonus_score_threshold,
+        "base_risk_pct": _preset.base_risk_pct,
+        "max_lot_per_trade": _preset.max_lot_per_trade,
+        "max_total_exposure_lot": _preset.max_total_exposure_lot,
+        "equity_floor_pct": _preset.equity_floor_pct,
+    })
     _bot_overrides.update(_yaml_bot)
     _bot_overrides.update(_dot_bot)
     _bot_overrides.update(_legacy_bot)
