@@ -20,29 +20,9 @@ from autotrader.core.exceptions import TradingError
 from autotrader.decision.unified.position_manager import (
     PositionManager,
 )
+from autotrader.live.mt5_utils import mt5_reason_to_exit_reason
 
 logger = logging.getLogger(__name__)
-
-
-def _mt5_reason_to_exit_reason(reason_code: int) -> str:
-    """MT5 DEAL_REASONコードをExitReason.valueに変換
-
-    Args:
-        reason_code: MT5のDEAL_REASONコード
-
-    Returns:
-        str: ExitReason の文字列値
-    """
-    _map = {
-        0: ExitReason.MANUAL_CLOSE,  # CLIENT
-        1: ExitReason.MANUAL_CLOSE,  # MOBILE
-        2: ExitReason.MANUAL_CLOSE,  # WEB
-        3: ExitReason.EXTERNAL_CLOSE,  # EXPERT（他EA）
-        4: ExitReason.STOP_LOSS,  # SL
-        5: ExitReason.TAKE_PROFIT,  # TP
-        6: ExitReason.STOP_OUT,  # ストップアウト
-    }
-    return _map.get(reason_code, ExitReason.EXTERNAL_CLOSE).value
 
 
 class PositionSyncService:
@@ -275,7 +255,7 @@ class PositionSyncService:
         if deal:
             exit_price = deal["price"]
             profit_loss = deal["profit"]
-            exit_reason = _mt5_reason_to_exit_reason(deal["reason_code"])
+            exit_reason = mt5_reason_to_exit_reason(deal["reason_code"])
             logger.info(
                 "外部決済詳細: ticket=%d reason=%s price=%.5f profit=%.2f",
                 ticket,
@@ -320,6 +300,7 @@ class PositionSyncService:
         self,
         active_symbol: str,
         open_trades: dict[int, str],
+        closed_trades: list[dict],
         enable_auto_trade: bool,
         last_signal,
         execute_action_callback,
@@ -332,6 +313,7 @@ class PositionSyncService:
         Args:
             active_symbol: アクティブシンボル
             open_trades: ticket→trade_idマッピング
+            closed_trades: クローズ済みトレード履歴
             enable_auto_trade: 自動取引ON/OFF
             last_signal: 直近シグナル
             execute_action_callback: アクション実行コールバック
@@ -361,7 +343,7 @@ class PositionSyncService:
                     ticket,
                     active_symbol,
                     open_trades,
-                    [],
+                    closed_trades,
                 )
 
         if not positions:
@@ -688,7 +670,7 @@ class PositionSyncService:
                             "exit_price": deal["price"],
                             "profit_loss": deal["profit"],
                             "exit_reason": (
-                                _mt5_reason_to_exit_reason(deal["reason_code"])
+                                mt5_reason_to_exit_reason(deal["reason_code"])
                             ),
                             "closed_at": closed_at,
                         }
@@ -806,6 +788,16 @@ class PositionSyncService:
                     record.exit_price = upd["exit_price"]
                 if upd["profit_loss"] is not None:
                     record.profit_loss = upd["profit_loss"]
+                if upd.get("profit_loss_pips") is not None:
+                    record.profit_loss_pips = (
+                        upd["profit_loss_pips"]
+                    )
+                if upd.get("final_stop_loss") is not None:
+                    record.stop_loss = upd["final_stop_loss"]
+                if upd.get("final_take_profit") is not None:
+                    record.take_profit = (
+                        upd["final_take_profit"]
+                    )
             db.flush()
 
     def restore_open_trades_from_db(

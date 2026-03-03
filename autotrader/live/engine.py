@@ -46,30 +46,10 @@ from autotrader.decision.unified.signal_consolidator import (
 )
 from autotrader.decision.unified.trade_bot import UnifiedTradeBot
 from autotrader.live.config import FundamentalConfig, LiveTradingConfig
+from autotrader.live.mt5_utils import mt5_reason_to_exit_reason
 from autotrader.live.tick_entry_optimizer import TickEntryOptimizer
 
 logger = logging.getLogger(__name__)
-
-
-def _mt5_reason_to_exit_reason(reason_code: int) -> str:
-    """MT5 DEAL_REASONコードをExitReason.valueに変換
-
-    Args:
-        reason_code: MT5のDEAL_REASONコード
-
-    Returns:
-        str: ExitReason の文字列値
-    """
-    _map = {
-        0: ExitReason.MANUAL_CLOSE,  # CLIENT
-        1: ExitReason.MANUAL_CLOSE,  # MOBILE
-        2: ExitReason.MANUAL_CLOSE,  # WEB
-        3: ExitReason.EXTERNAL_CLOSE,  # EXPERT（他EA）
-        4: ExitReason.STOP_LOSS,  # SL
-        5: ExitReason.TAKE_PROFIT,  # TP
-        6: ExitReason.STOP_OUT,  # ストップアウト
-    }
-    return _map.get(reason_code, ExitReason.EXTERNAL_CLOSE).value
 
 
 class LiveTradingEngine:
@@ -1183,13 +1163,35 @@ class LiveTradingEngine:
             else _sell_lot
         )
 
+        # 連続負け数（直近のclosed_tradesから計算）
+        _consec_losses = 0
+        for t in reversed(self._closed_trades):
+            _pnl = t.get("pnl_pips", 0)
+            if _pnl < 0:
+                _consec_losses += 1
+            else:
+                break
+
+        # 現在のDD%（equity vs balance）
+        _dd_pct = 0.0
+        if self._account_info.balance > 0:
+            _dd_pct = max(
+                0.0,
+                (
+                    1.0
+                    - self._account_info.equity
+                    / self._account_info.balance
+                )
+                * 100.0,
+            )
+
         sizing_ctx = SizingContext(
             equity=self._account_info.equity,
             sl_pips=sl_pips if sl_pips > 0 else 30.0,
             confidence=signal.confidence,
             regime=regime,
-            consecutive_losses=0,
-            current_dd_pct=0.0,
+            consecutive_losses=_consec_losses,
+            current_dd_pct=_dd_pct,
             initial_equity=self._account_info.balance,
             open_exposure_lot=_exposure_lot,
             open_same_direction_lot=_same_dir_lot,
@@ -1236,7 +1238,7 @@ class LiveTradingEngine:
                     self._open_trades[result.ticket] = trade_id
 
             # _cached_positionsに即時追加（次tick待ち不要）
-            entry_price = signal_with_lot.stop_loss or 0.0
+            entry_price = 0.0
             if entry_tick:
                 price_key = (
                     "ask"
@@ -1457,7 +1459,7 @@ class LiveTradingEngine:
         if deal:
             exit_price = deal["price"]
             profit_loss = deal["profit"]
-            exit_reason = _mt5_reason_to_exit_reason(deal["reason_code"])
+            exit_reason = mt5_reason_to_exit_reason(deal["reason_code"])
             logger.info(
                 "外部決済詳細: ticket=%d reason=%s price=%.5f profit=%.2f",
                 ticket,
@@ -1490,6 +1492,91 @@ class LiveTradingEngine:
         self._write_close_to_db(ticket, exit_price, exit_reason, profit_loss)
         # ローカルDB管理状態を削除
         self._delete_position_state(str(ticket))
+
+    def _update_sl_in_db(
+        self, ticket: int, new_sl: float
+    ) -> None:
+        """DB上のオープントレードのSLを更新
+
+        トレーリングストップ/ブレークイーブン移動後に
+        REST APIフォールバックでも最新値を返せるようにする。
+
+        Args:
+            ticket: MT5チケットID
+            new_sl: 新しいSL価格
+        """
+        from autotrader.adapters.database.connection import (
+            get_session,
+        )
+        from autotrader.adapters.database.models import (
+            TradeRecord,
+        )
+        from autotrader.config.settings import get_settings
+
+        trade_id = self._open_trades.get(ticket)
+        if not trade_id:
+            return
+        try:
+            db_url = get_settings().database_url
+            with get_session(db_url) as db:
+                record = (
+                    db.query(TradeRecord)
+                    .filter(
+                        TradeRecord.trade_id == trade_id,
+                    )
+                    .first()
+                )
+                if record:
+                    record.stop_loss = new_sl
+                    db.flush()
+        except Exception:
+            logger.debug(
+                "DB SL更新スキップ: ticket=%d", ticket
+            )
+
+    def _update_volume_in_db(
+        self,
+        ticket: int,
+        new_volume: float,
+        partial_profit: float = 0.0,
+    ) -> None:
+        """部分決済後のDB volumeを更新
+
+        Args:
+            ticket: MT5チケットID
+            new_volume: 残ロット数
+            partial_profit: 部分決済の確定損益
+        """
+        from autotrader.adapters.database.connection import (
+            get_session,
+        )
+        from autotrader.adapters.database.repositories import (
+            TradeRepository,
+        )
+        from autotrader.config.settings import get_settings
+
+        trade_id = self._open_trades.get(ticket)
+        if not trade_id:
+            return
+        try:
+            db_url = get_settings().database_url
+            with get_session(db_url) as db:
+                repo = TradeRepository(db)
+                repo.update_volume(
+                    trade_id, new_volume, partial_profit
+                )
+            logger.info(
+                "DB部分決済記録: ticket=%d"
+                " 残vol=%.2f partial_pnl=%.2f",
+                ticket,
+                new_volume,
+                partial_profit,
+            )
+        except Exception:
+            logger.debug(
+                "DB volume更新スキップ: ticket=%d",
+                ticket,
+            )
 
     def _write_close_to_db(
         self,
@@ -1797,6 +1884,10 @@ class LiveTradingEngine:
                             action.new_sl,
                             action.reason,
                         )
+                        # DB上のSLも同期更新
+                        self._update_sl_in_db(
+                            position.ticket, action.new_sl
+                        )
 
         elif action.action_type == ManagementActionType.PARTIAL_CLOSE:
             close_vol = round(position.volume * action.close_ratio, 2)
@@ -1811,6 +1902,29 @@ class LiveTradingEngine:
                         close_vol,
                         action.reason,
                     )
+                    # DBのvolumeを更新
+                    remaining = round(
+                        position.volume - close_vol, 2
+                    )
+                    _partial_pnl = 0.0
+                    try:
+                        deal = await self._executor.get_deal_by_position_async(
+                            position.ticket
+                        )
+                        if deal:
+                            _partial_pnl = deal["profit"]
+                    except (
+                        KeyError,
+                        ValueError,
+                        TypeError,
+                        MT5DataError,
+                    ):
+                        pass
+                    self._update_volume_in_db(
+                        position.ticket,
+                        remaining,
+                        _partial_pnl,
+                    )
                     # SL変更もあれば実行（バリデーション付き）
                     if action.new_sl is not None:
                         _sl_ok = True
@@ -1820,9 +1934,17 @@ class LiveTradingEngine:
                             else:
                                 _sl_ok = action.new_sl > current_price
                         if _sl_ok:
-                            await self._executor.modify_position_async(
-                                position, stop_loss=action.new_sl
+                            sl_result = (
+                                await self._executor.modify_position_async(
+                                    position,
+                                    stop_loss=action.new_sl,
+                                )
                             )
+                            if sl_result.success:
+                                self._update_sl_in_db(
+                                    position.ticket,
+                                    action.new_sl,
+                                )
 
         elif action.action_type == ManagementActionType.FULL_CLOSE:
             result = await self._executor.close_position_async(
@@ -2029,7 +2151,7 @@ class LiveTradingEngine:
                             "exit_price": deal["price"],
                             "profit_loss": deal["profit"],
                             "exit_reason": (
-                                _mt5_reason_to_exit_reason(deal["reason_code"])
+                                mt5_reason_to_exit_reason(deal["reason_code"])
                             ),
                             "closed_at": closed_at,
                         }
@@ -2148,6 +2270,16 @@ class LiveTradingEngine:
                     record.exit_price = upd["exit_price"]
                 if upd["profit_loss"] is not None:
                     record.profit_loss = upd["profit_loss"]
+                if upd.get("profit_loss_pips") is not None:
+                    record.profit_loss_pips = (
+                        upd["profit_loss_pips"]
+                    )
+                if upd.get("final_stop_loss") is not None:
+                    record.stop_loss = upd["final_stop_loss"]
+                if upd.get("final_take_profit") is not None:
+                    record.take_profit = (
+                        upd["final_take_profit"]
+                    )
             db.flush()
 
     def _restore_open_trades_from_db(self, tickets: list[int]) -> None:

@@ -184,6 +184,37 @@ class TradeRepository:
         self.session.flush()
         return self._to_entity(record)
 
+    def update_volume(
+        self,
+        trade_id: str,
+        new_volume: float,
+        partial_profit: float = 0.0,
+    ) -> None:
+        """部分決済後のボリューム更新
+
+        部分決済でロットが減少した際にDBを同期更新する。
+        partial_profitは確定済み部分損益を加算する。
+
+        Args:
+            trade_id: トレードID
+            new_volume: 更新後のボリューム
+            partial_profit: 部分決済の確定損益
+        """
+        record = (
+            self.session.query(TradeRecord)
+            .filter(TradeRecord.trade_id == trade_id)
+            .first()
+        )
+        if record is None:
+            return
+        record.volume = round(new_volume, 2)
+        if partial_profit != 0.0:
+            current_pnl = record.profit_loss or 0.0
+            record.profit_loss = round(
+                current_pnl + partial_profit, 2
+            )
+        self.session.flush()
+
     def get_by_id(self, trade_id: str) -> Trade | None:
         """IDでトレードを取得
 
