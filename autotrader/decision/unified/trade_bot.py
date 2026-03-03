@@ -282,12 +282,19 @@ class UnifiedTradeBot:
         self.timeframes = self.config.timeframes
 
         # 時間足別評価器
-        self.evaluators: dict[str, TimeframeEvaluator] = {
-            tf: TimeframeEvaluator(
-                tf, self.config.get_evaluator_config(tf)
+        self.evaluators: dict[str, TimeframeEvaluator] = {}
+        for tf in self.timeframes:
+            _eval_cfg = self.config.get_evaluator_config(tf)
+            if self.config.ema_cross_penalty is not None:
+                _eval_cfg = dataclasses.replace(
+                    _eval_cfg,
+                    ema_cross_penalty=(
+                        self.config.ema_cross_penalty
+                    ),
+                )
+            self.evaluators[tf] = TimeframeEvaluator(
+                tf, _eval_cfg
             )
-            for tf in self.timeframes
-        }
 
         # 新アーキテクチャコンポーネント（risk_manager を含む）
         self._init_new_components()
@@ -974,6 +981,33 @@ class UnifiedTradeBot:
                     f"トレンド強度過大: "
                     f"{regime_result.trend_strength:.2f}"
                     f" >= {self.config.trend_strength_max}"
+                )
+
+            # ADX上限フィルタ（追いかけ防止）
+            if (
+                self.config.adx_upper_limit is not None
+                and regime_result.adx
+                > self.config.adx_upper_limit
+            ):
+                return _filt_hold(
+                    f"ADX上限: {regime_result.adx:.1f}"
+                    f" > {self.config.adx_upper_limit}"
+                )
+
+            # TREND整合TF上限フィルタ
+            if (
+                self.config.trend_max_aligned_tfs
+                is not None
+                and regime_result.regime
+                == MarketRegime.TREND
+                and len(consensus.aligned_tfs)
+                > self.config.trend_max_aligned_tfs
+            ):
+                return _filt_hold(
+                    f"TREND整合TF過多: "
+                    f"{len(consensus.aligned_tfs)}"
+                    f" > "
+                    f"{self.config.trend_max_aligned_tfs}"
                 )
 
             # LONDONオフ時間ブロック（hour=7はLONDON境界）
