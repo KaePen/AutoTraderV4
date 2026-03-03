@@ -14,6 +14,12 @@
   box-shadow: 0 10px 15px -3px rgb(0 0 0 / 0.1);
 }
 
+/* メトリクスストリップ内カードはコンパクト化 */
+#metrics-strip .card {
+  padding: 0.5rem 0.75rem;
+  min-width: 0;
+}
+
 /* カスタムスクロールバー */
 ::-webkit-scrollbar {
   width: 6px;

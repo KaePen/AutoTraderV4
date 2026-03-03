@@ -994,11 +994,11 @@ const DashboardApp = {
     const valueColors = { profit: 'text-green-400', loss: 'text-red-400', neutral: 'text-gray-100' };
     const borderColors = { profit: 'border-l-green-500/50', loss: 'border-l-red-500/50', neutral: 'border-l-gray-600' };
     return `
-      <div class="card border-l-2 ${borderColors[variant]} py-3">
-        <p class="text-xs text-gray-400 uppercase tracking-wider mb-1">${label}</p>
-        <p class="text-lg font-bold tabular-nums ${valueColors[variant]}">${value}</p>
+      <div class="card border-l-2 ${borderColors[variant]}">
+        <p class="text-[10px] text-gray-400 uppercase tracking-wider mb-0.5">${label}</p>
+        <p class="text-sm font-bold tabular-nums leading-tight ${valueColors[variant]}">${value}</p>
         ${hint ? `<p class="text-[10px] text-gray-600 tabular-nums">${hint}</p>` : ''}
-        ${sub ? `<p class="text-xs text-gray-500 mt-0.5 tabular-nums">${sub}</p>` : ''}
+        ${sub ? `<p class="text-[10px] text-gray-500 mt-0.5 tabular-nums">${sub}</p>` : ''}
       </div>`;
   },
 
@@ -1025,16 +1025,16 @@ const DashboardApp = {
     }).join('<span class="text-gray-700 mx-0.5">·</span>');
 
     const profitStr = totalCount > 0
-      ? `<p class="text-xs text-gray-500 mt-0.5 tabular-nums">${totalProfit >= 0 ? '+' : ''}${this.fmtCurrency(totalProfit)}</p>`
+      ? `<p class="text-[10px] text-gray-500 mt-0.5 tabular-nums">${totalProfit >= 0 ? '+' : ''}${this.fmtCurrency(totalProfit)}</p>`
       : '';
     const pillsRow = totalCount > 0
       ? `<p class="flex flex-wrap gap-y-0.5 items-center mt-1 leading-none">${pills}</p>`
       : `<p class="text-xs text-gray-600 mt-0.5">ポジションなし</p>`;
 
     return `
-      <div class="card border-l-2 ${borderColors[variant]} py-3">
-        <p class="text-xs text-gray-400 uppercase tracking-wider mb-1">ポジション</p>
-        <p class="text-lg font-bold tabular-nums ${valueColors[variant]}">${totalCount} open</p>
+      <div class="card border-l-2 ${borderColors[variant]}">
+        <p class="text-[10px] text-gray-400 uppercase tracking-wider mb-0.5">ポジション</p>
+        <p class="text-sm font-bold tabular-nums leading-tight ${valueColors[variant]}">${totalCount} open</p>
         ${profitStr}
         ${pillsRow}
       </div>`;
