@@ -121,6 +121,7 @@ class OrderService:
         active_symbol: str,
         account_info,
         open_trades: dict[int, str],
+        closed_trades: list[dict],
         cached_positions: list[dict],
         write_entry_to_db,
         save_position_state,
@@ -132,6 +133,7 @@ class OrderService:
             active_symbol: アクティブシンボル
             account_info: 口座情報
             open_trades: ticket→trade_idマッピング
+            closed_trades: クローズ済みトレード履歴
             cached_positions: キャッシュ済みポジション
             write_entry_to_db: DB書き込みコールバック
             save_position_state: 状態保存コールバック
@@ -201,13 +203,35 @@ class OrderService:
             else _sell_lot
         )
 
+        # 連続負け数（直近のclosed_tradesから計算）
+        _consec_losses = 0
+        for t in reversed(closed_trades):
+            _pnl = t.get("pnl_pips", 0)
+            if _pnl < 0:
+                _consec_losses += 1
+            else:
+                break
+
+        # 現在のDD%（equity vs balance）
+        _dd_pct = 0.0
+        if account_info.balance > 0:
+            _dd_pct = max(
+                0.0,
+                (
+                    1.0
+                    - account_info.equity
+                    / account_info.balance
+                )
+                * 100.0,
+            )
+
         sizing_ctx = SizingContext(
             equity=account_info.equity,
             sl_pips=sl_pips if sl_pips > 0 else 30.0,
             confidence=signal.confidence,
             regime=regime,
-            consecutive_losses=0,
-            current_dd_pct=0.0,
+            consecutive_losses=_consec_losses,
+            current_dd_pct=_dd_pct,
             initial_equity=account_info.balance,
             open_exposure_lot=_exposure_lot,
             open_same_direction_lot=_same_dir_lot,
@@ -262,7 +286,7 @@ class OrderService:
                     open_trades[result.ticket] = trade_id
 
             # _cached_positionsに即時追加（次tick待ち不要）
-            entry_price = signal_with_lot.stop_loss or 0.0
+            entry_price = 0.0
             if entry_tick:
                 price_key = (
                     "ask"
@@ -407,6 +431,8 @@ class OrderService:
         active_symbol: str,
         write_close_to_db,
         delete_position_state,
+        update_sl_in_db=None,
+        update_volume_in_db=None,
     ) -> None:
         """管理アクション実行
 
@@ -417,6 +443,8 @@ class OrderService:
             active_symbol: アクティブシンボル
             write_close_to_db: DB決済記録コールバック
             delete_position_state: 状態削除コールバック
+            update_sl_in_db: SL変更時のDB同期コールバック
+            update_volume_in_db: 部分決済時のDB同期コールバック
         """
         if action.action_type == ManagementActionType.HOLD:
             return
@@ -450,6 +478,12 @@ class OrderService:
                             action.new_sl,
                             action.reason,
                         )
+                        # DB上のSLも同期更新
+                        if update_sl_in_db:
+                            update_sl_in_db(
+                                position.ticket,
+                                action.new_sl,
+                            )
 
         elif action.action_type == ManagementActionType.PARTIAL_CLOSE:
             close_vol = round(position.volume * action.close_ratio, 2)
@@ -466,6 +500,32 @@ class OrderService:
                         close_vol,
                         action.reason,
                     )
+                    # DBのvolumeを更新
+                    remaining = round(
+                        position.volume - close_vol, 2
+                    )
+                    _partial_pnl = 0.0
+                    try:
+                        deal = (
+                            await self._executor.get_deal_by_position_async(
+                                position.ticket
+                            )
+                        )
+                        if deal:
+                            _partial_pnl = deal["profit"]
+                    except (
+                        KeyError,
+                        ValueError,
+                        TypeError,
+                        MT5DataError,
+                    ):
+                        pass
+                    if update_volume_in_db:
+                        update_volume_in_db(
+                            position.ticket,
+                            remaining,
+                            _partial_pnl,
+                        )
                     # SL変更もあれば実行（バリデーション付き）
                     if action.new_sl is not None:
                         _sl_ok = True
@@ -475,10 +535,17 @@ class OrderService:
                             else:
                                 _sl_ok = action.new_sl > current_price
                         if _sl_ok:
-                            await self._executor.modify_position_async(
-                                position,
-                                stop_loss=action.new_sl,
+                            sl_result = (
+                                await self._executor.modify_position_async(
+                                    position,
+                                    stop_loss=action.new_sl,
+                                )
                             )
+                            if sl_result.success and update_sl_in_db:
+                                update_sl_in_db(
+                                    position.ticket,
+                                    action.new_sl,
+                                )
 
         elif action.action_type == ManagementActionType.FULL_CLOSE:
             result = await self._executor.close_position_async(
