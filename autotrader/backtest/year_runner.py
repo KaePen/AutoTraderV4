@@ -274,12 +274,18 @@ def run_unified_year(
                 if consolidated.sl_pips > 0:
                     sl_pips = consolidated.sl_pips
                     tp_pips = consolidated.tp_pips
+                    _base_price = (
+                        consolidated.entry_price
+                        if consolidated.entry_price
+                        is not None
+                        else candle.close
+                    )
                     if consolidated.direction == SignalType.BUY:
-                        sl_price = candle.close - sl_pips / 100
-                        tp_price = candle.close + tp_pips / 100
+                        sl_price = _base_price - sl_pips / 100
+                        tp_price = _base_price + tp_pips / 100
                     else:
-                        sl_price = candle.close + sl_pips / 100
-                        tp_price = candle.close - tp_pips / 100
+                        sl_price = _base_price + sl_pips / 100
+                        tp_price = _base_price - tp_pips / 100
 
                 signal = Signal(
                     symbol=runner.config.symbol,

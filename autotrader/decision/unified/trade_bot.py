@@ -17,6 +17,10 @@ from typing import TYPE_CHECKING
 
 import pandas as pd
 
+from autotrader.constraint.filters.m1_execution_gate import (
+    M1ExecutionGate,
+    M1ExecutionGateConfig,
+)
 from autotrader.constraint.soft_guard import (
     SoftGuard,
     SoftGuardConfig,
@@ -59,6 +63,26 @@ if TYPE_CHECKING:
     from autotrader.decision.unified.fundamental_assessor import (
         FundamentalAssessment,
     )
+
+
+@dataclass
+class PendingEntry:
+    """リトレースエントリー保留データ."""
+
+    direction: SignalType
+    target_price: float
+    original_close: float
+    bars_waited: int = 0
+    max_wait_bars: int = 5
+    fallback_entry: bool = True
+    # 保留シグナル構築に必要なコンテキスト
+    sl_pips: float = 0.0
+    tp_pips: float = 0.0
+    confidence: float = 0.0
+    primary_tf: str = ""
+    rationale: str = ""
+    consensus: object | None = None
+    regime_result: object | None = None
 
 
 @dataclass(frozen=True)
@@ -436,6 +460,22 @@ class UnifiedTradeBot:
             )
         )
 
+        # M1実行ゲート
+        self._m1_exec_gate = M1ExecutionGate(
+            M1ExecutionGateConfig(
+                enabled=self.config.m1_exec_gate_enabled,
+                ema_weight=self.config.m1_exec_gate_ema_weight,
+                bar_weight=self.config.m1_exec_gate_bar_weight,
+                bb_weight=self.config.m1_exec_gate_bb_weight,
+                bb_low=self.config.m1_exec_gate_bb_low,
+                bb_high=self.config.m1_exec_gate_bb_high,
+                threshold=self.config.m1_exec_gate_threshold,
+            )
+        )
+
+        # M1リトレースエントリー保留
+        self._pending_entry: PendingEntry | None = None
+
     def set_market_data(
         self,
         data: dict[str, pd.DataFrame],
@@ -573,6 +613,68 @@ class UnifiedTradeBot:
         Returns:
             ConsolidatedSignal: 統合シグナル
         """
+        # リトレースエントリー保留チェック
+        if self._pending_entry is not None:
+            _pe = self._pending_entry
+            _m1_row_pe = self._get_current_row(
+                "M1", current_time,
+            )
+            if _m1_row_pe is not None:
+                _pe.bars_waited += 1
+                _low = _m1_row_pe.get("low")
+                _high = _m1_row_pe.get("high")
+
+                # リトレース到達判定
+                _reached = False
+                if _pe.direction == SignalType.BUY:
+                    if (
+                        _low is not None
+                        and not pd.isna(_low)
+                        and float(_low) <= _pe.target_price
+                    ):
+                        _reached = True
+                elif _pe.direction == SignalType.SELL:
+                    if (
+                        _high is not None
+                        and not pd.isna(_high)
+                        and float(_high)
+                        >= _pe.target_price
+                    ):
+                        _reached = True
+
+                if _reached:
+                    # リトレース到達 → エントリー実行
+                    _entry_price = _pe.target_price
+                    self._pending_entry = None
+                    return self._build_retrace_signal(
+                        _pe, _entry_price,
+                        current_time, candle,
+                    )
+
+                # タイムアウト判定
+                if _pe.bars_waited >= _pe.max_wait_bars:
+                    if _pe.fallback_entry:
+                        # フォールバック: 現在価格でエントリー
+                        self._pending_entry = None
+                        return self._build_retrace_signal(
+                            _pe, None,
+                            current_time, candle,
+                        )
+                    else:
+                        # キャンセル
+                        self._pending_entry = None
+                        return self._hold_signal(
+                            "リトレース待機タイムアウト"
+                            "（キャンセル）"
+                        )
+
+                # 待機継続 → HOLD
+                return self._hold_signal(
+                    f"リトレース待機中"
+                    f"({_pe.bars_waited}"
+                    f"/{_pe.max_wait_bars})"
+                )
+
         # 1. 日次リセット
         py_time = current_time.to_pydatetime()
         self.risk_manager.reset_daily(py_time)
@@ -851,6 +953,25 @@ class UnifiedTradeBot:
             if _mr_result.should_filter:
                 return self._hold_with_analysis(
                     _mr_result.reason,
+                    plan,
+                    tf_signals,
+                    consensus,
+                    regime_result,
+                    htf_alignment,
+                )
+
+        # M1実行ゲート
+        if self._m1_exec_gate.config.enabled:
+            _m1_row_gate = self._get_current_row(
+                "M1", current_time,
+            )
+            _gate_result = self._m1_exec_gate.check(
+                direction=consensus.direction,
+                m1_row=_m1_row_gate,
+            )
+            if not _gate_result.passed:
+                return self._hold_with_analysis(
+                    _gate_result.reason,
                     plan,
                     tf_signals,
                     consensus,
@@ -1205,6 +1326,72 @@ class UnifiedTradeBot:
             return _filt_hold("primary_tfデータなし")
 
         sl_pips = primary_signal.sl_pips * _overrides.sl_multiplier
+        # M1構造的SL
+        if self.config.m1_structure_sl_enabled:
+            _m1_row_sl = self._get_current_row(
+                "M1", current_time,
+            )
+            if _m1_row_sl is not None:
+                _pip_unit = 0.01  # JPYペア
+                _current_close = candle.close if candle else (
+                    _m1_row_sl.get("close")
+                    if _m1_row_sl is not None
+                    else None
+                )
+                if _current_close is not None:
+                    if consensus.direction == SignalType.BUY:
+                        _swing = _m1_row_sl.get(
+                            "last_swing_low",
+                        )
+                        if (
+                            _swing is not None
+                            and not pd.isna(_swing)
+                        ):
+                            _struct_sl = (
+                                (_current_close
+                                 - float(_swing))
+                                / _pip_unit
+                                + self.config
+                                .m1_structure_sl_buffer_pips
+                            )
+                            _struct_sl = max(
+                                self.config
+                                .m1_structure_sl_min_pips,
+                                min(
+                                    _struct_sl,
+                                    self.config
+                                    .m1_structure_sl_max_pips,
+                                ),
+                            )
+                            sl_pips = _struct_sl
+                    elif (
+                        consensus.direction
+                        == SignalType.SELL
+                    ):
+                        _swing = _m1_row_sl.get(
+                            "last_swing_high",
+                        )
+                        if (
+                            _swing is not None
+                            and not pd.isna(_swing)
+                        ):
+                            _struct_sl = (
+                                (float(_swing)
+                                 - _current_close)
+                                / _pip_unit
+                                + self.config
+                                .m1_structure_sl_buffer_pips
+                            )
+                            _struct_sl = max(
+                                self.config
+                                .m1_structure_sl_min_pips,
+                                min(
+                                    _struct_sl,
+                                    self.config
+                                    .m1_structure_sl_max_pips,
+                                ),
+                            )
+                            sl_pips = _struct_sl
         # TREND時のSL下限上書き
         if (
             self.config.trend_sl_min_pips is not None
@@ -1227,6 +1414,81 @@ class UnifiedTradeBot:
             plan.get_recommended_tp_sl_ratio() * self.config.tp_sl_ratio
         )
         tp_pips = sl_pips * tp_sl_ratio
+
+        # M1リトレースエントリー
+        if self.config.m1_retrace_entry_enabled:
+            _m1_row_rt = self._get_current_row(
+                "M1", current_time,
+            )
+            if _m1_row_rt is not None:
+                _atr_val = _m1_row_rt.get("atr_14")
+                if (
+                    _atr_val is not None
+                    and not pd.isna(_atr_val)
+                ):
+                    _pip_unit_rt = 0.01
+                    _retrace_pips = (
+                        float(_atr_val)
+                        / _pip_unit_rt
+                        * self.config
+                        .m1_retrace_atr_factor
+                    )
+                    _close_rt = (
+                        candle.close if candle
+                        else float(
+                            _m1_row_rt.get(
+                                "close", 0,
+                            ),
+                        )
+                    )
+                    if (
+                        consensus.direction
+                        == SignalType.BUY
+                    ):
+                        _target = (
+                            _close_rt
+                            - _retrace_pips
+                            * _pip_unit_rt
+                        )
+                    else:
+                        _target = (
+                            _close_rt
+                            + _retrace_pips
+                            * _pip_unit_rt
+                        )
+
+                    self._pending_entry = PendingEntry(
+                        direction=consensus.direction,
+                        target_price=_target,
+                        original_close=_close_rt,
+                        bars_waited=0,
+                        max_wait_bars=(
+                            self.config
+                            .m1_retrace_max_wait_bars
+                        ),
+                        fallback_entry=(
+                            self.config
+                            .m1_retrace_fallback_entry
+                        ),
+                        sl_pips=sl_pips,
+                        tp_pips=tp_pips,
+                        confidence=(
+                            consensus.confidence
+                        ),
+                        primary_tf=(
+                            primary_signal.timeframe
+                        ),
+                        rationale=(
+                            f"リトレース保留: "
+                            f"target={_target:.3f}"
+                        ),
+                        consensus=consensus,
+                        regime_result=regime_result,
+                    )
+                    return self._hold_signal(
+                        f"リトレース待機開始: "
+                        f"target={_target:.3f}"
+                    )
 
         # ポジションサイジング
         lot = 0.01
@@ -1866,6 +2128,66 @@ class UnifiedTradeBot:
             trend_strength=regime_result.trend_strength,
             buy_score=consensus.buy_score,
             sell_score=consensus.sell_score,
+        )
+
+    def _build_retrace_signal(
+        self,
+        pe: PendingEntry,
+        entry_price: float | None,
+        current_time: pd.Timestamp,
+        candle: Candle | None,
+    ) -> ConsolidatedSignal:
+        """リトレースエントリーシグナルを構築.
+
+        Args:
+            pe: 保留エントリーデータ
+            entry_price: リトレース到達価格（Noneならフォールバック）
+            current_time: 現在時刻
+            candle: 現在足
+
+        Returns:
+            ConsolidatedSignal: エントリーシグナル
+        """
+        _pip_unit = 0.01  # JPYペア
+        _base = (
+            entry_price if entry_price is not None
+            else (
+                candle.close if candle
+                else pe.original_close
+            )
+        )
+        _mode = (
+            "リトレース到達"
+            if entry_price is not None
+            else "フォールバック"
+        )
+
+        return ConsolidatedSignal(
+            direction=pe.direction,
+            confidence=pe.confidence,
+            primary_tf=pe.primary_tf,
+            aligned_tfs=[],
+            sl_pips=pe.sl_pips,
+            tp_pips=pe.tp_pips,
+            rationale=(
+                f"M1{_mode}エントリー: "
+                f"target={pe.target_price:.3f}, "
+                f"base={_base:.3f}, "
+                f"waited={pe.bars_waited}bars"
+            ),
+            entry_price=_base,
+            consensus_score=(
+                pe.consensus.score
+                if pe.consensus
+                and hasattr(pe.consensus, "score")
+                else None
+            ),
+            regime=(
+                str(pe.regime_result.regime.value)
+                if pe.regime_result
+                and hasattr(pe.regime_result, "regime")
+                else None
+            ),
         )
 
     def _get_current_row(

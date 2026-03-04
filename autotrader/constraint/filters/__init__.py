@@ -15,6 +15,11 @@ from autotrader.constraint.filters.filter_result import (
     FilterResult,
     ManagerFilterResult,
 )
+from autotrader.constraint.filters.m1_execution_gate import (
+    M1ExecutionGate,
+    M1ExecutionGateConfig,
+    M1ExecutionGateResult,
+)
 from autotrader.constraint.filters.micro_reversal_filter import (
     MicroReversalConfig,
     MicroReversalFilter,
@@ -38,6 +43,9 @@ __all__ = [
     "EventFilter",
     "FilterManager",
     "FilterResult",
+    "M1ExecutionGate",
+    "M1ExecutionGateConfig",
+    "M1ExecutionGateResult",
     "ManagerFilterResult",
     "MicroReversalConfig",
     "MicroReversalFilter",

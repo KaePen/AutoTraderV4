@@ -79,6 +79,8 @@ class ConsolidatedSignal:
     sell_score: float = 0.0
     # ポジションサイジング結果
     lot: float | None = None
+    # リトレースエントリー価格（None=通常エントリー）
+    entry_price: float | None = None
 
     @property
     def alignment_count(self) -> int:
