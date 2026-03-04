@@ -449,6 +449,39 @@ class UnifiedBotConfig:
     m1_micro_reversal_roc_lookback: int = 5
     # 発動に必要な最小シグナル数（2=2/3合議）
     m1_micro_reversal_min_signals: int = 2
+    # --- M1構造的SL ---
+    # M1スイングレベルベースSL有効化
+    m1_structure_sl_enabled: bool = False
+    # SLバッファ（pips）
+    m1_structure_sl_buffer_pips: float = 3.0
+    # 構造的SL最小値（pips）
+    m1_structure_sl_min_pips: float = 15.0
+    # 構造的SL最大値（pips）
+    m1_structure_sl_max_pips: float = 60.0
+    # --- M1実行ゲート ---
+    # M1実行ゲート有効化
+    m1_exec_gate_enabled: bool = False
+    # EMAアラインメント重み
+    m1_exec_gate_ema_weight: float = 1.0
+    # バーモメンタム重み
+    m1_exec_gate_bar_weight: float = 0.5
+    # BB健全ゾーン重み
+    m1_exec_gate_bb_weight: float = 0.5
+    # BB健全ゾーン下限
+    m1_exec_gate_bb_low: float = 0.3
+    # BB健全ゾーン上限
+    m1_exec_gate_bb_high: float = 0.7
+    # 通過に必要な最小スコア
+    m1_exec_gate_threshold: float = 1.0
+    # --- M1リトレースエントリー ---
+    # リトレースエントリー有効化
+    m1_retrace_entry_enabled: bool = False
+    # リトレースATR係数（M1 ATR × factor分の押し/戻りを待つ）
+    m1_retrace_atr_factor: float = 0.5
+    # リトレース待機最大M1足数
+    m1_retrace_max_wait_bars: int = 5
+    # タイムアウト時にフォールバックエントリーするか
+    m1_retrace_fallback_entry: bool = True
 
     def get_evaluator_config(self, timeframe: str) -> EvaluatorConfig:
         """時間足別評価器設定を取得

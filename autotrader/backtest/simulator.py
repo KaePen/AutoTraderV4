@@ -1019,16 +1019,33 @@ class TradeSimulator:
         self,
         signal_type: SignalType,
         candle: Candle,
+        override_price: float | None = None,
     ) -> float:
         """エントリー価格を取得
 
         Args:
             signal_type: シグナル種別
             candle: 足データ
+            override_price: 上書きエントリー価格（リトレース用）
 
         Returns:
             float: エントリー価格（スプレッド・スリッページ込み）
         """
+        if override_price is not None:
+            spread = self._get_spread_for_candle(candle)
+            half_spread = spread / 2
+            if signal_type == SignalType.BUY:
+                return (
+                    override_price
+                    + half_spread
+                    + self._slippage_price
+                )
+            else:
+                return (
+                    override_price
+                    - half_spread
+                    - self._slippage_price
+                )
         spread = self._get_spread_for_candle(candle)
         half_spread = spread / 2
         if signal_type == SignalType.BUY:
