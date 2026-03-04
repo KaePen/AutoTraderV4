@@ -61,13 +61,13 @@ class EvaluatorConfig:
     """
 
     timeframe: str = "M15"
-    strength_config: StrengthConfig = field(
-        default_factory=StrengthConfig
-    )
+    strength_config: StrengthConfig = field(default_factory=StrengthConfig)
     min_score: float = 5.0
     atr_sl_multiplier: float = 1.5
     atr_tp_multiplier: float = 2.0
-    ema_cross_penalty: float | None = None  # EMAクロス矛盾ペナルティ（None=-2.5）
+    ema_cross_penalty: float | None = (
+        None  # EMAクロス矛盾ペナルティ（None=-2.5）
+    )
 
 
 @dataclass(frozen=True)
@@ -102,7 +102,6 @@ class RiskConfig:
     default_tp_pips: float = 25.0
     cooldown_minutes: int = 5
     max_daily_trades: int = 0
-
 
 
 # ===================================================================
@@ -146,9 +145,7 @@ class SignalConfig:
     htf_score_filter_min_alignment: float = 0.1
     htf_score_filter_threshold_add: float = 1.0
     regime_detection_tf: str = "H1"
-    htf_alignment_tfs: list[str] = field(
-        default_factory=lambda: ["H4", "D1"]
-    )
+    htf_alignment_tfs: list[str] = field(default_factory=lambda: ["H4", "D1"])
     macd_slope_filter_threshold: float = -2.0
     trend_strength_max: float = 0.8
 
@@ -280,17 +277,22 @@ class UnifiedBotConfig:
     )
     risk: RiskConfig = field(default_factory=RiskConfig)
     timeframes: list[str] = field(
-        default_factory=lambda: ["M1", "M5", "M15", "M30", "H1", "H4", "H8", "D1"]
+        default_factory=lambda: [
+            "M1",
+            "M5",
+            "M15",
+            "M30",
+            "H1",
+            "H4",
+            "H8",
+            "D1",
+        ]
     )
-    evaluator_configs: dict[str, EvaluatorConfig] = field(
-        default_factory=dict
-    )
+    evaluator_configs: dict[str, EvaluatorConfig] = field(default_factory=dict)
     min_adx: float = 20.0
     require_htf_trend: bool = True
     tp_sl_ratio: float = 1.2
-    timeframe_configs: dict[str, TimeframeConfig] = field(
-        default_factory=dict
-    )
+    timeframe_configs: dict[str, TimeframeConfig] = field(default_factory=dict)
     enable_position_sizing: bool = True
     enable_position_manager: bool = True
     use_position_manager: bool = True
@@ -330,9 +332,7 @@ class UnifiedBotConfig:
     # レジーム検出に使用するTF
     regime_detection_tf: str = "H1"
     # HTF整合性チェックに使用するTFリスト
-    htf_alignment_tfs: list[str] = field(
-        default_factory=lambda: ["H4", "D1"]
-    )
+    htf_alignment_tfs: list[str] = field(default_factory=lambda: ["H4", "D1"])
     # --- TradingPlan デフォルト設定 ---
     default_primary_tf: str = "M15"
     default_entry_tf: str = "M5"
@@ -436,6 +436,19 @@ class UnifiedBotConfig:
     trend_max_aligned_tfs: int | None = None
     # EMAクロス矛盾ペナルティ上書き（None=デフォルト-2.5）
     ema_cross_penalty: float | None = None
+    # --- M1マイクロ反転フィルタ ---
+    # M1マイクロ反転フィルタ有効化
+    m1_micro_reversal_enabled: bool = False
+    # BB %B極値閾値（BUY: >この値, SELL: <1-この値）
+    m1_micro_reversal_bb_extreme: float = 0.90
+    # Stochastic K極値閾値（BUY: >この値, SELL: <100-この値）
+    m1_micro_reversal_stoch_extreme: float = 80.0
+    # ROC/ATR比の極値閾値
+    m1_micro_reversal_roc_atr_extreme: float = 1.5
+    # ROC計算に使うM1足本数
+    m1_micro_reversal_roc_lookback: int = 5
+    # 発動に必要な最小シグナル数（2=2/3合議）
+    m1_micro_reversal_min_signals: int = 2
 
     def get_evaluator_config(self, timeframe: str) -> EvaluatorConfig:
         """時間足別評価器設定を取得
@@ -488,9 +501,7 @@ class UnifiedBotConfig:
             ),
             regime_detection_tf=self.regime_detection_tf,
             htf_alignment_tfs=list(self.htf_alignment_tfs),
-            macd_slope_filter_threshold=(
-                self.macd_slope_filter_threshold
-            ),
+            macd_slope_filter_threshold=(self.macd_slope_filter_threshold),
             trend_strength_max=self.trend_strength_max,
         )
 
@@ -506,9 +517,7 @@ class UnifiedBotConfig:
             trend_sl_min_pips=self.trend_sl_min_pips,
             trend_sl_max_pips=self.trend_sl_max_pips,
             penalty_cap=self.penalty_cap,
-            default_tp_sl_ratio_range=(
-                self.default_tp_sl_ratio_range
-            ),
+            default_tp_sl_ratio_range=(self.default_tp_sl_ratio_range),
             max_positions=self.max_positions,
             bonus_max_positions=self.bonus_max_positions,
             bonus_score_threshold=self.bonus_score_threshold,
@@ -540,12 +549,8 @@ class UnifiedBotConfig:
             sg_volatility_penalty=self.sg_volatility_penalty,
             sg_recent_loss_penalty=self.sg_recent_loss_penalty,
             regime_threshold_enabled=self.regime_threshold_enabled,
-            regime_trend_threshold_add=(
-                self.regime_trend_threshold_add
-            ),
-            low_atr_trend_filter_enabled=(
-                self.low_atr_trend_filter_enabled
-            ),
+            regime_trend_threshold_add=(self.regime_trend_threshold_add),
+            low_atr_trend_filter_enabled=(self.low_atr_trend_filter_enabled),
             low_atr_trend_ratio_max=self.low_atr_trend_ratio_max,
             fundamental_caution_block_level=(
                 self.fundamental_caution_block_level
@@ -553,53 +558,33 @@ class UnifiedBotConfig:
             fundamental_holiday_liquidity_block=(
                 self.fundamental_holiday_liquidity_block
             ),
-            fundamental_decay_coefficient=(
-                self.fundamental_decay_coefficient
-            ),
-            fundamental_assessor_enabled=(
-                self.fundamental_assessor_enabled
-            ),
-            fundamental_softguard_enabled=(
-                self.fundamental_softguard_enabled
-            ),
+            fundamental_decay_coefficient=(self.fundamental_decay_coefficient),
+            fundamental_assessor_enabled=(self.fundamental_assessor_enabled),
+            fundamental_softguard_enabled=(self.fundamental_softguard_enabled),
             fundamental_pm_enabled=self.fundamental_pm_enabled,
             fundamental_post_event_lag_seconds=(
                 self.fundamental_post_event_lag_seconds
             ),
-            range_filter_consolidated=(
-                self.range_filter_consolidated
-            ),
-            range_filter_block_threshold=(
-                self.range_filter_block_threshold
-            ),
-            bb_width_trend_filter_enabled=(
-                self.bb_width_trend_filter_enabled
-            ),
-            tokyo_session_filter_enabled=(
-                self.tokyo_session_filter_enabled
-            ),
+            range_filter_consolidated=(self.range_filter_consolidated),
+            range_filter_block_threshold=(self.range_filter_block_threshold),
+            bb_width_trend_filter_enabled=(self.bb_width_trend_filter_enabled),
+            tokyo_session_filter_enabled=(self.tokyo_session_filter_enabled),
             session_transition_wait_enabled=(
                 self.session_transition_wait_enabled
             ),
             session_transition_wait_minutes=(
                 self.session_transition_wait_minutes
             ),
-            liquidity_based_tp_enabled=(
-                self.liquidity_based_tp_enabled
-            ),
+            liquidity_based_tp_enabled=(self.liquidity_based_tp_enabled),
             liquidity_tp_margin_pct=self.liquidity_tp_margin_pct,
             liquidity_tp_default_rr=self.liquidity_tp_default_rr,
             use_actual_spread_data=self.use_actual_spread_data,
             off_hours_trend_block=self.off_hours_trend_block,
-            off_hours_high_align_block=(
-                self.off_hours_high_align_block
-            ),
+            off_hours_high_align_block=(self.off_hours_high_align_block),
             off_hours_high_align_threshold=(
                 self.off_hours_high_align_threshold
             ),
-            high_align_penalty_threshold=(
-                self.high_align_penalty_threshold
-            ),
+            high_align_penalty_threshold=(self.high_align_penalty_threshold),
             high_align_penalty_score=self.high_align_penalty_score,
         )
 

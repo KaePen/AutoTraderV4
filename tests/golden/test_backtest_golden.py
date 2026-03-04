@@ -128,6 +128,24 @@ class TestUnifiedBotConfigDefaults:
         assert self.config.trend_sl_max_pips is None
         assert self.config.high_align_penalty_threshold is None
 
+    # --- M1マイクロ反転フィルタ（デフォルトOFF確認）---
+
+    def test_m1_micro_reversal_disabled_by_default(
+        self,
+    ) -> None:
+        """M1マイクロ反転フィルタはデフォルトOFF"""
+        assert self.config.m1_micro_reversal_enabled is False
+
+    def test_m1_micro_reversal_default_thresholds(
+        self,
+    ) -> None:
+        """M1マイクロ反転フィルタのデフォルト閾値"""
+        assert self.config.m1_micro_reversal_bb_extreme == 0.90
+        assert self.config.m1_micro_reversal_stoch_extreme == 80.0
+        assert self.config.m1_micro_reversal_roc_atr_extreme == 1.5
+        assert self.config.m1_micro_reversal_roc_lookback == 5
+        assert self.config.m1_micro_reversal_min_signals == 2
+
     # --- 時間足設定 ---
 
     def test_default_timeframes(self) -> None:
