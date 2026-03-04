@@ -17,9 +17,10 @@ def _make_row(**kwargs: object) -> pd.Series:
     defaults = {
         "close": 150.0,
         "open": 149.9,
-        "ema_10": 150.1,
-        "ema_20": 149.8,
-        "bb_percent_b": 0.5,
+        "ema_12": 150.1,
+        "ema_26": 149.8,
+        "sma_20": 150.0,
+        "bb_width": 1.0,
     }
     defaults.update(kwargs)
     return pd.Series(defaults)
@@ -73,16 +74,17 @@ class TestM1ExecutionGateBuy:
                 enabled=True, threshold=1.0,
             ),
         )
-        # close(150) > ema_20(149.8) ✓
-        # ema_10(150.1) > ema_20(149.8) ✓
+        # close(150) > ema_26(149.8) ✓
+        # ema_12(150.1) > ema_26(149.8) ✓
         # close(150) > open(149.9) → 陽線 ✓
-        # bb_percent_b(0.5) in [0.3, 0.7] ✓
+        # pct_b=(150-150+0.5)/1.0=0.5 in [0.3, 0.7] ✓
         row = _make_row(
             close=150.0,
             open=149.9,
-            ema_10=150.1,
-            ema_20=149.8,
-            bb_percent_b=0.5,
+            ema_12=150.1,
+            ema_26=149.8,
+            sma_20=150.0,
+            bb_width=1.0,
         )
         result = gate.check(SignalType.BUY, row)
         assert result.passed is True
@@ -99,16 +101,17 @@ class TestM1ExecutionGateBuy:
                 enabled=True, threshold=1.0,
             ),
         )
-        # close(149.5) < ema_20(150.0) ✗
-        # ema_10(149.7) < ema_20(150.0) ✗
+        # close(149.5) < ema_26(150.0) ✗
+        # ema_12(149.7) < ema_26(150.0) ✗
         # close(149.5) < open(150.0) → 陰線 ✗
-        # bb_percent_b(0.1) < 0.3 ✗
+        # pct_b=(149.5-150+0.5)/1.0=0.0 < 0.3 ✗
         row = _make_row(
             close=149.5,
             open=150.0,
-            ema_10=149.7,
-            ema_20=150.0,
-            bb_percent_b=0.1,
+            ema_12=149.7,
+            ema_26=150.0,
+            sma_20=150.0,
+            bb_width=1.0,
         )
         result = gate.check(SignalType.BUY, row)
         assert result.passed is False
@@ -124,9 +127,10 @@ class TestM1ExecutionGateBuy:
         row = _make_row(
             close=150.0,
             open=150.1,  # 陰線
-            ema_10=150.1,
-            ema_20=149.8,
-            bb_percent_b=0.1,  # BB外
+            ema_12=150.1,
+            ema_26=149.8,
+            sma_20=151.0,  # pct_b=(150-151+0.5)/1.0=-0.5 BB外
+            bb_width=1.0,
         )
         result = gate.check(SignalType.BUY, row)
         assert result.passed is True
@@ -146,16 +150,17 @@ class TestM1ExecutionGateSell:
                 enabled=True, threshold=1.0,
             ),
         )
-        # close(149.5) < ema_20(150.0) ✓
-        # ema_10(149.7) < ema_20(150.0) ✓
+        # close(149.5) < ema_26(150.0) ✓
+        # ema_12(149.7) < ema_26(150.0) ✓
         # close(149.5) < open(150.0) → 陰線 ✓
-        # bb_percent_b(0.4) in [0.3, 0.7] ✓
+        # pct_b=(149.5-149.5+0.5)/1.0=0.5 in [0.3, 0.7] ✓
         row = _make_row(
             close=149.5,
             open=150.0,
-            ema_10=149.7,
-            ema_20=150.0,
-            bb_percent_b=0.4,
+            ema_12=149.7,
+            ema_26=150.0,
+            sma_20=149.5,
+            bb_width=1.0,
         )
         result = gate.check(SignalType.SELL, row)
         assert result.passed is True
@@ -173,9 +178,10 @@ class TestM1ExecutionGateSell:
         row = _make_row(
             close=150.5,
             open=150.0,
-            ema_10=150.3,
-            ema_20=149.8,
-            bb_percent_b=0.5,
+            ema_12=150.3,
+            ema_26=149.8,
+            sma_20=150.5,
+            bb_width=1.0,
         )
         result = gate.check(SignalType.SELL, row)
         assert result.ema_aligned is False
@@ -199,9 +205,10 @@ class TestM1ExecutionGateThreshold:
         row = _make_row(
             close=150.0,
             open=149.9,
-            ema_10=150.1,
-            ema_20=149.8,
-            bb_percent_b=0.1,  # BB外
+            ema_12=150.1,
+            ema_26=149.8,
+            sma_20=151.0,  # pct_b=-0.5 BB外
+            bb_width=1.0,
         )
         result = gate.check(SignalType.BUY, row)
         assert result.passed is True
@@ -221,9 +228,10 @@ class TestM1ExecutionGateThreshold:
         row = _make_row(
             close=150.0,
             open=149.9,
-            ema_10=150.1,
-            ema_20=149.8,
-            bb_percent_b=0.1,
+            ema_12=150.1,
+            ema_26=149.8,
+            sma_20=151.0,  # pct_b=-0.5 BB外
+            bb_width=1.0,
         )
         result = gate.check(SignalType.BUY, row)
         assert result.passed is False
@@ -240,7 +248,7 @@ class TestM1ExecutionGateNaN:
             ),
         )
         row = _make_row(
-            ema_10=float("nan"),
+            ema_12=float("nan"),
         )
         result = gate.check(SignalType.BUY, row)
         assert result.ema_aligned is False
@@ -253,7 +261,7 @@ class TestM1ExecutionGateNaN:
             ),
         )
         row = _make_row(
-            bb_percent_b=float("nan"),
+            bb_width=float("nan"),
         )
         result = gate.check(SignalType.BUY, row)
         assert result.bb_healthy is False
