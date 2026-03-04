@@ -756,7 +756,9 @@ class TestBreakevenImprovement:
 
     def setup_method(self) -> None:
         """テストセットアップ"""
-        self.manager = PositionManager()
+        # early_breakeven_enabled を明示的にONにしてテスト
+        cfg = PositionManagerConfig(early_breakeven_enabled=True)
+        self.manager = PositionManager(config=cfg)
         self.entry_time = datetime(2024, 1, 1, 10, 0, 0)
         # デフォルト: slip=0.5, cushion=3.0
         # offset = slip*2*0.01 + cushion*0.01 = 0.01 + 0.03 = 0.04
@@ -1101,6 +1103,7 @@ class TestRangeDayBeFix:
     def setup_method(self) -> None:
         """テストセットアップ"""
         self.config = PositionManagerConfig(
+            early_breakeven_enabled=True,
             range_day_be_disabled=True,
             range_day_early_be_r=1.0,
             range_day_fast_be_enabled=False,
@@ -1235,6 +1238,7 @@ class TestRangeDayBeFix:
     def test_cli_flag_disable_returns_legacy(self) -> None:
         """--no-range-day-be-fixで従来動作（0.5R BE）"""
         legacy_config = PositionManagerConfig(
+            early_breakeven_enabled=True,
             range_day_be_disabled=False,
             range_day_insurance_enabled=False,
             range_day_half_r_partial_enabled=False,
@@ -1309,6 +1313,7 @@ class TestFastBeAndStagnation:
     def test_fast_be_fires_when_quick(self) -> None:
         """RANGE×DAY: 30分で0.5R到達→BE発火"""
         config = PositionManagerConfig(
+            early_breakeven_enabled=True,
             range_day_be_disabled=True,
             range_day_early_be_r=1.0,
             range_day_fast_be_enabled=True,
@@ -2262,15 +2267,16 @@ class Test2021RangeImprovements:
         action = manager.evaluate(
             "pos1", 150.0, now, atr=0.5,
         )
-        # TREND 60分閾値未満 → HOLD
+        # TREND 90分閾値未満 → HOLD
         assert action.action_type == ManagementActionType.HOLD
 
-    def test_regime_stagnation_trend_60min(self) -> None:
-        """TREND: 60分でSTAGNATION発火
+    def test_regime_stagnation_trend_90min(self) -> None:
+        """TREND: 90分でSTAGNATION発火
 
-        条件: elapsed >= 60分 AND highest_r < stagnation_min_mfe_r
+        条件: elapsed >= 90分 AND highest_r < stagnation_min_mfe_r
         テスト: stagnation_min_mfe_r=0.30 に設定し、MFE=0.25R でテスト
         （0.25R >= 0.2R なので超早期exitは回避）
+        TREND fallback: 90分（stag_trend_minutes未設定時）
         """
         config = PositionManagerConfig(
             stagnation_min_mfe_r=0.30,  # 閾値引き上げ
@@ -2283,9 +2289,16 @@ class Test2021RangeImprovements:
         t1 = self.entry_time + timedelta(minutes=10)
         manager.evaluate("pos1", 150.125, t1, atr=0.5)
 
-        # 65分経過、TREND→60分閾値を超過
+        # 85分経過、TREND→90分閾値未到達 → HOLD
+        t2 = self.entry_time + timedelta(minutes=85)
+        action2 = manager.evaluate(
+            "pos1", 150.0, t2, atr=0.5,
+        )
+        assert action2.action_type == ManagementActionType.HOLD
+
+        # 95分経過、TREND→90分閾値を超過
         # highest_r=0.25R < 0.30R → STAGNATION発火
-        now = self.entry_time + timedelta(minutes=65)
+        now = self.entry_time + timedelta(minutes=95)
         action = manager.evaluate(
             "pos1", 150.0, now, atr=0.5,
         )
@@ -2295,10 +2308,11 @@ class Test2021RangeImprovements:
         assert action.exit_reason == ExitReason.STAGNATION
         assert "TREND" in action.reason
 
-    def test_regime_stagnation_range_90min(self) -> None:
-        """RANGE: 90分でSTAGNATION発火（60分では不発）
+    def test_regime_stagnation_range_120min(self) -> None:
+        """RANGE: 120分でSTAGNATION発火（90分では不発）
 
-        条件: elapsed >= 90分 AND highest_r < stagnation_min_mfe_r
+        条件: elapsed >= 120分 AND highest_r < stagnation_min_mfe_r
+        RANGE fallback: 120分（stag_range_minutes未設定時）
         """
         config = PositionManagerConfig(
             stagnation_min_mfe_r=0.30,
@@ -2311,15 +2325,15 @@ class Test2021RangeImprovements:
         t1 = self.entry_time + timedelta(minutes=10)
         manager.evaluate("pos1", 150.125, t1, atr=0.5)
 
-        # 65分経過、RANGE→90分閾値未到達 → HOLD
-        t2 = self.entry_time + timedelta(minutes=65)
+        # 95分経過、RANGE→120分閾値未到達 → HOLD
+        t2 = self.entry_time + timedelta(minutes=95)
         action2 = manager.evaluate(
             "pos1", 150.0, t2, atr=0.5,
         )
         assert action2.action_type == ManagementActionType.HOLD
 
-        # 95分経過、RANGE→90分閾値を超過
-        now = self.entry_time + timedelta(minutes=95)
+        # 125分経過、RANGE→120分閾値を超過
+        now = self.entry_time + timedelta(minutes=125)
         action = manager.evaluate(
             "pos1", 150.0, now, atr=0.5,
         )

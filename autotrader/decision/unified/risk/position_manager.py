@@ -212,7 +212,7 @@ class PositionManagerConfig:
         TradingStrategyMode.UNIVERSAL,
     )
     early_breakeven_r: float = 0.3
-    early_breakeven_enabled: bool = True
+    early_breakeven_enabled: bool = False
     disable_tp_after_partial: bool = True
     signal_rev_close_ratio: float = 0.0
     stagnation_exit_minutes: float = 120.0
@@ -237,7 +237,7 @@ class PositionManagerConfig:
     early_partial_close_enabled: bool = False
     early_partial_close_ratio: float = 0.25
     # RANGE×DAY 軽い保険（スパイク反転防止）
-    range_day_insurance_enabled: bool = True
+    range_day_insurance_enabled: bool = False
     range_day_insurance_max_minutes: float = 30.0
     range_day_insurance_sl_offset_r: float = -0.1
     range_day_insurance_partial_ratio: float = 0.20
@@ -246,7 +246,7 @@ class PositionManagerConfig:
     insurance_block_high_mfe_r: float = 0.8
     insurance_min_holding_minutes: float = 15.0
     # RANGE×DAY 0.5R部分確定
-    range_day_half_r_partial_enabled: bool = True
+    range_day_half_r_partial_enabled: bool = False
     range_day_half_r_partial_ratio: float = 0.20
     range_day_half_r_trigger: float = 0.5
     # BE移動クッション: BE価格に余裕を持たせノイズによるBE_HIT削減
@@ -260,7 +260,7 @@ class PositionManagerConfig:
     # 含み損時のみ発動（含み益時はトレーリングに任せる）
     consensus_exit_loss_only: bool = False
     # 利益反転ガード: MFE到達後の利益急落で早期退出
-    profit_reversal_enabled: bool = True
+    profit_reversal_enabled: bool = False
     # MFEがこのR値以上に達した後に発動対象
     profit_reversal_mfe_r: float = 0.3
     # highest_rからの下落がこの値以上で発動
@@ -268,7 +268,7 @@ class PositionManagerConfig:
     # current_rがこの値以下で発動
     profit_reversal_max_r: float = 0.05
     # ユニバーサル0.5R部分利確（全レジーム対応）
-    universal_half_r_enabled: bool = True
+    universal_half_r_enabled: bool = False
     universal_half_r_trigger: float = 0.5
     universal_half_r_ratio: float = 0.25
     # 段階的STAGNATION: 3段階で早期に停滞を検出

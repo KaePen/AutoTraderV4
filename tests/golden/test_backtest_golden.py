@@ -131,7 +131,7 @@ class TestUnifiedBotConfigDefaults:
     # --- 時間足設定 ---
 
     def test_default_timeframes(self) -> None:
-        expected = ["M1", "M5", "M15", "M30", "H1", "H4", "D1"]
+        expected = ["M1", "M5", "M15", "M30", "H1", "H4", "H8", "D1"]
         assert self.config.timeframes == expected
 
     def test_htf_alignment_tfs(self) -> None:
@@ -224,8 +224,9 @@ class TestPositionManagerConfigDefaults:
         """very_early_exitはデフォルトOFF（Phase3最大犯人）"""
         assert self.config.very_early_exit_enabled is False
 
-    def test_profit_reversal_enabled(self) -> None:
-        assert self.config.profit_reversal_enabled is True
+    def test_profit_reversal_disabled(self) -> None:
+        """profit_reversalはデフォルトOFF（exit簡素化で+68%改善）"""
+        assert self.config.profit_reversal_enabled is False
         assert self.config.profit_reversal_mfe_r == 0.3
         assert self.config.profit_reversal_drop_r == 0.25
 
@@ -236,8 +237,9 @@ class TestPositionManagerConfigDefaults:
     def test_range_day_settings(self) -> None:
         assert self.config.range_day_be_disabled is True
         assert self.config.range_day_fast_be_enabled is True
-        assert self.config.range_day_insurance_enabled is True
-        assert self.config.range_day_half_r_partial_enabled is True
+        # exit簡素化: insurance/half_r OFF
+        assert self.config.range_day_insurance_enabled is False
+        assert self.config.range_day_half_r_partial_enabled is False
 
     def test_stag_override_none_by_default(self) -> None:
         """レジーム別stagnation上書きはデフォルトNone"""
