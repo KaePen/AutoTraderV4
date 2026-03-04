@@ -18,6 +18,61 @@ from autotrader.adapters.mt5.exceptions import MT5ConnectionError
 logger = logging.getLogger(__name__)
 
 
+async def _hide_mt5_window() -> None:
+    """MT5ウィンドウを非表示にする
+
+    win32guiでMetaTraderウィンドウを検索し非表示化。
+    ベストエフォート: 失敗してもMT5接続に影響しない。
+    """
+
+    def _do_hide() -> None:
+        try:
+            import win32con  # type: ignore[import]
+            import win32gui  # type: ignore[import]
+        except ImportError:
+            logger.debug(
+                "pywin32未インストール: "
+                "MT5ウィンドウ非表示をスキップ"
+            )
+            return
+
+        hidden_count = 0
+
+        def _enum_callback(
+            hwnd: int, _: object
+        ) -> None:
+            nonlocal hidden_count
+            title = win32gui.GetWindowText(hwnd)
+            if "MetaTrader" in title:
+                win32gui.ShowWindow(
+                    hwnd, win32con.SW_HIDE
+                )
+                hidden_count += 1
+                logger.debug(
+                    "MT5ウィンドウ非表示: %s", title
+                )
+
+        win32gui.EnumWindows(_enum_callback, None)
+        if hidden_count:
+            logger.info(
+                "MT5ウィンドウ %d件を非表示化",
+                hidden_count,
+            )
+        else:
+            logger.debug(
+                "MT5ウィンドウが見つかりません"
+            )
+
+    loop = asyncio.get_running_loop()
+    try:
+        await loop.run_in_executor(None, _do_hide)
+    except Exception:
+        logger.warning(
+            "MT5ウィンドウ非表示に失敗",
+            exc_info=True,
+        )
+
+
 class MT5Transport(ABC):
     """MT5トランスポート抽象クラス"""
 
@@ -519,6 +574,10 @@ class MT5ConnectionManager:
                 self._connected = True
                 self._last_health_check = time.time()
                 logger.info("MT5接続成功")
+
+                if self._config.hide_window:
+                    await _hide_mt5_window()
+
                 return True
 
             except MT5ConnectionError as e:

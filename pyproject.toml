@@ -58,6 +58,7 @@ dev = [
 ]
 mt5 = [
     "MetaTrader5>=5.0.45",
+    "pywin32>=306",
 ]
 fast = [
     "numba>=0.59.0",
