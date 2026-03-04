@@ -509,6 +509,15 @@ class BacktestRunner:
         df["is_bullish_div"] = div_df["is_bullish_div"]
         df["is_bearish_div"] = div_df["is_bearish_div"]
 
+        # スイングレベル（M1構造的SL用）
+        _swing_window = 20  # 20本のルックバック
+        df["last_swing_low"] = df["low"].rolling(
+            window=_swing_window, min_periods=1,
+        ).min()
+        df["last_swing_high"] = df["high"].rolling(
+            window=_swing_window, min_periods=1,
+        ).max()
+
         return df
 
     def _calculate_indicators_cached(

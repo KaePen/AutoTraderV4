@@ -1472,8 +1472,9 @@ class UnifiedTradeBot:
                         ),
                         sl_pips=sl_pips,
                         tp_pips=tp_pips,
-                        confidence=(
-                            consensus.confidence
+                        confidence=min(
+                            consensus.score / 20.0,
+                            1.0,
                         ),
                         primary_tf=(
                             primary_signal.timeframe

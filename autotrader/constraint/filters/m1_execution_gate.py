@@ -132,33 +132,33 @@ class M1ExecutionGate:
     ) -> bool:
         """EMAアラインメントチェック.
 
-        BUY: close > ema_20 AND ema_10 > ema_20
-        SELL: close < ema_20 AND ema_10 < ema_20
+        BUY: close > ema_26 AND ema_12 > ema_26
+        SELL: close < ema_26 AND ema_12 < ema_26
         """
         close = row.get("close")
-        ema_10 = row.get("ema_10")
-        ema_20 = row.get("ema_20")
+        ema_12 = row.get("ema_12")
+        ema_26 = row.get("ema_26")
         if (
             close is None
-            or ema_10 is None
-            or ema_20 is None
+            or ema_12 is None
+            or ema_26 is None
         ):
             return False
         if (
             pd.isna(close)
-            or pd.isna(ema_10)
-            or pd.isna(ema_20)
+            or pd.isna(ema_12)
+            or pd.isna(ema_26)
         ):
             return False
 
         if direction == SignalType.BUY:
             return (
-                float(close) > float(ema_20)
-                and float(ema_10) > float(ema_20)
+                float(close) > float(ema_26)
+                and float(ema_12) > float(ema_26)
             )
         return (
-            float(close) < float(ema_20)
-            and float(ema_10) < float(ema_20)
+            float(close) < float(ema_26)
+            and float(ema_12) < float(ema_26)
         )
 
     def _check_bar(
@@ -185,14 +185,34 @@ class M1ExecutionGate:
     def _check_bb(self, row: pd.Series) -> bool:
         """BB健全ゾーンチェック.
 
-        bb_percent_bが0.3-0.7の範囲内なら健全。
+        sma_20とbb_widthからpercent_bを算出し、
+        0.3-0.7の範囲内なら健全。
         """
-        bb_pct = row.get("bb_percent_b")
-        if bb_pct is None or pd.isna(bb_pct):
+        close = row.get("close")
+        sma_20 = row.get("sma_20")
+        bb_width = row.get("bb_width")
+        if (
+            close is None
+            or sma_20 is None
+            or bb_width is None
+        ):
             return False
-        val = float(bb_pct)
+        if (
+            pd.isna(close)
+            or pd.isna(sma_20)
+            or pd.isna(bb_width)
+        ):
+            return False
+        _close = float(close)
+        _sma = float(sma_20)
+        _width = float(bb_width)
+        if _width <= 0:
+            return False
+        # bb_percent_b = (close - lower) / width
+        # lower = sma_20 - width / 2
+        pct_b = (_close - _sma + _width / 2) / _width
         return (
             self._config.bb_low
-            <= val
+            <= pct_b
             <= self._config.bb_high
         )
