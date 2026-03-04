@@ -28,6 +28,7 @@ class MT5Config:
         retry_count: リトライ回数
         retry_delay_sec: リトライ間隔（秒）
         health_check_interval_sec: ヘルスチェック間隔（秒）
+        hide_window: MT5ウィンドウを非表示にするか
     """
 
     login: int = 0
@@ -42,3 +43,4 @@ class MT5Config:
     retry_count: int = 3
     retry_delay_sec: float = 1.0
     health_check_interval_sec: float = 30.0
+    hide_window: bool = True
