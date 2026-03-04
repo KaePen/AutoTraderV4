@@ -292,6 +292,20 @@ class PositionManagerConfig:
     stag_pretighten_mfe_r: float = 0.10
     # SLターゲットR値（エントリーからの距離）
     stag_pretighten_sl_r: float = -0.05
+    # 早期利益ガード: 小利益+センチメント悪化で早期撤退
+    early_profit_guard_enabled: bool = False
+    # MFE最低値（一度は有利に動いた証拠）
+    early_profit_guard_min_mfe_r: float = 0.05
+    # 現在含み益の最低R値
+    early_profit_guard_min_r: float = 0.0
+    # 大利益は対象外（profit_reversalに任せる）
+    early_profit_guard_max_r: float = 0.30
+    # 逆方向スコア - 自方向スコアの差（これ以上で発動）
+    early_profit_guard_score_diff: float = 1.0
+    # 逆方向スコアの最低値（ノイズ排除）
+    early_profit_guard_min_opp_score: float = 4.0
+    # 最低保有時間（分、エントリーノイズ排除）
+    early_profit_guard_min_hold_minutes: float = 5.0
 
 
 class PositionManager:
@@ -543,6 +557,18 @@ class PositionManager:
         if self.config.profit_reversal_enabled:
             action = self._check_profit_reversal(
                 position, current_price,
+            )
+            if action is not None:
+                self._try_state_transition(
+                    position, action,
+                )
+                return action
+
+        # 3.6 早期利益ガード
+        if self.config.early_profit_guard_enabled:
+            action = self._check_early_profit_guard(
+                position, current_price, current_time,
+                buy_score, sell_score,
             )
             if action is not None:
                 self._try_state_transition(
@@ -1095,6 +1121,75 @@ class PositionManager:
                 trigger_price=current_price,
             )
         return None
+
+    def _check_early_profit_guard(
+        self,
+        position: ManagedPosition,
+        current_price: float,
+        current_time: datetime,
+        buy_score: float,
+        sell_score: float,
+    ) -> ManagementAction | None:
+        """早期利益ガード
+
+        小利益帯でセンチメント悪化（逆方向スコア優勢）を
+        検出し、利益があるうちに早期撤退する。
+
+        profit_reversalはMFE>=0.3R後の急落を捕捉するが、
+        この機能はMFE 0.05-0.30Rの小利益帯を保護する。
+        """
+        # スコアが両方0（ライブ初期化等）は無視
+        if buy_score == 0.0 and sell_score == 0.0:
+            return None
+
+        cfg = self.config
+        # 1. 一度は有利方向に動いた証拠
+        if position.highest_r < cfg.early_profit_guard_min_mfe_r:
+            return None
+
+        # 2. 現在まだ含み益
+        if position.current_r <= cfg.early_profit_guard_min_r:
+            return None
+
+        # 3. 大利益はprofit_reversalに委任
+        if position.current_r > cfg.early_profit_guard_max_r:
+            return None
+
+        # 4. エントリーノイズ除外
+        elapsed = (
+            (current_time - position.entry_time).total_seconds()
+            / 60
+        )
+        if elapsed < cfg.early_profit_guard_min_hold_minutes:
+            return None
+
+        # 5. スコア方向の判定
+        if position.direction == SignalType.BUY:
+            own_score = buy_score
+            opp_score = sell_score
+        else:
+            own_score = sell_score
+            opp_score = buy_score
+
+        # 6. 逆方向に実質的な勢い
+        if opp_score < cfg.early_profit_guard_min_opp_score:
+            return None
+
+        # 7. スコア差で逆転検知
+        score_diff = opp_score - own_score
+        if score_diff < cfg.early_profit_guard_score_diff:
+            return None
+
+        return ManagementAction.full_close(
+            reason=(
+                f"早期利益ガード: R={position.current_r:.2f},"
+                f" MFE={position.highest_r:.2f}R,"
+                f" opp={opp_score:.1f} own={own_score:.1f}"
+                f" (diff={score_diff:.1f})"
+            ),
+            exit_reason=ExitReason.TAKE_PROFIT_EARLY,
+            trigger_price=current_price,
+        )
 
     def _check_partial_close(
         self,
