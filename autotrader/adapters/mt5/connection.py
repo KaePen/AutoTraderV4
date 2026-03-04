@@ -43,7 +43,7 @@ async def _hide_mt5_window() -> None:
         ) -> None:
             nonlocal hidden_count
             title = win32gui.GetWindowText(hwnd)
-            if "MetaTrader" in title:
+            if "MetaTrader" in title or "MT5" in title:
                 win32gui.ShowWindow(
                     hwnd, win32con.SW_HIDE
                 )

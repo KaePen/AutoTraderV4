@@ -10,6 +10,7 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
@@ -44,13 +45,22 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="開発モード（自動リロード）",
     )
+    parser.add_argument(
+        "--show-mt5",
+        action="store_true",
+        help="MT5ウィンドウを表示する（デフォルト: 非表示）",
+    )
     return parser.parse_args()
 
 
 def main() -> None:
     """メイン関数"""
     args = parse_args()
-    
+
+    # MT5ウィンドウ表示/非表示を環境変数で伝搬
+    if args.show_mt5:
+        os.environ["MT5_SHOW_WINDOW"] = "1"
+
     import uvicorn
     
     print(f"AutoTrader WebUI サーバー起動")
