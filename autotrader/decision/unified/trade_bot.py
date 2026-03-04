@@ -115,11 +115,7 @@ class BotState:
             new_losses = self.consecutive_losses
 
         new_peak = max(self.peak_equity, new_equity)
-        new_dd = (
-            (new_peak - new_equity) / new_peak
-            if new_peak > 0
-            else 0.0
-        )
+        new_dd = (new_peak - new_equity) / new_peak if new_peak > 0 else 0.0
 
         return replace(
             self,
@@ -160,7 +156,8 @@ class BotState:
         )
 
     def with_initial_equity(
-        self, initial_balance: float,
+        self,
+        initial_balance: float,
     ) -> BotState:
         """初期資金設定後の新しいBotStateを返す
 
@@ -240,15 +237,20 @@ class RiskManager:
         # 日次トレード件数制限チェック（0=無制限）
         limit = self.config.max_daily_trades
         if limit > 0 and self._daily_trades >= limit:
-            return False, f"日次トレード件数上限({self._daily_trades}/{limit}件)"
+            return (
+                False,
+                f"日次トレード件数上限({self._daily_trades}/{limit}件)",
+            )
 
         # クールダウンチェック
         if self._last_trade_time is not None:
             cooldown = timedelta(minutes=self.config.cooldown_minutes)
             if timestamp - self._last_trade_time < cooldown:
                 remaining = int(
-                    (self._last_trade_time + cooldown - timestamp)
-                    .total_seconds() // 60
+                    (
+                        self._last_trade_time + cooldown - timestamp
+                    ).total_seconds()
+                    // 60
                 )
                 return False, f"クールダウン中(残{remaining}分)"
 
@@ -288,13 +290,9 @@ class UnifiedTradeBot:
             if self.config.ema_cross_penalty is not None:
                 _eval_cfg = dataclasses.replace(
                     _eval_cfg,
-                    ema_cross_penalty=(
-                        self.config.ema_cross_penalty
-                    ),
+                    ema_cross_penalty=(self.config.ema_cross_penalty),
                 )
-            self.evaluators[tf] = TimeframeEvaluator(
-                tf, _eval_cfg
-            )
+            self.evaluators[tf] = TimeframeEvaluator(tf, _eval_cfg)
 
         # 新アーキテクチャコンポーネント（risk_manager を含む）
         self._init_new_components()
@@ -321,6 +319,7 @@ class UnifiedTradeBot:
 
         # シグナル生成パイプライン
         from .pipeline import build_default_pipeline
+
         self._pipeline = build_default_pipeline()
 
     def _init_new_components(self) -> None:
@@ -330,6 +329,7 @@ class UnifiedTradeBot:
             MarketRegimeDetector,
             RegimeDetectorConfig,
         )
+
         self.regime_detector = MarketRegimeDetector(RegimeDetectorConfig())
 
         # モード選択器（UNIVERSAL固定）
@@ -356,28 +356,33 @@ class UnifiedTradeBot:
         self.consensus = ModeAwareScoreConsensus(_consensus_cfg)
 
         # ポジションサイザー（資金管理パラメータを設定から注入）
-        self.position_sizer = PositionSizer(PositionSizerConfig(
-            base_risk_pct=self.config.base_risk_pct,
-            max_risk_pct_absolute=self.config.max_risk_pct_absolute,
-            max_lot_per_trade=self.config.max_lot_per_trade,
-            max_total_exposure_lot=self.config.max_total_exposure_lot,
-            equity_floor_pct=self.config.equity_floor_pct,
-            equity_caution_pct=self.config.equity_caution_pct,
-            slippage_buffer_pips=self.config.slippage_buffer_pips,
-        ))
+        self.position_sizer = PositionSizer(
+            PositionSizerConfig(
+                base_risk_pct=self.config.base_risk_pct,
+                max_risk_pct_absolute=self.config.max_risk_pct_absolute,
+                max_lot_per_trade=self.config.max_lot_per_trade,
+                max_total_exposure_lot=self.config.max_total_exposure_lot,
+                equity_floor_pct=self.config.equity_floor_pct,
+                equity_caution_pct=self.config.equity_caution_pct,
+                slippage_buffer_pips=self.config.slippage_buffer_pips,
+            )
+        )
 
         # ソフトガード（UnifiedBotConfigからペナルティ値を伝搬）
-        self.soft_guard = SoftGuard(SoftGuardConfig(
-            spread_penalty_rate=self.config.sg_spread_penalty_rate,
-            off_hours_penalty=self.config.sg_off_hours_penalty,
-            volatility_penalty=self.config.sg_volatility_penalty,
-            recent_loss_penalty=self.config.sg_recent_loss_penalty,
-        ))
+        self.soft_guard = SoftGuard(
+            SoftGuardConfig(
+                spread_penalty_rate=self.config.sg_spread_penalty_rate,
+                off_hours_penalty=self.config.sg_off_hours_penalty,
+                volatility_penalty=self.config.sg_volatility_penalty,
+                recent_loss_penalty=self.config.sg_recent_loss_penalty,
+            )
+        )
 
         # 動的TF選択器（UNIVERSALモード用）
         from autotrader.decision.unified.dynamic_tf_selector import (
             DynamicTFSelector,
         )
+
         self._dynamic_tf_selector = DynamicTFSelector(
             bot_config=self.config,
         )
@@ -394,7 +399,8 @@ class UnifiedTradeBot:
         risk_config = dataclasses.replace(
             self.config.risk,
             cooldown_minutes=(
-                0 if self.config.demo_mode
+                0
+                if self.config.demo_mode
                 else self.config.risk.cooldown_minutes
             ),
             max_daily_trades=(
@@ -411,6 +417,24 @@ class UnifiedTradeBot:
             enabled=self.config.session_transition_wait_enabled,
         )
 
+        # M1マイクロ反転フィルタ
+        from autotrader.constraint.filters.micro_reversal_filter import (
+            MicroReversalConfig,
+            MicroReversalFilter,
+        )
+
+        self._micro_reversal_filter = MicroReversalFilter(
+            MicroReversalConfig(
+                enabled=self.config.m1_micro_reversal_enabled,
+                bb_extreme=(self.config.m1_micro_reversal_bb_extreme),
+                stoch_extreme=(self.config.m1_micro_reversal_stoch_extreme),
+                roc_atr_extreme=(
+                    self.config.m1_micro_reversal_roc_atr_extreme
+                ),
+                roc_lookback=(self.config.m1_micro_reversal_roc_lookback),
+                min_signals=(self.config.m1_micro_reversal_min_signals),
+            )
+        )
 
     def set_market_data(
         self,
@@ -426,6 +450,7 @@ class UnifiedTradeBot:
 
         # 時刻配列を事前キャッシュ（O(1)検索用）
         import numpy as np
+
         self._time_arrays: dict[str, np.ndarray] = {}
         for tf, df in data.items():
             if df is None or df.empty:
@@ -433,13 +458,9 @@ class UnifiedTradeBot:
             if isinstance(df.index, pd.DatetimeIndex):
                 self._time_arrays[tf] = df.index.values
             elif "time" in df.columns:
-                self._time_arrays[tf] = (
-                    df["time"].values
-                )
+                self._time_arrays[tf] = df["time"].values
             elif "timestamp" in df.columns:
-                self._time_arrays[tf] = (
-                    df["timestamp"].values
-                )
+                self._time_arrays[tf] = df["timestamp"].values
 
         # 各評価器に上位時間足データを設定
         for tf in self.timeframes:
@@ -469,7 +490,7 @@ class UnifiedTradeBot:
         """
         try:
             idx = self.timeframes.index(tf)
-            return self.timeframes[idx + 1:]
+            return self.timeframes[idx + 1 :]
         except ValueError:
             return []
 
@@ -492,8 +513,10 @@ class UnifiedTradeBot:
             ConsolidatedSignal: 統合シグナル
         """
         return self._generate_signal_new(
-            current_time, candle,
-            fundamental_ctx, fundamental_memory,
+            current_time,
+            candle,
+            fundamental_ctx,
+            fundamental_memory,
         )
 
     def _assess_fundamental(
@@ -528,7 +551,8 @@ class UnifiedTradeBot:
             self._fund_assessor = FundamentalRiskAssessor()
 
         return self._fund_assessor.assess(
-            fundamental_ctx, fundamental_memory,
+            fundamental_ctx,
+            fundamental_memory,
         )
 
     def _generate_signal_new(
@@ -570,13 +594,14 @@ class UnifiedTradeBot:
         tf_signals: dict[str, TimeframeSignal] = {}
 
         _PARALLEL_TF_THRESHOLD = 12
-        _eval_tfs = [
-            tf for tf in self.timeframes if tf in self.evaluators
-        ]
+        _eval_tfs = [tf for tf in self.timeframes if tf in self.evaluators]
 
         if len(_eval_tfs) > _PARALLEL_TF_THRESHOLD:
             tf_signals = self._evaluate_tfs_parallel(
-                _eval_tfs, current_time, candle, plan,
+                _eval_tfs,
+                current_time,
+                candle,
+                plan,
             )
         else:
             for tf in _eval_tfs:
@@ -584,7 +609,10 @@ class UnifiedTradeBot:
                 if row is None:
                     continue
                 signal = self.evaluators[tf].evaluate(
-                    row, candle, plan, current_time,
+                    row,
+                    candle,
+                    plan,
+                    current_time,
                 )
                 tf_signals[tf] = signal
 
@@ -609,12 +637,14 @@ class UnifiedTradeBot:
 
         # 6. レジーム検出（動的regime_tfを使用）
         regime_result = self._detect_regime(
-            current_time, regime_tf=_regime_tf,
+            current_time,
+            regime_tf=_regime_tf,
         )
 
         # 7. HTF整合度（動的htf_tfsを使用）
         htf_alignment = self._get_htf_alignment(
-            current_time, htf_tfs=_htf_tfs,
+            current_time,
+            htf_tfs=_htf_tfs,
         )
 
         # 分析用に最後のモード/レジームを保持
@@ -626,15 +656,14 @@ class UnifiedTradeBot:
 
         # 9. コンセンサスはモード別TFセットのみ対象（役割重みを保持）
         consensus_signals: dict[str, TimeframeSignal] = {
-            tf: tf_signals[tf]
-            for tf in tf_set.all_tfs
-            if tf in tf_signals
+            tf: tf_signals[tf] for tf in tf_set.all_tfs if tf in tf_signals
         }
 
         # Phase 2b: ファンダメンタル評価（consolidate前に実行）
         # conviction boost適用のため方向判定前に評価する
         _fund_assessment = self._assess_fundamental(
-            fundamental_ctx, fundamental_memory,
+            fundamental_ctx,
+            fundamental_memory,
         )
         self._last_fundamental_assessment = _fund_assessment
         _fund_boosted = False
@@ -651,8 +680,7 @@ class UnifiedTradeBot:
         _base_threshold = self.consensus.threshold
         if _overrides.consensus_threshold_delta != 0.0:
             _base_threshold = (
-                _base_threshold
-                + _overrides.consensus_threshold_delta
+                _base_threshold + _overrides.consensus_threshold_delta
             )
         # レジーム別閾値調整（TREND勝率41%→閾値引き上げ）
         if (
@@ -660,49 +688,45 @@ class UnifiedTradeBot:
             and regime_result.regime == MarketRegime.TREND
         ):
             _base_threshold = (
-                _base_threshold
-                + self.config.regime_trend_threshold_add
+                _base_threshold + self.config.regime_trend_threshold_add
             )
             # TREND + BB_WIDTH > 0.06: 閾値 +1.0（ボラ拡大時の追従強化）
             # bisect検証: -314K, WR -1.5pp → デフォルトOFF
             if self.config.bb_width_trend_filter_enabled:
                 _primary_row = self._get_current_row(
-                    plan.primary_tf, current_time,
+                    plan.primary_tf,
+                    current_time,
                 )
                 if _primary_row is not None:
                     _bb_w_h4 = _primary_row.get("bb_width_h4")
-                    if (
-                        _bb_w_h4 is not None
-                        and not pd.isna(_bb_w_h4)
-                    ):
+                    if _bb_w_h4 is not None and not pd.isna(_bb_w_h4):
                         if float(_bb_w_h4) > 0.06:
-                            _base_threshold = (
-                                _base_threshold + 1.0
-                            )
+                            _base_threshold = _base_threshold + 1.0
 
         # TOKYOセッション最適化（UTC 17-21 = JST 02-06）
         # 東京深夜は流動性低下→閾値引き上げ
         # bisect検証: BB_WIDTHと合わせて-314K → デフォルトOFF
         if self.config.tokyo_session_filter_enabled:
-            _hour_utc_plan = current_time.hour if hasattr(
-                current_time, 'hour'
-            ) else current_time.to_pydatetime().hour
+            _hour_utc_plan = (
+                current_time.hour
+                if hasattr(current_time, "hour")
+                else current_time.to_pydatetime().hour
+            )
             if 17 <= _hour_utc_plan < 21:
                 _base_threshold = _base_threshold + 0.5
         # HTFスコア不一致フィルター（HTF整合度低→閾値引き上げ）
         if (
             self.config.htf_score_filter_enabled
-            and htf_alignment
-            <= self.config.htf_score_filter_min_alignment
+            and htf_alignment <= self.config.htf_score_filter_min_alignment
         ):
             _base_threshold = (
-                _base_threshold
-                + self.config.htf_score_filter_threshold_add
+                _base_threshold + self.config.htf_score_filter_threshold_add
             )
         if _base_threshold != self.consensus.threshold:
             _threshold_override = _base_threshold
         consensus = self.consensus.consolidate(
-            consensus_signals, plan,
+            consensus_signals,
+            plan,
             threshold_override=_threshold_override,
         )
 
@@ -716,41 +740,28 @@ class UnifiedTradeBot:
         ):
             _prelim_dir = (
                 SignalType.BUY
-                if consensus.buy_score
-                > consensus.sell_score
+                if consensus.buy_score > consensus.sell_score
                 else (
                     SignalType.SELL
-                    if consensus.sell_score
-                    > consensus.buy_score
+                    if consensus.sell_score > consensus.buy_score
                     else SignalType.HOLD
                 )
             )
             if _prelim_dir != SignalType.HOLD:
-                _boost_sign = (
-                    1.0
-                    if _prelim_dir == SignalType.BUY
-                    else -1.0
-                )
-                _boost_adj = (
-                    _fund_assessment
-                    .get_threshold_adjustment(
-                        signal_direction=_boost_sign,
-                    )
+                _boost_sign = 1.0 if _prelim_dir == SignalType.BUY else -1.0
+                _boost_adj = _fund_assessment.get_threshold_adjustment(
+                    signal_direction=_boost_sign,
                 )
                 # ブーストのみ適用（adj < 0 = 閾値引下げ）
                 if _boost_adj < 0:
-                    _boosted_th = (
-                        consensus.threshold + _boost_adj
-                    )
+                    _boosted_th = consensus.threshold + _boost_adj
                     if consensus.score >= _boosted_th:
                         _fund_boosted = True
                         consensus = ConsensusResult(
                             direction=_prelim_dir,
                             score=consensus.score,
                             threshold=_boosted_th,
-                            aligned_tfs=(
-                                consensus.aligned_tfs
-                            ),
+                            aligned_tfs=(consensus.aligned_tfs),
                             reasoning=(
                                 "ファンダブースト: "
                                 f"score="
@@ -759,16 +770,9 @@ class UnifiedTradeBot:
                                 f"(adj="
                                 f"{_boost_adj:+.2f})"
                             ),
-                            buy_score=(
-                                consensus.buy_score
-                            ),
-                            sell_score=(
-                                consensus.sell_score
-                            ),
-                            dynamic_entry_tf=(
-                                consensus
-                                .dynamic_entry_tf
-                            ),
+                            buy_score=(consensus.buy_score),
+                            sell_score=(consensus.sell_score),
+                            dynamic_entry_tf=(consensus.dynamic_entry_tf),
                         )
 
         if consensus.direction == SignalType.HOLD:
@@ -776,6 +780,7 @@ class UnifiedTradeBot:
                 from autotrader.core.diagnostics import (
                     SignalStepRecord,
                 )
+
                 tf_detail = {}
                 for tf_name, sig in tf_signals.items():
                     tf_detail[tf_name] = {
@@ -784,55 +789,83 @@ class UnifiedTradeBot:
                         "sell_strength": sig.sell_strength,
                         "net_strength": sig.net_strength,
                     }
-                self._flow_analyzer.collect(SignalStepRecord(
-                    timestamp=str(current_time),
-                    regime=regime_result.regime.value,
-                    volatility=regime_result.volatility_level,
-                    mode=plan.mode.value,
-                    primary_tf=plan.primary_tf,
-                    risk_passed=True,
-                    tf_details=tf_detail,
-                    consensus_direction="HOLD",
-                    consensus_score=consensus.score,
-                    consensus_threshold=consensus.threshold,
-                    consensus_passed=False,
-                    final_direction="HOLD",
-                    hold_reason=consensus.reasoning,
-                ))
+                self._flow_analyzer.collect(
+                    SignalStepRecord(
+                        timestamp=str(current_time),
+                        regime=regime_result.regime.value,
+                        volatility=regime_result.volatility_level,
+                        mode=plan.mode.value,
+                        primary_tf=plan.primary_tf,
+                        risk_passed=True,
+                        tf_details=tf_detail,
+                        consensus_direction="HOLD",
+                        consensus_score=consensus.score,
+                        consensus_threshold=consensus.threshold,
+                        consensus_passed=False,
+                        final_direction="HOLD",
+                        hold_reason=consensus.reasoning,
+                    )
+                )
             return self._hold_with_analysis(
                 consensus.reasoning,
-                plan, tf_signals, consensus,
-                regime_result, htf_alignment,
+                plan,
+                tf_signals,
+                consensus,
+                regime_result,
+                htf_alignment,
             )
 
         # BCA: 方向性エッジ評価
         _bca_penalty = 0.0
         if self._edge_assessor is not None:
             _edge_result = self._edge_assessor.assess(
-                consensus, tf_signals, tf_set,
+                consensus,
+                tf_signals,
+                tf_set,
             )
             if not _edge_result.passed:
                 return self._hold_with_analysis(
                     _edge_result.reasoning,
-                    plan, tf_signals, consensus,
-                    regime_result, htf_alignment,
+                    plan,
+                    tf_signals,
+                    consensus,
+                    regime_result,
+                    htf_alignment,
                 )
             _bca_penalty = _edge_result.penalty
+
+        # M1マイクロ反転フィルタ
+        if self._micro_reversal_filter.config.enabled:
+            _m1_row = self._get_current_row(
+                "M1",
+                current_time,
+            )
+            _m1_df = self._market_data.get("M1")
+            _m1_idx = self._current_indices.get("M1")
+            _mr_result = self._micro_reversal_filter.check(
+                direction=consensus.direction,
+                m1_row=_m1_row,
+                m1_df=_m1_df,
+                m1_index=_m1_idx,
+            )
+            if _mr_result.should_filter:
+                return self._hold_with_analysis(
+                    _mr_result.reason,
+                    plan,
+                    tf_signals,
+                    consensus,
+                    regime_result,
+                    htf_alignment,
+                )
 
         # Phase 2b: ファンダメンタル方向フィルター（ペナルティ）
         # ブーストで救済されたトレードはスキップ（方向一致確認済み）
         if _fund_assessment is not None and not _fund_boosted:
-            _dir_sign = (
-                1.0
-                if consensus.direction == SignalType.BUY
-                else -1.0
-            )
+            _dir_sign = 1.0 if consensus.direction == SignalType.BUY else -1.0
             _fund_adj = _fund_assessment.get_threshold_adjustment(
                 signal_direction=_dir_sign,
             )
-            _effective_threshold = (
-                consensus.threshold + _fund_adj
-            )
+            _effective_threshold = consensus.threshold + _fund_adj
             if consensus.score < _effective_threshold:
                 return self._hold_with_analysis(
                     f"ファンダフィルター: "
@@ -840,14 +873,18 @@ class UnifiedTradeBot:
                     f", adj={_fund_adj:+.1f}"
                     f", score={consensus.score:.1f}"
                     f"<{_effective_threshold:.1f}",
-                    plan, tf_signals, consensus,
-                    regime_result, htf_alignment,
+                    plan,
+                    tf_signals,
+                    consensus,
+                    regime_result,
+                    htf_alignment,
                 )
 
         # SoftGuardチェック（デモモードでも情報取得: 出力データに使用）
         # ATR比率・絶対ATRを計算してボラティリティ状態をSoftGuardに渡す
         _primary_atr_row = self._get_current_row(
-            plan.primary_tf, current_time,
+            plan.primary_tf,
+            current_time,
         )
         _atr_ratio = 1.0
         _primary_atr_abs = None  # 絶対ATR値（primary_tf基準）
@@ -855,8 +892,10 @@ class UnifiedTradeBot:
             _atr = _primary_atr_row.get("atr_14")
             _atr_ma = _primary_atr_row.get("atr_ma_20")
             if (
-                _atr is not None and _atr_ma is not None
-                and not pd.isna(_atr) and not pd.isna(_atr_ma)
+                _atr is not None
+                and _atr_ma is not None
+                and not pd.isna(_atr)
+                and not pd.isna(_atr_ma)
                 and _atr_ma > 0
             ):
                 _atr_ratio = float(_atr) / float(_atr_ma)
@@ -866,7 +905,8 @@ class UnifiedTradeBot:
         # entry_atr(CSV列)はH1由来のため、スケールを合わせる
         _entry_tf_atr_abs = None
         _entry_tf_row = self._get_current_row(
-            plan.entry_tf, current_time,
+            plan.entry_tf,
+            current_time,
         )
         if _entry_tf_row is not None:
             _e_atr = _entry_tf_row.get("atr_14")
@@ -878,9 +918,7 @@ class UnifiedTradeBot:
             "atr_ratio": _atr_ratio,
             "recent_losses": self.state.consecutive_losses,
             "trend_strength": regime_result.trend_strength,
-            "mtf_alignment": (
-                "aligned" if htf_alignment >= 0.3 else "mixed"
-            ),
+            "mtf_alignment": ("aligned" if htf_alignment >= 0.3 else "mixed"),
         }
         sg_result = self.soft_guard.check(
             sg_context,
@@ -896,54 +934,62 @@ class UnifiedTradeBot:
         if _bca_penalty > 0:
             sg_result = dataclasses.replace(
                 sg_result,
-                total_penalty=(
-                    sg_result.total_penalty + _bca_penalty
-                ),
+                total_penalty=(sg_result.total_penalty + _bca_penalty),
             )
 
         # セッションフィルター
-        hour_utc = current_time.hour if hasattr(
-            current_time, 'hour'
-        ) else current_time.to_pydatetime().hour
-
+        hour_utc = (
+            current_time.hour
+            if hasattr(current_time, "hour")
+            else current_time.to_pydatetime().hour
+        )
 
         def _filt_hold(reason: str) -> ConsolidatedSignal:
             """フィルターHOLD用ローカルヘルパー"""
             return self._hold_with_analysis(
-                reason, plan, tf_signals, consensus,
-                regime_result, htf_alignment, sg_result,
+                reason,
+                plan,
+                tf_signals,
+                consensus,
+                regime_result,
+                htf_alignment,
+                sg_result,
             )
 
         # デモモード: コンセンサス閾値のみ。追加フィルタースキップ
         if not self.config.demo_mode:
             # 上位足トレンドフィルター（必須条件、動的htf_tfs使用）
             if not self._check_htf_trend_alignment(
-                current_time, consensus.direction,
+                current_time,
+                consensus.direction,
                 htf_tfs=_htf_tfs,
             ):
                 if self._flow_analyzer:
                     from autotrader.core.diagnostics import (
                         SignalStepRecord,
                     )
-                    self._flow_analyzer.collect(SignalStepRecord(
-                        timestamp=str(current_time),
-                        regime=regime_result.regime.value,
-                        volatility=regime_result.volatility_level,
-                        mode=plan.mode.value,
-                        primary_tf=plan.primary_tf,
-                        risk_passed=True,
-                        consensus_direction=consensus.direction.value,
-                        consensus_score=consensus.score,
-                        consensus_threshold=consensus.threshold,
-                        consensus_passed=True,
-                        htf_passed=False,
-                        htf_direction=consensus.direction.value,
-                        final_direction="HOLD",
-                        hold_reason=(
-                            f"HTFトレンド不一致"
-                            f"({consensus.direction.value})"
-                        ),
-                    ))
+
+                    self._flow_analyzer.collect(
+                        SignalStepRecord(
+                            timestamp=str(current_time),
+                            regime=regime_result.regime.value,
+                            volatility=regime_result.volatility_level,
+                            mode=plan.mode.value,
+                            primary_tf=plan.primary_tf,
+                            risk_passed=True,
+                            consensus_direction=consensus.direction.value,
+                            consensus_score=consensus.score,
+                            consensus_threshold=consensus.threshold,
+                            consensus_passed=True,
+                            htf_passed=False,
+                            htf_direction=consensus.direction.value,
+                            final_direction="HOLD",
+                            hold_reason=(
+                                f"HTFトレンド不一致"
+                                f"({consensus.direction.value})"
+                            ),
+                        )
+                    )
                 return _filt_hold(
                     f"HTFトレンド不一致({consensus.direction.value})"
                 )
@@ -951,19 +997,16 @@ class UnifiedTradeBot:
             # SoftGuardペナルティによるブロック（常時有効）
             if sg_result.total_penalty >= 0.8:
                 return _filt_hold(
-                    f"SoftGuardブロック: penalty="
-                    f"{sg_result.total_penalty:.2f}"
+                    f"SoftGuardブロック: penalty={sg_result.total_penalty:.2f}"
                 )
 
             # ペナルティ上限フィルター（アダプティブ調整対応）
             _eff_penalty_cap = (
-                self.config.penalty_cap
-                - _overrides.penalty_cap_delta
+                self.config.penalty_cap - _overrides.penalty_cap_delta
             )
             if (
                 _eff_penalty_cap < 0.8
-                and sg_result.total_penalty
-                >= _eff_penalty_cap
+                and sg_result.total_penalty >= _eff_penalty_cap
             ):
                 return _filt_hold(
                     f"ペナルティ上限: "
@@ -986,8 +1029,7 @@ class UnifiedTradeBot:
             # ADX上限フィルタ（追いかけ防止）
             if (
                 self.config.adx_upper_limit is not None
-                and regime_result.adx
-                > self.config.adx_upper_limit
+                and regime_result.adx > self.config.adx_upper_limit
             ):
                 return _filt_hold(
                     f"ADX上限: {regime_result.adx:.1f}"
@@ -996,10 +1038,8 @@ class UnifiedTradeBot:
 
             # TREND整合TF上限フィルタ
             if (
-                self.config.trend_max_aligned_tfs
-                is not None
-                and regime_result.regime
-                == MarketRegime.TREND
+                self.config.trend_max_aligned_tfs is not None
+                and regime_result.regime == MarketRegime.TREND
                 and len(consensus.aligned_tfs)
                 > self.config.trend_max_aligned_tfs
             ):
@@ -1049,9 +1089,7 @@ class UnifiedTradeBot:
                 and hour_utc not in range(8, 18)
                 and regime_result.regime == MarketRegime.TREND
             ):
-                return _filt_hold(
-                    f"OffHoursTRENDBlock: hour={hour_utc}"
-                )
+                return _filt_hold(f"OffHoursTRENDBlock: hour={hour_utc}")
 
             # off_hours + 高htf_alignment 複合ブロック
             if (
@@ -1092,25 +1130,16 @@ class UnifiedTradeBot:
 
             # MACDスロープ逆方向フィルター
             _primary_sig = tf_signals.get(plan.primary_tf)
-            if (
-                _primary_sig
-                and _primary_sig.score_breakdown
-            ):
-                _macd_slope = (
-                    _primary_sig.score_breakdown.macd_slope
-                )
+            if _primary_sig and _primary_sig.score_breakdown:
+                _macd_slope = _primary_sig.score_breakdown.macd_slope
                 if _macd_slope <= self.config.macd_slope_filter_threshold:
-                    return _filt_hold(
-                        f"MACDスロープ逆方向: "
-                        f"{_macd_slope:.1f}"
-                    )
+                    return _filt_hold(f"MACDスロープ逆方向: {_macd_slope:.1f}")
 
             # 低ATR+TRENDフィルター（低ボラTRENDはWR低下）
             if (
                 self.config.low_atr_trend_filter_enabled
                 and regime_result.regime == MarketRegime.TREND
-                and _atr_ratio
-                <= self.config.low_atr_trend_ratio_max
+                and _atr_ratio <= self.config.low_atr_trend_ratio_max
             ):
                 return _filt_hold(
                     f"低ATR+TREND: atr_ratio="
@@ -1120,10 +1149,8 @@ class UnifiedTradeBot:
 
         # 高alignment時スコアペナルティ
         if (
-            self.config.high_align_penalty_threshold
-            is not None
-            and abs(htf_alignment)
-            > self.config.high_align_penalty_threshold
+            self.config.high_align_penalty_threshold is not None
+            and abs(htf_alignment) > self.config.high_align_penalty_threshold
         ):
             _penalty = self.config.high_align_penalty_score
             consensus = ConsensusResult(
@@ -1140,9 +1167,7 @@ class UnifiedTradeBot:
                 ),
                 buy_score=consensus.buy_score,
                 sell_score=consensus.sell_score,
-                dynamic_entry_tf=(
-                    consensus.dynamic_entry_tf
-                ),
+                dynamic_entry_tf=(consensus.dynamic_entry_tf),
             )
             # ペナルティ後にスコアが閾値未満ならHOLD
             if consensus.score < consensus.threshold:
@@ -1159,21 +1184,24 @@ class UnifiedTradeBot:
                 from autotrader.core.diagnostics import (
                     SignalStepRecord,
                 )
-                self._flow_analyzer.collect(SignalStepRecord(
-                    timestamp=str(current_time),
-                    regime=regime_result.regime.value,
-                    volatility=regime_result.volatility_level,
-                    mode=plan.mode.value,
-                    primary_tf=plan.primary_tf,
-                    risk_passed=True,
-                    consensus_direction=consensus.direction.value,
-                    consensus_score=consensus.score,
-                    consensus_threshold=consensus.threshold,
-                    consensus_passed=True,
-                    htf_passed=True,
-                    final_direction="HOLD",
-                    hold_reason="primary_tfデータなし",
-                ))
+
+                self._flow_analyzer.collect(
+                    SignalStepRecord(
+                        timestamp=str(current_time),
+                        regime=regime_result.regime.value,
+                        volatility=regime_result.volatility_level,
+                        mode=plan.mode.value,
+                        primary_tf=plan.primary_tf,
+                        risk_passed=True,
+                        consensus_direction=consensus.direction.value,
+                        consensus_score=consensus.score,
+                        consensus_threshold=consensus.threshold,
+                        consensus_passed=True,
+                        htf_passed=True,
+                        final_direction="HOLD",
+                        hold_reason="primary_tfデータなし",
+                    )
+                )
             return _filt_hold("primary_tfデータなし")
 
         sl_pips = primary_signal.sl_pips * _overrides.sl_multiplier
@@ -1183,7 +1211,8 @@ class UnifiedTradeBot:
             and regime_result.regime == MarketRegime.TREND
         ):
             sl_pips = max(
-                sl_pips, self.config.trend_sl_min_pips,
+                sl_pips,
+                self.config.trend_sl_min_pips,
             )
         # TREND時のSL上限キャップ
         if (
@@ -1191,20 +1220,18 @@ class UnifiedTradeBot:
             and regime_result.regime == MarketRegime.TREND
         ):
             sl_pips = min(
-                sl_pips, self.config.trend_sl_max_pips,
+                sl_pips,
+                self.config.trend_sl_max_pips,
             )
         tp_sl_ratio = (
-            plan.get_recommended_tp_sl_ratio()
-            * self.config.tp_sl_ratio
+            plan.get_recommended_tp_sl_ratio() * self.config.tp_sl_ratio
         )
         tp_pips = sl_pips * tp_sl_ratio
 
         # ポジションサイジング
         lot = 0.01
         if self.config.enable_position_sizing:
-            confidence = (
-                consensus.score / consensus.threshold
-            )
+            confidence = consensus.score / consensus.threshold
             # Phase 2b: ファンダメンタル値をSizingContextに反映
             _liq_factor = 1.0
             _vol_mult = 1.0
@@ -1226,23 +1253,17 @@ class UnifiedTradeBot:
                 current_dd_pct=self.state.current_dd_pct,
                 initial_equity=self.state.initial_equity,
                 open_exposure_lot=self.state.open_exposure_lot,
-                open_same_direction_lot=(
-                    self.state.open_same_direction_lot
-                ),
+                open_same_direction_lot=(self.state.open_same_direction_lot),
                 liquidity_factor=_liq_factor,
                 volatility_multiplier=_vol_mult,
             )
             sizing_result = self.position_sizer.calculate(sizing_context)
             if sizing_result.blocked:
-                return _filt_hold(
-                    f"資金管理: {sizing_result.reasoning}"
-                )
+                return _filt_hold(f"資金管理: {sizing_result.reasoning}")
             lot = sizing_result.lot
 
         rationale = (
-            f"{consensus.reasoning}, "
-            f"mode={plan.mode.value}, "
-            f"lot={lot:.2f}"
+            f"{consensus.reasoning}, mode={plan.mode.value}, lot={lot:.2f}"
         )
 
         # フロー分析: シグナル発生記録
@@ -1250,23 +1271,26 @@ class UnifiedTradeBot:
             from autotrader.core.diagnostics import (
                 SignalStepRecord,
             )
-            self._flow_analyzer.collect(SignalStepRecord(
-                timestamp=str(current_time),
-                regime=regime_result.regime.value,
-                volatility=regime_result.volatility_level,
-                mode=plan.mode.value,
-                primary_tf=plan.primary_tf,
-                risk_passed=True,
-                consensus_direction=consensus.direction.value,
-                consensus_score=consensus.score,
-                consensus_threshold=consensus.threshold,
-                consensus_passed=True,
-                htf_passed=True,
-                sl_pips=sl_pips,
-                tp_pips=tp_pips,
-                final_direction=consensus.direction.value,
-                hold_reason="",
-            ))
+
+            self._flow_analyzer.collect(
+                SignalStepRecord(
+                    timestamp=str(current_time),
+                    regime=regime_result.regime.value,
+                    volatility=regime_result.volatility_level,
+                    mode=plan.mode.value,
+                    primary_tf=plan.primary_tf,
+                    risk_passed=True,
+                    consensus_direction=consensus.direction.value,
+                    consensus_score=consensus.score,
+                    consensus_threshold=consensus.threshold,
+                    consensus_passed=True,
+                    htf_passed=True,
+                    sl_pips=sl_pips,
+                    tp_pips=tp_pips,
+                    final_direction=consensus.direction.value,
+                    hold_reason="",
+                )
+            )
 
         # TF別スコア内訳を集約
         tf_breakdowns: dict[str, dict[str, float]] = {}
@@ -1276,8 +1300,7 @@ class UnifiedTradeBot:
 
         # TF別方向を集約（UI表示用）
         tf_directions: dict[str, str] = {
-            tf: sig.direction.value
-            for tf, sig in tf_signals.items()
+            tf: sig.direction.value for tf, sig in tf_signals.items()
         }
 
         # 返却用confidence計算
@@ -1312,8 +1335,7 @@ class UnifiedTradeBot:
             htf_alignment=htf_alignment,
             penalty_total=sg_result.total_penalty,
             penalty_breakdown={
-                r.value: v
-                for r, v in sg_result.penalties.items()
+                r.value: v for r, v in sg_result.penalties.items()
             },
             trend_strength=regime_result.trend_strength,
             buy_score=consensus.buy_score,
@@ -1389,7 +1411,7 @@ class UnifiedTradeBot:
                 self._current_indices[tf] = idx
                 # current_timeまでのデータをスライス
                 if time_arr[idx] <= ct:
-                    result[tf] = df.iloc[:idx + 1]
+                    result[tf] = df.iloc[: idx + 1]
             else:
                 result[tf] = df
 
@@ -1420,16 +1442,17 @@ class UnifiedTradeBot:
             if row is None:
                 return tf, None
             signal = self.evaluators[tf].evaluate(
-                row, candle, plan, current_time,
+                row,
+                candle,
+                plan,
+                current_time,
             )
             return tf, signal
 
         results: dict[str, TimeframeSignal] = {}
         _max_w = min(4, (len(eval_tfs) + 3) // 4)
         with ThreadPoolExecutor(max_workers=_max_w) as pool:
-            for tf, signal in pool.map(
-                _eval_single, eval_tfs
-            ):
+            for tf, signal in pool.map(_eval_single, eval_tfs):
                 if signal is not None:
                     results[tf] = signal
         return results
@@ -1510,7 +1533,8 @@ class UnifiedTradeBot:
             float | None: bb_width値。取得不可時はNone
         """
         row = self._get_current_row(
-            plan.primary_tf, current_time,
+            plan.primary_tf,
+            current_time,
         )
         if row is None:
             return None
@@ -1553,15 +1577,20 @@ class UnifiedTradeBot:
 
         # RANGE/LOW_VOL以外は対象外
         if regime not in (
-            MarketRegime.RANGE, MarketRegime.LOW_VOL,
+            MarketRegime.RANGE,
+            MarketRegime.LOW_VOL,
         ):
             return None
 
         # 従来モード（個別フィルタ）
         if not self.config.range_filter_consolidated:
             return self._check_range_legacy(
-                regime_result, consensus, sg_result,
-                hour_utc, plan, current_time,
+                regime_result,
+                consensus,
+                sg_result,
+                hour_utc,
+                plan,
+                current_time,
             )
 
         # --- 統合モード: 各条件のスコアを加算 ---
@@ -1582,48 +1611,38 @@ class UnifiedTradeBot:
                     1.0,
                 )
                 score += _s
-                reasons.append(
-                    f"LOW_VOL({_s:.2f})"
-                )
+                reasons.append(f"LOW_VOL({_s:.2f})")
 
         # 2. RANGE + トレンド弱（方向感欠如）
         if (
             regime == MarketRegime.RANGE
-            and regime_result.trend_strength
-            < self._WEAK_TREND_THRESHOLD
+            and regime_result.trend_strength < self._WEAK_TREND_THRESHOLD
         ):
             # trend_strength=0で1.0、閾値で0.0
             _s = (
-                1.0
-                - regime_result.trend_strength
-                / self._WEAK_TREND_THRESHOLD
+                1.0 - regime_result.trend_strength / self._WEAK_TREND_THRESHOLD
             )
             score += _s
             reasons.append(
-                f"弱トレンド({_s:.2f},"
-                f"ts={regime_result.trend_strength:.2f})"
+                f"弱トレンド({_s:.2f},ts={regime_result.trend_strength:.2f})"
             )
 
         # 3. RANGE + ペナルティ + 低BB幅
-        if (
-            regime == MarketRegime.RANGE
-            and sg_result.total_penalty > 0
-        ):
+        if regime == MarketRegime.RANGE and sg_result.total_penalty > 0:
             _bb_val = self._get_bb_width(
-                plan, current_time,
+                plan,
+                current_time,
             )
             if _bb_val is not None:
                 _thr = self.config.range_day_bbw_threshold
                 if _bb_val < _thr:
                     # BB幅がthreshold比でどれだけ小さいか
                     _s = min(
-                        (_thr - _bb_val) / _thr, 1.0,
+                        (_thr - _bb_val) / _thr,
+                        1.0,
                     )
                     score += _s
-                    reasons.append(
-                        f"低BBW({_s:.2f},"
-                        f"bbw={_bb_val:.4f})"
-                    )
+                    reasons.append(f"低BBW({_s:.2f},bbw={_bb_val:.4f})")
 
         # 4. Weak Hours（JST 18-21 = UTC 9-12）
         if (
@@ -1632,37 +1651,26 @@ class UnifiedTradeBot:
             and regime == MarketRegime.RANGE
         ):
             _wh_thr = (
-                consensus.threshold
-                + self.config.weak_hours_score_premium
+                consensus.threshold + self.config.weak_hours_score_premium
             )
             _margin = _wh_thr - consensus.score
             if _margin > 0:
                 _s = min(
-                    _margin
-                    / self.config.weak_hours_score_premium,
+                    _margin / self.config.weak_hours_score_premium,
                     1.0,
                 )
                 score += _s
-                reasons.append(
-                    f"WeakHours({_s:.2f},h={hour_utc})"
-                )
+                reasons.append(f"WeakHours({_s:.2f},h={hour_utc})")
 
         # 5. RANGEスコアプレミアム（低スコア帯を除外）
         _sp = self.config.range_day_score_premium
-        if (
-            _sp > 0
-            and regime == MarketRegime.RANGE
-        ):
-            _margin = (
-                consensus.threshold + _sp
-                - consensus.score
-            )
+        if _sp > 0 and regime == MarketRegime.RANGE:
+            _margin = consensus.threshold + _sp - consensus.score
             if _margin > 0:
                 _s = min(_margin / _sp, 1.0)
                 score += _s
                 reasons.append(
-                    f"スコアPrem({_s:.2f},"
-                    f"sc={consensus.score:.1f})"
+                    f"スコアPrem({_s:.2f},sc={consensus.score:.1f})"
                 )
 
         _thr = self.config.range_filter_block_threshold
@@ -1703,8 +1711,7 @@ class UnifiedTradeBot:
         _lv_margin = self._LOW_VOL_SCORE_MARGIN
         if (
             regime_result.regime == MarketRegime.LOW_VOL
-            and consensus.score
-            < consensus.threshold + _lv_margin
+            and consensus.score < consensus.threshold + _lv_margin
         ):
             return (
                 f"LOW_VOL制限: score={consensus.score:.2f}"
@@ -1715,12 +1722,10 @@ class UnifiedTradeBot:
         # RANGE + トレンド弱制限
         if (
             regime_result.regime == MarketRegime.RANGE
-            and regime_result.trend_strength
-            < self._WEAK_TREND_THRESHOLD
+            and regime_result.trend_strength < self._WEAK_TREND_THRESHOLD
         ):
             return (
-                f"RANGE制限: trend_strength="
-                f"{regime_result.trend_strength:.2f}"
+                f"RANGE制限: trend_strength={regime_result.trend_strength:.2f}"
             )
 
         # RANGE ペナルティ+低ボラ制限
@@ -1729,12 +1734,12 @@ class UnifiedTradeBot:
             and sg_result.total_penalty > 0
         ):
             _bb_val = self._get_bb_width(
-                plan, current_time,
+                plan,
+                current_time,
             )
             if (
                 _bb_val is not None
-                and _bb_val
-                < self.config.range_day_bbw_threshold
+                and _bb_val < self.config.range_day_bbw_threshold
             ):
                 return (
                     f"RANGE低ボラ制限: "
@@ -1751,12 +1756,11 @@ class UnifiedTradeBot:
             self.config.weak_hours_enabled
             and 9 <= hour_utc <= 12
             and regime_result.regime == MarketRegime.RANGE
-            and consensus.score < consensus.threshold
-            + self.config.weak_hours_score_premium
+            and consensus.score
+            < consensus.threshold + self.config.weak_hours_score_premium
         ):
             _wh_threshold = (
-                consensus.threshold
-                + self.config.weak_hours_score_premium
+                consensus.threshold + self.config.weak_hours_score_premium
             )
             return (
                 f"WeakHours RANGE: hour={hour_utc}, "
@@ -1765,14 +1769,11 @@ class UnifiedTradeBot:
             )
 
         # RANGEスコアプレミアム
-        _score_premium = (
-            self.config.range_day_score_premium
-        )
+        _score_premium = self.config.range_day_score_premium
         if (
             _score_premium > 0
             and regime_result.regime == MarketRegime.RANGE
-            and consensus.score
-            < consensus.threshold + _score_premium
+            and consensus.score < consensus.threshold + _score_premium
         ):
             return (
                 f"RANGEスコアプレミアム: "
@@ -1833,14 +1834,11 @@ class UnifiedTradeBot:
         tf_breakdowns: dict[str, dict[str, float]] = {}
         for tf_name, sig in tf_signals.items():
             if sig.score_breakdown is not None:
-                tf_breakdowns[tf_name] = (
-                    sig.score_breakdown.to_dict()
-                )
+                tf_breakdowns[tf_name] = sig.score_breakdown.to_dict()
 
         # TF別方向を集約（UI表示用）
         tf_directions: dict[str, str] = {
-            tf: sig.direction.value
-            for tf, sig in tf_signals.items()
+            tf: sig.direction.value for tf, sig in tf_signals.items()
         }
 
         return ConsolidatedSignal(
@@ -1851,10 +1849,7 @@ class UnifiedTradeBot:
             sl_pips=0.0,
             tp_pips=0.0,
             rationale=reason,
-            scores={
-                tf: sig.confidence
-                for tf, sig in tf_signals.items()
-            },
+            scores={tf: sig.confidence for tf, sig in tf_signals.items()},
             regime=regime_result.regime.value,
             mode=plan.mode.value,
             consensus_score=consensus.score,
@@ -1862,22 +1857,16 @@ class UnifiedTradeBot:
             tf_directions=tf_directions,
             entry_threshold=consensus.threshold,
             htf_alignment=htf_alignment,
-            penalty_total=(
-                sg_result.total_penalty
-                if sg_result else 0.0
-            ),
+            penalty_total=(sg_result.total_penalty if sg_result else 0.0),
             penalty_breakdown=(
-                {
-                    r.value: v
-                    for r, v in sg_result.penalties.items()
-                }
-                if sg_result else {}
+                {r.value: v for r, v in sg_result.penalties.items()}
+                if sg_result
+                else {}
             ),
             trend_strength=regime_result.trend_strength,
             buy_score=consensus.buy_score,
             sell_score=consensus.sell_score,
         )
-
 
     def _get_current_row(
         self,
@@ -1946,7 +1935,6 @@ class UnifiedTradeBot:
         aligned_score = 0.0
         check_tfs = htf_tfs or list(self.config.htf_alignment_tfs)
 
-
         # プライマリTF（最初のHTF）でRSIチェック
         primary_row = None
         if check_tfs:
@@ -1974,8 +1962,9 @@ class UnifiedTradeBot:
             macd = row.get("macd")
             macd_signal = row.get("macd_signal")
 
-            if any(pd.isna(v) for v in [sma_20, sma_50, close]
-                   if v is not None):
+            if any(
+                pd.isna(v) for v in [sma_20, sma_50, close] if v is not None
+            ):
                 continue
 
             if sma_20 is None or sma_50 is None or close is None:
@@ -2008,7 +1997,6 @@ class UnifiedTradeBot:
 
         # 閾値0.8（緩和）
         return aligned_score >= 0.8
-
 
     def on_trade_executed(
         self,
