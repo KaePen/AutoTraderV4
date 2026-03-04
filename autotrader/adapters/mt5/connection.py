@@ -18,45 +18,54 @@ from autotrader.adapters.mt5.exceptions import MT5ConnectionError
 logger = logging.getLogger(__name__)
 
 
-async def _hide_mt5_window() -> None:
-    """MT5ウィンドウを非表示にする
+async def _set_mt5_window_visibility(
+    *, visible: bool,
+) -> None:
+    """MT5ウィンドウの表示/非表示を切り替える
 
-    win32guiでMetaTraderウィンドウを検索し非表示化。
+    win32guiでMT5ウィンドウを検索し表示状態を変更。
     ベストエフォート: 失敗してもMT5接続に影響しない。
+
+    Args:
+        visible: Trueで表示、Falseで非表示
     """
 
-    def _do_hide() -> None:
+    def _do_set() -> None:
         try:
             import win32con  # type: ignore[import]
             import win32gui  # type: ignore[import]
         except ImportError:
             logger.debug(
                 "pywin32未インストール: "
-                "MT5ウィンドウ非表示をスキップ"
+                "MT5ウィンドウ制御をスキップ"
             )
             return
 
-        hidden_count = 0
+        cmd = (
+            win32con.SW_SHOW if visible
+            else win32con.SW_HIDE
+        )
+        action = "表示" if visible else "非表示"
+        count = 0
 
         def _enum_callback(
             hwnd: int, _: object
         ) -> None:
-            nonlocal hidden_count
+            nonlocal count
             title = win32gui.GetWindowText(hwnd)
             if "MetaTrader" in title or "MT5" in title:
-                win32gui.ShowWindow(
-                    hwnd, win32con.SW_HIDE
-                )
-                hidden_count += 1
+                win32gui.ShowWindow(hwnd, cmd)
+                count += 1
                 logger.debug(
-                    "MT5ウィンドウ非表示: %s", title
+                    "MT5ウィンドウ%s: %s",
+                    action, title,
                 )
 
         win32gui.EnumWindows(_enum_callback, None)
-        if hidden_count:
+        if count:
             logger.info(
-                "MT5ウィンドウ %d件を非表示化",
-                hidden_count,
+                "MT5ウィンドウ %d件を%s化",
+                count, action,
             )
         else:
             logger.debug(
@@ -65,10 +74,10 @@ async def _hide_mt5_window() -> None:
 
     loop = asyncio.get_running_loop()
     try:
-        await loop.run_in_executor(None, _do_hide)
+        await loop.run_in_executor(None, _do_set)
     except Exception:
         logger.warning(
-            "MT5ウィンドウ非表示に失敗",
+            "MT5ウィンドウ制御に失敗",
             exc_info=True,
         )
 
@@ -575,8 +584,9 @@ class MT5ConnectionManager:
                 self._last_health_check = time.time()
                 logger.info("MT5接続成功")
 
-                if self._config.hide_window:
-                    await _hide_mt5_window()
+                await _set_mt5_window_visibility(
+                    visible=not self._config.hide_window,
+                )
 
                 return True
 
