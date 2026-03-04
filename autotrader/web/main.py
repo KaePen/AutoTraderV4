@@ -61,11 +61,16 @@ def _get_mt5_config():
     """
     from autotrader.adapters.mt5.config import MT5Config
 
+    hide_window = os.environ.get(
+        "MT5_SHOW_WINDOW", ""
+    ).lower() not in ("1", "true", "yes")
+
     return MT5Config(
         login=int(os.environ.get("MT5_LOGIN", "0")),
         password=os.environ.get("MT5_PASSWORD", ""),
         server=os.environ.get("MT5_SERVER", ""),
         terminal_path=os.environ.get("MT5_TERMINAL_PATH", ""),
+        hide_window=hide_window,
     )
 
 
