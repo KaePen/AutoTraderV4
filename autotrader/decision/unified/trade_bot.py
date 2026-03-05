@@ -115,6 +115,8 @@ class BotState:
     daily_trades: int = 0
     open_exposure_lot: float = 0.0
     open_same_direction_lot: float = 0.0
+    open_buy_count: int = 0
+    open_sell_count: int = 0
 
     def with_pnl(self, pnl: float) -> BotState:
         """PnL適用後の新しいBotStateを返す
@@ -163,12 +165,16 @@ class BotState:
         self,
         open_exposure_lot: float,
         open_same_direction_lot: float,
+        open_buy_count: int = 0,
+        open_sell_count: int = 0,
     ) -> BotState:
         """エクスポージャー更新後の新しいBotStateを返す
 
         Args:
             open_exposure_lot: 未決済エクスポージャー
             open_same_direction_lot: 同方向最大ロット
+            open_buy_count: BUYポジション数
+            open_sell_count: SELLポジション数
 
         Returns:
             BotState: 更新後の新インスタンス
@@ -177,6 +183,8 @@ class BotState:
             self,
             open_exposure_lot=open_exposure_lot,
             open_same_direction_lot=open_same_direction_lot,
+            open_buy_count=open_buy_count,
+            open_sell_count=open_sell_count,
         )
 
     def with_initial_equity(
@@ -202,7 +210,7 @@ class BotState:
 class RiskManager:
     """リスク管理器
 
-    日次損失制限、クールダウン管理を行う。
+    日次損失制限、クールダウン管理、多層防御を行う。
     """
 
     def __init__(self, config: RiskConfig | None = None):
@@ -216,6 +224,11 @@ class RiskManager:
         self._last_trade_time: datetime | None = None
         self._daily_trades: int = 0
         self._current_date: date | None = None
+        # Layer 4: サーキットブレーカー
+        self._circuit_breaker_until: datetime | None = None
+        # Layer 5: 急速DD検知用エクイティ履歴
+        self._equity_history: list[tuple[datetime, float]] = []
+        self._rapid_dd_pause_until: datetime | None = None
 
     def reset_daily(self, date: datetime) -> None:
         """日次リセット
@@ -245,18 +258,117 @@ class RiskManager:
         self._last_trade_time = timestamp
         self._daily_trades += 1
 
-    def can_trade(self, timestamp: datetime) -> tuple[bool, str]:
+    def record_equity(
+        self,
+        timestamp: datetime,
+        equity: float,
+    ) -> None:
+        """エクイティ記録（Layer 5用）
+
+        Args:
+            timestamp: 記録時刻
+            equity: エクイティ
+        """
+        self._equity_history.append((timestamp, equity))
+        # ウィンドウ外のデータを削除
+        cutoff = timestamp - timedelta(
+            minutes=self.config.rapid_dd_window_minutes,
+        )
+        self._equity_history = [
+            (t, e) for t, e in self._equity_history if t >= cutoff
+        ]
+
+    def trigger_circuit_breaker(
+        self,
+        timestamp: datetime,
+    ) -> None:
+        """サーキットブレーカー発動（Layer 4）
+
+        Args:
+            timestamp: 発動時刻
+        """
+        self._circuit_breaker_until = timestamp + timedelta(
+            minutes=(self.config.circuit_breaker_pause_minutes),
+        )
+
+    def check_rapid_dd(
+        self,
+        timestamp: datetime,
+        current_equity: float,
+    ) -> bool:
+        """急速DD検知（Layer 5）
+
+        Args:
+            timestamp: 現在時刻
+            current_equity: 現在のエクイティ
+
+        Returns:
+            bool: 急速DD検知でパウズすべきならTrue
+        """
+        if not self.config.rapid_dd_pause_enabled:
+            return False
+        if not self._equity_history:
+            return False
+        # ウィンドウ内の最高エクイティを取得
+        window_peak = max(e for _, e in self._equity_history)
+        if window_peak <= 0:
+            return False
+        dd_pct = (window_peak - current_equity) / window_peak
+        if dd_pct >= self.config.rapid_dd_threshold_pct:
+            self._rapid_dd_pause_until = timestamp + timedelta(
+                minutes=(self.config.rapid_dd_pause_duration_minutes),
+            )
+            return True
+        return False
+
+    def can_trade(
+        self,
+        timestamp: datetime,
+        open_position_count: int = 0,
+    ) -> tuple[bool, str]:
         """取引可否チェック
 
         Args:
             timestamp: 現在時刻
+            open_position_count: 現在の保有ポジション数
 
         Returns:
             tuple[bool, str]: (取引可否, 理由)
         """
+        # Layer 4: サーキットブレーカーチェック
+        if (
+            self.config.circuit_breaker_enabled
+            and self._circuit_breaker_until is not None
+            and timestamp < self._circuit_breaker_until
+        ):
+            remaining = int(
+                (self._circuit_breaker_until - timestamp).total_seconds() // 60
+            )
+            return (
+                False,
+                f"サーキットブレーカー発動中(残{remaining}分)",
+            )
+
+        # Layer 5: 急速DD検知パウズ
+        if (
+            self.config.rapid_dd_pause_enabled
+            and self._rapid_dd_pause_until is not None
+            and timestamp < self._rapid_dd_pause_until
+        ):
+            remaining = int(
+                (self._rapid_dd_pause_until - timestamp).total_seconds() // 60
+            )
+            return (
+                False,
+                f"急速DD検知パウズ中(残{remaining}分)",
+            )
+
         # 日次損失制限チェック
         if self._daily_pnl < -self.config.max_daily_loss_pct:
-            return False, f"日次損失制限超過({self._daily_pnl:.2%})"
+            return (
+                False,
+                f"日次損失制限超過({self._daily_pnl:.2%})",
+            )
 
         # 日次トレード件数制限チェック（0=無制限）
         limit = self.config.max_daily_trades
@@ -266,9 +378,22 @@ class RiskManager:
                 f"日次トレード件数上限({self._daily_trades}/{limit}件)",
             )
 
-        # クールダウンチェック
+        # Layer 1: 動的クールダウン
         if self._last_trade_time is not None:
-            cooldown = timedelta(minutes=self.config.cooldown_minutes)
+            if self.config.dynamic_cooldown_enabled:
+                cooldown_min = min(
+                    (
+                        self.config.dynamic_cooldown_base_minutes
+                        + (
+                            open_position_count
+                            * self.config.dynamic_cooldown_per_position_minutes
+                        )
+                    ),
+                    self.config.dynamic_cooldown_max_minutes,
+                )
+            else:
+                cooldown_min = self.config.cooldown_minutes
+            cooldown = timedelta(minutes=cooldown_min)
             if timestamp - self._last_trade_time < cooldown:
                 remaining = int(
                     (
@@ -276,7 +401,11 @@ class RiskManager:
                     ).total_seconds()
                     // 60
                 )
-                return False, f"クールダウン中(残{remaining}分)"
+                return (
+                    False,
+                    f"クールダウン中(残{remaining}分,"
+                    f" pos={open_position_count})",
+                )
 
         return True, ""
 
@@ -617,7 +746,8 @@ class UnifiedTradeBot:
         if self._pending_entry is not None:
             _pe = self._pending_entry
             _m1_row_pe = self._get_current_row(
-                "M1", current_time,
+                "M1",
+                current_time,
             )
             if _m1_row_pe is not None:
                 _pe.bars_waited += 1
@@ -637,8 +767,7 @@ class UnifiedTradeBot:
                     if (
                         _high is not None
                         and not pd.isna(_high)
-                        and float(_high)
-                        >= _pe.target_price
+                        and float(_high) >= _pe.target_price
                     ):
                         _reached = True
 
@@ -647,8 +776,10 @@ class UnifiedTradeBot:
                     _entry_price = _pe.target_price
                     self._pending_entry = None
                     return self._build_retrace_signal(
-                        _pe, _entry_price,
-                        current_time, candle,
+                        _pe,
+                        _entry_price,
+                        current_time,
+                        candle,
                     )
 
                 # タイムアウト判定
@@ -657,22 +788,21 @@ class UnifiedTradeBot:
                         # フォールバック: 現在価格でエントリー
                         self._pending_entry = None
                         return self._build_retrace_signal(
-                            _pe, None,
-                            current_time, candle,
+                            _pe,
+                            None,
+                            current_time,
+                            candle,
                         )
                     else:
                         # キャンセル
                         self._pending_entry = None
                         return self._hold_signal(
-                            "リトレース待機タイムアウト"
-                            "（キャンセル）"
+                            "リトレース待機タイムアウト（キャンセル）"
                         )
 
                 # 待機継続 → HOLD
                 return self._hold_signal(
-                    f"リトレース待機中"
-                    f"({_pe.bars_waited}"
-                    f"/{_pe.max_wait_bars})"
+                    f"リトレース待機中({_pe.bars_waited}/{_pe.max_wait_bars})"
                 )
 
         # 1. 日次リセット
@@ -680,7 +810,13 @@ class UnifiedTradeBot:
         self.risk_manager.reset_daily(py_time)
 
         # 2. リスク管理チェック（早期リターンで不要な計算を回避）
-        can_trade, reason = self.risk_manager.can_trade(py_time)
+        _open_pos_count = (
+            self.state.open_buy_count + self.state.open_sell_count
+        )
+        can_trade, reason = self.risk_manager.can_trade(
+            py_time,
+            open_position_count=_open_pos_count,
+        )
         if not can_trade:
             return self._hold_signal(reason)
 
@@ -749,6 +885,20 @@ class UnifiedTradeBot:
             htf_tfs=_htf_tfs,
         )
 
+        # Layer 3: ボラティリティ連動ポジション上限
+        if (
+            self.config.risk.volatility_position_limit_enabled
+            and regime_result.regime == MarketRegime.HIGH_VOL
+        ):
+            _vol_max = int(
+                self.config.max_positions
+                * self.config.risk.high_vol_max_positions_ratio
+            )
+            if _open_pos_count >= max(_vol_max, 1):
+                return self._hold_signal(
+                    f"HIGH_VOLポジション上限({_open_pos_count}/{_vol_max})"
+                )
+
         # 分析用に最後のモード/レジームを保持
         self._last_mode = plan.mode.value
         self._last_regime = regime_result.regime.value
@@ -784,6 +934,17 @@ class UnifiedTradeBot:
             _base_threshold = (
                 _base_threshold + _overrides.consensus_threshold_delta
             )
+        # Layer 2: 同方向プログレッシブ閾値
+        if self.config.risk.progressive_threshold_enabled:
+            _max_same_dir_count = max(
+                self.state.open_buy_count,
+                self.state.open_sell_count,
+            )
+            if _max_same_dir_count > 0:
+                _base_threshold += (
+                    _max_same_dir_count
+                    * self.config.risk.progressive_threshold_per_position
+                )
         # レジーム別閾値調整（TREND勝率41%→閾値引き上げ）
         if (
             self.config.regime_threshold_enabled
@@ -963,7 +1124,8 @@ class UnifiedTradeBot:
         # M1実行ゲート
         if self._m1_exec_gate.config.enabled:
             _m1_row_gate = self._get_current_row(
-                "M1", current_time,
+                "M1",
+                current_time,
             )
             _gate_result = self._m1_exec_gate.check(
                 direction=consensus.direction,
@@ -1329,66 +1491,52 @@ class UnifiedTradeBot:
         # M1構造的SL
         if self.config.m1_structure_sl_enabled:
             _m1_row_sl = self._get_current_row(
-                "M1", current_time,
+                "M1",
+                current_time,
             )
             if _m1_row_sl is not None:
                 _pip_unit = 0.01  # JPYペア
-                _current_close = candle.close if candle else (
-                    _m1_row_sl.get("close")
-                    if _m1_row_sl is not None
-                    else None
+                _current_close = (
+                    candle.close
+                    if candle
+                    else (
+                        _m1_row_sl.get("close")
+                        if _m1_row_sl is not None
+                        else None
+                    )
                 )
                 if _current_close is not None:
                     if consensus.direction == SignalType.BUY:
                         _swing = _m1_row_sl.get(
                             "last_swing_low",
                         )
-                        if (
-                            _swing is not None
-                            and not pd.isna(_swing)
-                        ):
+                        if _swing is not None and not pd.isna(_swing):
                             _struct_sl = (
-                                (_current_close
-                                 - float(_swing))
-                                / _pip_unit
-                                + self.config
-                                .m1_structure_sl_buffer_pips
+                                (_current_close - float(_swing)) / _pip_unit
+                                + self.config.m1_structure_sl_buffer_pips
                             )
                             _struct_sl = max(
-                                self.config
-                                .m1_structure_sl_min_pips,
+                                self.config.m1_structure_sl_min_pips,
                                 min(
                                     _struct_sl,
-                                    self.config
-                                    .m1_structure_sl_max_pips,
+                                    self.config.m1_structure_sl_max_pips,
                                 ),
                             )
                             sl_pips = _struct_sl
-                    elif (
-                        consensus.direction
-                        == SignalType.SELL
-                    ):
+                    elif consensus.direction == SignalType.SELL:
                         _swing = _m1_row_sl.get(
                             "last_swing_high",
                         )
-                        if (
-                            _swing is not None
-                            and not pd.isna(_swing)
-                        ):
+                        if _swing is not None and not pd.isna(_swing):
                             _struct_sl = (
-                                (float(_swing)
-                                 - _current_close)
-                                / _pip_unit
-                                + self.config
-                                .m1_structure_sl_buffer_pips
+                                (float(_swing) - _current_close) / _pip_unit
+                                + self.config.m1_structure_sl_buffer_pips
                             )
                             _struct_sl = max(
-                                self.config
-                                .m1_structure_sl_min_pips,
+                                self.config.m1_structure_sl_min_pips,
                                 min(
                                     _struct_sl,
-                                    self.config
-                                    .m1_structure_sl_max_pips,
+                                    self.config.m1_structure_sl_max_pips,
                                 ),
                             )
                             sl_pips = _struct_sl
@@ -1418,77 +1566,53 @@ class UnifiedTradeBot:
         # M1リトレースエントリー
         if self.config.m1_retrace_entry_enabled:
             _m1_row_rt = self._get_current_row(
-                "M1", current_time,
+                "M1",
+                current_time,
             )
             if _m1_row_rt is not None:
                 _atr_val = _m1_row_rt.get("atr_14")
-                if (
-                    _atr_val is not None
-                    and not pd.isna(_atr_val)
-                ):
+                if _atr_val is not None and not pd.isna(_atr_val):
                     _pip_unit_rt = 0.01
                     _retrace_pips = (
                         float(_atr_val)
                         / _pip_unit_rt
-                        * self.config
-                        .m1_retrace_atr_factor
+                        * self.config.m1_retrace_atr_factor
                     )
                     _close_rt = (
-                        candle.close if candle
+                        candle.close
+                        if candle
                         else float(
                             _m1_row_rt.get(
-                                "close", 0,
+                                "close",
+                                0,
                             ),
                         )
                     )
-                    if (
-                        consensus.direction
-                        == SignalType.BUY
-                    ):
-                        _target = (
-                            _close_rt
-                            - _retrace_pips
-                            * _pip_unit_rt
-                        )
+                    if consensus.direction == SignalType.BUY:
+                        _target = _close_rt - _retrace_pips * _pip_unit_rt
                     else:
-                        _target = (
-                            _close_rt
-                            + _retrace_pips
-                            * _pip_unit_rt
-                        )
+                        _target = _close_rt + _retrace_pips * _pip_unit_rt
 
                     self._pending_entry = PendingEntry(
                         direction=consensus.direction,
                         target_price=_target,
                         original_close=_close_rt,
                         bars_waited=0,
-                        max_wait_bars=(
-                            self.config
-                            .m1_retrace_max_wait_bars
-                        ),
-                        fallback_entry=(
-                            self.config
-                            .m1_retrace_fallback_entry
-                        ),
+                        max_wait_bars=(self.config.m1_retrace_max_wait_bars),
+                        fallback_entry=(self.config.m1_retrace_fallback_entry),
                         sl_pips=sl_pips,
                         tp_pips=tp_pips,
                         confidence=min(
                             consensus.score / 20.0,
                             1.0,
                         ),
-                        primary_tf=(
-                            primary_signal.timeframe
-                        ),
-                        rationale=(
-                            f"リトレース保留: "
-                            f"target={_target:.3f}"
-                        ),
+                        primary_tf=(primary_signal.timeframe),
+                        rationale=(f"リトレース保留: target={_target:.3f}"),
                         consensus=consensus,
                         regime_result=regime_result,
                     )
                     return self._hold_signal(
-                        f"リトレース待機開始: "
-                        f"target={_target:.3f}"
+                        f"リトレース待機開始: target={_target:.3f}"
                     )
 
         # ポジションサイジング
@@ -2151,16 +2275,12 @@ class UnifiedTradeBot:
         """
         _pip_unit = 0.01  # JPYペア
         _base = (
-            entry_price if entry_price is not None
-            else (
-                candle.close if candle
-                else pe.original_close
-            )
+            entry_price
+            if entry_price is not None
+            else (candle.close if candle else pe.original_close)
         )
         _mode = (
-            "リトレース到達"
-            if entry_price is not None
-            else "フォールバック"
+            "リトレース到達" if entry_price is not None else "フォールバック"
         )
 
         return ConsolidatedSignal(
@@ -2179,14 +2299,12 @@ class UnifiedTradeBot:
             entry_price=_base,
             consensus_score=(
                 pe.consensus.score
-                if pe.consensus
-                and hasattr(pe.consensus, "score")
+                if pe.consensus and hasattr(pe.consensus, "score")
                 else None
             ),
             regime=(
                 str(pe.regime_result.regime.value)
-                if pe.regime_result
-                and hasattr(pe.regime_result, "regime")
+                if pe.regime_result and hasattr(pe.regime_result, "regime")
                 else None
             ),
         )
