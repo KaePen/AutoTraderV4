@@ -30,6 +30,16 @@ class TestM1StructureSLConfig:
         assert config.m1_structure_sl_min_pips == 15.0
         assert config.m1_structure_sl_max_pips == 60.0
 
+    def test_default_swing_window(self) -> None:
+        """デフォルトスイングウィンドウ."""
+        config = UnifiedBotConfig()
+        assert config.m1_structure_sl_swing_window == 20
+
+    def test_custom_swing_window(self) -> None:
+        """カスタムスイングウィンドウの設定."""
+        config = UnifiedBotConfig(m1_structure_sl_swing_window=30)
+        assert config.m1_structure_sl_swing_window == 30
+
     def test_custom_values(self) -> None:
         """カスタム値の設定."""
         config = UnifiedBotConfig(

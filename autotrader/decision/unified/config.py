@@ -458,6 +458,8 @@ class UnifiedBotConfig:
     m1_structure_sl_min_pips: float = 15.0
     # 構造的SL最大値（pips）
     m1_structure_sl_max_pips: float = 60.0
+    # スイングウィンドウ（ルックバック本数）
+    m1_structure_sl_swing_window: int = 20
     # --- M1実行ゲート ---
     # M1実行ゲート有効化
     m1_exec_gate_enabled: bool = False
