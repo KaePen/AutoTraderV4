@@ -1488,6 +1488,24 @@ def run_single_backtest(args: argparse.Namespace):
         )
 
         console = Console()
+        runner = service.create_runner()
+
+        # データソース確認（Parquetキャッシュ vs 新規生成）
+        _symbol = config.symbol
+        _check_tfs = [config.timeframe, "H4", "Daily", "M15"]
+        _src_parts = []
+        for _tf in _check_tfs:
+            _pq = runner.chart_dir / "cache" / f"{_symbol}_{_tf}.parquet"
+            if not _pq.exists() and _tf == "Daily":
+                _pq = (
+                    runner.chart_dir / "cache" / f"{_symbol}_D1.parquet"
+                )
+            _src_parts.append(
+                f"[dim]{_tf}:[/dim] [green]キャッシュ[/green]"
+                if _pq.exists()
+                else f"[dim]{_tf}:[/dim] [yellow]新規生成[/yellow]"
+            )
+        console.print("データソース  " + "  ".join(_src_parts))
 
         with Progress(
             SpinnerColumn(),
@@ -1498,7 +1516,6 @@ def run_single_backtest(args: argparse.Namespace):
             transient=True,
         ) as progress:
             task_id = progress.add_task("読み込み中: H1", total=4)
-            runner = service.create_runner()
 
             def _on_tf_loaded(tf: str, current: int, total: int) -> None:
                 next_labels = {
