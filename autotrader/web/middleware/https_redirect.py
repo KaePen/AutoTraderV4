@@ -82,7 +82,7 @@ class HTTPSRedirectMiddleware(BaseHTTPMiddleware):
                 "HTTP → HTTPS リダイレクト: %s", url
             )
             return RedirectResponse(
-                url=str(url), status_code=301
+                url=str(url), status_code=302
             )
 
         return await call_next(request)
