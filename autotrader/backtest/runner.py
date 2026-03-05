@@ -201,6 +201,8 @@ class BacktestRunner:
         self.chart_dir = _chart_dir if _chart_dir.exists() else self.data_dir
         # TFデータを統合dict管理
         self._tf_data: dict[str, pd.DataFrame] = {}
+        # M1構造的SLスイングウィンドウ（run_unified でbot_configから上書き可能）
+        self._m1_structure_sl_swing_window: int = 20
         self._cancel_callback: Callable[[], bool] | None = None
 
         # イベントエミッター初期化
@@ -510,7 +512,8 @@ class BacktestRunner:
         df["is_bearish_div"] = div_df["is_bearish_div"]
 
         # スイングレベル（M1構造的SL用）
-        _swing_window = 20  # 20本のルックバック
+        # ウィンドウはUnifiedBotConfig.m1_structure_sl_swing_windowから取得
+        _swing_window = self._m1_structure_sl_swing_window
         df["last_swing_low"] = df["low"].rolling(
             window=_swing_window, min_periods=1,
         ).min()
@@ -1002,6 +1005,13 @@ class BacktestRunner:
             BacktestResult: バックテスト結果
         """
         from autotrader.decision.unified import UnifiedBotConfig
+
+        # bot_configのスイングウィンドウをインスタンス変数に反映
+        # load_data()より前に設定することでキャッシュ再計算時にも有効
+        if config is not None:
+            self._m1_structure_sl_swing_window = (
+                config.m1_structure_sl_swing_window
+            )
 
         if self._h1_df is None:
             self.load_data()
