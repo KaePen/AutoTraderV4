@@ -195,11 +195,14 @@ symbols:
     slippage_pips: 0.7
     default_sl_pips: 25.0
     default_tp_pips: 50.0
-    max_positions: 2
+    # EURJPY最適化結果 (2026-03-06, 2023-2025検証)
+    # pos=4/risk=0.04: +5,907K (旧pos=2/risk=0.02: +2,119K, +179%)
+    # WR 72.2%, PF 2.07, DD 2.80%, Sharpe 7.73, 月間+ 100%
+    max_positions: 4
     bonus_score_threshold: 7.5
-    base_risk_pct: 0.02
-    max_lot_per_trade: 1.5
-    # EURJPY最適化結果 (2026-03-02)
+    base_risk_pct: 0.04
+    max_lot_per_trade: 3.0
+    max_total_exposure_lot: 8.0
     signal:
       bca_min_edge: 0.65  # デフォルト0.55→0.65, +182K
 
