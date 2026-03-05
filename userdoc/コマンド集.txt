@@ -14,8 +14,8 @@ EURGBP / EURNZD / EURAUD（好みで）
 .venv/Scripts/python.exe scripts/export_mt5_chart.py --symbol USDJPY --start 2026-01-01 --end 2026-01-31 --lookback-months 6 --output-dir tmp/csv
 
 ■WebUI起動
-uv run python scripts/archive/run_webui.py --reload
-uv run python scripts/archive/run_webui.py --show-mt5
+.venv\Scripts\python.exe -m autotrader.web --show-mt5 --reload
+.venv\Scripts\python.exe -m autotrader.web --show-mt5
 
 ■WebClaudeマネージャー起動
 cloudcli
