@@ -51,6 +51,7 @@ logs/
 tmp/
 *.tmp
 *_done.txt
+.claude/worktrees/*
 
 # バックテスト結果
 results/

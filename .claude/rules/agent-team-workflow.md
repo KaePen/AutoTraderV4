@@ -51,13 +51,14 @@ Agent(
 - worktree 削除（アクティブ worktree は保護）
 - ローカル・リモートブランチ削除
 - `worktree prune` / `fetch --prune`
-- 孤立 tmp/ ディレクトリの掃除
+- 孤立 `.claude/worktrees/` ディレクトリの掃除
 
 エージェントの責務は **PR 作成まで**。マージ以降は `pr_watcher.py` に委任する。
 
-## tmp/ ディレクトリ
+## .claude/worktrees/ ディレクトリ
 
-- `tmp/` は worktree 専用（`.gitignore` 登録済み）
+- `EnterWorktree` ツールは `.claude/worktrees/` 配下に worktree を作成する
+- `.gitignore` 登録済み
 - `pr_watcher.py` がマージ後に自動削除
 
 ## 禁止事項
@@ -82,10 +83,9 @@ Agent(
 
 ```bash
 BRANCH="feat/xxx"
-WORKTREE="/d/Projects/AutoTraderV4/tmp/${BRANCH//\//_}"
+WORKTREE="/d/Projects/AutoTraderV4/.claude/worktrees/${BRANCH//\//_}"
 git -C /d/Projects/AutoTraderV4 pull origin main
-git -C /d/Projects/AutoTraderV4 branch "$BRANCH"
-git -C /d/Projects/AutoTraderV4 worktree add "$WORKTREE" "$BRANCH"
+git -C /d/Projects/AutoTraderV4 worktree add "$WORKTREE" -b "$BRANCH"
 # 以降は $WORKTREE 配下のファイルのみ編集する
 ```
 
