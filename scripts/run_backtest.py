@@ -372,8 +372,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--data-dir",
         type=str,
-        default="data",
-        help="データ基底ディレクトリ（デフォルト: data）",
+        default=None,
+        help="データ基底ディレクトリ（デフォルト: 自動検出）",
     )
     parser.add_argument(
         "-v",
@@ -2059,6 +2059,12 @@ def run_quick(args: argparse.Namespace):
 def main():
     """メイン関数"""
     args = parse_args()
+
+    # data-dir 未指定時は自動検出
+    if args.data_dir is None:
+        from autotrader.config.paths import get_data_dir
+
+        args.data_dir = get_data_dir()
 
     # ロギング設定
     setup_logging(args.verbose)
