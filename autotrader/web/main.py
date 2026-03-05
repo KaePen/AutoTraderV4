@@ -238,10 +238,11 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
 
-    # CORS設定
+    # CORS設定（LAN内プライベートIPからのアクセスも許可）
     app.add_middleware(
         CORSMiddleware,
         allow_origins=web_settings.cors_origins,
+        allow_origin_regex=web_settings.cors_origin_regex,
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
