@@ -1492,13 +1492,14 @@ def run_single_backtest(args: argparse.Namespace):
 
         # データソース確認（Parquetキャッシュ vs 新規生成）
         _symbol = config.symbol
-        _check_tfs = [config.timeframe, "H4", "Daily", "M15"]
+        _check_tfs = bot_config.timeframes
         _src_parts = []
         for _tf in _check_tfs:
+            # D1ファイルは "Daily" または "D1" の両方に対応
             _pq = runner.chart_dir / "cache" / f"{_symbol}_{_tf}.parquet"
-            if not _pq.exists() and _tf == "Daily":
+            if not _pq.exists() and _tf == "D1":
                 _pq = (
-                    runner.chart_dir / "cache" / f"{_symbol}_D1.parquet"
+                    runner.chart_dir / "cache" / f"{_symbol}_Daily.parquet"
                 )
             _src_parts.append(
                 f"[dim]{_tf}:[/dim] [green]キャッシュ[/green]"
