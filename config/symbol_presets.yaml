@@ -181,12 +181,12 @@ symbols:
     slippage_pips: 0.5
     default_sl_pips: 20.0
     default_tp_pips: 40.0
-    max_positions: 3
+    max_positions: 8
     bonus_max_positions: 0
     bonus_score_threshold: 7.0
-    base_risk_pct: 0.02
-    max_lot_per_trade: 2.0
-    max_total_exposure_lot: 5.0
+    base_risk_pct: 0.08
+    max_lot_per_trade: 5.0
+    max_total_exposure_lot: 16.0
     equity_floor_pct: 0.30
 
   EURJPY:
