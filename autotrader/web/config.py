@@ -32,6 +32,13 @@ class WebSettings(BaseSettings):
     cors_origins: list[str] = Field(
         default_factory=lambda: ["http://localhost:3000"]
     )
+    # LANからのCORSリクエストを許可する正規表現パターン
+    cors_origin_regex: str = (
+        r"^https?://(localhost|127\.0\.0\.1"
+        r"|192\.168\.\d{1,3}\.\d{1,3}"
+        r"|10\.\d{1,3}\.\d{1,3}\.\d{1,3})"
+        r"(:\d+)?$"
+    )
     ws_heartbeat_interval: int = 30
 
 
