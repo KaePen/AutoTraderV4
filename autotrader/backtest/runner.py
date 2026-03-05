@@ -370,10 +370,6 @@ class BacktestRunner:
         if _chart_pq.exists():
             try:
                 df = pd.read_parquet(_chart_pq)
-                _log.debug(
-                    "チャートParquet使用: %s",
-                    _chart_pq.name,
-                )
                 return df
             except Exception as e:
                 _log.warning(
@@ -1584,11 +1580,6 @@ class BacktestRunner:
                         for y in years_to_load
                     ]
                     df = pd.concat(_dfs, ignore_index=True)
-                    _log.debug(
-                        "年別キャッシュ使用（ロード省略）: %s [%s]",
-                        cache_key,
-                        ", ".join(str(y) for y in years_to_load),
-                    )
                 except Exception as e:
                     _log.warning(
                         "キャッシュ読み込み失敗: %s（再読み込み）",
@@ -1601,10 +1592,6 @@ class BacktestRunner:
                 if _use_chart_parquet:
                     try:
                         df = pd.read_parquet(_chart_pq)
-                        _log.debug(
-                            "チャートParquet使用: %s",
-                            _chart_pq.name,
-                        )
                     except Exception as e:
                         _log.warning(
                             "チャートParquet読み込み失敗（CSV fallback）: %s",
