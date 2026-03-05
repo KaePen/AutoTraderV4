@@ -1,11 +1,13 @@
 """WebUIサーバー起動エントリーポイント
 
 使用方法:
-    python -m autotrader.web
+    python -m autotrader.web [--show-mt5]
 """
 from __future__ import annotations
 
+import argparse
 import logging
+import os
 
 import uvicorn
 
@@ -16,7 +18,38 @@ logging.basicConfig(
     datefmt="%H:%M:%S",
 )
 
-from autotrader.web.main import app
+
+def parse_args() -> argparse.Namespace:
+    """コマンドライン引数をパース"""
+    parser = argparse.ArgumentParser(
+        description="AutoTrader WebUI サーバー",
+    )
+    parser.add_argument(
+        "--show-mt5",
+        action="store_true",
+        help="MT5ウィンドウを表示する（デフォルト: 非表示）",
+    )
+    parser.add_argument(
+        "--host",
+        default="0.0.0.0",
+        help="バインドホスト（デフォルト: 0.0.0.0）",
+    )
+    parser.add_argument(
+        "--port",
+        type=int,
+        default=8000,
+        help="バインドポート（デフォルト: 8000）",
+    )
+    return parser.parse_args()
+
 
 if __name__ == "__main__":
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    args = parse_args()
+
+    # MT5ウィンドウ表示/非表示を環境変数で伝搬
+    if args.show_mt5:
+        os.environ["MT5_SHOW_WINDOW"] = "1"
+
+    from autotrader.web.main import app
+
+    uvicorn.run(app, host=args.host, port=args.port)
