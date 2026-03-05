@@ -384,13 +384,66 @@ const ChartManager = {
   },
 
   /**
-   * MT5のtick price_updateで最新バーのcloseをリアルタイム更新
-   * ローソク足APIを呼ばずに高速でチャートを更新する。
+   * タイムフレームの秒数を返す
+   * @returns {number} 秒数
+   */
+  _getTfSeconds() {
+    const map = {
+      M1: 60, M5: 300, M15: 900, M30: 1800,
+      H1: 3600, H4: 14400, H8: 28800, D1: 86400,
+    };
+    return map[this.timeframe] || 900;
+  },
+
+  /**
+   * MT5のtick price_updateで最新バーをリアルタイム更新
+   * 時間足の境界を超えた場合は新しいバーを自動作成する。
    *
    * @param {number} bid - MT5のbid価格
+   * @param {number} [tickTimeMs] - tickのUNIXエポックミリ秒
    */
-  updateLastBar(bid) {
+  updateLastBar(bid, tickTimeMs) {
     if (!this.candleSeries || !this._lastBarData || bid <= 0) return;
+
+    const tfSec = this._getTfSeconds();
+    const lastBarTime = this._lastBarData.time;
+
+    // tickTimeMsが提供されている場合、新しい足への移行を判定
+    if (tickTimeMs && tickTimeMs > 0) {
+      const tickTimeSec = Math.floor(tickTimeMs / 1000);
+      const nextBarTime = lastBarTime + tfSec;
+
+      if (tickTimeSec >= nextBarTime) {
+        // 新しいバーを作成（前バーの終了時刻 = 新バーの開始時刻）
+        const newBar = {
+          time: nextBarTime,
+          open: bid,
+          high: bid,
+          low: bid,
+          close: bid,
+        };
+        try {
+          this.candleSeries.update(newBar);
+          this._lastBarData = newBar;
+          // _rawCandlesにも追加（遅延読み込み整合性のため）
+          this._rawCandles.push({
+            time: new Date(nextBarTime * 1000).toISOString(),
+            open: bid, high: bid, low: bid, close: bid,
+            volume: 0,
+          });
+          if (this.volumeSeries) {
+            this.volumeSeries.update({
+              time: nextBarTime, value: 0, color: '#22c55e28',
+            });
+          }
+        } catch (_e) {
+          // チャート未準備時は無視
+        }
+        return;
+      }
+    }
+
+    // 既存バーの更新
     const updated = {
       ...this._lastBarData,
       close: bid,
