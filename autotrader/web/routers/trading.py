@@ -24,6 +24,9 @@ from autotrader.web.schemas import (
     AccountPresetRequest,
     ApiResponse,
     MT5StatusResponse,
+    ReloadLogicRequest,
+    ReloadLogicResponse,
+    ReloadStatusResponse,
     SwitchAccountRequest,
     TradingModeResponse,
 )
@@ -919,5 +922,115 @@ async def delete_account_preset(
                 )
                 for a in accounts
             ]
+        )
+    )
+
+
+@router.post(
+    "/reload-logic",
+    response_model=ApiResponse[ReloadLogicResponse],
+)
+@limiter.limit("3/minute")
+async def reload_trade_logic(
+    request: Request,
+    user: Annotated[dict[str, any] | None, Depends(get_optional_user)],
+    body: ReloadLogicRequest,
+    mgr=Depends(get_engine_manager),
+    engine=Depends(get_live_engine),
+) -> ApiResponse[ReloadLogicResponse]:
+    """トレードロジックをホットリロードする
+
+    WebUI 本体を再起動せずに Python コードを動的に更新する。
+    ポジション監視・ファンダメンタル収集は中断しない。
+
+    Args:
+        request: FastAPIリクエスト
+        body: リロードリクエスト
+        mgr: EngineManager
+        engine: LiveTradingEngine（後方互換）
+
+    Returns:
+        ApiResponse[ReloadLogicResponse]: リロード結果
+    """
+    if body.dry_run:
+        # 変更検知のみ実行しリロードしない
+        changed: list[str] = []
+        if mgr and mgr.engines:
+            first = next(iter(mgr.engines.values()))
+            changed = first._reloader.check_changed()
+        elif engine:
+            changed = engine._reloader.check_changed()
+        return ApiResponse(
+            data=ReloadLogicResponse(
+                success=True,
+                results={"dry_run": True, "changed_files": changed},
+            )
+        )
+
+    # 実際のリロード実行
+    if mgr and mgr.engines:
+        result = await mgr.reload_trade_logic(body.symbol)
+        return ApiResponse(
+            data=ReloadLogicResponse(
+                success=result.get("success", False),
+                error=result.get("error"),
+                results=result.get("results", {}),
+            )
+        )
+
+    if engine:
+        result = await engine.reload_trade_logic()
+        return ApiResponse(
+            data=ReloadLogicResponse(
+                success=result.get("success", False),
+                reloaded_at=result.get("reloaded_at"),
+                error=result.get("error"),
+            )
+        )
+
+    return ApiResponse(
+        success=False,
+        error="エンジンが起動していません",
+        data=ReloadLogicResponse(success=False),
+    )
+
+
+@router.get(
+    "/reload-status",
+    response_model=ApiResponse[ReloadStatusResponse],
+)
+@limiter.limit("30/minute")
+async def get_reload_status(
+    request: Request,
+    user: Annotated[dict[str, any] | None, Depends(get_optional_user)],
+    mgr=Depends(get_engine_manager),
+    engine=Depends(get_live_engine),
+) -> ApiResponse[ReloadStatusResponse]:
+    """ホットリロード状態を取得する
+
+    Args:
+        request: FastAPIリクエスト
+        mgr: EngineManager
+        engine: LiveTradingEngine（後方互換）
+
+    Returns:
+        ApiResponse[ReloadStatusResponse]: リロード状態
+    """
+    target = None
+    if mgr and mgr.engines:
+        target = next(iter(mgr.engines.values()))
+    elif engine:
+        target = engine
+
+    if target is None:
+        return ApiResponse(
+            data=ReloadStatusResponse()
+        )
+
+    return ApiResponse(
+        data=ReloadStatusResponse(
+            reloading=target._reload_lock.locked(),
+            last_reload=target._last_reload_at,
+            changed_files=target._reloader.check_changed(),
         )
     )

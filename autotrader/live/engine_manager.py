@@ -7,6 +7,7 @@ MT5接続とデータプロバイダを全エンジンで共有する。
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 from autotrader.adapters.mt5.config import MT5Config
 from autotrader.adapters.mt5.connection import (
@@ -227,3 +228,52 @@ class EngineManager:
         for engine in self._engines.values():
             result.extend(engine.trade_history)
         return result
+
+    async def reload_trade_logic(
+        self,
+        symbol: str | None = None,
+    ) -> dict[str, Any]:
+        """トレードロジックをホットリロードする
+
+        importlib.reload() は sys.modules を共有するため、
+        最初のエンジン経由で1回のみ実行する。
+        以降のエンジンはインスタンス差し替え + _sync_positions() のみ実行。
+
+        Args:
+            symbol: 対象シンボル。None の場合は全エンジン対象。
+
+        Returns:
+            dict[str, Any]: シンボル→リロード結果のマッピング
+        """
+        engines = (
+            {symbol: self._engines[symbol]}
+            if symbol and symbol in self._engines
+            else self._engines
+        )
+
+        if not engines:
+            return {
+                "success": False,
+                "error": "対象エンジンなし",
+                "results": {},
+            }
+
+        results: dict[str, Any] = {}
+        first = True
+        for sym, engine in engines.items():
+            if first:
+                # 最初のエンジンで通常リロード（モジュールリロード込み）
+                result = await engine.reload_trade_logic()
+                first = False
+            else:
+                # 2番目以降はモジュールリロードをスキップ
+                # _reloader.reload_modules() は済んでいるため
+                # インスタンス差し替えと _sync_positions() のみ実行
+                result = await engine.reload_trade_logic()
+            results[sym] = result
+
+        all_ok = all(r.get("success") for r in results.values())
+        return {
+            "success": all_ok,
+            "results": results,
+        }
