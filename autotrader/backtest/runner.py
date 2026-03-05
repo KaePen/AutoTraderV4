@@ -176,11 +176,11 @@ class BacktestRunner:
 
     def __init__(
         self,
-        data_dir: str | Path = "data",
+        data_dir: str | Path | None = None,
         config: BacktestConfig | None = None,
         verbose: bool = True,
         log_to_file: bool = True,
-        log_dir: str | Path = "logs/backtest_log",
+        log_dir: str | Path | None = None,
     ) -> None:
         """初期化
 
@@ -191,6 +191,13 @@ class BacktestRunner:
             log_to_file: ファイルログ出力
             log_dir: ログ出力先ディレクトリ
         """
+        from autotrader.config.paths import get_data_dir, get_log_dir
+
+        if data_dir is None:
+            data_dir = get_data_dir()
+        if log_dir is None:
+            log_dir = get_log_dir()
+
         self.config = config or BacktestConfig()
         # 通貨ペア別サブディレクトリに解決
         # 例: data/USDJPY/ (data_dir="data", symbol="USDJPY")

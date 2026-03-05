@@ -752,8 +752,8 @@ def main() -> None:
     parser.add_argument(
         "--output-base",
         type=str,
-        default="data",
-        help="出力ベースディレクトリ",
+        default=None,
+        help="出力ベースディレクトリ（デフォルト: 自動検出）",
     )
     parser.add_argument(
         "--overwrite",
@@ -774,6 +774,10 @@ def main() -> None:
 
     rss_dir = Path(args.rss_dir)
     gdelt_dir = Path(args.gdelt_dir) if args.gdelt_dir else None
+    if args.output_base is None:
+        from autotrader.config.paths import get_data_dir
+
+        args.output_base = get_data_dir()
     output_base = Path(args.output_base)
 
     print("=== llm_news 決定論的生成 ===")

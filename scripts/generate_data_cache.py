@@ -677,8 +677,8 @@ def main() -> None:
     parser.add_argument(
         "--data-dir",
         type=str,
-        default="data",
-        help="データベースディレクトリ（デフォルト: data）",
+        default=None,
+        help="データベースディレクトリ（デフォルト: 自動検出）",
     )
     parser.add_argument(
         "--fundamental-dir",
@@ -708,7 +708,16 @@ def main() -> None:
     )
     args = parser.parse_args()
 
+    if args.data_dir is None:
+        from autotrader.config.paths import get_data_dir
+
+        args.data_dir = get_data_dir()
     data_dir = Path(args.data_dir)
+    # fundamental_dir もデフォルト解決
+    if args.fundamental_dir == "data/fundamental":
+        args.fundamental_dir = str(
+            Path(args.data_dir) / "fundamental"
+        )
     fund_dir = Path(args.fundamental_dir)
     events_src_dir = fund_dir / "events"
     if not events_src_dir.exists():

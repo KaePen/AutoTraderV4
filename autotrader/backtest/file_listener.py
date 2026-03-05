@@ -109,7 +109,7 @@ class FileEventListener(EventListener):
 
     def __init__(
         self,
-        log_dir: str | Path = "logs/backtest_log",
+        log_dir: str | Path | None = None,
         verbose: bool = True,
     ) -> None:
         """初期化
@@ -118,6 +118,10 @@ class FileEventListener(EventListener):
             log_dir: ログ出力先ディレクトリ
             verbose: 詳細出力（月別統計等）
         """
+        if log_dir is None:
+            from autotrader.config.paths import get_log_dir
+
+            log_dir = get_log_dir()
         self.log_dir = Path(log_dir)
         self.log_dir.mkdir(parents=True, exist_ok=True)
         self.verbose = verbose
