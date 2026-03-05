@@ -370,7 +370,7 @@ class BacktestRunner:
         if _chart_pq.exists():
             try:
                 df = pd.read_parquet(_chart_pq)
-                _log.info(
+                _log.debug(
                     "チャートParquet使用: %s",
                     _chart_pq.name,
                 )
@@ -585,7 +585,7 @@ class BacktestRunner:
                             pd.read_parquet(cache_dir / f"{y}.parquet")
                             for y in years_to_load
                         ]
-                        _log.info(
+                        _log.debug(
                             "年別キャッシュ使用: %s [%s]",
                             cache_key,
                             ", ".join(str(y) for y in years_to_load),
@@ -595,7 +595,7 @@ class BacktestRunner:
                         _log.warning("キャッシュ読み込み失敗（再計算）: %s", e)
 
         # インジケータ計算（全期間・ウォームアップ込み）
-        _log.info("インジケータ計算（全期間）: %s", cache_key)
+        _log.debug("インジケータ計算（全期間）: %s", cache_key)
         df = self._calculate_indicators(df)
 
         # 年別に分割してparquet保存
@@ -1584,7 +1584,7 @@ class BacktestRunner:
                         for y in years_to_load
                     ]
                     df = pd.concat(_dfs, ignore_index=True)
-                    _log.info(
+                    _log.debug(
                         "年別キャッシュ使用（ロード省略）: %s [%s]",
                         cache_key,
                         ", ".join(str(y) for y in years_to_load),
@@ -1601,7 +1601,7 @@ class BacktestRunner:
                 if _use_chart_parquet:
                     try:
                         df = pd.read_parquet(_chart_pq)
-                        _log.info(
+                        _log.debug(
                             "チャートParquet使用: %s",
                             _chart_pq.name,
                         )
