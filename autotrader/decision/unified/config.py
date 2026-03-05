@@ -102,6 +102,26 @@ class RiskConfig:
     default_tp_pips: float = 25.0
     cooldown_minutes: int = 5
     max_daily_trades: int = 0
+    # Layer 1: 動的クールダウン
+    dynamic_cooldown_enabled: bool = True
+    dynamic_cooldown_base_minutes: int = 5
+    dynamic_cooldown_per_position_minutes: int = 5
+    dynamic_cooldown_max_minutes: int = 30
+    # Layer 2: 同方向プログレッシブ閾値
+    progressive_threshold_enabled: bool = True
+    progressive_threshold_per_position: float = 0.5
+    # Layer 3: ボラティリティ連動ポジション上限
+    volatility_position_limit_enabled: bool = True
+    high_vol_max_positions_ratio: float = 0.5
+    # Layer 4: ポートフォリオ・サーキットブレーカー
+    circuit_breaker_enabled: bool = True
+    circuit_breaker_loss_pct: float = 0.05
+    circuit_breaker_pause_minutes: int = 60
+    # Layer 5: 急速DD検知パウズ
+    rapid_dd_pause_enabled: bool = True
+    rapid_dd_window_minutes: int = 30
+    rapid_dd_threshold_pct: float = 0.02
+    rapid_dd_pause_duration_minutes: int = 30
 
 
 # ===================================================================

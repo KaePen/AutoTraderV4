@@ -31,21 +31,19 @@ from autotrader.core.enums import (
 
 def run_unified_year(
     runner: "BacktestRunner",
-        bot_config: "UnifiedBotConfig",
-        sim_config: SimulatorConfig,
-        year: int,
-        market_data: "dict[str, pd.DataFrame]",
-        use_m1: bool = False,
-        multi_mode_controller: Any = None,
-        fundamental_provider: Any = None,
-        period_start: datetime | None = None,
-        period_end: datetime | None = None,
-        emitter: "BacktestEventEmitter | None" = None,
-        row_progress_callback: (
-            "Callable[[int, int], None] | None"
-        ) = None,
-        adaptive_config: "TunerConfig | None" = None,
-    ) -> dict[str, Any] | None:
+    bot_config: "UnifiedBotConfig",
+    sim_config: SimulatorConfig,
+    year: int,
+    market_data: "dict[str, pd.DataFrame]",
+    use_m1: bool = False,
+    multi_mode_controller: Any = None,
+    fundamental_provider: Any = None,
+    period_start: datetime | None = None,
+    period_end: datetime | None = None,
+    emitter: "BacktestEventEmitter | None" = None,
+    row_progress_callback: ("Callable[[int, int], None] | None") = None,
+    adaptive_config: "TunerConfig | None" = None,
+) -> dict[str, Any] | None:
     """統合ボットで1年分のバックテスト実行（self-contained）
 
     年ごとに新しい UnifiedTradeBot インスタンスを生成するため、
@@ -121,7 +119,9 @@ def run_unified_year(
     _log = logging.getLogger(__name__)
     _log.info(
         "%d年: period_df=%d行, tf=%s",
-        year, len(period_df), tf.value,
+        year,
+        len(period_df),
+        tf.value,
     )
 
     if period_df.empty:
@@ -183,30 +183,74 @@ def run_unified_year(
 
         # 資金管理: botのequityとエクスポージャーを同期
         open_positions = simulator.get_open_positions()
-        exposure_lot = sum(
-            p.volume for p in open_positions
-        )
+        exposure_lot = sum(p.volume for p in open_positions)
         # 同方向ロット: BUY/SELLの大きい方を設定
         buy_lot = sum(
-            p.volume for p in open_positions
-            if p.signal_type == SignalType.BUY
+            p.volume for p in open_positions if p.signal_type == SignalType.BUY
         )
         sell_lot = sum(
-            p.volume for p in open_positions
+            p.volume
+            for p in open_positions
             if p.signal_type == SignalType.SELL
+        )
+        buy_count = sum(
+            1 for p in open_positions if p.signal_type == SignalType.BUY
+        )
+        sell_count = sum(
+            1 for p in open_positions if p.signal_type == SignalType.SELL
         )
         bot.state = bot.state.with_exposure(
             open_exposure_lot=exposure_lot,
             open_same_direction_lot=max(buy_lot, sell_lot),
+            open_buy_count=buy_count,
+            open_sell_count=sell_count,
         )
+
+        # Layer 5: エクイティ記録
+        py_time = candle_time
+        bot.risk_manager.record_equity(
+            py_time,
+            simulator.state.equity,
+        )
+
+        # Layer 5: 急速DD検知
+        bot.risk_manager.check_rapid_dd(
+            py_time,
+            simulator.state.equity,
+        )
+
+        # Layer 4: サーキットブレーカー
+        if bot.risk_manager.config.circuit_breaker_enabled and open_positions:
+            _unrealized_pnl = sum(p.unrealized_pnl for p in open_positions)
+            _equity = simulator.state.equity
+            if _equity > 0:
+                _loss_pct = abs(min(_unrealized_pnl, 0)) / _equity
+                if (
+                    _loss_pct
+                    >= bot.risk_manager.config.circuit_breaker_loss_pct
+                ):
+                    # 全ポジション強制決済
+                    for pos in list(open_positions):
+                        simulator._close_position(
+                            pos,
+                            candle.close,
+                            candle_time,
+                            ExitReason.CIRCUIT_BREAKER,
+                        )
+                    bot.risk_manager.trigger_circuit_breaker(
+                        py_time,
+                    )
 
         # [FUNDAMENTAL] 重要指標前スキップチェック
         current_time = pd.Timestamp(candle_time)
         if fundamental_provider is not None:
             import datetime as _dt
+
             _now_utc = _dt.datetime(
-                candle_time.year, candle_time.month,
-                candle_time.day, candle_time.hour,
+                candle_time.year,
+                candle_time.month,
+                candle_time.day,
+                candle_time.hour,
                 candle_time.minute,
                 tzinfo=_dt.timezone.utc,
             )
@@ -220,9 +264,8 @@ def run_unified_year(
             # Phase 2b有効時: アセッサーの方向フィルターに委任
             if (
                 not bot_config.fundamental_assessor_enabled
-                and _fctx.event_caution_level >= (
-                    bot_config.fundamental_caution_block_level
-                )
+                and _fctx.event_caution_level
+                >= (bot_config.fundamental_caution_block_level)
             ):
                 continue  # 超重要指標日はスキップ
 
@@ -234,15 +277,12 @@ def run_unified_year(
             and hasattr(fundamental_provider, "memory")
             and fundamental_provider.memory is not None
         ):
-            _fund_mem_snap = (
-                fundamental_provider.memory.snapshot()
-            )
+            _fund_mem_snap = fundamental_provider.memory.snapshot()
         consolidated = bot.generate_signal(
-            current_time, candle,
+            current_time,
+            candle,
             fundamental_ctx=(
-                _fctx
-                if fundamental_provider is not None
-                else None
+                _fctx if fundamental_provider is not None else None
             ),
             fundamental_memory=_fund_mem_snap,
         )
@@ -259,9 +299,7 @@ def run_unified_year(
                 rationale=consolidated.rationale,
                 aligned_timeframes=consolidated.aligned_tfs,
                 candle_time=candle_time,
-                score_breakdowns=(
-                    consolidated.tf_score_breakdowns
-                ),
+                score_breakdowns=(consolidated.tf_score_breakdowns),
             )
 
         # Signalオブジェクトに変換
@@ -276,8 +314,7 @@ def run_unified_year(
                     tp_pips = consolidated.tp_pips
                     _base_price = (
                         consolidated.entry_price
-                        if consolidated.entry_price
-                        is not None
+                        if consolidated.entry_price is not None
                         else candle.close
                     )
                     if consolidated.direction == SignalType.BUY:
@@ -302,8 +339,7 @@ def run_unified_year(
                 )
 
         prev_position_ids = {
-            p.position_id
-            for p in simulator.get_open_positions()
+            p.position_id for p in simulator.get_open_positions()
         }
         prev_trade_count = len(simulator.get_closed_trades())
 
@@ -316,10 +352,13 @@ def run_unified_year(
             )
         # Phase 2b: ファンダメンタル評価をPMへ渡す
         _fund_assess = getattr(
-            bot, "_last_fundamental_assessment", None,
+            bot,
+            "_last_fundamental_assessment",
+            None,
         )
         simulator.process_candle(
-            candle, signal,
+            candle,
+            signal,
             consensus_scores=_consensus_scores,
             fundamental_assessment=_fund_assess,
         )
@@ -329,104 +368,72 @@ def run_unified_year(
         for pos in current_positions:
             if pos.position_id not in prev_position_ids:
                 _mode = (
-                    consolidated.mode
-                    or getattr(bot, "_last_mode", "")
+                    consolidated.mode or getattr(bot, "_last_mode", "")
                     if consolidated
                     else getattr(bot, "_last_mode", "")
                 )
                 _regime = (
-                    consolidated.regime
-                    or getattr(bot, "_last_regime", "")
+                    consolidated.regime or getattr(bot, "_last_regime", "")
                     if consolidated
-                    else getattr(
-                        bot, "_last_regime", ""
-                    )
+                    else getattr(bot, "_last_regime", "")
                 )
                 _key = pos.position_id
                 # エントリー時メトリクス取得
                 row = period_df.iloc[idx]
-                _entry_atr = float(
-                    row.get("atr_14", 0) or 0
-                )
-                _entry_adx = float(
-                    row.get("adx", 0) or 0
-                )
-                _entry_bb_w = float(
-                    row.get("bb_width", 0) or 0
-                )
+                _entry_atr = float(row.get("atr_14", 0) or 0)
+                _entry_adx = float(row.get("adx", 0) or 0)
+                _entry_bb_w = float(row.get("bb_width", 0) or 0)
                 # エントリー時メトリクス（sim側）
                 _em = simulator.get_entry_metrics(
                     pos.position_id,
                 )
                 # スプレッド: 価格→pips変換
-                _entry_spread_pips = (
-                    _em.get("spread", 0) * 100
-                    if _em else 0.0
-                )
+                _entry_spread_pips = _em.get("spread", 0) * 100 if _em else 0.0
                 _pos_mode_regime[_key] = {
                     "mode": _mode,
                     "regime": _regime,
-                    "primary_tf": (
-                        consolidated.primary_tf
-                    ),
-                    "strategy_id": (
-                        consolidated.strategy_id
-                    ),
-                    "score_breakdowns": (
-                        consolidated.tf_score_breakdowns
-                    ),
+                    "primary_tf": (consolidated.primary_tf),
+                    "strategy_id": (consolidated.strategy_id),
+                    "score_breakdowns": (consolidated.tf_score_breakdowns),
                     "confidence": consolidated.confidence,
-                    "consensus_score": (
-                        consolidated.consensus_score
-                        or 0.0
-                    ),
+                    "consensus_score": (consolidated.consensus_score or 0.0),
                     "sl_pips": consolidated.sl_pips,
                     "tp_pips": consolidated.tp_pips,
                     "rationale": consolidated.rationale,
-                    "entry_spread_pips": (
-                        _entry_spread_pips
-                    ),
+                    "entry_spread_pips": (_entry_spread_pips),
                     "entry_atr": _entry_atr,
                     "entry_adx": _entry_adx,
                     "entry_bb_width": _entry_bb_w,
                     "position_id": pos.position_id,
                     "equity_before": (
-                        _em.get("equity_before", 0)
-                        if _em else 0
+                        _em.get("equity_before", 0) if _em else 0
                     ),
                     "dd_pct_at_entry": (
-                        _em.get("dd_pct_at_entry", 0)
-                        if _em else 0
+                        _em.get("dd_pct_at_entry", 0) if _em else 0
                     ),
                     "consecutive_losses": int(
                         _em.get(
-                            "consecutive_losses", 0,
+                            "consecutive_losses",
+                            0,
                         )
-                        if _em else 0
+                        if _em
+                        else 0
                     ),
                     "risk_per_trade_pct": (
                         _em.get(
-                            "risk_per_trade_pct", 0,
+                            "risk_per_trade_pct",
+                            0,
                         )
-                        if _em else 0
+                        if _em
+                        else 0
                     ),
                     "lot": pos.volume,
                     # Phase5: 新メタデータ
-                    "entry_threshold": (
-                        consolidated.entry_threshold
-                    ),
-                    "htf_alignment": (
-                        consolidated.htf_alignment
-                    ),
-                    "penalty_total": (
-                        consolidated.penalty_total
-                    ),
-                    "penalty_breakdown": (
-                        consolidated.penalty_breakdown
-                    ),
-                    "trend_strength": (
-                        consolidated.trend_strength
-                    ),
+                    "entry_threshold": (consolidated.entry_threshold),
+                    "htf_alignment": (consolidated.htf_alignment),
+                    "penalty_total": (consolidated.penalty_total),
+                    "penalty_breakdown": (consolidated.penalty_breakdown),
+                    "trend_strength": (consolidated.trend_strength),
                 }
                 _emitter.emit_trade_opened(
                     trade_id=pos.position_id,
@@ -452,11 +459,13 @@ def run_unified_year(
             from autotrader.decision.unified.adaptive import (
                 TradeRecord,
             )
+
             _trade_record = TradeRecord.from_trade(new_trade)
 
             # リスク管理に記録（PnLを渡して複利計算に反映）
             bot.on_trade_executed(
-                candle_time, pnl=pnl,
+                candle_time,
+                pnl=pnl,
                 trade_record=_trade_record,
             )
 
@@ -477,26 +486,17 @@ def run_unified_year(
                     if new_trade.signal_type.value == "BUY"
                     else (new_trade.entry_price - new_trade.exit_price) * 100
                 )
-            _ckey = (
-                new_trade.position_id
-                or str(new_trade.opened_at)
-            )
-            _sig_data = _pos_mode_regime.get(
-                _ckey, {}
-            )
+            _ckey = new_trade.position_id or str(new_trade.opened_at)
+            _sig_data = _pos_mode_regime.get(_ckey, {})
             if not _sig_data:
                 logging.getLogger(__name__).warning(
-                    "sig_data欠落: key=%s", _ckey,
+                    "sig_data欠落: key=%s",
+                    _ckey,
                 )
             _cm = _sig_data.get("mode", "")
             _cr = _sig_data.get("regime", "")
             # MFE/MAE取得
-            _pos_id = (
-                new_trade.position_id
-                or _sig_data.get(
-                    "position_id", ""
-                )
-            )
+            _pos_id = new_trade.position_id or _sig_data.get("position_id", "")
             _mfe_mae = simulator.get_position_mfe_mae(
                 _pos_id,
             )
@@ -511,22 +511,13 @@ def run_unified_year(
             _xm = simulator.get_exit_metrics(
                 new_trade.trade_id,
             )
-            _exit_spread_pips = (
-                _xm.get("exit_spread", 0) * 100
-            )
+            _exit_spread_pips = _xm.get("exit_spread", 0) * 100
             # time_to_mfe計算
             _time_to_mfe_min = 0.0
             _mfe_time = _mfe_mae.get("mfe_time")
-            if (
-                _mfe_time
-                and new_trade.opened_at
-            ):
-                _td_mfe = (
-                    _mfe_time - new_trade.opened_at
-                )
-                _time_to_mfe_min = (
-                    _td_mfe.total_seconds() / 60.0
-                )
+            if _mfe_time and new_trade.opened_at:
+                _td_mfe = _mfe_time - new_trade.opened_at
+                _time_to_mfe_min = _td_mfe.total_seconds() / 60.0
             # session判定（UTC時間ベース）
             _session = ""
             if new_trade.opened_at:
@@ -540,12 +531,8 @@ def run_unified_year(
                 else:
                     _session = "TOKYO"
             # parent_trade_id / position_id
-            _parent_id = (
-                new_trade.parent_trade_id or ""
-            )
-            _position_id = (
-                new_trade.position_id or ""
-            )
+            _parent_id = new_trade.parent_trade_id or ""
+            _position_id = new_trade.position_id or ""
             # Exit詳細理由を取得（STAGNATION等の診断用）
             _exit_detail = simulator.get_exit_detail(
                 _pos_id,
@@ -573,72 +560,89 @@ def run_unified_year(
                 mfe_pips=_mfe_mae.get("mfe", 0.0),
                 mae_pips=_mfe_mae.get("mae", 0.0),
                 entry_spread_pips=_sig_data.get(
-                    "entry_spread_pips", 0.0,
+                    "entry_spread_pips",
+                    0.0,
                 ),
                 entry_atr=_sig_data.get(
-                    "entry_atr", 0.0,
+                    "entry_atr",
+                    0.0,
                 ),
                 entry_adx=_sig_data.get(
-                    "entry_adx", 0.0,
+                    "entry_adx",
+                    0.0,
                 ),
                 entry_bb_width=_sig_data.get(
-                    "entry_bb_width", 0.0,
+                    "entry_bb_width",
+                    0.0,
                 ),
                 exit_spread_pips=_exit_spread_pips,
                 slippage_pips=_xm.get(
-                    "slippage_pips", 0.0,
+                    "slippage_pips",
+                    0.0,
                 ),
                 commission=_xm.get(
-                    "commission", 0.0,
+                    "commission",
+                    0.0,
                 ),
                 equity_before=_sig_data.get(
-                    "equity_before", 0.0,
+                    "equity_before",
+                    0.0,
                 ),
                 equity_after=_xm.get(
-                    "equity_after", 0.0,
+                    "equity_after",
+                    0.0,
                 ),
                 dd_pct_at_entry=_sig_data.get(
-                    "dd_pct_at_entry", 0.0,
+                    "dd_pct_at_entry",
+                    0.0,
                 ),
                 consecutive_losses=_sig_data.get(
-                    "consecutive_losses", 0,
+                    "consecutive_losses",
+                    0,
                 ),
                 risk_per_trade_pct=_sig_data.get(
-                    "risk_per_trade_pct", 0.0,
+                    "risk_per_trade_pct",
+                    0.0,
                 ),
                 lot=_sig_data.get("lot", 0.0),
                 # Phase5-6: 新フィールド
                 parent_trade_id=_parent_id,
                 position_id=_position_id,
                 entry_threshold=_sig_data.get(
-                    "entry_threshold", 0.0,
+                    "entry_threshold",
+                    0.0,
                 ),
                 htf_alignment=_sig_data.get(
-                    "htf_alignment", 0.0,
+                    "htf_alignment",
+                    0.0,
                 ),
                 penalty_total=_sig_data.get(
-                    "penalty_total", 0.0,
+                    "penalty_total",
+                    0.0,
                 ),
                 penalty_breakdown=_sig_data.get(
-                    "penalty_breakdown", {},
+                    "penalty_breakdown",
+                    {},
                 ),
                 trend_strength=_sig_data.get(
-                    "trend_strength", 0.0,
+                    "trend_strength",
+                    0.0,
                 ),
                 mfe_r=_mfe_mae.get("mfe_r", 0.0),
                 mae_r=_mfe_mae.get("mae_r", 0.0),
-                time_to_mfe_minutes=(
-                    _time_to_mfe_min
-                ),
+                time_to_mfe_minutes=(_time_to_mfe_min),
                 session=_session,
                 strategy_id=_sig_data.get(
-                    "strategy_id", "",
+                    "strategy_id",
+                    "",
                 ),
                 trigger_price=_xm.get(
-                    "trigger_price", 0.0,
+                    "trigger_price",
+                    0.0,
                 ),
                 fill_price=_xm.get(
-                    "fill_price", 0.0,
+                    "fill_price",
+                    0.0,
                 ),
                 exit_reason_detail=_exit_detail,
             )
@@ -699,17 +703,12 @@ def run_unified_year(
     if _pos_evt_logger.event_count > 0:
         for listener in runner._emitter._listeners:
             if isinstance(listener, FileEventListener):
-                evt_path = (
-                    listener.log_dir
-                    / f"position_events_{year}.csv"
-                )
+                evt_path = listener.log_dir / f"position_events_{year}.csv"
                 _pos_evt_logger.write_csv(evt_path)
                 break
 
     trades = simulator.get_closed_trades()
-    calculator = MetricsCalculator(
-        initial_balance=sim_config.initial_balance
-    )
+    calculator = MetricsCalculator(initial_balance=sim_config.initial_balance)
     metrics = calculator.calculate(trades, simulator.state.daily_pnl)
 
     # ブレークダウン生成（regime/mode/exit_reason別）
@@ -751,25 +750,13 @@ def validate_trade_log(
     for t in trades:
         tid = t.trade_id[:8] if t.trade_id else "?"
         if not t.regime or t.regime == "UNKNOWN":
-            errors.append(
-                f"regime欠落: {tid}"
-            )
+            errors.append(f"regime欠落: {tid}")
         if not t.mode or t.mode == "UNKNOWN":
-            errors.append(
-                f"mode欠落: {tid}"
-            )
-        if (
-            (t.consensus_score or 0) == 0
-            and not t.parent_trade_id
-        ):
-            errors.append(
-                f"score=0: {tid}"
-            )
+            errors.append(f"mode欠落: {tid}")
+        if (t.consensus_score or 0) == 0 and not t.parent_trade_id:
+            errors.append(f"score=0: {tid}")
     if errors:
-        msg = (
-            f"{year}年ログ品質警告"
-            f"({len(errors)}件):\n"
-            + "\n".join(errors[:10])
+        msg = f"{year}年ログ品質警告({len(errors)}件):\n" + "\n".join(
+            errors[:10]
         )
         _log.warning(msg)
-

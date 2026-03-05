@@ -40,12 +40,26 @@ class Timeframe(str, Enum):
             int: 分単位の値
         """
         mapping = {
-            "M1": 1, "M2": 2, "M3": 3, "M4": 4, "M5": 5,
-            "M6": 6, "M10": 10, "M12": 12, "M15": 15,
-            "M20": 20, "M30": 30,
-            "H1": 60, "H2": 120, "H3": 180, "H4": 240,
-            "H6": 360, "H8": 480, "H12": 720,
-            "D1": 1440, "W1": 10080,
+            "M1": 1,
+            "M2": 2,
+            "M3": 3,
+            "M4": 4,
+            "M5": 5,
+            "M6": 6,
+            "M10": 10,
+            "M12": 12,
+            "M15": 15,
+            "M20": 20,
+            "M30": 30,
+            "H1": 60,
+            "H2": 120,
+            "H3": 180,
+            "H4": 240,
+            "H6": 360,
+            "H8": 480,
+            "H12": 720,
+            "D1": 1440,
+            "W1": 10080,
         }
         return mapping[self.value]
 
@@ -70,7 +84,7 @@ class Timeframe(str, Enum):
         """
         all_tfs = list(cls)
         idx = all_tfs.index(tf)
-        return all_tfs[idx + 1:]
+        return all_tfs[idx + 1 :]
 
     @classmethod
     def all_trading(cls) -> list["Timeframe"]:
@@ -138,6 +152,7 @@ class ExitReason(str, Enum):
     MANUAL_CLOSE = "MANUAL_CLOSE"
     STOP_OUT = "STOP_OUT"
     GHOST_CLEANUP = "GHOST_CLEANUP"
+    CIRCUIT_BREAKER = "CIRCUIT_BREAKER"
 
 
 class TrendDirection(str, Enum):
@@ -175,7 +190,7 @@ class TradingStrategyMode(str, Enum):
     全TFを動的に評価して最強TFを自動選択するUNIVERSALモードのみ。
     """
 
-    UNIVERSAL = "UNIVERSAL"    # 動的：全TFを評価して最強TFを自動選択
+    UNIVERSAL = "UNIVERSAL"  # 動的：全TFを評価して最強TFを自動選択
 
 
 class TradingMode(str, Enum):
