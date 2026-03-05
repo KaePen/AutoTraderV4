@@ -79,6 +79,37 @@ async def _on_calendar_updated(
     )
 
 
+async def _on_logic_reloaded(
+    data: dict[str, Any],
+) -> None:
+    """ロジックリロード完了 -> dashboard"""
+    await manager.broadcast(
+        EventType.LOGIC_RELOAD,
+        {"status": "completed", **data},
+        "dashboard",
+    )
+
+
+async def _on_logic_reload_failed(
+    data: dict[str, Any],
+) -> None:
+    """ロジックリロード失敗 -> dashboard"""
+    await manager.broadcast(
+        EventType.LOGIC_RELOAD,
+        {"status": "failed", **data},
+        "dashboard",
+    )
+
+
+async def _on_logic_change_detected(
+    data: dict[str, Any],
+) -> None:
+    """ロジック変更検知 -> dashboard"""
+    await manager.broadcast(
+        EventType.LOGIC_CHANGE_DETECTED, data, "dashboard"
+    )
+
+
 def setup_event_bridge() -> None:
     """EventBus -> WebSocket ブリッジを登録
 
@@ -104,4 +135,13 @@ def setup_event_bridge() -> None:
     )
     get_event_bus().subscribe(
         "calendar.updated", _on_calendar_updated
+    )
+    get_event_bus().subscribe(
+        "logic.reloaded", _on_logic_reloaded
+    )
+    get_event_bus().subscribe(
+        "logic.reload_failed", _on_logic_reload_failed
+    )
+    get_event_bus().subscribe(
+        "logic.change_detected", _on_logic_change_detected
     )

@@ -569,6 +569,36 @@ class TradingModeResponse(BaseModel):
     symbol_demo_mode: dict[str, bool] = Field(default_factory=dict)
 
 
+class ReloadLogicResponse(BaseModel):
+    """ホットリロード実行レスポンス
+
+    Attributes:
+        success: リロード成功フラグ
+        reloaded_at: リロード完了時刻（ISO8601）
+        error: エラーメッセージ（失敗時）
+        results: シンボル別リロード結果
+    """
+
+    success: bool
+    reloaded_at: str | None = None
+    error: str | None = None
+    results: dict[str, Any] = Field(default_factory=dict)
+
+
+class ReloadStatusResponse(BaseModel):
+    """ホットリロード状態レスポンス
+
+    Attributes:
+        reloading: リロード実行中フラグ
+        last_reload: 最終リロード時刻
+        changed_files: 変更検知済みファイル
+    """
+
+    reloading: bool = False
+    last_reload: datetime | None = None
+    changed_files: list[str] = Field(default_factory=list)
+
+
 class IndicatorPoint(BaseModel):
     """時系列指標の1点
 

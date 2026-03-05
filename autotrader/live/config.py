@@ -13,6 +13,23 @@ from autotrader.live.tick_entry_config import TickEntryConfig
 
 
 @dataclass(frozen=True)
+class ReloadConfig:
+    """ホットリロード設定
+
+    Attributes:
+        enabled: ホットリロード機能の有効/無効
+        auto_reload_on_change: ファイル変更時に自動リロードするか
+        auto_reload_poll_interval_sec: 変更検知ポーリング間隔（秒）
+        reload_timeout_sec: リロードタイムアウト（秒）
+    """
+
+    enabled: bool = True
+    auto_reload_on_change: bool = False  # 本番は False（安全側）
+    auto_reload_poll_interval_sec: float = 5.0
+    reload_timeout_sec: float = 30.0
+
+
+@dataclass(frozen=True)
 class FundamentalConfig:
     """ファンダメンタルデータ収集・利用設定
 
@@ -56,6 +73,7 @@ class LiveTradingConfig:
         require_confirmation: 注文前に確認要求
         tick_entry_config: ティックエントリー最適化設定
         fundamental_config: ファンダメンタル設定
+        reload_config: ホットリロード設定
     """
 
     symbol: str = "USDJPY"
@@ -75,4 +93,7 @@ class LiveTradingConfig:
     )
     fundamental_config: FundamentalConfig = field(
         default_factory=FundamentalConfig
+    )
+    reload_config: ReloadConfig = field(
+        default_factory=ReloadConfig
     )

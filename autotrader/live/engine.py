@@ -47,6 +47,7 @@ from autotrader.decision.unified.signal_consolidator import (
 from autotrader.decision.unified.trade_bot import UnifiedTradeBot
 from autotrader.live.config import FundamentalConfig, LiveTradingConfig
 from autotrader.live.mt5_utils import mt5_reason_to_exit_reason
+from autotrader.live.reload import TradeLogicReloader
 from autotrader.live.tick_entry_optimizer import TickEntryOptimizer
 
 logger = logging.getLogger(__name__)
@@ -173,6 +174,16 @@ class LiveTradingEngine:
         else:
             # カレンダー＋RSS軽量初期化（DB不要・LLM不要）
             self._init_calendar_only()
+
+        # ホットリロード関連
+        self._entry_blocked: bool = False
+        self._reload_lock: asyncio.Lock = asyncio.Lock()
+        self._reload_task: asyncio.Task | None = None  # type: ignore[type-arg]
+        self._last_reload_at: datetime | None = None
+        # プロジェクトルートを engine.py から推定
+        _engine_path = __import__("pathlib").Path(__file__).resolve()
+        _project_root = _engine_path.parent.parent.parent
+        self._reloader = TradeLogicReloader(_project_root)
 
     @property
     def connected(self) -> bool:
@@ -475,6 +486,13 @@ class LiveTradingEngine:
         # メインループ開始
         self._running = True
         self._task = asyncio.create_task(self._main_loop())
+
+        # ホットリロード変更検知ループ起動
+        if self._config.reload_config.enabled:
+            self._reload_task = asyncio.create_task(
+                self._auto_reload_loop()
+            )
+
         logger.info(
             "エンジン起動完了: symbol=%s interval=%.0fs auto=%s",
             self._active_symbol,
@@ -490,6 +508,15 @@ class LiveTradingEngine:
         # ティック監視中ならキャンセル
         if self._tick_optimizer.is_active:
             self._tick_optimizer.cancel_monitoring("エンジン停止")
+
+        # ホットリロードループ停止
+        if self._reload_task:
+            self._reload_task.cancel()
+            try:
+                await self._reload_task
+            except asyncio.CancelledError:
+                pass
+            self._reload_task = None
 
         if self._task:
             self._task.cancel()
@@ -1098,6 +1125,11 @@ class LiveTradingEngine:
         Args:
             signal: トレードシグナル
         """
+        # ホットリロード中はエントリーをスキップ
+        if self._entry_blocked:
+            logger.info("エントリーブロック中（ホットリロード）— スキップ")
+            return
+
         # 既存ポジションチェック（設定値に基づく上限）
         positions = await self._executor.get_open_positions_async(
             self._active_symbol
@@ -2870,3 +2902,144 @@ class LiveTradingEngine:
 
         except Exception as e:
             logger.warning(f"[Fundamental] 指標後分析失敗: {e}")
+
+    # ------------------------------------------------------------------
+    # ホットリロード
+    # ------------------------------------------------------------------
+
+    async def reload_trade_logic(self) -> dict:
+        """トレードロジックをホットリロードする
+
+        既存ポジションの継続保証:
+        - _entry_blocked=True でエントリーを一時停止
+        - モジュールリロード後に新インスタンスを生成
+        - _sync_positions() で状態を復元（WebUI再起動と同一パス）
+        - 完了後 _entry_blocked=False に戻す
+        - エラー時は旧インスタンスへロールバック
+
+        Returns:
+            dict: {"success": bool, "reloaded_at": str, "error": str | None}
+        """
+        # 既にリロード中なら即時返却
+        if self._reload_lock.locked():
+            return {
+                "success": False,
+                "error": "リロード実行中です",
+                "reloaded_at": None,
+            }
+
+        async with self._reload_lock:
+            # 旧インスタンスを退避（ロールバック用）
+            old_bot = self._bot
+            old_pm = self._pm
+            old_sizer = self._sizer
+
+            self._entry_blocked = True
+            try:
+                await asyncio.wait_for(
+                    self._do_reload(),
+                    timeout=self._config.reload_config.reload_timeout_sec,
+                )
+                self._last_reload_at = datetime.now(UTC)
+                self._reloader.mark_reloaded()
+                get_event_bus().publish_nowait(
+                    "logic.reloaded",
+                    {
+                        "symbol": self._active_symbol,
+                        "reloaded_at": (
+                            self._last_reload_at.isoformat()
+                        ),
+                    },
+                )
+                logger.info(
+                    "ホットリロード完了: symbol=%s",
+                    self._active_symbol,
+                )
+                return {
+                    "success": True,
+                    "error": None,
+                    "reloaded_at": self._last_reload_at.isoformat(),
+                }
+            except Exception as e:
+                # 旧インスタンスへロールバック
+                self._bot = old_bot
+                self._pm = old_pm
+                self._sizer = old_sizer
+                logger.error(
+                    "ホットリロード失敗 — ロールバック: %s", e, exc_info=True
+                )
+                get_event_bus().publish_nowait(
+                    "logic.reload_failed",
+                    {
+                        "symbol": self._active_symbol,
+                        "error": str(e),
+                    },
+                )
+                return {
+                    "success": False,
+                    "error": str(e),
+                    "reloaded_at": None,
+                }
+            finally:
+                self._entry_blocked = False
+
+    async def _do_reload(self) -> None:
+        """実際のリロード処理（reload_trade_logic の内部実装）"""
+        # モジュールをリロード（1回のみ実行 — sys.modules 共有）
+        self._reloader.reload_modules()
+
+        # 新インスタンスを動的インポートで生成
+        new_bot = self._reloader.create_new_bot(
+            self._config.bot_config
+        )
+        new_pm = self._reloader.create_new_pm()
+        sizer_config = self._build_sizer_config(
+            self._config.bot_config, self._config.symbol
+        )
+        new_sizer = self._reloader.create_new_sizer(sizer_config)
+
+        # インスタンスを差し替え
+        self._bot = new_bot
+        self._pm = new_pm
+        self._sizer = new_sizer
+
+        # ポジション状態を復元（WebUI再起動と同一パス）
+        await self._sync_positions()
+
+    async def _auto_reload_loop(self) -> None:
+        """ファイル変更を定期ポーリングしてホットリロードを制御する
+
+        auto_reload_on_change=True 時: 変更検知→自動リロード実行
+        auto_reload_on_change=False 時: 変更検知→WebSocketに通知のみ
+        """
+        interval = (
+            self._config.reload_config.auto_reload_poll_interval_sec
+        )
+        while self._running:
+            await asyncio.sleep(interval)
+            try:
+                changed = self._reloader.check_changed()
+                if not changed:
+                    continue
+
+                logger.info(
+                    "トレードロジック変更検知: %d ファイル",
+                    len(changed),
+                )
+                get_event_bus().publish_nowait(
+                    "logic.change_detected",
+                    {
+                        "symbol": self._active_symbol,
+                        "changed_files": changed,
+                    },
+                )
+
+                if self._config.reload_config.auto_reload_on_change:
+                    logger.info("自動ホットリロード開始")
+                    await self.reload_trade_logic()
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                logger.error(
+                    "変更検知ループエラー: %s", e, exc_info=True
+                )

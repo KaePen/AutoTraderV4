@@ -25,6 +25,8 @@ class EventType(str, Enum):
     CALENDAR_UPDATE = "calendar_update"
     ALERT = "alert"
     HEARTBEAT = "heartbeat"
+    LOGIC_RELOAD = "logic_reload"
+    LOGIC_CHANGE_DETECTED = "logic_change_detected"
 
 
 class ConnectionManager:

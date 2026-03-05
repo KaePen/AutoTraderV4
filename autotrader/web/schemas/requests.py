@@ -204,6 +204,18 @@ class SwitchAccountRequest(BaseModel):
     server: str
 
 
+class ReloadLogicRequest(BaseModel):
+    """トレードロジックリロードリクエスト
+
+    Attributes:
+        symbol: 対象シンボル（None = 全エンジン）
+        dry_run: True の場合は変更検知のみ実行しリロードしない
+    """
+
+    symbol: str | None = None
+    dry_run: bool = False
+
+
 class AccountPresetRequest(BaseModel):
     """口座プリセット登録リクエスト
 
