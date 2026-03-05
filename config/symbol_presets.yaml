@@ -212,11 +212,15 @@ symbols:
     slippage_pips: 1.0
     default_sl_pips: 30.0
     default_tp_pips: 60.0
-    max_positions: 1
+    # GBPJPY最適化結果 (2026-03-06, 2023-2025検証)
+    # pos=3/risk=0.03: +3,010K (旧pos=1/risk=0.015: +1,291K, +133%)
+    # WR 70.0%, PF 1.78, DD 2.62%, Sharpe 5.89, 月間+ 100%
+    max_positions: 3
     bonus_max_positions: 1
     bonus_score_threshold: 8.0
-    base_risk_pct: 0.015
-    max_lot_per_trade: 1.0
+    base_risk_pct: 0.03
+    max_lot_per_trade: 2.0
+    max_total_exposure_lot: 6.0
 
   AUDJPY:
     pip_value: 100.0
@@ -224,10 +228,14 @@ symbols:
     slippage_pips: 0.7
     default_sl_pips: 20.0
     default_tp_pips: 40.0
-    max_positions: 2
+    # AUDJPY最適化結果 (2026-03-06, 2023-2025検証)
+    # pos=3/risk=0.03: +2,207K (旧pos=2/risk=0.02: +1,263K, +75%)
+    # WR 67.9%, PF 1.86, DD 2.49%, Sharpe 5.66, 月間+ 97.2%
+    max_positions: 3
     bonus_score_threshold: 7.0
-    base_risk_pct: 0.02
-    max_lot_per_trade: 1.5
+    base_risk_pct: 0.03
+    max_lot_per_trade: 2.0
+    max_total_exposure_lot: 6.0
 
   CADJPY:
     pip_value: 100.0
@@ -235,10 +243,15 @@ symbols:
     slippage_pips: 0.7
     default_sl_pips: 20.0
     default_tp_pips: 40.0
+    # CADJPY最適化結果 (2026-03-06, 2023-2025検証)
+    # pos=2/risk=0.025: +1,610K (旧pos=2/risk=0.02: +1,126K, +43%)
+    # WR 67.3%, PF 1.87, DD 2.81%, Sharpe 5.71, 月間+ 94.4%
+    # pos=3はDD 3.94%で基準超過のため見送り
     max_positions: 2
     bonus_score_threshold: 7.0
-    base_risk_pct: 0.02
+    base_risk_pct: 0.025
     max_lot_per_trade: 1.5
+    max_total_exposure_lot: 4.0
 
   CHFJPY:
     pip_value: 100.0
@@ -246,7 +259,11 @@ symbols:
     slippage_pips: 0.7
     default_sl_pips: 25.0
     default_tp_pips: 50.0
-    max_positions: 2
+    # CHFJPY最適化結果 (2026-03-06, 2023-2025検証)
+    # pos=3/risk=0.025: +2,496K (旧pos=2/risk=0.02: +1,807K, +38%)
+    # WR 70.0%, PF -, DD 2.65%, Sharpe 5.9, 月間+ -
+    max_positions: 3
     bonus_score_threshold: 7.5
-    base_risk_pct: 0.02
-    max_lot_per_trade: 1.5
+    base_risk_pct: 0.025
+    max_lot_per_trade: 2.0
+    max_total_exposure_lot: 5.0
