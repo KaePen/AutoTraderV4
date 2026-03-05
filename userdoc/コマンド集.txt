@@ -7,7 +7,7 @@ EURJPY / GBPJPY / AUDJPY / CADJPY / CHFJPY
 EURGBP / EURNZD / EURAUD（好みで）
 
 .venv/Scripts/python.exe scripts/run_backtest.py --years 2010-2025 --verbose
-.venv/Scripts/python.exe scripts/run_backtest.py --years 2010-2025 --symbol USDCHF --verbose
+.venv/Scripts/python.exe scripts/run_backtest.py --years 2010-2025 --symbol USDJPY --verbose --max-year-workers 8
 .venv/Scripts/python.exe scripts/run_backtest.py --start 2026-01-01 --end 2026-01-31 --symbol USDJPY --data-dir userdoc\csv --verbose
 
 ■MT5 csvデータ取得
