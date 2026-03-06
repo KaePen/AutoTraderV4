@@ -300,11 +300,10 @@ class MetricsStrip extends Component {
 
   _statsSubText(s, c) {
     if (!s) return '--';
-    const np = `${s.net_profit >= 0 ? '+' : ''}${fmtCurrency(s.net_profit, c)}`;
     const aw = fmtCurrency(s.average_win, c);
     const al = fmtCurrency(s.average_loss, c);
     const dd = fmtCurrency(s.max_drawdown, c);
-    return `${np} | ▲${aw} ▼${al} | DD${dd}`;
+    return `▲${aw} ▼${al} | DD${dd}`;
   }
 
   /** trades チャネル更新 → 統計カードのみ差分更新 */
