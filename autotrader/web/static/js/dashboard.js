@@ -1226,20 +1226,55 @@ const DashboardApp = {
     const pct25 = Math.max(0.01, Math.round(vol * 0.25 * 100) / 100);
     const pct50 = Math.max(0.01, Math.round(vol * 0.50 * 100) / 100);
     const pct75 = Math.max(0.01, Math.round(vol * 0.75 * 100) / 100);
-    const btnCls = 'shrink-0 px-2 py-1 text-[10px] font-semibold rounded transition-colors';
+    const selCls = 'px-2 py-1 text-[10px] font-semibold rounded transition-colors cursor-pointer';
+    const actCls = 'shrink-0 px-2 py-1 text-[10px] font-semibold rounded transition-colors';
     return `
       <div class="mt-2 pt-2 border-t border-gray-700/50" onclick="event.stopPropagation()">
         <div class="flex items-center gap-1.5">
-          <button class="${btnCls} bg-amber-700/80 hover:bg-amber-600 text-amber-100"
-            onclick="DashboardApp.closePosition(${p.ticket}, ${pct25})">25%</button>
-          <button class="${btnCls} bg-amber-700/80 hover:bg-amber-600 text-amber-100"
-            onclick="DashboardApp.closePosition(${p.ticket}, ${pct50})">50%</button>
-          <button class="${btnCls} bg-amber-700/80 hover:bg-amber-600 text-amber-100"
-            onclick="DashboardApp.closePosition(${p.ticket}, ${pct75})">75%</button>
-          <button class="${btnCls} bg-red-600 hover:bg-red-500 text-white"
+          <button class="${selCls} bg-gray-600 hover:bg-amber-700/80 text-gray-200"
+            onclick="DashboardApp._selectClosePct(${p.ticket}, ${pct25}, this)">25%</button>
+          <button class="${selCls} bg-gray-600 hover:bg-amber-700/80 text-gray-200"
+            onclick="DashboardApp._selectClosePct(${p.ticket}, ${pct50}, this)">50%</button>
+          <button class="${selCls} bg-gray-600 hover:bg-amber-700/80 text-gray-200"
+            onclick="DashboardApp._selectClosePct(${p.ticket}, ${pct75}, this)">75%</button>
+          <div class="w-px h-4 bg-gray-600 shrink-0"></div>
+          <button class="${actCls} bg-amber-600 hover:bg-amber-500 text-white opacity-50 pointer-events-none"
+            data-close-exec="${p.ticket}"
+            onclick="DashboardApp.closePosition(${p.ticket}, DashboardApp._closeVolumes[${p.ticket}])">部分決済</button>
+          <button class="${actCls} bg-red-600 hover:bg-red-500 text-white"
             onclick="DashboardApp.closePosition(${p.ticket}, null)">全決済</button>
         </div>
       </div>`;
+  },
+
+  /** 選択中の部分決済ボリューム */
+  _closeVolumes: {},
+
+  /** 部分決済比率の選択 */
+  _selectClosePct(ticket, volume, btn) {
+    this._closeVolumes[ticket] = volume;
+    // 同じチケットの選択ボタンのスタイルをリセット
+    const ui = btn.closest('[data-close-ui]');
+    if (ui) {
+      ui.querySelectorAll('button:not([data-close-exec])').forEach(b => {
+        if (b.textContent.includes('%')) {
+          b.className = b.className
+            .replace(/bg-amber-700\/80/g, 'bg-gray-600')
+            .replace(/text-amber-100/g, 'text-gray-200');
+        }
+      });
+    }
+    // 選択されたボタンをハイライト
+    btn.className = btn.className
+      .replace(/bg-gray-600/g, 'bg-amber-700/80')
+      .replace(/text-gray-200/g, 'text-amber-100');
+    // 部分決済ボタンを有効化
+    const execBtn = document.querySelector(
+      `[data-close-exec="${ticket}"]`
+    );
+    if (execBtn) {
+      execBtn.classList.remove('opacity-50', 'pointer-events-none');
+    }
   },
 
   /** ポジション決済実行 */
