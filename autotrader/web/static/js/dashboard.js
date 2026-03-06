@@ -373,6 +373,7 @@ class PositionPanel extends Component {
   mount() {
     this.subscribe('positions', () => this._render());
     this._posTimeInterval = setInterval(() => this._tickPositionTimers(), 60000);
+    this._initHeightSync();
   }
 
   destroy() {
@@ -381,6 +382,31 @@ class PositionPanel extends Component {
       clearInterval(this._posTimeInterval);
       this._posTimeInterval = null;
     }
+    if (this._resizeObserver) {
+      this._resizeObserver.disconnect();
+      this._resizeObserver = null;
+    }
+  }
+
+  /** PC版: 左カラムの高さに合わせてポジションパネルの max-height を設定 */
+  _initHeightSync() {
+    const panel = document.getElementById('position-panel');
+    if (!panel) return;
+    const leftCol = panel.previousElementSibling;
+    if (!leftCol) return;
+
+    const sync = () => {
+      if (window.innerWidth >= 1024) {
+        panel.style.maxHeight = leftCol.offsetHeight + 'px';
+      } else {
+        panel.style.maxHeight = '';
+      }
+    };
+
+    this._resizeObserver = new ResizeObserver(sync);
+    this._resizeObserver.observe(leftCol);
+    window.addEventListener('resize', sync);
+    sync();
   }
 
   _render() {
