@@ -524,17 +524,23 @@ class PositionPanel extends Component {
     const arrowChar = isExpanded ? '&#x25BE;' : '&#x25B8;';
 
     return `
-        <div class="flex items-center justify-between mb-1.5">
-          <div class="flex items-center gap-1.5">
+        <div class="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 mb-1.5">
+          <!-- 左グループ: 方向バッジ + シンボル (常に表示) -->
+          <div class="flex items-center gap-1.5 flex-shrink-0">
             <span class="text-[11px] font-bold px-1.5 py-0.5 rounded ${dirBg}">${p.signal_type}</span>
             <span class="text-sm font-semibold text-gray-200">${p.symbol}</span>
-            <span class="text-xs font-mono tabular-nums ${pnlColor}">${p.current_price.toFixed(digits)}</span>
-            <span class="text-xs text-gray-400">${p.volume.toFixed(2)}lot</span>
-            <span class="text-xs text-gray-600">&middot;</span>
-            <span class="text-xs text-gray-400" data-elapsed-ticket="${p.ticket}">${this._fmtElapsedTime(p)}</span>
-            <span class="text-xs inline-block" data-remaining-ticket="${p.ticket}">${this._fmtRemainingTimeInner(p)}</span>
           </div>
-          <div class="flex items-center gap-2">
+          <!-- 中グループ: 価格 + ロット + 経過時間 (スマホでは折り返し) -->
+          <div class="flex items-center gap-1 sm:gap-1.5 text-xs text-gray-400 flex-shrink-0">
+            <span class="font-mono tabular-nums ${pnlColor}">${p.current_price.toFixed(digits)}</span>
+            <span class="text-gray-600">&middot;</span>
+            <span>${p.volume.toFixed(2)}lot</span>
+            <span class="text-gray-600">&middot;</span>
+            <span data-elapsed-ticket="${p.ticket}">${this._fmtElapsedTime(p)}</span>
+            <span class="inline-block" data-remaining-ticket="${p.ticket}">${this._fmtRemainingTimeInner(p)}</span>
+          </div>
+          <!-- 右グループ: 損益 + 矢印 (常に右寄せ) -->
+          <div class="flex items-center gap-1.5 ml-auto flex-shrink-0">
             <div class="flex items-baseline gap-1 ${pnlBg} px-2 py-0.5 rounded-md">
               <span class="text-sm font-bold tabular-nums ${pnlColor}">${pnlSign}${fmtCurrency(p.unrealized_pnl, c)}</span>
               <span class="text-[10px] tabular-nums ${pnlColor} opacity-70">${pnlSign}${p.unrealized_pnl_pips.toFixed(1)}p</span>
