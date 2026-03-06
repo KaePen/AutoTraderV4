@@ -947,8 +947,10 @@ class AnalysisPanel extends Component {
       if (mins !== null && mins <= 60 && mins > 0) {
         apEventText.textContent = '重要指標まで ' + Math.round(mins) + ' 分';
         apEventBanner.classList.remove('hidden');
+        apEventBanner.classList.add('inline-flex');
       } else {
         apEventBanner.classList.add('hidden');
+        apEventBanner.classList.remove('inline-flex');
       }
     }
 
