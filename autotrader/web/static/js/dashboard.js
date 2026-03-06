@@ -388,7 +388,9 @@ class PositionPanel extends Component {
     const countEl = document.getElementById('position-count');
     if (!listEl) return;
 
-    const positions = this._dataFlow.get('positions') || [];
+    const positions = [...(this._dataFlow.get('positions') || [])];
+    // 損失大→利益大の順にソート
+    positions.sort((a, b) => (a.unrealized_pnl || 0) - (b.unrealized_pnl || 0));
     this._updatePosTimeCache(positions);
 
     if (countEl) countEl.textContent = positions.length > 0 ? positions.length + ' open' : 'no open';
@@ -548,8 +550,8 @@ class PositionPanel extends Component {
             <span id="${arrowId}" class="text-base text-gray-400">${arrowChar}</span>
           </div>
         </div>
-        ${progressHtml}
         <div id="${detailId}" class="${detailCls}">
+          ${progressHtml}
           ${priceRowHtml}
           ${p.trade_id ? `<div class="mt-1 text-[9px] text-gray-700 tabular-nums truncate">ID: ${p.trade_id}</div>` : ''}
         </div>`;
