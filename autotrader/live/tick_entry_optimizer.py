@@ -167,7 +167,24 @@ class TickEntryOptimizer:
             bool: 監視開始に成功したか
         """
         if self._state == OptimizerState.MONITORING:
-            # 衝突ポリシー処理
+            # 同一シグナル（同シンボル・同方向）なら監視継続
+            if (
+                self._pending_signal is not None
+                and self._pending_signal.symbol == signal.symbol
+                and self._pending_signal.signal_type
+                == signal.signal_type
+            ):
+                logger.debug(
+                    "同一シグナル継続監視: %s %s"
+                    " (ticks=%d, elapsed=%.1fs)",
+                    signal.signal_type.value,
+                    signal.symbol,
+                    self._buffer.count,
+                    self._buffer.elapsed,
+                )
+                return True
+
+            # 異なるシグナルとの衝突
             if self._config.conflict_policy == "ignore":
                 logger.debug(
                     "既存監視中のため新シグナル無視"
@@ -175,7 +192,16 @@ class TickEntryOptimizer:
                 return False
             if self._config.conflict_policy == "replace":
                 logger.info(
-                    "既存監視を新シグナルで置換"
+                    "既存監視を新シグナルで置換:"
+                    " %s %s → %s %s",
+                    self._pending_signal.signal_type.value
+                    if self._pending_signal
+                    else "?",
+                    self._pending_signal.symbol
+                    if self._pending_signal
+                    else "?",
+                    signal.signal_type.value,
+                    signal.symbol,
                 )
                 self.reset()
 
@@ -539,7 +565,7 @@ class TickEntryOptimizer:
         """
         if self._state == OptimizerState.MONITORING:
             self._state = OptimizerState.CANCELLED
-            logger.info(
+            logger.debug(
                 "ティック監視キャンセル: %s "
                 "(ticks=%d, elapsed=%.1fs)",
                 reason,
