@@ -948,41 +948,76 @@ const DashboardApp = {
     const tp = d.total_pnl || 0;
     const tt = d.total_trades || 0;
 
-    el.innerHTML = `
-      ${this.metricCard('残高', this.fmtCurrency(a.balance), '有効証拠金: ' + this.fmtCurrency(a.equity), 'neutral')}
-      ${this.metricCard('本日損益',
-        (d.daily_pnl >= 0 ? '+' : '') + this.fmtCurrency(d.daily_pnl),
-        (d.daily_pnl_pct >= 0 ? '+' : '') + d.daily_pnl_pct.toFixed(2) + '%',
-        d.daily_pnl >= 0 ? 'profit' : 'loss')}
-      ${this.metricCard('週間/月間',
-        (wp >= 0 ? '+' : '') + this.fmtCurrency(wp),
-        '月間: ' + (mp >= 0 ? '+' : '') + this.fmtCurrency(mp),
-        wp >= 0 ? 'profit' : 'loss')}
-      ${this.metricCard('全履歴損益',
-        (tp >= 0 ? '+' : '') + this.fmtCurrency(tp),
-        tt.toLocaleString() + ' トレード',
-        tp >= 0 ? 'profit' : 'loss')}
-      ${this.metricCard('勝率',
-        d.win_rate.toFixed(1) + '%',
-        '本日 ' + d.today_trades + ' トレード',
-        d.win_rate >= 55 ? 'profit' : d.win_rate >= 45 ? 'neutral' : 'loss')}
-      ${this.positionMetricCard()}
-      ${this.metricCard('証拠金維持率',
-        a.margin_level.toFixed(0) + '%',
-        '余剰: ' + this.fmtCurrency(a.free_margin),
-        a.margin_level > 300 ? 'profit' : a.margin_level > 150 ? 'neutral' : 'loss')}
-    `;
+    // 各カードのデータ定義
+    const cards = [
+      { id: 'mc-balance', label: '残高', value: this.fmtCurrency(a.balance),
+        sub: '有効証拠金: ' + this.fmtCurrency(a.equity), variant: 'neutral' },
+      { id: 'mc-daily', label: '本日損益',
+        value: (d.daily_pnl >= 0 ? '+' : '') + this.fmtCurrency(d.daily_pnl),
+        sub: (d.daily_pnl_pct >= 0 ? '+' : '') + d.daily_pnl_pct.toFixed(2) + '%',
+        variant: d.daily_pnl >= 0 ? 'profit' : 'loss' },
+      { id: 'mc-weekly', label: '週間/月間',
+        value: (wp >= 0 ? '+' : '') + this.fmtCurrency(wp),
+        sub: '月間: ' + (mp >= 0 ? '+' : '') + this.fmtCurrency(mp),
+        variant: wp >= 0 ? 'profit' : 'loss' },
+      { id: 'mc-total', label: '全履歴損益',
+        value: (tp >= 0 ? '+' : '') + this.fmtCurrency(tp),
+        sub: tt.toLocaleString() + ' トレード',
+        variant: tp >= 0 ? 'profit' : 'loss' },
+      { id: 'mc-winrate', label: '勝率',
+        value: d.win_rate.toFixed(1) + '%',
+        sub: '本日 ' + d.today_trades + ' トレード',
+        variant: d.win_rate >= 55 ? 'profit' : d.win_rate >= 45 ? 'neutral' : 'loss' },
+      { id: 'mc-margin', label: '証拠金維持率',
+        value: a.margin_level.toFixed(0) + '%',
+        sub: '余剰: ' + this.fmtCurrency(a.free_margin),
+        variant: a.margin_level > 300 ? 'profit' : a.margin_level > 150 ? 'neutral' : 'loss' },
+    ];
+
+    // 初回: innerHTML で構築、2回目以降: 差分更新
+    const existing = el.querySelector('[data-metric]');
+    if (!existing) {
+      // ポジションカードを証拠金の前に配置
+      const before = cards.slice(0, 5);
+      const after = cards.slice(5);
+      el.innerHTML = before.map(c => this.metricCard(c.id, c.label, c.value, c.sub, c.variant)).join('')
+        + this.positionMetricCard()
+        + after.map(c => this.metricCard(c.id, c.label, c.value, c.sub, c.variant)).join('');
+      return;
+    }
+
+    // 差分更新: 各カードの値・サブテキスト・色のみ変更
+    const valueColors = { profit: 'text-green-400', loss: 'text-red-400', neutral: 'text-gray-100' };
+    const borderColors = { profit: 'border-l-green-500/50', loss: 'border-l-red-500/50', neutral: 'border-l-gray-600' };
+    for (const c of cards) {
+      const card = el.querySelector(`[data-metric="${c.id}"]`);
+      if (!card) continue;
+      const valEl = card.querySelector('[data-val]');
+      const subEl = card.querySelector('[data-sub]');
+      if (valEl) {
+        valEl.textContent = c.value;
+        valEl.className = `text-sm font-bold tabular-nums leading-tight ${valueColors[c.variant]}`;
+      }
+      if (subEl) subEl.textContent = c.sub;
+      // ボーダー色更新
+      card.className = card.className
+        .replace(/border-l-(green|red|gray)-[^\s]*/g, '')
+        .replace(/\s+/g, ' ').trim()
+        + ' ' + borderColors[c.variant];
+    }
+
+    // ポジションカード差分更新
+    this._updatePositionMetricCard();
   },
 
-  metricCard(label, value, sub, variant, hint) {
+  metricCard(id, label, value, sub, variant) {
     const valueColors = { profit: 'text-green-400', loss: 'text-red-400', neutral: 'text-gray-100' };
     const borderColors = { profit: 'border-l-green-500/50', loss: 'border-l-red-500/50', neutral: 'border-l-gray-600' };
     return `
-      <div class="card border-l-2 ${borderColors[variant]}">
+      <div class="card border-l-2 ${borderColors[variant]}" data-metric="${id}">
         <p class="text-[10px] text-gray-400 uppercase tracking-wider mb-0.5">${label}</p>
-        <p class="text-sm font-bold tabular-nums leading-tight ${valueColors[variant]}">${value}</p>
-        ${hint ? `<p class="text-[10px] text-gray-600 tabular-nums">${hint}</p>` : ''}
-        ${sub ? `<p class="text-[10px] text-gray-500 mt-0.5 tabular-nums">${sub}</p>` : ''}
+        <p class="text-sm font-bold tabular-nums leading-tight ${valueColors[variant]}" data-val>${value}</p>
+        <p class="text-[10px] text-gray-500 mt-0.5 tabular-nums" data-sub>${sub}</p>
       </div>`;
   },
 
@@ -995,33 +1030,72 @@ const DashboardApp = {
     const borderColors = { profit: 'border-l-green-500/50', loss: 'border-l-red-500/50', neutral: 'border-l-gray-600' };
     const valueColors = { profit: 'text-green-400', loss: 'text-red-400', neutral: 'text-gray-100' };
 
-    // 通貨ペアごとにグループ化して含み損益合計を集計
+    const pillsHtml = this._buildPositionPills();
+    const profitStr = totalCount > 0
+      ? `${totalProfit >= 0 ? '+' : ''}${this.fmtCurrency(totalProfit)}`
+      : '';
+
+    return `
+      <div class="card border-l-2 ${borderColors[variant]}" data-metric="mc-position" style="min-height:72px">
+        <p class="text-[10px] text-gray-400 uppercase tracking-wider mb-0.5">ポジション</p>
+        <p class="text-sm font-bold tabular-nums leading-tight ${valueColors[variant]}" data-val>${totalCount} open</p>
+        <p class="text-[10px] text-gray-500 mt-0.5 tabular-nums" data-sub>${profitStr}</p>
+        <p class="flex flex-wrap gap-y-0.5 items-center mt-1 leading-none" data-pills style="min-height:14px">${pillsHtml}</p>
+      </div>`;
+  },
+
+  /** ポジション通貨ペア pills のHTML生成 */
+  _buildPositionPills() {
+    const positions = this.positions;
+    if (positions.length === 0) return '';
+
     const bySymbol = {};
     for (const p of positions) {
       if (!bySymbol[p.symbol]) bySymbol[p.symbol] = { pnl: 0 };
       bySymbol[p.symbol].pnl += (p.unrealized_pnl || 0);
     }
-
-    const pills = Object.entries(bySymbol).map(([sym, cnt]) => {
+    return Object.entries(bySymbol).map(([sym, cnt]) => {
       const arrow = cnt.pnl > 0 ? '↑' : cnt.pnl < 0 ? '↓' : '→';
       const color = cnt.pnl > 0 ? 'text-green-400' : cnt.pnl < 0 ? 'text-red-400' : 'text-gray-400';
       return `<span class="inline-flex items-center gap-0.5 ${color} text-[10px] font-medium">${sym}<span>${arrow}</span></span>`;
     }).join('<span class="text-gray-700 mx-0.5">·</span>');
+  },
 
-    const profitStr = totalCount > 0
-      ? `<p class="text-[10px] text-gray-500 mt-0.5 tabular-nums">${totalProfit >= 0 ? '+' : ''}${this.fmtCurrency(totalProfit)}</p>`
-      : '';
-    const pillsRow = totalCount > 0
-      ? `<p class="flex flex-wrap gap-y-0.5 items-center mt-1 leading-none">${pills}</p>`
-      : `<p class="text-xs text-gray-600 mt-0.5">ポジションなし</p>`;
+  /** ポジションメトリクスカードの差分更新 */
+  _updatePositionMetricCard() {
+    const el = document.getElementById('metrics-strip');
+    if (!el) return;
+    const card = el.querySelector('[data-metric="mc-position"]');
+    if (!card) return;
 
-    return `
-      <div class="card border-l-2 ${borderColors[variant]}">
-        <p class="text-[10px] text-gray-400 uppercase tracking-wider mb-0.5">ポジション</p>
-        <p class="text-sm font-bold tabular-nums leading-tight ${valueColors[variant]}">${totalCount} open</p>
-        ${profitStr}
-        ${pillsRow}
-      </div>`;
+    const positions = this.positions;
+    const totalCount = positions.length;
+    const totalProfit = positions.reduce((s, p) => s + (p.unrealized_pnl || 0), 0);
+    const variant = totalCount === 0 ? 'neutral' : (totalProfit >= 0 ? 'profit' : 'loss');
+    const valueColors = { profit: 'text-green-400', loss: 'text-red-400', neutral: 'text-gray-100' };
+    const borderColors = { profit: 'border-l-green-500/50', loss: 'border-l-red-500/50', neutral: 'border-l-gray-600' };
+
+    const valEl = card.querySelector('[data-val]');
+    const subEl = card.querySelector('[data-sub]');
+    const pillsEl = card.querySelector('[data-pills]');
+
+    if (valEl) {
+      valEl.textContent = totalCount + ' open';
+      valEl.className = `text-sm font-bold tabular-nums leading-tight ${valueColors[variant]}`;
+    }
+    if (subEl) {
+      subEl.textContent = totalCount > 0
+        ? `${totalProfit >= 0 ? '+' : ''}${this.fmtCurrency(totalProfit)}`
+        : '';
+    }
+    if (pillsEl) {
+      pillsEl.innerHTML = this._buildPositionPills();
+    }
+    // ボーダー色更新
+    card.className = card.className
+      .replace(/border-l-(green|red|gray)-[^\s]*/g, '')
+      .replace(/\s+/g, ' ').trim()
+      + ' ' + borderColors[variant];
   },
 
   /** ポジション描画 */
@@ -1086,6 +1160,9 @@ const DashboardApp = {
           .join('') +
         '</div>';
     }
+
+    // メトリクスストリップのポジションカードも差分更新
+    this._updatePositionMetricCard();
   },
 
   positionCard(p, idx) {
