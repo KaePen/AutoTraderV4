@@ -418,10 +418,15 @@ const SettingsManager = {
 
     const addSection = `
       <div class="space-y-2">
-        <h3 class="text-xs font-semibold text-gray-400 uppercase tracking-wider">
-          口座を登録
-        </h3>
-        <div class="space-y-1.5">
+        <button id="conn-add-toggle" class="flex items-center gap-1.5 group">
+          <svg id="conn-add-chevron" class="w-3.5 h-3.5 transition-transform -rotate-90 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+          </svg>
+          <h3 class="text-xs font-semibold text-gray-400 uppercase tracking-wider group-hover:text-gray-300 transition-colors">
+            口座を登録
+          </h3>
+        </button>
+        <div id="conn-add-fields" class="hidden space-y-1.5">
           <input id="conn-add-login" type="number" placeholder="ログインID *"
             class="w-full bg-gray-700 border border-gray-600 rounded px-2.5 py-1 sm:py-1.5 text-sm text-gray-100 focus:outline-none focus:ring-1 focus:ring-blue-500 placeholder-gray-500" />
           <input id="conn-add-server" type="text" placeholder="サーバー名 * (例: XMTrading-MT5)"
@@ -467,6 +472,16 @@ const SettingsManager = {
 
   /** 接続タブのイベントバインド */
   bindConnectionEvents(currentLogin) {
+    // 口座登録セクションの折りたたみ
+    const addToggle = document.getElementById('conn-add-toggle');
+    const addFields = document.getElementById('conn-add-fields');
+    const addChevron = document.getElementById('conn-add-chevron');
+    if (addToggle && addFields) {
+      addToggle.addEventListener('click', () => {
+        const isHidden = addFields.classList.toggle('hidden');
+        if (addChevron) addChevron.style.transform = isHidden ? 'rotate(-90deg)' : '';
+      });
+    }
     // ヘッダー表示名保存
     const nickSave = document.getElementById('conn-nickname-save');
     const nickInput = document.getElementById('conn-nickname-input');
