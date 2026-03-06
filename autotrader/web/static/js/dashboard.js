@@ -389,12 +389,6 @@ class PositionPanel extends Component {
     if (!listEl) return;
 
     const positions = this._dataFlow.get('positions') || [];
-    // DEBUG: ポジションデータの時間フィールドを確認
-    if (positions.length > 0 && !this._debugLogged) {
-      const p = positions[0];
-      console.log('[POS DEBUG]', { ticket: p.ticket, opened_at: p.opened_at, elapsed_minutes: p.elapsed_minutes, max_hold_minutes: p.max_hold_minutes, parsed_ms: p.opened_at ? new Date(p.opened_at).getTime() : null, now: Date.now() });
-      this._debugLogged = true;
-    }
     this._updatePosTimeCache(positions);
 
     if (countEl) countEl.textContent = positions.length > 0 ? positions.length + ' open' : 'no open';
