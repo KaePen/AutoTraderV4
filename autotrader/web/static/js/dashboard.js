@@ -389,6 +389,12 @@ class PositionPanel extends Component {
     if (!listEl) return;
 
     const positions = this._dataFlow.get('positions') || [];
+    // DEBUG: ポジションデータの時間フィールドを確認
+    if (positions.length > 0 && !this._debugLogged) {
+      const p = positions[0];
+      console.log('[POS DEBUG]', { ticket: p.ticket, opened_at: p.opened_at, elapsed_minutes: p.elapsed_minutes, max_hold_minutes: p.max_hold_minutes, parsed_ms: p.opened_at ? new Date(p.opened_at).getTime() : null, now: Date.now() });
+      this._debugLogged = true;
+    }
     this._updatePosTimeCache(positions);
 
     if (countEl) countEl.textContent = positions.length > 0 ? positions.length + ' open' : 'no open';
@@ -669,45 +675,49 @@ class PositionPanel extends Component {
     for (const p of positions) {
       const t = Number(p.ticket);
       activeTickets.add(t);
+      // opened_atからmsタイムスタンプを保存（最も信頼できるソース）
       const existing = this._posTimeCache[t];
-      // 優先度: elapsed_minutes(バックエンド計算) > opened_at(UTC ISO)
-      let baseElapsedMin = (existing && existing.baseElapsedMin != null)
-        ? existing.baseElapsedMin : null;
-      let baseReceivedAt = (existing && existing.baseReceivedAt)
-        ? existing.baseReceivedAt : null;
-      if (p.elapsed_minutes != null) {
-        baseElapsedMin = p.elapsed_minutes;
-        baseReceivedAt = Date.now();
-      } else if (baseElapsedMin == null && p.opened_at) {
-        // elapsed_minutesがない場合、opened_at(UTC ISO)から計算
-        const openMs = new Date(p.opened_at).getTime();
-        if (openMs > 0) {
-          baseElapsedMin = Math.max(0, Math.floor((Date.now() - openMs) / 60000));
-          baseReceivedAt = Date.now();
-        }
+      let openedAtMs = existing ? existing.openedAtMs : null;
+      if (!openedAtMs && p.opened_at) {
+        openedAtMs = new Date(p.opened_at).getTime();
+        if (isNaN(openedAtMs) || openedAtMs <= 0) openedAtMs = null;
       }
       const maxHoldMin = p.max_hold_minutes != null
         ? p.max_hold_minutes
         : (existing ? existing.maxHoldMin : null);
-      this._posTimeCache[t] = { baseElapsedMin, baseReceivedAt, maxHoldMin };
+      this._posTimeCache[t] = { openedAtMs, maxHoldMin };
     }
     for (const ticket of Object.keys(this._posTimeCache)) {
       if (!activeTickets.has(Number(ticket))) delete this._posTimeCache[ticket];
     }
   }
 
+  // opened_atから経過分数を直接計算（毎回リアルタイム）
   _calcElapsedMin(ticket) {
     const cache = this._posTimeCache[ticket];
-    if (!cache || cache.baseElapsedMin == null || !cache.baseReceivedAt) return 0;
-    // バックエンド計算値 + 受信後の経過時間で補正
-    const sinceReceived = Math.floor((Date.now() - cache.baseReceivedAt) / 60000);
-    return Math.max(0, cache.baseElapsedMin + sinceReceived);
+    if (!cache || !cache.openedAtMs) return 0;
+    return Math.max(0, Math.floor((Date.now() - cache.openedAtMs) / 60000));
   }
 
   _fmtElapsedTime(p) {
-    const elapsed = this._calcElapsedMin(Number(p.ticket));
-    if (elapsed > 0) return fmtHoldTime(null, elapsed);
-    if (p.elapsed_minutes != null) return fmtHoldTime(null, p.elapsed_minutes);
+    // 1. バックエンドのelapsed_minutesがあればそれを使う
+    if (p.elapsed_minutes != null && p.elapsed_minutes > 0) {
+      return fmtHoldTime(null, p.elapsed_minutes);
+    }
+    // 2. opened_atから直接計算
+    const cache = this._posTimeCache[Number(p.ticket)];
+    if (cache && cache.openedAtMs) {
+      const min = Math.max(0, Math.floor((Date.now() - cache.openedAtMs) / 60000));
+      if (min > 0) return fmtHoldTime(null, min);
+    }
+    // 3. opened_at文字列から直接計算（キャッシュ未構築時）
+    if (p.opened_at) {
+      const ms = new Date(p.opened_at).getTime();
+      if (!isNaN(ms) && ms > 0) {
+        const min = Math.max(0, Math.floor((Date.now() - ms) / 60000));
+        if (min > 0) return fmtHoldTime(null, min);
+      }
+    }
     return '0m';
   }
 
