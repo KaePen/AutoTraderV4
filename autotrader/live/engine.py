@@ -1487,7 +1487,32 @@ class LiveTradingEngine:
             ticket: MT5ポジションID
         """
         logger.info("外部決済検出（手動/SL/TP）: ticket=%d", ticket)
+
+        # DBからポジションのシンボルを確認し、自エンジンと一致しない場合はスキップ
+        trade_symbol = self._get_trade_symbol_from_db(ticket)
+        if trade_symbol and trade_symbol != self._active_symbol:
+            logger.info(
+                "他シンボルのポジション: ticket=%d symbol=%s"
+                " (自エンジン=%s) → スキップ",
+                ticket,
+                trade_symbol,
+                self._active_symbol,
+            )
+            # _open_tradesから除去（誤復元分）
+            self._open_trades.pop(ticket, None)
+            return
+
+        # 5分 lookback で約定履歴を検索
         deal = await self._executor.get_deal_by_position_async(ticket)
+        if not deal:
+            # フォールバック: 全履歴から検索（エンジン停止が長かった場合）
+            deal = await self._executor.get_deal_by_position_id_async(
+                ticket
+            )
+            if deal:
+                logger.info(
+                    "全履歴検索で約定取得: ticket=%d", ticket
+                )
         if deal:
             exit_price = deal["price"]
             profit_loss = deal["profit"]
@@ -1502,8 +1527,10 @@ class LiveTradingEngine:
         else:
             # 約定履歴取得失敗時はティック価格をフォールバックに使用
             exit_price = 0.0
+            # ポジションのシンボルを特定してティックを取得
+            _tick_symbol = trade_symbol or self._active_symbol
             try:
-                tick = await self._data_provider.get_tick(self._active_symbol)
+                tick = await self._data_provider.get_tick(_tick_symbol)
                 _bid = float(tick.get("bid", 0))
                 _ask = float(tick.get("ask", 0))
                 # 方向不明のためmid価格をフォールバック
@@ -1524,6 +1551,35 @@ class LiveTradingEngine:
         self._write_close_to_db(ticket, exit_price, exit_reason, profit_loss)
         # ローカルDB管理状態を削除
         self._delete_position_state(str(ticket))
+
+    def _get_trade_symbol_from_db(self, ticket: int) -> str | None:
+        """DBからトレードのシンボルを取得
+
+        Args:
+            ticket: MT5チケットID
+
+        Returns:
+            str | None: シンボル文字列。未取得時None。
+        """
+        from autotrader.adapters.database.connection import (
+            get_session,
+        )
+        from autotrader.adapters.database.models import (
+            TradeRecord,
+        )
+        from autotrader.config.settings import get_settings
+
+        try:
+            db_url = get_settings().database_url
+            with get_session(db_url) as db:
+                record = (
+                    db.query(TradeRecord.symbol)
+                    .filter(TradeRecord.ticket == ticket)
+                    .first()
+                )
+                return record[0] if record else None
+        except Exception:
+            return None
 
     def _update_sl_in_db(
         self, ticket: int, new_sl: float
@@ -2319,6 +2375,7 @@ class LiveTradingEngine:
 
         エンジン再起動時に _open_trades マッピングを
         DBの is_open=True レコードから復元する。
+        自エンジンのシンボルに一致するレコードのみ復元する。
 
         Args:
             tickets: 現在のMT5チケットIDリスト
@@ -2339,6 +2396,7 @@ class LiveTradingEngine:
                     .filter(
                         TradeRecord.is_open.is_(True),
                         TradeRecord.ticket.in_(tickets),
+                        TradeRecord.symbol == self._active_symbol,
                     )
                     .all()
                 )

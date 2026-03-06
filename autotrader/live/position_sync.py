@@ -251,7 +251,17 @@ class PositionSyncService:
             closed_trades: クローズ済みトレード履歴
         """
         logger.info("外部決済検出（手動/SL/TP）: ticket=%d", ticket)
+        # 5分 lookback で約定履歴を検索
         deal = await self._executor.get_deal_by_position_async(ticket)
+        if not deal:
+            # フォールバック: 全履歴から検索
+            deal = await self._executor.get_deal_by_position_id_async(
+                ticket
+            )
+            if deal:
+                logger.info(
+                    "全履歴検索で約定取得: ticket=%d", ticket
+                )
         if deal:
             exit_price = deal["price"]
             profit_loss = deal["profit"]
@@ -333,6 +343,7 @@ class PositionSyncService:
             self.restore_open_trades_from_db(
                 [pos.ticket for pos in positions],
                 open_trades,
+                symbol=active_symbol,
             )
 
         # 外部決済の検出
@@ -539,6 +550,7 @@ class PositionSyncService:
         self.restore_open_trades_from_db(
             [pos.ticket for pos in positions],
             open_trades,
+            symbol=active_symbol,
         )
 
         saved_states = self.load_position_states()
@@ -804,12 +816,14 @@ class PositionSyncService:
         self,
         tickets: list[int],
         open_trades: dict[int, str],
+        symbol: str = "",
     ) -> None:
         """DBからオープントレードのtrade_idを復元
 
         Args:
             tickets: 現在のMT5チケットIDリスト
             open_trades: ticket→trade_idマッピング
+            symbol: フィルタ対象シンボル（空文字で全シンボル）
         """
         from autotrader.adapters.database.connection import (
             get_session,
@@ -822,14 +836,15 @@ class PositionSyncService:
         try:
             db_url = get_settings().database_url
             with get_session(db_url) as db:
-                records = (
-                    db.query(TradeRecord)
-                    .filter(
-                        TradeRecord.is_open.is_(True),
-                        TradeRecord.ticket.in_(tickets),
-                    )
-                    .all()
+                query = db.query(TradeRecord).filter(
+                    TradeRecord.is_open.is_(True),
+                    TradeRecord.ticket.in_(tickets),
                 )
+                if symbol:
+                    query = query.filter(
+                        TradeRecord.symbol == symbol,
+                    )
+                records = query.all()
                 for r in records:
                     if r.ticket not in open_trades:
                         open_trades[r.ticket] = r.trade_id
