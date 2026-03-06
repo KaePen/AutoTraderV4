@@ -556,11 +556,6 @@ async def toggle_symbol_demo_mode(
     Returns:
         ApiResponse[TradingModeResponse]: 更新後のモード
     """
-    from autotrader.web.services.settings_service import (
-        get_settings_service,
-    )
-    svc = get_settings_service()
-
     # EngineManager経由
     if mgr:
         target = mgr.get_engine(symbol)
@@ -573,11 +568,9 @@ async def toggle_symbol_demo_mode(
             config = build_engine_config(symbol)
             target = await mgr.add_symbol(config)
 
-        if enable:
-            svc.enable_demo_mode()
-        else:
-            svc.disable_demo_mode()
-
+        # シンボル単位のデモモードフラグのみ変更
+        # （svc.enable_demo_mode()は全エンジンのBotConfigを
+        #   一括変更してしまうため使用しない）
         target.set_symbol_demo_mode(symbol, enable)
 
         if not target.running:
@@ -609,11 +602,7 @@ async def toggle_symbol_demo_mode(
             data=TradingModeResponse(),
         )
 
-    if enable:
-        svc.enable_demo_mode()
-    else:
-        svc.disable_demo_mode()
-
+    # シンボル単位のデモモードフラグのみ変更
     engine.set_symbol_demo_mode(symbol, enable)
 
     if not engine.running:
