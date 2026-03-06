@@ -173,7 +173,7 @@ class MetricsStrip extends Component {
           <span class="text-[10px] text-gray-500 tabular-nums" data-sub>${profitStr}</span>
           <span class="text-[10px] text-gray-500 tabular-nums cursor-pointer hover:text-gray-300 transition-colors" data-pos-summary>${summaryText}</span>
         </div>
-        <div data-pos-popover class="hidden absolute z-50 left-0 top-full mt-1 bg-gray-800 border border-gray-700 rounded-lg shadow-xl p-2 min-w-[180px]"></div>
+        <div data-pos-popover class="hidden absolute z-50 -left-px -right-px top-full mt-1 bg-gray-800 border border-gray-700 rounded-lg shadow-xl p-2"></div>
       </div>`;
   }
 
