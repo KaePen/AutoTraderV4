@@ -338,17 +338,20 @@ const SettingsManager = {
     const acct = isConnected && dash && dash.account ? dash.account : null;
     const nick = acct ? this.getNickname(acct.login) : '';
 
+    const lev = acct ? (acct.leverage ? '1:' + acct.leverage : '-') : '-';
+    const cur = acct ? (acct.currency || '-') : '-';
     const currentSection = acct ? `
       <div class="space-y-2">
         <h3 class="text-xs font-semibold text-gray-400 uppercase tracking-wider">
           現在の接続
         </h3>
-        <div class="bg-gray-700/40 rounded-lg p-3 space-y-2">
-          ${this._connRow('ログインID', String(acct.login || '-'))}
+        <div class="bg-gray-700/40 rounded-lg p-3 space-y-1.5 sm:space-y-2">
+          ${this._connRow('ID', String(acct.login || '-'))}
           ${this._connRow('サーバー', acct.server || '-')}
-          ${this._connRow('口座名義', acct.name || '-')}
-          ${this._connRow('通貨', acct.currency || '-')}
-          ${this._connRow('レバレッジ', acct.leverage ? '1:' + acct.leverage : '-')}
+          <div class="flex items-center justify-between text-sm">
+            <span class="text-gray-400">${acct.name || '-'}</span>
+            <span class="text-gray-500 text-xs tabular-nums">${cur} / ${lev}</span>
+          </div>
         </div>
         <div class="flex gap-2">
           <input id="conn-nickname-input" type="text"
@@ -418,15 +421,15 @@ const SettingsManager = {
         <h3 class="text-xs font-semibold text-gray-400 uppercase tracking-wider">
           口座を登録
         </h3>
-        <div class="space-y-2">
+        <div class="space-y-1.5">
           <input id="conn-add-login" type="number" placeholder="ログインID *"
-            class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-1.5 text-sm text-gray-100 focus:outline-none focus:ring-1 focus:ring-blue-500 placeholder-gray-500" />
+            class="w-full bg-gray-700 border border-gray-600 rounded px-2.5 py-1 sm:py-1.5 text-sm text-gray-100 focus:outline-none focus:ring-1 focus:ring-blue-500 placeholder-gray-500" />
           <input id="conn-add-server" type="text" placeholder="サーバー名 * (例: XMTrading-MT5)"
-            class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-1.5 text-sm text-gray-100 focus:outline-none focus:ring-1 focus:ring-blue-500 placeholder-gray-500" />
+            class="w-full bg-gray-700 border border-gray-600 rounded px-2.5 py-1 sm:py-1.5 text-sm text-gray-100 focus:outline-none focus:ring-1 focus:ring-blue-500 placeholder-gray-500" />
           <input id="conn-add-name" type="text" placeholder="表示名 (省略可)"
-            class="w-full bg-gray-700 border border-gray-600 rounded px-3 py-1.5 text-sm text-gray-100 focus:outline-none focus:ring-1 focus:ring-blue-500 placeholder-gray-500" maxlength="30" />
+            class="w-full bg-gray-700 border border-gray-600 rounded px-2.5 py-1 sm:py-1.5 text-sm text-gray-100 focus:outline-none focus:ring-1 focus:ring-blue-500 placeholder-gray-500" maxlength="30" />
           <button id="conn-add-btn"
-            class="w-full py-1.5 rounded bg-blue-600 hover:bg-blue-700 text-sm text-white font-medium transition-colors">
+            class="w-full py-1 sm:py-1.5 rounded bg-blue-600 hover:bg-blue-700 text-sm text-white font-medium transition-colors">
             登録
           </button>
         </div>
@@ -443,7 +446,7 @@ const SettingsManager = {
       </div>` : '';
 
     this.content.innerHTML = `
-      <div class="space-y-5">
+      <div class="space-y-3 sm:space-y-5">
         ${currentSection}
         ${switchSection}
         ${addSection}
