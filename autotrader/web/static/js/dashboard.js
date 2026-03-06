@@ -1246,11 +1246,10 @@ class TradingControl extends Component {
     if (this.tcBusy) return;
     const m = this._dataFlow.get('tradingMode');
     const demoStates = (m && m.symbol_demo_mode) || {};
-    // 全ONなら全OFF、それ以外は全ON
     const allOn = pairs.every(p => demoStates[p]);
     const nextOn = !allOn;
 
-    // 楽観的UI更新
+    // 楽観的UI更新: 全ペア一括で状態を反映
     const newDemoStates = { ...demoStates };
     pairs.forEach(p => { newDemoStates[p] = nextOn; });
     this._dataFlow.publish('tradingMode', { ...m, symbol_demo_mode: newDemoStates });
@@ -1258,15 +1257,17 @@ class TradingControl extends Component {
 
     this.tcBusy = true;
     try {
-      const results = await Promise.all(pairs.map(p => toggleSymbolDemoMode(p, nextOn)));
-      const last = results[results.length - 1];
-      if (last) this._dataFlow.publish('tradingMode', last);
+      // 順次実行で中間状態の干渉を防止
+      for (const p of pairs) {
+        await toggleSymbolDemoMode(p, nextOn);
+      }
     } catch (e) {
       this._dataFlow.publish('tradingMode', m);
       console.error('グループDEMO切替エラー:', e);
     } finally {
       this.tcBusy = false;
-      this.renderSymbolDropdown(true);
+      // 最終状態をサーバーから取得して確定
+      this._onFetchTradingMode();
       this._onFetchAnalysis();
     }
   }
@@ -1287,7 +1288,7 @@ class TradingControl extends Component {
       }
     }
 
-    // 楽観的UI更新
+    // 楽観的UI更新: 全ペア一括で状態を反映
     const newAutoStates = { ...autoStates };
     pairs.forEach(p => { newAutoStates[p] = nextOn; });
     this._dataFlow.publish('tradingMode', { ...m, symbol_auto_trade: newAutoStates });
@@ -1295,15 +1296,16 @@ class TradingControl extends Component {
 
     this.tcBusy = true;
     try {
-      const results = await Promise.all(pairs.map(p => toggleSymbolAutoTrade(p, nextOn)));
-      const last = results[results.length - 1];
-      if (last) this._dataFlow.publish('tradingMode', last);
+      for (const p of pairs) {
+        await toggleSymbolAutoTrade(p, nextOn);
+      }
     } catch (e) {
       this._dataFlow.publish('tradingMode', m);
       console.error('グループ自動トレード切替エラー:', e);
     } finally {
       this.tcBusy = false;
-      this.renderSymbolDropdown(true);
+      // 最終状態をサーバーから取得して確定
+      this._onFetchTradingMode();
     }
   }
 
@@ -1412,9 +1414,9 @@ class TradingControl extends Component {
         const autoLabel = autoOn ? 'ON' : 'OFF';
         toggleHtml = `<div class="flex items-center gap-1 flex-shrink-0 ml-auto">
           <button data-action="demo" data-symbol="${pair}"${disabledAttr}
-                  class="px-1.5 py-0.5 rounded text-[10px] font-bold transition-all min-w-[2.5rem] ${demoCls}${disabledCls}" title="デモモード">DEMO</button>
+                  class="px-1.5 py-0.5 rounded text-[10px] font-bold transition-all min-w-[3rem] text-center ${demoCls}${disabledCls}" title="デモモード">DEMO</button>
           <button data-action="auto" data-symbol="${pair}"${disabledAttr}
-                  class="px-1.5 py-0.5 rounded text-[10px] font-bold transition-all min-w-[2.5rem] ${autoCls}${disabledCls}" title="自動トレード">${autoLabel}</button>
+                  class="px-1.5 py-0.5 rounded text-[10px] font-bold transition-all min-w-[3rem] text-center ${autoCls}${disabledCls}" title="自動トレード">${autoLabel}</button>
         </div>`;
       }
 
@@ -1450,9 +1452,9 @@ class TradingControl extends Component {
         const autoLabel = allAuto ? 'ALL ON' : 'ALL OFF';
         groupToggleHtml = `<div class="flex items-center gap-1 ml-auto">
           <button data-group-action="demo" data-group-pairs="${group.pairs.join(',')}"${disabledAttr}
-                  class="px-1.5 py-0.5 rounded text-[10px] font-bold transition-all min-w-[2.5rem] ${demoCls}${disabledCls}">DEMO</button>
+                  class="px-1.5 py-0.5 rounded text-[10px] font-bold transition-all min-w-[3rem] text-center ${demoCls}${disabledCls}">DEMO</button>
           <button data-group-action="auto" data-group-pairs="${group.pairs.join(',')}"${disabledAttr}
-                  class="px-1.5 py-0.5 rounded text-[10px] font-bold transition-all min-w-[2.5rem] ${autoCls}${disabledCls}">${autoLabel}</button>
+                  class="px-1.5 py-0.5 rounded text-[10px] font-bold transition-all min-w-[3rem] text-center ${autoCls}${disabledCls}">${autoLabel}</button>
         </div>`;
       }
       const header = `<div class="px-3 pt-1.5 pb-0.5 flex items-center gap-1">
