@@ -103,6 +103,7 @@ class MetricsStrip extends Component {
   mount() {
     this.subscribe('dashboard', () => this._updateDashboardCards());
     this.subscribe('positions', () => this._updatePositionCard());
+    this.subscribe('trades', () => this._updateStatsCard());
   }
 
   _getCards() {
@@ -209,7 +210,8 @@ class MetricsStrip extends Component {
       const after = cards.slice(5);
       el.innerHTML = before.map(c => this._metricCardHtml(c.id, c.label, c.value, c.sub, c.variant)).join('')
         + this._positionMetricCardHtml()
-        + after.map(c => this._metricCardHtml(c.id, c.label, c.value, c.sub, c.variant)).join('');
+        + after.map(c => this._metricCardHtml(c.id, c.label, c.value, c.sub, c.variant)).join('')
+        + this._statsCardHtml();
       this._initialized = true;
       this._initPopover();
       return;
@@ -270,6 +272,64 @@ class MetricsStrip extends Component {
     if (popoverEl && !popoverEl.classList.contains('hidden')) {
       popoverEl.innerHTML = this._buildPopoverContent(positions);
     }
+    card.className = card.className
+      .replace(/border-l-(green|red|gray)-[^\s]*/g, '')
+      .replace(/\s+/g, ' ').trim()
+      + ' ' + borderColors[variant];
+  }
+
+  _statsCardHtml() {
+    const td = this._dataFlow.get('trades');
+    const s = td && td.summary;
+    const c = this._getCurrency();
+    const pf = s ? s.profit_factor.toFixed(2) : '--';
+    const aw = s ? fmtCurrency(s.average_win, c) : '--';
+    const al = s ? fmtCurrency(s.average_loss, c) : '--';
+    const dd = s ? fmtCurrency(s.max_drawdown, c) : '--';
+    const np = s ? `${s.net_profit >= 0 ? '+' : ''}${fmtCurrency(s.net_profit, c)}` : '--';
+    const pfVal = s ? s.profit_factor : 0;
+    const variant = pfVal >= 1.5 ? 'profit' : pfVal >= 1.0 ? 'neutral' : 'loss';
+    const borderColors = { profit: 'border-l-green-500/50', loss: 'border-l-red-500/50', neutral: 'border-l-gray-600' };
+    return `
+      <div class="card border-l-2 ${borderColors[variant]}" data-metric="mc-stats">
+        <p class="text-[10px] text-gray-400 uppercase tracking-wider mb-1">統計</p>
+        <div class="grid grid-cols-2 gap-x-2 gap-y-0.5 text-[10px] tabular-nums">
+          <span class="text-gray-500">PF</span><span class="text-gray-200 text-right font-bold" data-st-pf>${pf}</span>
+          <span class="text-gray-500">純損益</span><span class="text-right font-bold ${s && s.net_profit >= 0 ? 'text-green-400' : 'text-red-400'}" data-st-np>${np}</span>
+          <span class="text-gray-500">平均勝</span><span class="text-green-400 text-right" data-st-aw>${aw}</span>
+          <span class="text-gray-500">平均負</span><span class="text-red-400 text-right" data-st-al>${al}</span>
+          <span class="text-gray-500">最大DD</span><span class="text-red-400 text-right" data-st-dd>${dd}</span>
+        </div>
+      </div>`;
+  }
+
+  /** trades チャネル更新 → 統計カードのみ差分更新 */
+  _updateStatsCard() {
+    const el = this.root;
+    if (!el || !this._initialized) return;
+    const card = el.querySelector('[data-metric="mc-stats"]');
+    if (!card) return;
+    const td = this._dataFlow.get('trades');
+    const s = td && td.summary;
+    if (!s) return;
+    const c = this._getCurrency();
+    const pfEl = card.querySelector('[data-st-pf]');
+    const npEl = card.querySelector('[data-st-np]');
+    const awEl = card.querySelector('[data-st-aw]');
+    const alEl = card.querySelector('[data-st-al]');
+    const ddEl = card.querySelector('[data-st-dd]');
+    if (pfEl) pfEl.textContent = s.profit_factor.toFixed(2);
+    if (npEl) {
+      npEl.textContent = `${s.net_profit >= 0 ? '+' : ''}${fmtCurrency(s.net_profit, c)}`;
+      npEl.className = `text-right font-bold ${s.net_profit >= 0 ? 'text-green-400' : 'text-red-400'}`;
+    }
+    if (awEl) awEl.textContent = fmtCurrency(s.average_win, c);
+    if (alEl) alEl.textContent = fmtCurrency(s.average_loss, c);
+    if (ddEl) ddEl.textContent = fmtCurrency(s.max_drawdown, c);
+    // ボーダー色更新
+    const pfVal = s.profit_factor;
+    const variant = pfVal >= 1.5 ? 'profit' : pfVal >= 1.0 ? 'neutral' : 'loss';
+    const borderColors = { profit: 'border-l-green-500/50', loss: 'border-l-red-500/50', neutral: 'border-l-gray-600' };
     card.className = card.className
       .replace(/border-l-(green|red|gray)-[^\s]*/g, '')
       .replace(/\s+/g, ' ').trim()
