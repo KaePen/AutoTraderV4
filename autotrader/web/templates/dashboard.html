@@ -83,9 +83,8 @@
     </div>
 
     <!-- ポジションパネル (右1/3) -->
-    <!-- グリッドのストレッチで左カラムと同じ高さを自動で占有 -->
-    <!-- mobile: min-h-[160px]で最低高さを確保しコンテンツが見える -->
-    <div class="card flex flex-col overflow-hidden min-h-[160px] max-h-[50vh] lg:max-h-full" id="position-panel">
+    <!-- mobile: max-h-[50vh] / PC: JSで左カラム高さに同期 -->
+    <div class="card flex flex-col overflow-hidden min-h-[160px] max-h-[50vh] lg:max-h-none" id="position-panel">
       <div class="flex items-center justify-between mb-3 flex-shrink-0">
         <h2 class="text-sm font-semibold text-gray-300 uppercase tracking-wider">Positions</h2>
         <span id="position-count" class="text-xs text-gray-500">no open</span>
@@ -151,5 +150,5 @@
 {% block scripts %}
 <script src="/static/js/chart.js?v=9"></script>
 <script src="/static/js/fundamental.js?v=4"></script>
-<script src="/static/js/dashboard.js?v=46"></script>
+<script src="/static/js/dashboard.js?v=47"></script>
 {% endblock %}
