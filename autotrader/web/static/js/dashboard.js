@@ -1186,11 +1186,20 @@ class TradingControl extends Component {
     const symbolDemoStates = (m && m.symbol_demo_mode) || {};
     const currentOn = Object.prototype.hasOwnProperty.call(symbolDemoStates, symbol)
       ? symbolDemoStates[symbol] : false;
+    const nextOn = !currentOn;
+
+    // 楽観的UI更新: API応答を待たず即座に反映
+    const optimistic = { ...m, symbol_demo_mode: { ...symbolDemoStates, [symbol]: nextOn } };
+    this._dataFlow.publish('tradingMode', optimistic);
+    this.renderSymbolDropdown(true);
+
     this.tcBusy = true;
     try {
-      const result = await toggleSymbolDemoMode(symbol, !currentOn);
+      const result = await toggleSymbolDemoMode(symbol, nextOn);
       if (result) this._dataFlow.publish('tradingMode', result);
     } catch (e) {
+      // 失敗時: ロールバック
+      this._dataFlow.publish('tradingMode', m);
       console.error(symbol + ' デモモード切替エラー:', e);
     } finally {
       this.tcBusy = false;
@@ -1212,11 +1221,19 @@ class TradingControl extends Component {
     if (nextOn && !isDemoOn) {
       if (!confirm(`${symbol} の自動トレード（リアルモード）を開始しますか？\n実際の売買が実行されます。`)) return;
     }
+
+    // 楽観的UI更新: API応答を待たず即座に反映
+    const optimistic = { ...m, symbol_auto_trade: { ...symbolAutoStates, [symbol]: nextOn } };
+    this._dataFlow.publish('tradingMode', optimistic);
+    this.renderSymbolDropdown(true);
+
     this.tcBusy = true;
     try {
       const result = await toggleSymbolAutoTrade(symbol, nextOn);
       if (result) this._dataFlow.publish('tradingMode', result);
     } catch (e) {
+      // 失敗時: ロールバック
+      this._dataFlow.publish('tradingMode', m);
       console.error(symbol + ' 自動トレード切替エラー:', e);
     } finally {
       this.tcBusy = false;
