@@ -465,7 +465,7 @@ class LiveTradingEngine:
             logger.warning("エンジンは既に実行中です")
             return
 
-        logger.info("ライブトレーディングエンジン開始")
+        logger.info("[%s] ライブトレーディングエンジン開始", self._active_symbol)
 
         # MT5接続（共有接続時はスキップ）
         if self._owns_connection:
@@ -529,7 +529,7 @@ class LiveTradingEngine:
         # 共有接続時はdisconnectをスキップ
         if self._owns_connection:
             await self._conn.disconnect()
-        logger.info("ライブトレーディングエンジン停止")
+        logger.info("[%s] ライブトレーディングエンジン停止", self._active_symbol)
 
     async def _main_loop(self) -> None:
         """メインループ
@@ -613,7 +613,7 @@ class LiveTradingEngine:
                 self._active_symbol, now_utc
             )
             if fundamental_ctx.has_high_impact_within_30min:
-                logger.info("[Fundamental] 重要指標直前のためスキップ")
+                logger.info("[%s] 重要指標直前のためスキップ", self._active_symbol)
                 return
         else:
             fundamental_ctx = None
@@ -698,8 +698,9 @@ class LiveTradingEngine:
             # 履歴上限
             if len(self._signal_history) > 200:
                 self._signal_history = self._signal_history[-200:]
-            logger.info(
-                "シグナル生成: %s conf=%.2f",
+            logger.debug(
+                "[%s] シグナル生成: %s conf=%.2f",
+                self._active_symbol,
                 signal.direction.value,
                 signal.confidence,
             )
@@ -1154,14 +1155,18 @@ class LiveTradingEngine:
             max_pos = base_max
         if len(positions) >= max_pos:
             logger.info(
-                "既存ポジション上限(%d)、エントリースキップ",
+                "[%s] 既存ポジション上限(%d)、エントリースキップ",
+                self._active_symbol,
                 max_pos,
             )
             return
 
         # ロット計算
         if self._account_info is None:
-            logger.warning("口座情報なし、エントリースキップ")
+            logger.warning(
+                "[%s] 口座情報なし、エントリースキップ",
+                self._active_symbol,
+            )
             return
 
         # signal.stop_lossはpips値（_consolidated_to_signalでsl_pipsを設定）
@@ -1231,13 +1236,20 @@ class LiveTradingEngine:
         sizing_result = self._sizer.calculate(sizing_ctx)
 
         if sizing_result.blocked:
-            logger.warning("サイジング拒否: %s", sizing_result.reasoning)
+            logger.warning(
+                "[%s] サイジング拒否: %s",
+                self._active_symbol,
+                sizing_result.reasoning,
+            )
             return
 
         lot = sizing_result.lot
 
         if lot <= 0:
-            logger.warning("ロット計算結果=0、エントリースキップ")
+            logger.warning(
+                "[%s] ロット計算結果=0、エントリースキップ",
+                self._active_symbol,
+            )
             return
 
         # Signal にlotを付与
@@ -1249,7 +1261,8 @@ class LiveTradingEngine:
 
         if result.success:
             logger.info(
-                "エントリー成功: ticket=%d %.2f lots",
+                "[%s] エントリー成功: ticket=%d %.2f lots",
+                self._active_symbol,
                 result.ticket or 0,
                 lot,
             )
@@ -1309,7 +1322,11 @@ class LiveTradingEngine:
                 {"symbol": self._active_symbol},
             )
         else:
-            logger.error("エントリー失敗: %s", result.message)
+            logger.error(
+                "[%s] エントリー失敗: %s",
+                self._active_symbol,
+                result.message,
+            )
 
     async def _register_new_position(
         self,
@@ -1359,7 +1376,8 @@ class LiveTradingEngine:
                 )
 
         logger.info(
-            "PM登録: ticket=%d entry=%.3f sl=%.3f tp=%.3f",
+            "[%s] PM登録: ticket=%d entry=%.3f sl=%.3f tp=%.3f",
+            self._active_symbol,
             ticket,
             entry_price,
             sl_price,
@@ -1486,7 +1504,11 @@ class LiveTradingEngine:
         Args:
             ticket: MT5ポジションID
         """
-        logger.info("外部決済検出（手動/SL/TP）: ticket=%d", ticket)
+        logger.info(
+            "[%s] 外部決済検出（手動/SL/TP）: ticket=%d",
+            self._active_symbol,
+            ticket,
+        )
 
         # DBからポジションのシンボルを確認し、自エンジンと一致しない場合はスキップ
         trade_symbol = self._get_trade_symbol_from_db(ticket)
