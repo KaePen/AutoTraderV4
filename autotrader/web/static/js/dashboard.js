@@ -670,8 +670,7 @@ class PositionPanel extends Component {
       const t = Number(p.ticket);
       activeTickets.add(t);
       const existing = this._posTimeCache[t];
-      // elapsed_minutesをバックエンドから受信した時刻と共に保存
-      // バックエンド計算値（UTC基準）を信頼し、受信時刻からの差分で補正
+      // 優先度: elapsed_minutes(バックエンド計算) > opened_at(UTC ISO)
       let baseElapsedMin = (existing && existing.baseElapsedMin != null)
         ? existing.baseElapsedMin : null;
       let baseReceivedAt = (existing && existing.baseReceivedAt)
@@ -679,6 +678,13 @@ class PositionPanel extends Component {
       if (p.elapsed_minutes != null) {
         baseElapsedMin = p.elapsed_minutes;
         baseReceivedAt = Date.now();
+      } else if (baseElapsedMin == null && p.opened_at) {
+        // elapsed_minutesがない場合、opened_at(UTC ISO)から計算
+        const openMs = new Date(p.opened_at).getTime();
+        if (openMs > 0) {
+          baseElapsedMin = Math.max(0, Math.floor((Date.now() - openMs) / 60000));
+          baseReceivedAt = Date.now();
+        }
       }
       const maxHoldMin = p.max_hold_minutes != null
         ? p.max_hold_minutes
