@@ -2287,18 +2287,12 @@ class LiveTradingEngine:
                         updates[-1]["profit_loss"],
                     )
                 else:
-                    updates.append(
-                        {
-                            "ticket": ticket,
-                            "trade_id": trade_id,
-                            "exit_price": None,
-                            "profit_loss": None,
-                            "exit_reason": (ExitReason.GHOST_CLEANUP.value),
-                            "closed_at": datetime.now(UTC),
-                        }
-                    )
+                    # 決済約定が見つからない＝まだオープンの可能性
+                    # MT5ポジション一覧が一時的に不完全だった場合に
+                    # オープン中ポジションを誤閉鎖しないようスキップ
                     logger.info(
-                        "ゴーストレコード掃除: ticket=%s trade_id=%s",
+                        "ゴースト候補スキップ(決済履歴なし):"
+                        " ticket=%s trade_id=%s",
                         ticket,
                         trade_id,
                     )
