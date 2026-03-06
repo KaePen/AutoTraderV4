@@ -1349,12 +1349,16 @@ class TradingControl extends Component {
         </div>`;
       }
 
+      const checkSvg = isSelected
+        ? '<svg class="w-3 h-3 text-blue-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>'
+        : '';
+
       return `<div class="dd-pair-row flex items-center gap-2 px-3 py-2 hover:bg-gray-700/50 cursor-pointer transition-colors select-none ${selectedCls}" data-pair="${pair}">
         <span class="w-2 h-2 rounded-full flex-shrink-0 ${mode.dotCls}${pulseAttr}"></span>
         <span class="font-semibold text-xs text-gray-200 tabular-nums">${pair}</span>
         <span class="text-[10px] ${mode.textCls}">${mode.label}</span>
+        ${checkSvg}
         ${toggleHtml}
-        ${isSelected ? '<svg class="w-3 h-3 text-blue-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>' : ''}
       </div>`;
     };
 
