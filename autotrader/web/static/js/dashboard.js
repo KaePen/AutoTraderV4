@@ -1400,6 +1400,9 @@ class TradingControl extends Component {
 
       let toggleHtml = '';
       if (isConnected) {
+        const busy = self.tcBusy;
+        const disabledAttr = busy ? ' disabled' : '';
+        const disabledCls = busy ? ' opacity-50 cursor-not-allowed' : '';
         const demoCls = demoOn
           ? 'bg-orange-500/25 text-orange-400 border border-orange-600/50 hover:bg-orange-500/40'
           : 'bg-gray-700/80 text-gray-500 border border-gray-600/50 hover:bg-gray-600/80 hover:text-gray-300';
@@ -1408,10 +1411,10 @@ class TradingControl extends Component {
           : 'bg-green-600/90 text-white hover:bg-green-700';
         const autoLabel = autoOn ? 'ON' : 'OFF';
         toggleHtml = `<div class="flex items-center gap-1 flex-shrink-0 ml-auto">
-          <button data-action="demo" data-symbol="${pair}"
-                  class="px-1.5 py-0.5 rounded text-[10px] font-bold transition-all ${demoCls}" title="デモモード">DEMO</button>
-          <button data-action="auto" data-symbol="${pair}"
-                  class="px-2 py-0.5 rounded text-[10px] font-bold transition-all min-w-[2rem] ${autoCls}" title="自動トレード">${autoLabel}</button>
+          <button data-action="demo" data-symbol="${pair}"${disabledAttr}
+                  class="px-1.5 py-0.5 rounded text-[10px] font-bold transition-all min-w-[2.5rem] ${demoCls}${disabledCls}" title="デモモード">DEMO</button>
+          <button data-action="auto" data-symbol="${pair}"${disabledAttr}
+                  class="px-1.5 py-0.5 rounded text-[10px] font-bold transition-all min-w-[2.5rem] ${autoCls}${disabledCls}" title="自動トレード">${autoLabel}</button>
         </div>`;
       }
 
@@ -1433,6 +1436,9 @@ class TradingControl extends Component {
       // グループ内の状態集計
       let groupToggleHtml = '';
       if (isConnected) {
+        const busy = self.tcBusy;
+        const disabledAttr = busy ? ' disabled' : '';
+        const disabledCls = busy ? ' opacity-50 cursor-not-allowed' : '';
         const allDemo = group.pairs.every(p => symbolDemoStates[p]);
         const allAuto = group.pairs.every(p => symbolAutoStates[p]);
         const demoCls = allDemo
@@ -1443,10 +1449,10 @@ class TradingControl extends Component {
           : 'bg-green-600/90 text-white hover:bg-green-700';
         const autoLabel = allAuto ? 'ALL ON' : 'ALL OFF';
         groupToggleHtml = `<div class="flex items-center gap-1 ml-auto">
-          <button data-group-action="demo" data-group-pairs="${group.pairs.join(',')}"
-                  class="px-1 py-0 rounded text-[9px] font-bold transition-all ${demoCls}">DEMO</button>
-          <button data-group-action="auto" data-group-pairs="${group.pairs.join(',')}"
-                  class="px-1 py-0 rounded text-[9px] font-bold transition-all min-w-[2.5rem] ${autoCls}">${autoLabel}</button>
+          <button data-group-action="demo" data-group-pairs="${group.pairs.join(',')}"${disabledAttr}
+                  class="px-1.5 py-0.5 rounded text-[10px] font-bold transition-all min-w-[2.5rem] ${demoCls}${disabledCls}">DEMO</button>
+          <button data-group-action="auto" data-group-pairs="${group.pairs.join(',')}"${disabledAttr}
+                  class="px-1.5 py-0.5 rounded text-[10px] font-bold transition-all min-w-[2.5rem] ${autoCls}${disabledCls}">${autoLabel}</button>
         </div>`;
       }
       const header = `<div class="px-3 pt-1.5 pb-0.5 flex items-center gap-1">
