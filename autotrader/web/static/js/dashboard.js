@@ -1420,14 +1420,15 @@ class TradingControl extends Component {
     const isLive = m && m.mode === 'live';
     const isConnected = m && m.connected;
 
+    const mt5Base = 'hidden sm:inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium';
     if (isConnected) {
-      mt5Badge.className = 'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-green-900/30 text-green-400 border border-green-800/50';
+      mt5Badge.className = mt5Base + ' bg-green-900/30 text-green-400 border border-green-800/50';
       mt5Badge.innerHTML = '<span class="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse"></span>MT5';
     } else if (isLive) {
-      mt5Badge.className = 'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-yellow-900/30 text-yellow-400 border border-yellow-800/50';
+      mt5Badge.className = mt5Base + ' bg-yellow-900/30 text-yellow-400 border border-yellow-800/50';
       mt5Badge.innerHTML = '<span class="w-1.5 h-1.5 rounded-full bg-yellow-500"></span>MT5';
     } else {
-      mt5Badge.className = 'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-gray-700/80 text-gray-400 border border-gray-700/50';
+      mt5Badge.className = mt5Base + ' bg-gray-700/80 text-gray-400 border border-gray-700/50';
       mt5Badge.innerHTML = '<span class="w-1.5 h-1.5 rounded-full bg-gray-500"></span>MT5';
     }
 
