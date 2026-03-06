@@ -1761,8 +1761,11 @@ class LiveTradingEngine:
         SL変更・部分決済・全決済をMT5で実行。
         _cached_positionsをMT5の現在状態で更新する。
         """
-        # 全通貨ペアのポジションを取得（UI表示用）
-        positions = await self._executor.get_open_positions_async(None)
+        # 自シンボルのポジションのみ取得
+        # （他シンボルのポジションはそのシンボルのエンジンが管理）
+        positions = await self._executor.get_open_positions_async(
+            self._active_symbol
+        )
         # MT5接続エラー時は_cached_positionsを更新しない
         # （一時的な切断時にUIが空になるのを防ぐ）
         if positions is None:
@@ -1828,7 +1831,7 @@ class LiveTradingEngine:
             except (KeyError, ValueError, TypeError, MT5DataError):
                 pass
 
-            # キャッシュエントリ構築（MT5全ポジションを対象）
+            # キャッシュエントリ構築（自シンボルのポジション）
             pip_diff = (current_price - position.entry_price) / pip_factor
             if position.signal_type == SignalType.SELL:
                 pip_diff = -pip_diff
