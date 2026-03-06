@@ -1744,15 +1744,17 @@ const DashboardApp = {
 
     // ポジション（シンボル単位マージ: 各エンジンは自シンボル分のみ送信）
     if (data.positions !== undefined) {
-      const tickSymbol = (data.analysis && data.analysis.symbol) || '';
+      // 送信元シンボルの特定: analysis.symbol → positions内のsymbol → 不明時はスキップ
+      const tickSymbol = (data.analysis && data.analysis.symbol)
+        || (data.positions.length > 0 && data.positions[0].symbol)
+        || '';
+      if (!tickSymbol) return; // シンボル不明時はマージ不可、REST再取得に任せる
       for (const p of data.positions) {
         p.trade_id = this._tradeIdCache[p.ticket] || '';
       }
       const prevPositions = df.get('positions') || [];
       // 送信元シンボルのポジションだけ差し替え、他シンボルは保持
-      const otherPositions = tickSymbol
-        ? prevPositions.filter(p => p.symbol !== tickSymbol)
-        : [];
+      const otherPositions = prevPositions.filter(p => p.symbol !== tickSymbol);
       const merged = [...otherPositions, ...data.positions]
         .sort((a, b) => a.ticket - b.ticket);
       const prevTickets = new Set(prevPositions.map(p => p.ticket));
