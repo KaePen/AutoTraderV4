@@ -152,7 +152,10 @@ const DashboardApp = {
       if (!data.analysis.symbol || data.analysis.symbol === this.symbol) {
         this.lastAnalysis = data.analysis;
         this.renderAnalysis();
-        this.renderTradingControl();
+        // ドロップダウン展開中・操作中は再描画をスキップ
+        if (!this.tcBusy && !this._isDropdownOpen()) {
+          this.renderTradingControl();
+        }
       }
     }
 
@@ -546,8 +549,8 @@ const DashboardApp = {
     } catch (e) {
       this.tradingMode = null;
     }
-    // ユーザー操作中（tcBusy）はポーリングによる再描画をスキップ
-    if (!this.tcBusy) {
+    // ユーザー操作中・ドロップダウン展開中は再描画をスキップ
+    if (!this.tcBusy && !this._isDropdownOpen()) {
       this.renderTradingControl();
     }
     this.renderAnalysis();
@@ -627,8 +630,17 @@ const DashboardApp = {
     this.updateHeaderAccountName();
   },
 
+  /** ドロップダウンが開いているか */
+  _isDropdownOpen() {
+    const list = document.getElementById('symbol-dropdown-list');
+    return list && !list.classList.contains('hidden');
+  },
+
   /** カスタムシンボルドロップダウン描画 */
   renderSymbolDropdown() {
+    // ドロップダウン展開中はinnerHTML上書きをスキップ（ボタン操作が消失するため）
+    if (this._isDropdownOpen()) return;
+
     // グループ定義（グループヘッダー付きで整理表示）
     const symbolGroups = [
       {
