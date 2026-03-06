@@ -23,6 +23,7 @@ from autotrader.web.middleware import limiter
 from autotrader.web.schemas import (
     AccountPresetRequest,
     ApiResponse,
+    ClosePositionResponse,
     MT5StatusResponse,
     ReloadLogicRequest,
     ReloadLogicResponse,
@@ -1032,5 +1033,157 @@ async def get_reload_status(
             reloading=target._reload_lock.locked(),
             last_reload=target._last_reload_at,
             changed_files=target._reloader.check_changed(),
+        )
+    )
+
+
+# ==== ポジション決済API ====
+
+
+@router.post(
+    "/positions/{ticket}/close",
+    response_model=ApiResponse[ClosePositionResponse],
+)
+@limiter.limit("30/minute")
+async def close_position(
+    request: Request,
+    user: Annotated[
+        dict[str, any] | None, Depends(get_optional_user)
+    ],
+    ticket: int,
+    volume: float | None = None,
+    mgr=Depends(get_engine_manager),
+    engine=Depends(get_live_engine),
+) -> ApiResponse[ClosePositionResponse]:
+    """ポジションを決済（全決済/部分決済）
+
+    volumeを指定しない場合は全決済。
+    指定した場合はその数量だけ部分決済。
+
+    Args:
+        request: FastAPIリクエスト
+        ticket: MT5チケットID
+        volume: 決済ロット数（None=全決済）
+        mgr: EngineManager
+        engine: LiveTradingEngine（後方互換）
+
+    Returns:
+        ApiResponse[ClosePositionResponse]: 決済結果
+    """
+    from autotrader.core.entities import Position
+
+    # 対象エンジンを特定
+    target_engine = None
+    if mgr:
+        # 全エンジンからチケットに一致するポジションを検索
+        for eng in mgr.engines.values():
+            for p in eng.cached_positions:
+                if p.get("ticket") == ticket:
+                    target_engine = eng
+                    break
+            if target_engine:
+                break
+    if target_engine is None:
+        target_engine = engine
+
+    if not target_engine or not target_engine.connected:
+        return ApiResponse(
+            success=False,
+            error="エンジンが接続されていません",
+            data=ClosePositionResponse(
+                ticket=ticket,
+                closed_volume=0.0,
+                remaining_volume=0.0,
+            ),
+        )
+
+    # MT5からポジション情報を取得
+    executor = target_engine._executor
+    positions = await executor.get_open_positions_async(None)
+    if positions is None:
+        return ApiResponse(
+            success=False,
+            error="MT5ポジション取得失敗",
+            data=ClosePositionResponse(
+                ticket=ticket,
+                closed_volume=0.0,
+                remaining_volume=0.0,
+            ),
+        )
+
+    target_pos: Position | None = None
+    for pos in positions:
+        if pos.ticket == ticket:
+            target_pos = pos
+            break
+
+    if target_pos is None:
+        return ApiResponse(
+            success=False,
+            error=f"ポジション ticket={ticket} が見つかりません",
+            data=ClosePositionResponse(
+                ticket=ticket,
+                closed_volume=0.0,
+                remaining_volume=0.0,
+            ),
+        )
+
+    # 決済実行
+    pos_volume = target_pos.volume
+    close_volume = pos_volume if volume is None else volume
+    close_volume = min(close_volume, pos_volume)
+    close_volume = round(close_volume, 2)
+
+    is_full = close_volume >= pos_volume
+
+    if is_full:
+        result = await executor.close_position_async(
+            target_pos, "MANUAL_CLOSE"
+        )
+    else:
+        result = await executor.close_partial_async(
+            target_pos, close_volume, "MANUAL_PARTIAL"
+        )
+
+    if not result.success:
+        return ApiResponse(
+            success=False,
+            error=sanitize_error_message(
+                Exception(result.message), "決済"
+            ),
+            data=ClosePositionResponse(
+                ticket=ticket,
+                closed_volume=0.0,
+                remaining_volume=pos_volume,
+            ),
+        )
+
+    remaining = round(pos_volume - close_volume, 2)
+    exit_price = result.exit_price or 0.0
+
+    # DB記録
+    if is_full and hasattr(target_engine, "_handle_external_close"):
+        # 全決済: DB更新はエンジンの次tickで自動検出される
+        # （外部決済と同じフロー）
+        logger.info(
+            "手動全決済: ticket=%d price=%.5f",
+            ticket,
+            exit_price,
+        )
+    else:
+        logger.info(
+            "手動部分決済: ticket=%d %.2f lots"
+            " remaining=%.2f",
+            ticket,
+            close_volume,
+            remaining,
+        )
+
+    return ApiResponse(
+        data=ClosePositionResponse(
+            ticket=ticket,
+            closed_volume=close_volume,
+            remaining_volume=remaining,
+            exit_price=exit_price,
         )
     )
