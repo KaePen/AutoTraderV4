@@ -169,8 +169,10 @@ class MetricsStrip extends Component {
       <div class="card border-l-2 ${borderColors[variant]} relative" data-metric="mc-position">
         <p class="text-[10px] text-gray-400 uppercase tracking-wider mb-0.5">ポジション</p>
         <p class="text-sm font-bold tabular-nums leading-tight ${valueColors[variant]}" data-val>${totalCount} open</p>
-        <p class="text-[10px] text-gray-500 mt-0.5 tabular-nums" data-sub>${profitStr}</p>
-        <p class="text-[10px] text-gray-500 mt-0.5 tabular-nums cursor-pointer hover:text-gray-300 transition-colors" data-pos-summary>${summaryText}</p>
+        <div class="flex items-baseline justify-between mt-0.5">
+          <span class="text-[10px] text-gray-500 tabular-nums" data-sub>${profitStr}</span>
+          <span class="text-[10px] text-gray-500 tabular-nums cursor-pointer hover:text-gray-300 transition-colors" data-pos-summary>${summaryText}</span>
+        </div>
         <div data-pos-popover class="hidden absolute z-50 left-0 top-full mt-1 bg-gray-800 border border-gray-700 rounded-lg shadow-xl p-2 min-w-[180px]"></div>
       </div>`;
   }
