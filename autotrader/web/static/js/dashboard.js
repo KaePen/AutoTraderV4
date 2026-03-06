@@ -525,18 +525,10 @@ const DashboardApp = {
   /** トレーディングコントロール初期化 */
   initTradingControl() {
     const settingsMt5Btn = document.getElementById('settings-mt5-btn');
-    const autoBtn = document.getElementById('tc-auto-trade-btn');
-    const demoBtn = document.getElementById('tc-demo-mode-btn');
     const trigger = document.getElementById('symbol-dropdown-trigger');
 
     if (settingsMt5Btn) {
       settingsMt5Btn.addEventListener('click', () => this.handleMT5Toggle());
-    }
-    if (autoBtn) {
-      autoBtn.addEventListener('click', () => this.handleAutoTradeToggle());
-    }
-    if (demoBtn) {
-      demoBtn.addEventListener('click', () => this.handleDemoModeToggle());
     }
     if (trigger) {
       trigger.addEventListener('click', (e) => {
@@ -588,79 +580,15 @@ const DashboardApp = {
     }
   },
 
-  /** デモモードON/OFFトグル（選択中シンボル対象） */
-  async handleDemoModeToggle() {
-    if (this.tcBusy) return;
-    const m = this.tradingMode;
-    const symbolDemoStates = (m && m.symbol_demo_mode) || {};
-    const currentDemoOn = Object.prototype.hasOwnProperty.call(symbolDemoStates, this.symbol)
-      ? symbolDemoStates[this.symbol]
-      : false;
-
-    this.tcBusy = true;
-    try {
-      this.renderTradingControl();
-      const result = await toggleSymbolDemoMode(this.symbol, !currentDemoOn);
-      if (result) this.tradingMode = result;
-    } catch (e) {
-      console.error('デモモード切替エラー:', e);
-    } finally {
-      this.tcBusy = false;
-      this.renderTradingControl();
-      // デモ/ライブ切替後に閾値を即時更新
-      this.fetchAnalysis();
-    }
-  },
-
-  /** 自動トレードON/OFFトグル（選択中シンボル対象） */
-  async handleAutoTradeToggle() {
-    if (this.tcBusy) return;
-    const m = this.tradingMode;
-    const symbolAutoStates = (m && m.symbol_auto_trade) || {};
-    const symbolDemoStates = (m && m.symbol_demo_mode) || {};
-    const currentAutoOn = Object.prototype.hasOwnProperty.call(symbolAutoStates, this.symbol)
-      ? symbolAutoStates[this.symbol]
-      : false;
-    const isDemoOn = Object.prototype.hasOwnProperty.call(symbolDemoStates, this.symbol)
-      ? symbolDemoStates[this.symbol]
-      : false;
-    const nextOn = !currentAutoOn;
-
-    // リアルモードでONにする際は確認
-    if (nextOn && !isDemoOn) {
-      if (!confirm(`${this.symbol} の自動トレード（リアルモード）を開始しますか？\n実際の売買が実行されます。`)) return;
-    }
-
-    this.tcBusy = true;
-    try {
-      this.renderTradingControl();
-      const result = await toggleSymbolAutoTrade(this.symbol, nextOn);
-      if (result) this.tradingMode = result;
-    } catch (e) {
-      console.error('自動トレード切替エラー:', e);
-    } finally {
-      this.tcBusy = false;
-      this.renderTradingControl();
-    }
-  },
-
   /** トレーディングコントロール描画 */
   renderTradingControl() {
     const mt5Badge = document.getElementById('tc-mt5-badge');
     const mt5Btn = document.getElementById('settings-mt5-btn');
-    const autoBtn = document.getElementById('tc-auto-trade-btn');
     if (!mt5Badge) return;
 
     const m = this.tradingMode;
     const isLive = m && m.mode === 'live';
     const isConnected = m && m.connected;
-    const isRunning = m && m.engine_running;
-    const symbolAutoStates = (m && m.symbol_auto_trade) || {};
-    const symbolDemoStates = (m && m.symbol_demo_mode) || {};
-    const isAutoOn = Object.prototype.hasOwnProperty.call(symbolAutoStates, this.symbol)
-      ? symbolAutoStates[this.symbol] : false;
-    const isDemoOn = Object.prototype.hasOwnProperty.call(symbolDemoStates, this.symbol)
-      ? symbolDemoStates[this.symbol] : false;
 
     // MT5接続バッジ（楕円型・ロゴ横）
     if (isConnected) {
@@ -676,9 +604,6 @@ const DashboardApp = {
 
     // 設定モーダル内MT5ボタン（通常サイズ）
     const btnBase = 'px-4 py-2 rounded text-sm font-semibold transition-all';
-    // ヘッダーボタン（シンボルドロップダウン横・コンパクト）
-    const hdrBtnBase = 'hidden lg:inline-flex items-center px-2 py-1 rounded text-[10px] font-semibold transition-all';
-    const btnDisabled = hdrBtnBase + ' bg-gray-700 text-gray-500 cursor-not-allowed';
     if (mt5Btn) {
       if (this.tcBusy) {
         mt5Btn.disabled = true;
@@ -695,50 +620,7 @@ const DashboardApp = {
       }
     }
 
-    // 自動トレードボタン
-    if (autoBtn) {
-      if (this.tcBusy) {
-        autoBtn.disabled = true;
-        autoBtn.textContent = '...';
-        autoBtn.className = btnDisabled;
-      } else if (!isConnected) {
-        autoBtn.disabled = true;
-        autoBtn.textContent = 'AUTO';
-        autoBtn.className = btnDisabled;
-      } else if (isAutoOn) {
-        autoBtn.disabled = false;
-        autoBtn.textContent = 'AUTO';
-        autoBtn.className = hdrBtnBase + ' bg-red-600 hover:bg-red-700 text-white shadow-lg shadow-red-600/20 active:scale-[0.98]';
-      } else {
-        autoBtn.disabled = false;
-        autoBtn.textContent = 'AUTO';
-        autoBtn.className = hdrBtnBase + ' bg-green-600 hover:bg-green-700 text-white shadow-lg shadow-green-600/20 active:scale-[0.98]';
-      }
-    }
-
-    // デモモードボタン
-    const demoBtn = document.getElementById('tc-demo-mode-btn');
-    if (demoBtn) {
-      if (this.tcBusy) {
-        demoBtn.disabled = true;
-        demoBtn.textContent = '...';
-        demoBtn.className = btnDisabled;
-      } else if (!isLive) {
-        demoBtn.disabled = true;
-        demoBtn.textContent = 'DEMO';
-        demoBtn.className = btnDisabled;
-      } else if (isDemoOn) {
-        demoBtn.disabled = false;
-        demoBtn.textContent = 'DEMO';
-        demoBtn.className = hdrBtnBase + ' bg-orange-500/20 text-orange-400 border border-orange-600/50 hover:bg-orange-500/30 active:scale-[0.98]';
-      } else {
-        demoBtn.disabled = false;
-        demoBtn.textContent = 'DEMO';
-        demoBtn.className = hdrBtnBase + ' bg-gray-700 text-gray-300 hover:bg-gray-600 active:scale-[0.98]';
-      }
-    }
-
-    // カスタムシンボルドロップダウン更新
+    // ドロップダウン内にAUTO/DEMOボタンを描画
     this.renderSymbolDropdown();
 
     // ヘッダー口座名表示
@@ -805,27 +687,26 @@ const DashboardApp = {
       let toggleHtml = '';
       if (isConnected) {
         const demoCls = demoOn
-          ? 'bg-orange-500/20 text-orange-400 border-orange-600/50 hover:bg-orange-500/30'
-          : 'bg-gray-700/60 text-gray-500 hover:bg-gray-600/60';
+          ? 'bg-orange-500/25 text-orange-400 border border-orange-600/50 hover:bg-orange-500/40'
+          : 'bg-gray-700/80 text-gray-500 border border-gray-600/50 hover:bg-gray-600/80 hover:text-gray-300';
         const autoCls = autoOn
           ? (demoOn ? 'bg-orange-600 text-white hover:bg-orange-700' : 'bg-red-600 text-white hover:bg-red-700')
-          : 'bg-green-600/80 text-white hover:bg-green-700';
+          : 'bg-green-600/90 text-white hover:bg-green-700';
         const autoLabel = autoOn ? 'ON' : 'OFF';
-        toggleHtml = `<div class="flex items-center gap-0.5 flex-shrink-0" onclick="event.stopPropagation()">
-          <button onclick="DashboardApp.handleDropdownDemoToggle('${pair}')"
-                  class="px-1 py-0.5 rounded text-[9px] font-bold border transition-all ${demoCls}" title="デモモード">D</button>
-          <button onclick="DashboardApp.handleDropdownAutoToggle('${pair}')"
-                  class="px-1 py-0.5 rounded text-[9px] font-bold transition-all ${autoCls}" title="自動トレード">${autoLabel}</button>
+        toggleHtml = `<div class="flex items-center gap-1 flex-shrink-0 ml-auto">
+          <button data-action="demo" data-symbol="${pair}"
+                  class="px-1.5 py-0.5 rounded text-[10px] font-bold transition-all ${demoCls}" title="デモモード">DEMO</button>
+          <button data-action="auto" data-symbol="${pair}"
+                  class="px-2 py-0.5 rounded text-[10px] font-bold transition-all min-w-[2rem] ${autoCls}" title="自動トレード">${autoLabel}</button>
         </div>`;
       }
 
-      return `<div onclick="DashboardApp.selectSymbol('${pair}')"
-               class="flex items-center gap-2 px-3 py-1.5 hover:bg-gray-700 cursor-pointer transition-colors select-none ${selectedCls}">
+      return `<div class="dd-pair-row flex items-center gap-2 px-3 py-2 hover:bg-gray-700/50 cursor-pointer transition-colors select-none ${selectedCls}" data-pair="${pair}">
         <span class="w-2 h-2 rounded-full flex-shrink-0 ${mode.dotCls}${pulseAttr}"></span>
-        <span class="font-semibold text-xs text-gray-200 flex-1 tabular-nums">${pair}</span>
+        <span class="font-semibold text-xs text-gray-200 tabular-nums">${pair}</span>
+        <span class="text-[10px] ${mode.textCls}">${mode.label}</span>
         ${toggleHtml}
-        <span class="text-[10px] w-8 text-right ${mode.textCls}">${mode.label}</span>
-        ${isSelected ? '<svg class="w-3 h-3 text-blue-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>' : '<span class="w-3 flex-shrink-0"></span>'}
+        ${isSelected ? '<svg class="w-3 h-3 text-blue-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>' : ''}
       </div>`;
     };
 
@@ -836,6 +717,25 @@ const DashboardApp = {
       const header = `<div class="px-3 pt-1.5 pb-0.5 text-[10px] font-semibold text-gray-500 uppercase tracking-wider">${group.label}</div>`;
       return divider + header + group.pairs.map(renderPairItem).join('');
     }).join('');
+
+    // イベント委任（バブリング問題を回避）
+    list.onclick = (e) => {
+      // AUTO/DEMOボタンクリック
+      const btn = e.target.closest('[data-action]');
+      if (btn) {
+        e.stopPropagation();
+        const action = btn.dataset.action;
+        const symbol = btn.dataset.symbol;
+        if (action === 'demo') this.handleDropdownDemoToggle(symbol);
+        else if (action === 'auto') this.handleDropdownAutoToggle(symbol);
+        return;
+      }
+      // ペア行クリック（シンボル選択）
+      const row = e.target.closest('.dd-pair-row');
+      if (row) {
+        this.selectSymbol(row.dataset.pair);
+      }
+    };
   },
 
   /** シンボル選択（カスタムドロップダウンから呼ぶ） */
