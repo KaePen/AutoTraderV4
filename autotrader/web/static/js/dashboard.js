@@ -670,13 +670,20 @@ class PositionPanel extends Component {
       const t = Number(p.ticket);
       activeTickets.add(t);
       const existing = this._posTimeCache[t];
-      const openedAtMs = (existing && existing.openedAtMs)
-        ? existing.openedAtMs
-        : (p.opened_at ? new Date(p.opened_at).getTime() : null);
+      // elapsed_minutesをバックエンドから受信した時刻と共に保存
+      // バックエンド計算値（UTC基準）を信頼し、受信時刻からの差分で補正
+      let baseElapsedMin = (existing && existing.baseElapsedMin != null)
+        ? existing.baseElapsedMin : null;
+      let baseReceivedAt = (existing && existing.baseReceivedAt)
+        ? existing.baseReceivedAt : null;
+      if (p.elapsed_minutes != null) {
+        baseElapsedMin = p.elapsed_minutes;
+        baseReceivedAt = Date.now();
+      }
       const maxHoldMin = p.max_hold_minutes != null
         ? p.max_hold_minutes
         : (existing ? existing.maxHoldMin : null);
-      this._posTimeCache[t] = { openedAtMs, maxHoldMin };
+      this._posTimeCache[t] = { baseElapsedMin, baseReceivedAt, maxHoldMin };
     }
     for (const ticket of Object.keys(this._posTimeCache)) {
       if (!activeTickets.has(Number(ticket))) delete this._posTimeCache[ticket];
@@ -685,14 +692,15 @@ class PositionPanel extends Component {
 
   _calcElapsedMin(ticket) {
     const cache = this._posTimeCache[ticket];
-    if (!cache || !cache.openedAtMs) return 0;
-    return Math.max(0, Math.floor((Date.now() - cache.openedAtMs) / 60000));
+    if (!cache || cache.baseElapsedMin == null || !cache.baseReceivedAt) return 0;
+    // バックエンド計算値 + 受信後の経過時間で補正
+    const sinceReceived = Math.floor((Date.now() - cache.baseReceivedAt) / 60000);
+    return Math.max(0, cache.baseElapsedMin + sinceReceived);
   }
 
   _fmtElapsedTime(p) {
-    if (p.opened_at || this._posTimeCache[p.ticket]) {
-      return fmtHoldTime(null, this._calcElapsedMin(p.ticket));
-    }
+    const elapsed = this._calcElapsedMin(Number(p.ticket));
+    if (elapsed > 0) return fmtHoldTime(null, elapsed);
     if (p.elapsed_minutes != null) return fmtHoldTime(null, p.elapsed_minutes);
     return '0m';
   }
