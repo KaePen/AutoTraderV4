@@ -1209,7 +1209,97 @@ const DashboardApp = {
         <div id="${detailId}" class="${detailCls}">
           ${priceRowHtml}
           ${p.trade_id ? `<div class="mt-1 text-[9px] text-gray-700 tabular-nums truncate">ID: ${p.trade_id}</div>` : ''}
+          ${this._closePositionHtml(p)}
         </div>`;
+  },
+
+  /** 決済UIのHTML生成 */
+  _closePositionHtml(p) {
+    const vol = p.volume;
+    const minVol = 0.01;
+    const step = 0.01;
+    const sliderId = `close-slider-${p.ticket}`;
+    const labelId = `close-label-${p.ticket}`;
+    const btnFullId = `close-full-${p.ticket}`;
+    const btnPartId = `close-part-${p.ticket}`;
+    return `
+      <div class="mt-2 pt-2 border-t border-gray-700/50" onclick="event.stopPropagation()">
+        <div class="flex items-center gap-2 mb-1.5">
+          <button id="${btnFullId}"
+            class="px-2.5 py-1 text-[11px] font-semibold rounded bg-red-600 hover:bg-red-500 text-white transition-colors"
+            onclick="DashboardApp.closePosition(${p.ticket}, null)">
+            全決済
+          </button>
+          <span class="text-[10px] text-gray-500">|</span>
+          <span class="text-[10px] text-gray-400">部分決済</span>
+        </div>
+        <div class="flex items-center gap-2">
+          <input id="${sliderId}" type="range"
+            min="${minVol}" max="${vol}" step="${step}" value="${vol}"
+            class="flex-1 h-1.5 accent-amber-500 cursor-pointer"
+            oninput="document.getElementById('${labelId}').textContent = parseFloat(this.value).toFixed(2)">
+          <span id="${labelId}" class="text-xs tabular-nums text-amber-400 w-10 text-right">${vol.toFixed(2)}</span>
+          <span class="text-[10px] text-gray-500">lot</span>
+          <button id="${btnPartId}"
+            class="px-2 py-1 text-[10px] font-semibold rounded bg-amber-600 hover:bg-amber-500 text-white transition-colors"
+            onclick="DashboardApp.closePosition(${p.ticket}, parseFloat(document.getElementById('${sliderId}').value))">
+            決済
+          </button>
+        </div>
+      </div>`;
+  },
+
+  /** ポジション決済実行 */
+  async closePosition(ticket, volume) {
+    const btnFull = document.getElementById(`close-full-${ticket}`);
+    const btnPart = document.getElementById(`close-part-${ticket}`);
+    const isPartial = volume != null;
+
+    // ボタン無効化
+    if (btnFull) { btnFull.disabled = true; btnFull.classList.add('opacity-50'); }
+    if (btnPart) { btnPart.disabled = true; btnPart.classList.add('opacity-50'); }
+
+    try {
+      const params = new URLSearchParams({ });
+      if (volume != null) params.set('volume', volume.toFixed(2));
+      const url = `/api/v1/trading/positions/${ticket}/close?${params}`;
+      const res = await fetch(url, { method: 'POST' });
+      const json = await res.json();
+
+      if (json.success) {
+        const d = json.data;
+        const msg = isPartial
+          ? `部分決済完了: ${d.closed_volume}lot (残${d.remaining_volume}lot)`
+          : `全決済完了: ${d.closed_volume}lot @ ${d.exit_price}`;
+        this._showCloseToast(msg, 'success');
+      } else {
+        this._showCloseToast(`決済失敗: ${json.error || '不明なエラー'}`, 'error');
+      }
+    } catch (e) {
+      this._showCloseToast(`通信エラー: ${e.message}`, 'error');
+    } finally {
+      // ボタン復帰
+      if (btnFull) { btnFull.disabled = false; btnFull.classList.remove('opacity-50'); }
+      if (btnPart) { btnPart.disabled = false; btnPart.classList.remove('opacity-50'); }
+    }
+  },
+
+  /** 決済結果のトースト通知 */
+  _showCloseToast(msg, type) {
+    const existing = document.getElementById('close-toast');
+    if (existing) existing.remove();
+
+    const bg = type === 'success' ? 'bg-green-600' : 'bg-red-600';
+    const toast = document.createElement('div');
+    toast.id = 'close-toast';
+    toast.className = `fixed bottom-4 right-4 ${bg} text-white text-sm px-4 py-2 rounded-lg shadow-lg z-50 transition-opacity`;
+    toast.textContent = msg;
+    document.body.appendChild(toast);
+
+    setTimeout(() => {
+      toast.style.opacity = '0';
+      setTimeout(() => toast.remove(), 300);
+    }, 3000);
   },
 
   /** ポジションカードの詳細エリアをトグル */

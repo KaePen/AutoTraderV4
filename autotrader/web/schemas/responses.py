@@ -569,6 +569,22 @@ class TradingModeResponse(BaseModel):
     symbol_demo_mode: dict[str, bool] = Field(default_factory=dict)
 
 
+class ClosePositionResponse(BaseModel):
+    """ポジション決済レスポンス
+
+    Attributes:
+        ticket: MT5チケットID
+        closed_volume: 決済ロット数
+        remaining_volume: 残ロット数
+        exit_price: 決済価格
+    """
+
+    ticket: int
+    closed_volume: float
+    remaining_volume: float
+    exit_price: float = 0.0
+
+
 class ReloadLogicResponse(BaseModel):
     """ホットリロード実行レスポンス
 
