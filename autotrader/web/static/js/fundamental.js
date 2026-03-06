@@ -18,7 +18,7 @@ const FundamentalWidget = {
     this._initCollapsible();
   },
 
-  /** スマホ用折りたたみ初期化 */
+  /** 折りたたみ初期化（全画面サイズ対応、スマホのみデフォルト閉） */
   _initCollapsible() {
     const isMobile = !window.matchMedia('(min-width: 640px)').matches;
     this._setupToggle('news-toggle', 'news-chevron', 'fundamental-news-list', isMobile);
