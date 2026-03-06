@@ -1870,19 +1870,30 @@ class LiveTradingEngine:
             remaining_minutes = None
             max_hold_minutes = None
             elapsed_minutes = None
-            # PM管理ポジション: entry_time（正確なUTC）を使用
-            # MT5のopened_atはブローカータイムゾーン(UTC+2)のため不正確
+            # PM管理ポジション: entry_time（UTC aware）を使用
             if managed is not None and hasattr(managed, "entry_time"):
-                elapsed_sec = (
-                    datetime.now(UTC) - managed.entry_time
-                ).total_seconds()
-                elapsed_minutes = max(0, int(elapsed_sec / 60))
-            elif hasattr(position.opened_at, "timestamp"):
-                # 非PM管理ポジション: opened_atを使用（TZオフセットあり）
-                elapsed_sec = (
-                    datetime.now(UTC) - position.opened_at
-                ).total_seconds()
-                elapsed_minutes = max(0, int(elapsed_sec / 60))
+                try:
+                    elapsed_sec = (
+                        datetime.now(UTC) - managed.entry_time
+                    ).total_seconds()
+                    elapsed_minutes = max(
+                        0, int(elapsed_sec / 60)
+                    )
+                except TypeError:
+                    pass
+            # フォールバック: MT5のopened_at（UTC aware）を使用
+            if elapsed_minutes is None and hasattr(
+                position.opened_at, "timestamp"
+            ):
+                try:
+                    elapsed_sec = (
+                        datetime.now(UTC) - position.opened_at
+                    ).total_seconds()
+                    elapsed_minutes = max(
+                        0, int(elapsed_sec / 60)
+                    )
+                except TypeError:
+                    pass
             if managed is not None:
                 try:
                     from autotrader.config.tf_params_registry import (

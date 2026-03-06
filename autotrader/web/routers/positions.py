@@ -20,11 +20,15 @@ from autotrader.web.services.market_service import MarketService
 router = APIRouter()
 
 
-def _dict_to_position_response(d: dict) -> PositionResponse:
+def _dict_to_position_response(
+    d: dict,
+    db_opened_at_map: dict[int, datetime] | None = None,
+) -> PositionResponse:
     """エンジンのポジション辞書をPositionResponseに変換
 
     Args:
         d: ポジション辞書
+        db_opened_at_map: DB由来のticket→opened_atマップ
 
     Returns:
         PositionResponse: レスポンス
@@ -36,13 +40,32 @@ def _dict_to_position_response(d: dict) -> PositionResponse:
     elif opened_at is None:
         opened_at = datetime.now(UTC)
 
+    # DB由来のopened_atで上書き（永続的なソース）
+    ticket = d.get("ticket", 0)
+    if db_opened_at_map and ticket in db_opened_at_map:
+        opened_at = db_opened_at_map[ticket]
+
+    # elapsed_minutesが未計算の場合、opened_atから計算
+    elapsed_minutes = d.get("elapsed_minutes")
+    if elapsed_minutes is None and opened_at is not None:
+        now = datetime.now(UTC)
+        # naive datetimeの場合UTCとして扱う
+        if opened_at.tzinfo is None:
+            from datetime import timezone
+
+            opened_at = opened_at.replace(
+                tzinfo=timezone.utc
+            )
+        elapsed_sec = (now - opened_at).total_seconds()
+        elapsed_minutes = max(0, int(elapsed_sec / 60))
+
     signal_type_val = d.get("signal_type", "BUY")
     if isinstance(signal_type_val, str):
         signal_type_val = SignalType(signal_type_val)
 
     return PositionResponse(
         position_id=d.get("position_id", ""),
-        ticket=d.get("ticket", 0),
+        ticket=ticket,
         trade_id=d.get("trade_id", ""),
         symbol=d.get("symbol", ""),
         signal_type=signal_type_val,
@@ -62,7 +85,7 @@ def _dict_to_position_response(d: dict) -> PositionResponse:
         consensus_score=d.get("consensus_score"),
         remaining_minutes=d.get("remaining_minutes"),
         max_hold_minutes=d.get("max_hold_minutes"),
-        elapsed_minutes=d.get("elapsed_minutes"),
+        elapsed_minutes=elapsed_minutes,
     )
 
 
@@ -95,6 +118,9 @@ async def get_positions(
     Returns:
         ApiResponse[list[PositionResponse]]: ポジション一覧
     """
+    # DBからオープンポジションのopened_atマップを取得
+    db_opened_at_map = _get_db_opened_at_map(db)
+
     # EngineManager経由で全エンジンから集約
     if mgr and mgr.engines:
         positions = mgr.all_cached_positions
@@ -105,7 +131,7 @@ async def get_positions(
             ]
         return ApiResponse(
             data=[
-                _dict_to_position_response(p)
+                _dict_to_position_response(p, db_opened_at_map)
                 for p in positions
             ]
         )
@@ -120,7 +146,7 @@ async def get_positions(
             ]
         return ApiResponse(
             data=[
-                _dict_to_position_response(p)
+                _dict_to_position_response(p, db_opened_at_map)
                 for p in positions
             ]
         )
@@ -129,3 +155,33 @@ async def get_positions(
     service = MarketService(db)
     positions = service.get_positions(symbol)
     return ApiResponse(data=positions)
+
+
+def _get_db_opened_at_map(db: Session) -> dict[int, datetime]:
+    """DBからオープンポジションのticket→opened_atマップを取得
+
+    Args:
+        db: DBセッション
+
+    Returns:
+        dict[int, datetime]: ticket→opened_at
+    """
+    from autotrader.adapters.database.models import (
+        TradeRecord,
+    )
+
+    try:
+        records = (
+            db.query(
+                TradeRecord.ticket, TradeRecord.opened_at
+            )
+            .filter(TradeRecord.is_open.is_(True))
+            .all()
+        )
+        return {
+            r.ticket: r.opened_at
+            for r in records
+            if r.ticket is not None and r.opened_at is not None
+        }
+    except Exception:
+        return {}
