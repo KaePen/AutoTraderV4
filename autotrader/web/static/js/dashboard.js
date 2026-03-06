@@ -1223,47 +1223,41 @@ const DashboardApp = {
   /** 決済UIのHTML生成 */
   _closePositionHtml(p) {
     const vol = p.volume;
-    const minVol = 0.01;
-    const step = 0.01;
-    const sliderId = `close-slider-${p.ticket}`;
-    const labelId = `close-label-${p.ticket}`;
-    const btnFullId = `close-full-${p.ticket}`;
-    const btnPartId = `close-part-${p.ticket}`;
+    const pct25 = Math.max(0.01, Math.round(vol * 0.25 * 100) / 100);
+    const pct50 = Math.max(0.01, Math.round(vol * 0.50 * 100) / 100);
+    const pct75 = Math.max(0.01, Math.round(vol * 0.75 * 100) / 100);
+    const btnCls = 'shrink-0 px-2 py-1 text-[10px] font-semibold rounded transition-colors';
     return `
       <div class="mt-2 pt-2 border-t border-gray-700/50" onclick="event.stopPropagation()">
         <div class="flex items-center gap-1.5">
-          <button id="${btnFullId}"
-            class="shrink-0 px-2 py-1 text-[10px] font-semibold rounded bg-red-600 hover:bg-red-500 text-white transition-colors"
-            onclick="DashboardApp.closePosition(${p.ticket}, null)">
-            全決済
-          </button>
-          <div class="w-px h-4 bg-gray-600 shrink-0"></div>
-          <input id="${sliderId}" type="range"
-            min="${minVol}" max="${vol}" step="${step}" value="${vol}"
-            class="flex-1 min-w-0 h-1.5 accent-amber-500 cursor-pointer"
-            oninput="document.getElementById('${labelId}').textContent = parseFloat(this.value).toFixed(2)">
-          <span id="${labelId}" class="shrink-0 text-xs tabular-nums text-amber-400 w-8 text-right">${vol.toFixed(2)}</span>
-          <button id="${btnPartId}"
-            class="shrink-0 px-2 py-1 text-[10px] font-semibold rounded bg-amber-600 hover:bg-amber-500 text-white transition-colors"
-            onclick="DashboardApp.closePosition(${p.ticket}, parseFloat(document.getElementById('${sliderId}').value))">
-            部分決済
-          </button>
+          <button class="${btnCls} bg-amber-700/80 hover:bg-amber-600 text-amber-100"
+            onclick="DashboardApp.closePosition(${p.ticket}, ${pct25})">25%</button>
+          <button class="${btnCls} bg-amber-700/80 hover:bg-amber-600 text-amber-100"
+            onclick="DashboardApp.closePosition(${p.ticket}, ${pct50})">50%</button>
+          <button class="${btnCls} bg-amber-700/80 hover:bg-amber-600 text-amber-100"
+            onclick="DashboardApp.closePosition(${p.ticket}, ${pct75})">75%</button>
+          <button class="${btnCls} bg-red-600 hover:bg-red-500 text-white"
+            onclick="DashboardApp.closePosition(${p.ticket}, null)">全決済</button>
         </div>
       </div>`;
   },
 
   /** ポジション決済実行 */
   async closePosition(ticket, volume) {
-    const btnFull = document.getElementById(`close-full-${ticket}`);
-    const btnPart = document.getElementById(`close-part-${ticket}`);
     const isPartial = volume != null;
-
-    // ボタン無効化
-    if (btnFull) { btnFull.disabled = true; btnFull.classList.add('opacity-50'); }
-    if (btnPart) { btnPart.disabled = true; btnPart.classList.add('opacity-50'); }
+    // 決済UI内の全ボタンを無効化
+    const closeUi = document.querySelector(
+      `[data-close-ui="${ticket}"]`
+    );
+    const buttons = closeUi
+      ? closeUi.querySelectorAll('button') : [];
+    buttons.forEach(b => {
+      b.disabled = true;
+      b.classList.add('opacity-50');
+    });
 
     try {
-      const params = new URLSearchParams({ });
+      const params = new URLSearchParams();
       if (volume != null) params.set('volume', volume.toFixed(2));
       const url = `/api/v1/trading/positions/${ticket}/close?${params}`;
       const res = await fetch(url, { method: 'POST' });
@@ -1281,9 +1275,10 @@ const DashboardApp = {
     } catch (e) {
       this._showCloseToast(`通信エラー: ${e.message}`, 'error');
     } finally {
-      // ボタン復帰
-      if (btnFull) { btnFull.disabled = false; btnFull.classList.remove('opacity-50'); }
-      if (btnPart) { btnPart.disabled = false; btnPart.classList.remove('opacity-50'); }
+      buttons.forEach(b => {
+        b.disabled = false;
+        b.classList.remove('opacity-50');
+      });
     }
   },
 
