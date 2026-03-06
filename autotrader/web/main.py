@@ -180,14 +180,33 @@ async def lifespan(app: FastAPI):
         try:
             await mgr.connect()
 
-            # デフォルトシンボルのエンジンを追加
-            default_symbol = os.environ.get("AUTOTRADER_SYMBOL", "USDJPY")
-            config = build_engine_config(default_symbol)
-            engine = await mgr.add_symbol(config)
+            # 全通貨ペアのエンジンを起動時に追加
+            all_symbols = [
+                "EURUSD", "GBPUSD", "AUDUSD",
+                "NZDUSD", "USDCHF", "USDCAD",
+                "USDJPY", "EURJPY", "GBPJPY",
+                "AUDJPY", "CADJPY", "CHFJPY",
+            ]
+            default_symbol = os.environ.get(
+                "AUTOTRADER_SYMBOL", "USDJPY"
+            )
+            for sym in all_symbols:
+                try:
+                    cfg = build_engine_config(sym)
+                    eng = await mgr.add_symbol(cfg)
+                    if sym == default_symbol:
+                        engine = eng
+                except Exception as e:
+                    logger.warning(
+                        "エンジン追加失敗 %s: %s", sym, e,
+                    )
 
             # 後方互換: app.state.live_engine も設定
+            if "engine" not in dir():
+                engine = None
             app.state.live_engine = engine
-            svc.set_engine(engine)
+            if engine:
+                svc.set_engine(engine)
 
             acct = mgr.account_info
             if acct:

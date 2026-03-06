@@ -564,12 +564,14 @@ async def toggle_symbol_demo_mode(
     # EngineManager経由
     if mgr:
         target = mgr.get_engine(symbol)
+
+        # エンジンがなければ自動追加
         if target is None:
-            return ApiResponse(
-                success=False,
-                error=f"シンボル {symbol} のエンジンがありません",
-                data=TradingModeResponse(),
+            from autotrader.web.main import (
+                build_engine_config,
             )
+            config = build_engine_config(symbol)
+            target = await mgr.add_symbol(config)
 
         if enable:
             svc.enable_demo_mode()
