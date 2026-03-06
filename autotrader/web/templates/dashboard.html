@@ -101,10 +101,13 @@
     <!-- ニュースウィジェット -->
     <div class="card flex flex-col" id="fundamental-news-card">
       <div class="flex items-center justify-between mb-3 flex-shrink-0">
-        <div class="flex items-center gap-2">
+        <button id="news-toggle" class="flex items-center gap-2">
+          <svg id="news-chevron" class="w-3.5 h-3.5 transition-transform sm:hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+          </svg>
           <h2 class="text-sm font-semibold text-gray-300 uppercase tracking-wider">News</h2>
           <span id="fundamental-news-count" class="text-xs text-gray-500">--</span>
-        </div>
+        </button>
         <span id="fundamental-news-updated" class="text-[10px] text-gray-600 tabular-nums"></span>
       </div>
       <div id="fundamental-news-list" class="overflow-y-auto flex-1 min-h-0 max-h-64 space-y-2">
@@ -113,7 +116,12 @@
     <!-- 経済カレンダーウィジェット -->
     <div class="card flex flex-col" id="fundamental-calendar-card">
       <div class="flex items-center justify-between mb-3 flex-shrink-0">
-        <h2 class="text-sm font-semibold text-gray-300 uppercase tracking-wider">Economic Calendar</h2>
+        <button id="calendar-toggle" class="flex items-center gap-2">
+          <svg id="calendar-chevron" class="w-3.5 h-3.5 transition-transform sm:hidden" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+          </svg>
+          <h2 class="text-sm font-semibold text-gray-300 uppercase tracking-wider">Economic Calendar</h2>
+        </button>
         <span id="fundamental-calendar-updated" class="text-[10px] text-gray-600 tabular-nums"></span>
       </div>
       <div id="fundamental-calendar-list" class="overflow-y-auto flex-1 min-h-0 max-h-64">
@@ -142,6 +150,6 @@
 
 {% block scripts %}
 <script src="/static/js/chart.js?v=9"></script>
-<script src="/static/js/fundamental.js?v=3"></script>
+<script src="/static/js/fundamental.js?v=4"></script>
 <script src="/static/js/dashboard.js?v=41"></script>
 {% endblock %}

@@ -15,6 +15,31 @@ const FundamentalWidget = {
     this.fetchCalendar();
     this.startCountdown();
     this.startPolling();
+    this._initCollapsible();
+  },
+
+  /** スマホ用折りたたみ初期化 */
+  _initCollapsible() {
+    const isMobile = !window.matchMedia('(min-width: 640px)').matches;
+    this._setupToggle('news-toggle', 'news-chevron', 'fundamental-news-list', isMobile);
+    this._setupToggle('calendar-toggle', 'calendar-chevron', 'fundamental-calendar-list', isMobile);
+  },
+
+  _setupToggle(toggleId, chevronId, contentId, defaultCollapsed) {
+    const toggle = document.getElementById(toggleId);
+    const chevron = document.getElementById(chevronId);
+    const content = document.getElementById(contentId);
+    if (!toggle || !content) return;
+    let expanded = !defaultCollapsed;
+    if (!expanded) {
+      content.classList.add('hidden');
+      if (chevron) chevron.style.transform = 'rotate(-90deg)';
+    }
+    toggle.addEventListener('click', () => {
+      expanded = !expanded;
+      content.classList.toggle('hidden', !expanded);
+      if (chevron) chevron.style.transform = expanded ? '' : 'rotate(-90deg)';
+    });
   },
 
   /** シンボル変更時の軽量更新（カウントダウン再起動なし） */
