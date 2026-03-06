@@ -152,8 +152,7 @@ const DashboardApp = {
       if (!data.analysis.symbol || data.analysis.symbol === this.symbol) {
         this.lastAnalysis = data.analysis;
         this.renderAnalysis();
-        // ドロップダウン展開中・操作中は再描画をスキップ
-        if (!this.tcBusy && !this._isDropdownOpen()) {
+        if (!this.tcBusy) {
           this.renderTradingControl();
         }
       }
@@ -549,8 +548,8 @@ const DashboardApp = {
     } catch (e) {
       this.tradingMode = null;
     }
-    // ユーザー操作中・ドロップダウン展開中は再描画をスキップ
-    if (!this.tcBusy && !this._isDropdownOpen()) {
+    // ユーザー操作中は再描画をスキップ
+    if (!this.tcBusy) {
       this.renderTradingControl();
     }
     this.renderAnalysis();
@@ -636,12 +635,11 @@ const DashboardApp = {
     return list && !list.classList.contains('hidden');
   },
 
-  /** カスタムシンボルドロップダウン描画 */
-  renderSymbolDropdown() {
-    // ドロップダウン展開中はinnerHTML上書きをスキップ（ボタン操作が消失するため）
-    if (this._isDropdownOpen()) return;
-
-    // グループ定義（グループヘッダー付きで整理表示）
+  /** カスタムシンボルドロップダウン描画
+   * @param {boolean} force - true: 展開中でもリスト再構築（ユーザー操作後）
+   */
+  renderSymbolDropdown(force) {
+    // グループ定義
     const symbolGroups = [
       {
         label: 'USD ペア',
@@ -669,7 +667,7 @@ const DashboardApp = {
       return { label: '待機', dotCls: 'bg-gray-500', textCls: 'text-gray-500', pulse: false };
     };
 
-    // トリガーボタンを現在シンボルのモードで更新
+    // トリガーボタンは常に更新（ヘッダー表示なので軽量）
     const curMode = getPairMode(this.symbol);
     const trigDot = document.getElementById('symbol-trigger-dot');
     const trigLabel = document.getElementById('symbol-trigger-label');
@@ -678,13 +676,13 @@ const DashboardApp = {
     if (trigLabel) trigLabel.textContent = this.symbol;
     if (trigMode) {
       trigMode.textContent = curMode.label;
-      // inline-block w-[2.5rem] で固定幅を維持してモード切替時のサイズ変化を防ぐ
       trigMode.className = `font-normal inline-block w-[2.5rem] ${curMode.textCls}`;
     }
 
-    // ドロップダウンリストをグループ別に生成
+    // ドロップダウン展開中: forceでなければリスト再構築をスキップ
     const list = document.getElementById('symbol-dropdown-list');
     if (!list) return;
+    if (this._isDropdownOpen() && !force) return;
 
     /** ペア1件分のHTML（AUTO/DEMOトグル付き） */
     const renderPairItem = (pair) => {
@@ -815,14 +813,14 @@ const DashboardApp = {
 
     this.tcBusy = true;
     try {
-      this.renderTradingControl();
       const result = await toggleSymbolDemoMode(symbol, !currentOn);
       if (result) this.tradingMode = result;
     } catch (e) {
       console.error(symbol + ' デモモード切替エラー:', e);
     } finally {
       this.tcBusy = false;
-      this.renderTradingControl();
+      // ドロップダウン内ボタンを即時反映
+      this.renderSymbolDropdown(true);
       this.fetchAnalysis();
     }
   },
@@ -846,14 +844,14 @@ const DashboardApp = {
 
     this.tcBusy = true;
     try {
-      this.renderTradingControl();
       const result = await toggleSymbolAutoTrade(symbol, nextOn);
       if (result) this.tradingMode = result;
     } catch (e) {
       console.error(symbol + ' 自動トレード切替エラー:', e);
     } finally {
       this.tcBusy = false;
-      this.renderTradingControl();
+      // ドロップダウン内ボタンを即時反映
+      this.renderSymbolDropdown(true);
     }
   },
 
