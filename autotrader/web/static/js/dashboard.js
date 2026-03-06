@@ -1135,6 +1135,7 @@ class TradingControl extends Component {
     this.subscribe('tradingMode', () => {
       if (!this.tcBusy) this._render();
     });
+    this.subscribe('symbol', () => this.renderSymbolDropdown(true));
     this.subscribe('dashboard', () => this._updateAccountName());
 
     const settingsMt5Btn = document.getElementById('settings-mt5-btn');
