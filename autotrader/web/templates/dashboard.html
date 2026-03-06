@@ -83,15 +83,17 @@
     </div>
 
     <!-- ポジションパネル (右1/3) -->
-    <!-- グリッドのストレッチで左カラムと同じ高さを自動で占有 -->
-    <!-- mobile: min-h-[160px]で最低高さを確保しコンテンツが見える -->
-    <div class="card flex flex-col overflow-hidden min-h-[160px] max-h-[50vh] lg:min-h-0 lg:max-h-none" id="position-panel">
-      <div class="flex items-center justify-between mb-3 flex-shrink-0">
-        <h2 class="text-sm font-semibold text-gray-300 uppercase tracking-wider">Positions</h2>
-        <span id="position-count" class="text-xs text-gray-500">no open</span>
-      </div>
-      <div id="position-list" class="overflow-y-auto flex-1 min-h-0">
-        <div class="flex items-center justify-center h-16 text-gray-500 text-sm">ポジションなし</div>
+    <!-- PC: relative wrapper + absolute panel で右カラムがGrid行高さに影響しない -->
+    <!-- mobile: 通常フローで min-h-[160px] / max-h-[50vh] -->
+    <div class="lg:relative">
+      <div class="card flex flex-col overflow-hidden min-h-[160px] max-h-[50vh] lg:absolute lg:inset-0 lg:min-h-0 lg:max-h-none" id="position-panel">
+        <div class="flex items-center justify-between mb-3 flex-shrink-0">
+          <h2 class="text-sm font-semibold text-gray-300 uppercase tracking-wider">Positions</h2>
+          <span id="position-count" class="text-xs text-gray-500">no open</span>
+        </div>
+        <div id="position-list" class="overflow-y-auto flex-1 min-h-0">
+          <div class="flex items-center justify-center h-16 text-gray-500 text-sm">ポジションなし</div>
+        </div>
       </div>
     </div>
   </div>
