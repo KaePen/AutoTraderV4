@@ -419,7 +419,7 @@ const SettingsManager = {
     const addSection = `
       <div class="space-y-2">
         <button id="conn-add-toggle" class="flex items-center gap-1.5 group">
-          <svg id="conn-add-chevron" class="w-3.5 h-3.5 transition-transform -rotate-90 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+          <svg id="conn-add-chevron" class="w-3.5 h-3.5 transition-transform text-gray-500" style="transform:rotate(-90deg)" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
           </svg>
           <h3 class="text-xs font-semibold text-gray-400 uppercase tracking-wider group-hover:text-gray-300 transition-colors">
@@ -479,7 +479,7 @@ const SettingsManager = {
     if (addToggle && addFields) {
       addToggle.addEventListener('click', () => {
         const isHidden = addFields.classList.toggle('hidden');
-        if (addChevron) addChevron.style.transform = isHidden ? 'rotate(-90deg)' : '';
+        if (addChevron) addChevron.style.transform = isHidden ? 'rotate(-90deg)' : 'rotate(0deg)';
       });
     }
     // ヘッダー表示名保存
