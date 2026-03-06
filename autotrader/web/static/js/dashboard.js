@@ -1242,6 +1242,71 @@ class TradingControl extends Component {
     }
   }
 
+  async handleGroupDemoToggle(pairs) {
+    if (this.tcBusy) return;
+    const m = this._dataFlow.get('tradingMode');
+    const demoStates = (m && m.symbol_demo_mode) || {};
+    // 全ONなら全OFF、それ以外は全ON
+    const allOn = pairs.every(p => demoStates[p]);
+    const nextOn = !allOn;
+
+    // 楽観的UI更新
+    const newDemoStates = { ...demoStates };
+    pairs.forEach(p => { newDemoStates[p] = nextOn; });
+    this._dataFlow.publish('tradingMode', { ...m, symbol_demo_mode: newDemoStates });
+    this.renderSymbolDropdown(true);
+
+    this.tcBusy = true;
+    try {
+      const results = await Promise.all(pairs.map(p => toggleSymbolDemoMode(p, nextOn)));
+      const last = results[results.length - 1];
+      if (last) this._dataFlow.publish('tradingMode', last);
+    } catch (e) {
+      this._dataFlow.publish('tradingMode', m);
+      console.error('グループDEMO切替エラー:', e);
+    } finally {
+      this.tcBusy = false;
+      this.renderSymbolDropdown(true);
+      this._onFetchAnalysis();
+    }
+  }
+
+  async handleGroupAutoToggle(pairs) {
+    if (this.tcBusy) return;
+    const m = this._dataFlow.get('tradingMode');
+    const autoStates = (m && m.symbol_auto_trade) || {};
+    const demoStates = (m && m.symbol_demo_mode) || {};
+    const allOn = pairs.every(p => autoStates[p]);
+    const nextOn = !allOn;
+
+    // リアルモードで全ONにする場合は確認
+    if (nextOn) {
+      const realPairs = pairs.filter(p => !demoStates[p]);
+      if (realPairs.length > 0) {
+        if (!confirm(`${realPairs.join(', ')} の自動トレード（リアルモード）を開始しますか？\n実際の売買が実行されます。`)) return;
+      }
+    }
+
+    // 楽観的UI更新
+    const newAutoStates = { ...autoStates };
+    pairs.forEach(p => { newAutoStates[p] = nextOn; });
+    this._dataFlow.publish('tradingMode', { ...m, symbol_auto_trade: newAutoStates });
+    this.renderSymbolDropdown(true);
+
+    this.tcBusy = true;
+    try {
+      const results = await Promise.all(pairs.map(p => toggleSymbolAutoTrade(p, nextOn)));
+      const last = results[results.length - 1];
+      if (last) this._dataFlow.publish('tradingMode', last);
+    } catch (e) {
+      this._dataFlow.publish('tradingMode', m);
+      console.error('グループ自動トレード切替エラー:', e);
+    } finally {
+      this.tcBusy = false;
+      this.renderSymbolDropdown(true);
+    }
+  }
+
   _render() {
     const mt5Badge = document.getElementById('tc-mt5-badge');
     const mt5Btn = document.getElementById('settings-mt5-btn');
@@ -1365,11 +1430,44 @@ class TradingControl extends Component {
 
     list.innerHTML = symbolGroups.map((group, groupIdx) => {
       const divider = groupIdx > 0 ? '<div class="border-t border-gray-700/60 my-1"></div>' : '';
-      const header = `<div class="px-3 pt-1.5 pb-0.5 text-[10px] font-semibold text-gray-500 uppercase tracking-wider">${group.label}</div>`;
+      // グループ内の状態集計
+      let groupToggleHtml = '';
+      if (isConnected) {
+        const allDemo = group.pairs.every(p => symbolDemoStates[p]);
+        const allAuto = group.pairs.every(p => symbolAutoStates[p]);
+        const demoCls = allDemo
+          ? 'bg-orange-500/25 text-orange-400 border border-orange-600/50 hover:bg-orange-500/40'
+          : 'bg-gray-700/80 text-gray-500 border border-gray-600/50 hover:bg-gray-600/80 hover:text-gray-300';
+        const autoCls = allAuto
+          ? 'bg-red-600 text-white hover:bg-red-700'
+          : 'bg-green-600/90 text-white hover:bg-green-700';
+        const autoLabel = allAuto ? 'ALL ON' : 'ALL OFF';
+        groupToggleHtml = `<div class="flex items-center gap-1 ml-auto">
+          <button data-group-action="demo" data-group-pairs="${group.pairs.join(',')}"
+                  class="px-1 py-0 rounded text-[9px] font-bold transition-all ${demoCls}">DEMO</button>
+          <button data-group-action="auto" data-group-pairs="${group.pairs.join(',')}"
+                  class="px-1 py-0 rounded text-[9px] font-bold transition-all min-w-[2.5rem] ${autoCls}">${autoLabel}</button>
+        </div>`;
+      }
+      const header = `<div class="px-3 pt-1.5 pb-0.5 flex items-center gap-1">
+        <span class="text-[10px] font-semibold text-gray-500 uppercase tracking-wider">${group.label}</span>
+        ${groupToggleHtml}
+      </div>`;
       return divider + header + group.pairs.map(renderPairItem).join('');
     }).join('');
 
     list.onclick = (e) => {
+      // グループ一括ボタン
+      const groupBtn = e.target.closest('[data-group-action]');
+      if (groupBtn) {
+        e.stopPropagation();
+        const action = groupBtn.dataset.groupAction;
+        const pairs = groupBtn.dataset.groupPairs.split(',');
+        if (action === 'demo') self.handleGroupDemoToggle(pairs);
+        else if (action === 'auto') self.handleGroupAutoToggle(pairs);
+        return;
+      }
+      // 個別ボタン
       const btn = e.target.closest('[data-action]');
       if (btn) {
         e.stopPropagation();
