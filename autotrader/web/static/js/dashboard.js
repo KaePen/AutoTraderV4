@@ -1,967 +1,132 @@
-/** ダッシュボードロジック */
+/** ダッシュボードロジック - コンポーネントベース */
 
-const DashboardApp = {
-  symbol: 'USDJPY',
-  dashboard: null,
-  positions: [],
-  trades: [],
-  tradeSummary: null,
-  isLoading: true,
-  tradeHistoryExpanded: true,
-  // トレード履歴フィルター
-  tradeFilterSymbol: null,   // null = 全通貨ペア
-  tradeFilterDays: null,     // null = 全期間
-  pollInterval: null,
-  // WebSocket駆動フラグ（接続中はpollingを停止）
-  wsActive: false,
-  // トレーディングコントロール状態
-  tradingMode: null,
-  tcBusy: false,
-  // 分析パネル
-  lastAnalysis: null,
-  // ポジション詳細の展開状態（ticket番号をキーに保持）
-  _expandedPositions: new Set(),
-  // ポジション時間キャッシュ: { ticket: { openedAtMs, maxHoldMin } }
-  _posTimeCache: {},
-  // ポジション時間カウントダウンタイマーID
-  _posTimeInterval: null,
-  // trade_idキャッシュ: REST API（DB）経由でのみ更新
-  _tradeIdCache: {},
+// ── ユーティリティ関数 ──
 
-  /** 初期化 */
-  init() {
-    // 保存済みシンボルを復元
-    const saved = localStorage.getItem('chart_symbol');
-    if (saved) this.symbol = saved;
+function fmtCurrency(v, currency) {
+  currency = currency || 'JPY';
+  const digits = currency === 'JPY' ? 0 : 2;
+  return new Intl.NumberFormat('ja-JP', { style: 'currency', currency, maximumFractionDigits: digits }).format(v);
+}
 
-    // カスタムシンボルドロップダウン初期化（クリック外で閉じる）
-    document.addEventListener('click', (e) => {
-      const wrapper = document.getElementById('symbol-dropdown-wrapper');
-      const list = document.getElementById('symbol-dropdown-list');
-      if (wrapper && list && !wrapper.contains(e.target)) {
-        list.classList.add('hidden');
-      }
-    });
+function fmtTime(dateStr) {
+  return new Date(dateStr).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Tokyo' });
+}
 
-    // トレード履歴トグル
-    const toggle = document.getElementById('trade-history-toggle');
-    if (toggle) {
-      toggle.addEventListener('click', () => {
-        this.tradeHistoryExpanded = !this.tradeHistoryExpanded;
-        const table = document.getElementById('trade-history-table');
-        const chevron = document.getElementById('trade-history-chevron');
-        if (table) table.classList.toggle('hidden', !this.tradeHistoryExpanded);
-        if (chevron) {
-          chevron.style.transform = this.tradeHistoryExpanded ? '' : 'rotate(-90deg)';
-        }
-      });
-    }
+function fmtDateTime(dateStr) {
+  return new Date(dateStr).toLocaleDateString('ja-JP', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Tokyo' });
+}
 
-    // トレーディングコントロール初期化
-    this.initTradingControl();
+function fmtHoldTime(openedAt, elapsedMin) {
+  const diffMin = elapsedMin != null
+    ? elapsedMin
+    : Math.max(0, Math.floor((Date.now() - new Date(openedAt).getTime()) / 60000));
+  if (diffMin < 60) return diffMin + 'm';
+  const diffHour = Math.floor(diffMin / 60);
+  if (diffHour < 24) return diffHour + 'h ' + (diffMin % 60) + 'm';
+  return Math.floor(diffHour / 24) + 'd ' + (diffHour % 24) + 'h';
+}
 
-    // 復元シンボルをUIに反映
-    const sel = document.getElementById('symbol-selector');
-    if (sel) sel.value = this.symbol;
-    const chartTitle = document.getElementById('chart-title');
-    if (chartTitle) chartTitle.textContent = this.symbol + ' チャート';
+function escapeHtml(str) {
+  const div = document.createElement('div');
+  div.textContent = str || '';
+  return div.innerHTML;
+}
 
-    // チャート初期化
-    ChartManager.init('chart-container', this.symbol);
+// ── DataFlowManager (pub/sub + store) ──
 
-    // エンジン確保（復元シンボルがデフォルトと異なる場合）
-    ensureSymbolEngine(this.symbol).catch(() => {});
+class DataFlowManager {
+  constructor() {
+    this._subs = {};
+    this._store = {};
+    this._nextId = 0;
+  }
 
-    // データ取得
-    this.fetchAll();
-    this.fetchTradingMode();
-    this.fetchAnalysis();
-
-    // ファンダメンタルウィジェット初期化
-    if (typeof FundamentalWidget !== 'undefined') {
-      FundamentalWidget.init(this.symbol);
-    }
-
-    // ポジション経過/残り時間を1分ごとにクライアント側でカウントアップ
-    this._posTimeInterval = setInterval(() => this._tickPositionTimers(), 60000);
-
-    // チャートは30秒毎にフル再取得（ローソク足確定検知・バックアップ）
-    this.pollInterval = setInterval(() => this.fetchAll(), 30000);
-
-    // WS切断中フォールバック（10秒毎・必要最小限）
-    this._fallbackInterval = setInterval(() => {
-      if (!this.wsActive) {
-        this.fetchAnalysis();
-        this.fetchPositionsAndTrades();
-        this.fetchTradingMode();
-      }
-    }, 10000);
-
-    // ダッシュボードWebSocket（price_update + tick_update で全UI駆動）
-    this.dashWs = createWebSocketClient('/ws/dashboard');
-    // 高頻度: tick毎の価格更新 → チャートlastbar即時更新
-    this.dashWs.on('price_update', (msg) => {
-      this.wsActive = true;
-      const { symbol, bid, time_ms } = msg.data;
-      // 選択中シンボルのtickのみチャートに反映
-      if (bid > 0 && symbol === this.symbol) {
-        ChartManager.updateLastBar(bid, time_ms);
-      }
-    });
-    // 1秒毎: フル処理完了 → 全UI一括更新
-    this.dashWs.on('tick_update', (msg) => {
-      this.wsActive = true;
-      this._applyTickUpdate(msg.data);
-    });
-    // MT5エントリー確定時: ポジション即時更新
-    this.dashWs.on('position_update', () => {
-      this.wsActive = true;
-      this.fetchPositionsAndTrades();
-    });
-    // ファンダメンタル: ニュースリアルタイム更新
-    this.dashWs.on('news_update', (msg) => {
-      if (typeof FundamentalWidget !== 'undefined') {
-        FundamentalWidget.onNewsUpdate(msg);
-      }
-    });
-    // ファンダメンタル: カレンダー更新
-    this.dashWs.on('calendar_update', (msg) => {
-      if (typeof FundamentalWidget !== 'undefined') {
-        FundamentalWidget.onCalendarUpdate(msg);
-      }
-    });
-    this.dashWs.onStateChange((state) => {
-      if (state === 'disconnected' || state === 'error') {
-        this.wsActive = false;
-      }
-    });
-    this.dashWs.connect();
-  },
-
-  // ── tick_update 一括適用 ──
-
-  /**
-   * tick_updateペイロードを受信してUI全更新
-   * analysis / account / positions をまとめて適用する。
-   *
-   * @param {Object} data - tick_updateペイロード
-   */
-  _applyTickUpdate(data) {
-    // 分析パネル（選択中シンボルの分析のみ反映）
-    if (data.analysis) {
-      if (!data.analysis.symbol || data.analysis.symbol === this.symbol) {
-        this.lastAnalysis = data.analysis;
-        this.renderAnalysis();
-        if (!this.tcBusy) {
-          this.renderTradingControl();
-        }
-      }
-    }
-
-    // メトリクス（口座情報）
-    if (data.account && this.dashboard) {
-      this.dashboard = {
-        ...this.dashboard,
-        account: {
-          ...this.dashboard.account,
-          ...data.account,
-        },
-      };
-      this.renderMetrics();
-    }
-
-    // ポジション
-    if (data.positions !== undefined) {
-      // WS経由: trade_idはキャッシュ（DB由来）を使う
-      const prevTickets = new Set(this.positions.map(p => p.ticket));
-      const newTickets = new Set(data.positions.map(p => p.ticket));
-      for (const p of data.positions) {
-        p.trade_id = this._tradeIdCache[p.ticket] || '';
-      }
-      this.positions = data.positions;
-      this.renderPositions();
-      // ポジション増減時はREST再取得でtrade_idをDB同期
-      const added = data.positions.some(p => !prevTickets.has(p.ticket));
-      const removed = [...prevTickets].some(t => !newTickets.has(t));
-      if (added || removed) {
-        this.fetchPositionsAndTrades();
-      }
-    }
-
-  },
-
-  // ── 分析パネル ──
-
-  /** 分析データ取得 */
-  async fetchAnalysis() {
-    try {
-      this.lastAnalysis = await getAnalysis(this.symbol);
-    } catch (e) {
-      this.lastAnalysis = null;
-    }
-    this.renderAnalysis();
-  },
-
-  /** 分析パネル描画 */
-  renderAnalysis() {
-    const panel = document.getElementById('analysis-panel');
-    if (!panel) return;
-
-    const a = this.lastAnalysis;
-    // エンジン未起動ならパネル非表示（live/demo両方で表示）
-    const m = this.tradingMode;
-    const isLive = m && (m.mode === 'live' || m.mode === 'demo');
-    if (!isLive) {
-      panel.classList.add('hidden');
-      return;
-    }
-    panel.classList.remove('hidden');
-
-    // 重要指標発表警告
-    const apEventBanner = document.getElementById('ap-next-event');
-    const apEventText = document.getElementById('ap-next-event-text');
-    if (apEventBanner && apEventText) {
-      const mins = (typeof FundamentalWidget !== 'undefined') ? FundamentalWidget.nextHighImpactMinutes : null;
-      if (mins !== null && mins <= 60 && mins > 0) {
-        apEventText.textContent = '重要指標まで ' + Math.round(mins) + ' 分';
-        apEventBanner.classList.remove('hidden');
-      } else {
-        apEventBanner.classList.add('hidden');
-      }
-    }
-
-    // データなし or エンジン未起動（シンボル不一致）: プレースホルダ表示
-    const noData = !a || (!a.engine_running && (!a.tf_scores || Object.keys(a.tf_scores).length === 0));
-    if (noData) {
-      const msg = (a && a.rationale) ? a.rationale : '分析データなし';
-      const dirBadge = document.getElementById('ap-direction-badge');
-      if (dirBadge) {
-        dirBadge.textContent = '--';
-        dirBadge.className = 'inline-flex items-center px-2 py-0.5 rounded text-xs font-bold bg-gray-700 text-gray-400';
-      }
-      const scoreText = document.getElementById('ap-score-text');
-      if (scoreText) scoreText.textContent = '--';
-      const scoreBar = document.getElementById('ap-score-bar');
-      if (scoreBar) scoreBar.style.width = '0%';
-      const htfEl = document.getElementById('ap-htf');
-      if (htfEl) { htfEl.textContent = '--'; htfEl.className = 'font-bold tabular-nums text-gray-500'; }
-      const trendEl = document.getElementById('ap-trend');
-      if (trendEl) { trendEl.textContent = '--'; trendEl.className = 'font-bold tabular-nums text-gray-500'; }
-      const penaltyEl = document.getElementById('ap-penalty');
-      if (penaltyEl) { penaltyEl.textContent = '--'; penaltyEl.className = 'font-bold tabular-nums text-gray-500'; }
-      const tfEl = document.getElementById('ap-tf-scores');
-      if (tfEl) tfEl.innerHTML = '<p class="text-gray-500 text-xs text-center py-4">' + msg + '</p>';
-      return;
-    }
-
-    // 方向バッジ
-    const dirBadge = document.getElementById('ap-direction-badge');
-    if (dirBadge) {
-      const dirStyles = {
-        BUY: 'bg-green-900/40 text-green-400 border border-green-700/50',
-        SELL: 'bg-red-900/40 text-red-400 border border-red-700/50',
-        HOLD: 'bg-gray-700 text-gray-400',
-      };
-      dirBadge.textContent = a.direction || '--';
-      dirBadge.className = 'inline-flex items-center px-2 py-0.5 rounded text-xs font-bold ' + (dirStyles[a.direction] || dirStyles.HOLD);
-    }
-
-    // スコアバー（中央0基準・左SELL/右BUY）
-    const score = a.consensus_score || 0;
-    const threshold = a.entry_threshold || 1;
-    const dir = a.direction;
-    const buyScore = a.buy_score || 0;
-    const sellScore = a.sell_score || 0;
-    const scoreText = document.getElementById('ap-score-text');
-    const scoreBar = document.getElementById('ap-score-bar');
-    const thSell = document.getElementById('ap-threshold-sell');
-    const thBuy = document.getElementById('ap-threshold-buy');
-    if (scoreText) {
-      // HOLD時はbuy/sellスコア内訳を表示
-      if (dir === 'HOLD' && (buyScore > 0 || sellScore > 0)) {
-        scoreText.textContent = 'B:' + buyScore.toFixed(1) + ' S:' + sellScore.toFixed(1) + ' / ' + threshold.toFixed(1);
-      } else {
-        scoreText.textContent = score.toFixed(2) + ' / ' + threshold.toFixed(1);
-      }
-    }
-    if (scoreBar) {
-      // 片側の最大値: threshold * 1.5（スケーリング用）
-      const maxHalf = threshold * 1.5;
-      // HOLD時はbuy/sellスコアの大きい方で方向を決定
-      let barDir = dir;
-      let barScore = score;
-      if (dir === 'HOLD' && (buyScore > 0 || sellScore > 0)) {
-        barDir = buyScore >= sellScore ? 'BUY' : 'SELL';
-        barScore = Math.max(buyScore, sellScore);
-      }
-      // スコアの割合（0〜50%の範囲にマップ）
-      const halfPct = Math.min(50, (barScore / maxHalf) * 50);
-      // BUY: 中央から右へ、SELL: 中央から左へ
-      if (barDir === 'BUY') {
-        scoreBar.style.left = '50%';
-        scoreBar.style.width = halfPct + '%';
-      } else if (barDir === 'SELL') {
-        scoreBar.style.left = (50 - halfPct) + '%';
-        scoreBar.style.width = halfPct + '%';
-      } else {
-        scoreBar.style.left = '50%';
-        scoreBar.style.width = '0%';
-      }
-      // BUY/SELL確定: 閾値超えで鮮やか、未達で暗め
-      // HOLD: グレー系で方向傾向を表示
-      let barColor;
-      if (dir === 'BUY') {
-        barColor = score >= threshold ? 'bg-green-500' : score >= threshold * 0.7 ? 'bg-green-700' : 'bg-gray-500';
-      } else if (dir === 'SELL') {
-        barColor = score >= threshold ? 'bg-red-500' : score >= threshold * 0.7 ? 'bg-red-700' : 'bg-gray-500';
-      } else {
-        barColor = 'bg-gray-500';
-      }
-      // 中央起点のバー: 外側の端のみ丸め、中央側は角を立てる
-      const roundedCls = barDir === 'BUY' ? 'rounded-r-full' : barDir === 'SELL' ? 'rounded-l-full' : 'rounded-full';
-      scoreBar.className = 'absolute top-0 h-full ' + roundedCls + ' transition-all duration-500 ' + barColor;
-    }
-    // 閾値マーカー（左右対称に配置）
-    if (thSell || thBuy) {
-      const maxHalf = threshold * 1.5;
-      const thHalfPct = Math.min(49, (threshold / maxHalf) * 50);
-      if (thSell) thSell.style.left = (50 - thHalfPct) + '%';
-      if (thBuy) thBuy.style.left = (50 + thHalfPct) + '%';
-    }
-
-    // サブ指標
-    const htfEl = document.getElementById('ap-htf');
-    const trendEl = document.getElementById('ap-trend');
-    const penaltyEl = document.getElementById('ap-penalty');
-    if (htfEl) {
-      const htfPct = (a.htf_alignment * 100).toFixed(0) + '%';
-      htfEl.textContent = htfPct;
-      htfEl.className = 'font-bold tabular-nums ' + (a.htf_alignment >= 0.6 ? 'text-green-400' : a.htf_alignment >= 0.3 ? 'text-yellow-400' : 'text-red-400');
-    }
-    if (trendEl) {
-      trendEl.textContent = (a.trend_strength || 0).toFixed(2);
-      trendEl.className = 'font-bold tabular-nums ' + (a.trend_strength >= 0.5 ? 'text-green-400' : 'text-gray-300');
-    }
-    if (penaltyEl) {
-      penaltyEl.textContent = (a.penalty_total || 0).toFixed(2);
-      penaltyEl.className = 'font-bold tabular-nums ' + (a.penalty_total >= 0.5 ? 'text-red-400' : 'text-gray-300');
-    }
-
-    // 時間足スコア（コンセンサス詳細表示）
-    const tfEl = document.getElementById('ap-tf-scores');
-    if (tfEl && a.tf_scores) {
-      const tfOrder = ['M1', 'M5', 'M15', 'M30', 'H1', 'H4', 'H8', 'D1'];
-      // tfOrderを基準に全TFを列挙。データなしはnull（グレー表示用）
-      const tfs = tfOrder.map(tf => [tf, a.tf_scores[tf] ?? null]);
-      const bd = a.tf_breakdowns || {};
-      const aligned = a.aligned_tfs || [];
-
-      // TF方向をバックエンドから直接取得（tf_directionsが優先）
-      const tfDirsRaw = a.tf_directions || {};
-      const tfDirs = {};
-      for (const [tf] of tfs) {
-        tfDirs[tf] = tfDirsRaw[tf] || 'HOLD';
-      }
-
-      // コンセンサス投票サマリー（データあるTFのみカウント）
-      let buyCount = 0, sellCount = 0, holdCount = 0;
-      for (const [tf, sc] of tfs) {
-        if (sc === null) continue;
-        if (tfDirs[tf] === 'BUY') buyCount++;
-        else if (tfDirs[tf] === 'SELL') sellCount++;
-        else holdCount++;
-      }
-      const total = buyCount + sellCount + holdCount;
-      const buyPct = total > 0 ? (buyCount / total * 100) : 0;
-      const sellPct = total > 0 ? (sellCount / total * 100) : 0;
-      const holdPct = total > 0 ? (holdCount / total * 100) : 0;
-
-      // ペナルティ内訳（バー可視化）
-      const pb = a.penalty_breakdown || {};
-      const penaltyLabel = {
-        high_spread: 'SPR', off_hours: 'HRS',
-        low_volatility: 'VOL↓', high_volatility: 'VOL↑',
-        recent_loss: 'LOSS', mtf_conflict: 'MTF', weak_trend: 'TRD',
-      };
-      // 全ペナルティ項目を固定順で表示（値0も含む）
-      const penaltyItems = Object.keys(penaltyLabel).map(k => [k, pb[k] || 0]);
-      const penaltyTotal = a.penalty_total || 0;
-      const penaltyBarW = Math.min(100, Math.round(penaltyTotal / 0.5 * 100));
-      const penaltyBorderCls = penaltyTotal > 0 ? 'border-red-700/50 bg-red-900/10' : 'border-gray-700 bg-gray-800/60';
-      const penaltyScColor = penaltyTotal > 0 ? 'text-red-400' : 'text-gray-500';
-      const penaltyCardHtml = `<div class="rounded border ${penaltyBorderCls} px-2 py-1.5">
-          <div class="flex items-center justify-between mb-0.5">
-            <span class="text-[10px] text-gray-400 uppercase font-bold">PEN</span>
-            <span class="text-xs font-bold tabular-nums ${penaltyScColor}">-${penaltyTotal.toFixed(2)}</span>
-          </div>
-          <div class="w-full bg-gray-700/50 rounded-full h-1 mb-1">
-            <div class="bg-red-500/60 h-1 rounded-full" style="width:${penaltyBarW}%"></div>
-          </div>
-          <div class="hidden xl:block space-y-0.5">
-            ${penaltyItems.map(([k, v]) => {
-              const lbl = penaltyLabel[k];
-              const c = v > 0 ? 'text-red-400' : 'text-gray-600';
-              const w = Math.min(100, Math.round(v / 0.25 * 100));
-              const valText = v > 0 ? `-${v.toFixed(2)}` : '0';
-              return `<div class="flex items-center gap-1">
-                <span class="text-[8px] text-gray-500 w-7 text-right flex-shrink-0">${lbl}</span>
-                <div class="flex-1 h-1 bg-gray-700/40 rounded-full overflow-hidden">
-                  <div class="bg-red-500/40 h-full rounded-full" style="width:${w}%"></div>
-                </div>
-                <span class="text-[9px] tabular-nums ${c} w-8 text-right flex-shrink-0">${valText}</span>
-              </div>`;
-            }).join('')}
-          </div>
-        </div>`;
-
-      // 投票サマリーバー
-      const summaryHtml = `
-        <div class="mb-2">
-          <div class="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] mb-1">
-            <span class="text-gray-500">Vote:</span>
-            <span class="text-green-400 font-bold">${buyCount} BUY</span>
-            <span class="text-gray-500">|</span>
-            <span class="text-red-400 font-bold">${sellCount} SELL</span>
-            <span class="text-gray-500">|</span>
-            <span class="text-gray-400">${holdCount} HOLD</span>
-            <span class="text-gray-500 ml-auto">${a.regime || '--'}</span>
-          </div>
-          <div class="w-full h-1.5 rounded-full overflow-hidden flex">
-            <div class="bg-green-500/70 h-full" style="width:${buyPct}%"></div>
-            <div class="bg-gray-600/50 h-full" style="width:${holdPct}%"></div>
-            <div class="bg-red-500/70 h-full" style="width:${sellPct}%"></div>
-          </div>
-        </div>`;
-
-      // 指標ラベル（短縮名）
-      const indLabel = {
-        trend: 'TRD', adx: 'ADX', rsi: 'RSI',
-        macd_slope: 'MACD', divergence: 'DIV',
-        ema_cross: 'EMA', stochastic: 'STO', htf: 'HTF',
-      };
-
-      // TFカード
-      const cardsHtml = tfs.map(([tf, sc]) => {
-        // データなし: 通常カードと同じ構造でN/A表示（ダークモード対応グレー）
-        if (sc === null) {
-          const naIndKeys = ['trend', 'adx', 'rsi', 'macd_slope', 'divergence', 'ema_cross', 'stochastic', 'htf'];
-          const naDetailHtml = naIndKeys.map(k => {
-            const lbl = indLabel[k] || k.slice(0, 4).toUpperCase();
-            return `<div class="flex items-center gap-1">
-              <span class="text-[8px] text-gray-500 w-7 text-right flex-shrink-0">${lbl}</span>
-              <div class="flex-1 h-1 bg-gray-600/30 rounded-full overflow-hidden"></div>
-              <span class="text-[9px] tabular-nums text-gray-500 w-6 text-right flex-shrink-0">--</span>
-            </div>`;
-          }).join('');
-          return `<div class="rounded border border-gray-600 bg-gray-700/30 px-2 py-1.5">
-            <div class="flex items-center justify-between mb-0.5">
-              <div class="flex items-center">
-                <span class="text-gray-500 text-[10px] mr-1">&#9644;</span>
-                <span class="text-[10px] text-gray-400 uppercase font-bold">${tf}</span>
-              </div>
-              <span class="text-xs font-bold tabular-nums text-gray-500">N/A</span>
-            </div>
-            <div class="w-full bg-gray-600/40 rounded-full h-1 mb-1"></div>
-            <div class="hidden xl:block space-y-0.5">${naDetailHtml}</div>
-          </div>`;
-        }
-        const isAligned = aligned.includes(tf);
-        const dir = tfDirs[tf];
-        const dirIcon = dir === 'BUY' ? '&#9650;' : dir === 'SELL' ? '&#9660;' : '&#9644;';
-        const dirColor = dir === 'BUY' ? 'text-green-400' : dir === 'SELL' ? 'text-red-400' : 'text-gray-500';
-        const borderCls = isAligned
-          ? (dir === 'SELL' ? 'border-red-600/60 bg-red-900/10' : 'border-green-600/60 bg-green-900/10')
-          : 'border-gray-700 bg-gray-800/60';
-        const alignBadge = isAligned
-          ? `<span class="text-[8px] ${dir === 'SELL' ? 'text-red-400' : 'text-green-400'} font-bold ml-1">&#10003;</span>`
-          : '';
-        const scColor = sc > 0.5 ? 'text-green-400' : sc > 0.2 ? 'text-yellow-400' : 'text-gray-500';
-        const barW = Math.min(100, sc * 100);
-        const barColor = dir === 'BUY' ? 'bg-green-500/60' : dir === 'SELL' ? 'bg-red-500/60' : 'bg-gray-500/40';
-
-        // 内訳（全指標を固定順で表示）
-        const detail = bd[tf];
-        let detailHtml = '';
-        if (detail) {
-          const indKeys = ['trend', 'adx', 'rsi', 'macd_slope', 'divergence', 'ema_cross', 'stochastic', 'htf'];
-          const items = indKeys.map(k => [k, detail[k] || 0]);
-          const maxAbs = Math.max(...items.map(([, v]) => Math.abs(v)), 0.1);
-          detailHtml = items.map(([k, v]) => {
-            const c = v > 0 ? 'text-green-400' : v < 0 ? 'text-red-400' : 'text-gray-600';
-            const bg = v > 0 ? 'bg-green-500/40' : 'bg-red-500/40';
-            const w = Math.round(Math.abs(v) / maxAbs * 100);
-            const lbl = indLabel[k] || k.slice(0, 4).toUpperCase();
-            return `<div class="flex items-center gap-1">
-              <span class="text-[8px] text-gray-500 w-7 text-right flex-shrink-0">${lbl}</span>
-              <div class="flex-1 h-1 bg-gray-700/40 rounded-full overflow-hidden">
-                <div class="${bg} h-full rounded-full" style="width:${w}%"></div>
-              </div>
-              <span class="text-[9px] tabular-nums ${c} w-6 text-right flex-shrink-0">${v >= 0 ? '+' : ''}${v.toFixed(1)}</span>
-            </div>`;
-          }).join('');
-        }
-
-        return `<div class="rounded border ${borderCls} px-2 py-1.5">
-          <div class="flex items-center justify-between mb-0.5">
-            <div class="flex items-center">
-              <span class="${dirColor} text-[10px] mr-1">${dirIcon}</span>
-              <span class="text-[10px] text-gray-400 uppercase font-bold">${tf}</span>
-              ${alignBadge}
-            </div>
-            <span class="text-xs font-bold tabular-nums ${scColor}">${sc.toFixed(2)}</span>
-          </div>
-          <div class="w-full bg-gray-700/50 rounded-full h-1 mb-1">
-            <div class="${barColor} h-1 rounded-full" style="width:${barW}%"></div>
-          </div>
-          ${detailHtml ? `<div class="hidden xl:block space-y-0.5">${detailHtml}</div>` : ''}
-        </div>`;
-      }).join('');
-
-      tfEl.innerHTML = `<div class="w-full">${summaryHtml}</div>` + `<div class="grid grid-cols-3 sm:grid-cols-5 lg:grid-cols-9 gap-1.5 mt-2">${cardsHtml}${penaltyCardHtml}</div>`;
-    }
-
-  },
-
-  // ── トレーディングコントロール ──
-
-  /** トレーディングコントロール初期化 */
-  initTradingControl() {
-    const settingsMt5Btn = document.getElementById('settings-mt5-btn');
-    const trigger = document.getElementById('symbol-dropdown-trigger');
-
-    if (settingsMt5Btn) {
-      settingsMt5Btn.addEventListener('click', () => this.handleMT5Toggle());
-    }
-    if (trigger) {
-      trigger.addEventListener('click', (e) => {
-        e.stopPropagation();
-        const list = document.getElementById('symbol-dropdown-list');
-        if (list) list.classList.toggle('hidden');
-      });
-    }
-  },
-
-  /** トレーディングモード取得 */
-  async fetchTradingMode() {
-    try {
-      this.tradingMode = await getTradingMode();
-    } catch (e) {
-      this.tradingMode = null;
-    }
-    // ユーザー操作中は再描画をスキップ
-    if (!this.tcBusy) {
-      this.renderTradingControl();
-    }
-    this.renderAnalysis();
-  },
-
-  /** MT5接続/切断トグル */
-  async handleMT5Toggle() {
-    if (this.tcBusy) return;
-    const isConnected = this.tradingMode && this.tradingMode.connected;
-
-    // 切断時は確認
-    if (isConnected) {
-      if (!confirm('MT5から切断しますか？')) return;
-    }
-
-    this.tcBusy = true;
-    try {
-      this.renderTradingControl();
-      if (isConnected) {
-        await disconnectMT5();
-      } else {
-        await connectMT5();
-      }
-      await this.fetchTradingMode();
-    } catch (e) {
-      console.error('MT5操作エラー:', e);
-    } finally {
-      this.tcBusy = false;
-      this.renderTradingControl();
-    }
-  },
-
-  /** トレーディングコントロール描画 */
-  renderTradingControl() {
-    const mt5Badge = document.getElementById('tc-mt5-badge');
-    const mt5Btn = document.getElementById('settings-mt5-btn');
-    if (!mt5Badge) return;
-
-    const m = this.tradingMode;
-    const isLive = m && m.mode === 'live';
-    const isConnected = m && m.connected;
-
-    // MT5接続バッジ（楕円型・ロゴ横）
-    if (isConnected) {
-      mt5Badge.className = 'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-green-900/30 text-green-400 border border-green-800/50';
-      mt5Badge.innerHTML = '<span class="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse"></span>MT5';
-    } else if (isLive) {
-      mt5Badge.className = 'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-yellow-900/30 text-yellow-400 border border-yellow-800/50';
-      mt5Badge.innerHTML = '<span class="w-1.5 h-1.5 rounded-full bg-yellow-500"></span>MT5';
-    } else {
-      mt5Badge.className = 'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-gray-700/80 text-gray-400 border border-gray-700/50';
-      mt5Badge.innerHTML = '<span class="w-1.5 h-1.5 rounded-full bg-gray-500"></span>MT5';
-    }
-
-    // 設定モーダル内MT5ボタン（通常サイズ）
-    const btnBase = 'px-4 py-2 rounded text-sm font-semibold transition-all';
-    if (mt5Btn) {
-      if (this.tcBusy) {
-        mt5Btn.disabled = true;
-        mt5Btn.textContent = '処理中...';
-        mt5Btn.className = btnBase + ' bg-gray-700 text-gray-500 cursor-not-allowed';
-      } else if (isConnected) {
-        mt5Btn.disabled = false;
-        mt5Btn.textContent = 'MT5 切断';
-        mt5Btn.className = btnBase + ' bg-gray-600 text-gray-200 hover:bg-gray-500';
-      } else {
-        mt5Btn.disabled = false;
-        mt5Btn.textContent = 'MT5 接続';
-        mt5Btn.className = btnBase + ' bg-blue-600 text-white hover:bg-blue-700';
-      }
-    }
-
-    // ドロップダウン内にAUTO/DEMOボタンを描画
-    this.renderSymbolDropdown();
-
-    // ヘッダー口座名表示
-    this.updateHeaderAccountName();
-  },
-
-  /** ドロップダウンが開いているか */
-  _isDropdownOpen() {
-    const list = document.getElementById('symbol-dropdown-list');
-    return list && !list.classList.contains('hidden');
-  },
-
-  /** カスタムシンボルドロップダウン描画
-   * @param {boolean} force - true: 展開中でもリスト再構築（ユーザー操作後）
-   */
-  renderSymbolDropdown(force) {
-    // グループ定義
-    const symbolGroups = [
-      {
-        label: 'USD ペア',
-        pairs: ['EURUSD', 'GBPUSD', 'AUDUSD', 'NZDUSD', 'USDCHF', 'USDCAD'],
-      },
-      {
-        label: 'JPY ペア',
-        pairs: ['USDJPY', 'EURJPY', 'GBPJPY', 'AUDJPY', 'CADJPY', 'CHFJPY'],
-      },
-    ];
-    const m = this.tradingMode;
-    const isConnected = m && m.connected;
-    const symbolAutoStates = (m && m.symbol_auto_trade) || {};
-    const symbolDemoStates = (m && m.symbol_demo_mode) || {};
-
-    /** 各ペアのモード情報を返す */
-    const getPairMode = (pair) => {
-      const autoOn = Object.prototype.hasOwnProperty.call(symbolAutoStates, pair)
-        ? symbolAutoStates[pair] : false;
-      const demoOn = Object.prototype.hasOwnProperty.call(symbolDemoStates, pair)
-        ? symbolDemoStates[pair] : false;
-      if (!isConnected) return { label: '未接続', dotCls: 'bg-gray-600', textCls: 'text-gray-500', pulse: false };
-      if (autoOn && !demoOn) return { label: 'リアル', dotCls: 'bg-green-500', textCls: 'text-green-400', pulse: true };
-      if (autoOn && demoOn) return { label: 'デモ', dotCls: 'bg-orange-400', textCls: 'text-orange-400', pulse: true };
-      return { label: '待機', dotCls: 'bg-gray-500', textCls: 'text-gray-500', pulse: false };
+  subscribe(channel, handler) {
+    if (!this._subs[channel]) this._subs[channel] = [];
+    const id = ++this._nextId;
+    this._subs[channel].push({ handler, id });
+    return () => {
+      const arr = this._subs[channel];
+      if (arr) this._subs[channel] = arr.filter(s => s.id !== id);
     };
+  }
 
-    // トリガーボタンは常に更新（ヘッダー表示なので軽量）
-    const curMode = getPairMode(this.symbol);
-    const trigDot = document.getElementById('symbol-trigger-dot');
-    const trigLabel = document.getElementById('symbol-trigger-label');
-    const trigMode = document.getElementById('symbol-trigger-mode');
-    if (trigDot) trigDot.className = `w-1.5 h-1.5 rounded-full flex-shrink-0 ${curMode.dotCls}${curMode.pulse ? ' animate-pulse' : ''}`;
-    if (trigLabel) trigLabel.textContent = this.symbol;
-    if (trigMode) {
-      trigMode.textContent = curMode.label;
-      trigMode.className = `font-normal inline-block w-[2.5rem] ${curMode.textCls}`;
-    }
+  publish(channel, data) {
+    this._store[channel] = data;
+    const subs = this._subs[channel];
+    if (subs) subs.forEach(s => s.handler(data));
+  }
 
-    // ドロップダウン展開中: forceでなければリスト再構築をスキップ
-    const list = document.getElementById('symbol-dropdown-list');
-    if (!list) return;
-    if (this._isDropdownOpen() && !force) return;
+  get(channel) {
+    return this._store[channel];
+  }
+}
 
-    /** ペア1件分のHTML（AUTO/DEMOトグル付き） */
-    const renderPairItem = (pair) => {
-      const mode = getPairMode(pair);
-      const isSelected = pair === this.symbol;
-      const selectedCls = isSelected ? 'bg-gray-700/60' : '';
-      const pulseAttr = mode.pulse ? ' animate-pulse' : '';
-      const autoOn = Object.prototype.hasOwnProperty.call(symbolAutoStates, pair) ? symbolAutoStates[pair] : false;
-      const demoOn = Object.prototype.hasOwnProperty.call(symbolDemoStates, pair) ? symbolDemoStates[pair] : false;
+// ── Component 基底クラス ──
 
-      // AUTO/DEMOトグルボタン（MT5接続時のみ有効）
-      let toggleHtml = '';
-      if (isConnected) {
-        const demoCls = demoOn
-          ? 'bg-orange-500/25 text-orange-400 border border-orange-600/50 hover:bg-orange-500/40'
-          : 'bg-gray-700/80 text-gray-500 border border-gray-600/50 hover:bg-gray-600/80 hover:text-gray-300';
-        const autoCls = autoOn
-          ? (demoOn ? 'bg-orange-600 text-white hover:bg-orange-700' : 'bg-red-600 text-white hover:bg-red-700')
-          : 'bg-green-600/90 text-white hover:bg-green-700';
-        const autoLabel = autoOn ? 'ON' : 'OFF';
-        toggleHtml = `<div class="flex items-center gap-1 flex-shrink-0 ml-auto">
-          <button data-action="demo" data-symbol="${pair}"
-                  class="px-1.5 py-0.5 rounded text-[10px] font-bold transition-all ${demoCls}" title="デモモード">DEMO</button>
-          <button data-action="auto" data-symbol="${pair}"
-                  class="px-2 py-0.5 rounded text-[10px] font-bold transition-all min-w-[2rem] ${autoCls}" title="自動トレード">${autoLabel}</button>
-        </div>`;
-      }
+class Component {
+  constructor(rootId, dataFlow) {
+    this._rootId = rootId;
+    this._dataFlow = dataFlow;
+    this._unsubs = [];
+  }
 
-      return `<div class="dd-pair-row flex items-center gap-2 px-3 py-2 hover:bg-gray-700/50 cursor-pointer transition-colors select-none ${selectedCls}" data-pair="${pair}">
-        <span class="w-2 h-2 rounded-full flex-shrink-0 ${mode.dotCls}${pulseAttr}"></span>
-        <span class="font-semibold text-xs text-gray-200 tabular-nums">${pair}</span>
-        <span class="text-[10px] ${mode.textCls}">${mode.label}</span>
-        ${toggleHtml}
-        ${isSelected ? '<svg class="w-3 h-3 text-blue-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>' : ''}
-      </div>`;
-    };
+  get root() {
+    return document.getElementById(this._rootId);
+  }
 
-    list.innerHTML = symbolGroups.map((group, groupIdx) => {
-      const divider = groupIdx > 0
-        ? '<div class="border-t border-gray-700/60 my-1"></div>'
-        : '';
-      const header = `<div class="px-3 pt-1.5 pb-0.5 text-[10px] font-semibold text-gray-500 uppercase tracking-wider">${group.label}</div>`;
-      return divider + header + group.pairs.map(renderPairItem).join('');
-    }).join('');
+  subscribe(channel, handler) {
+    this._unsubs.push(this._dataFlow.subscribe(channel, handler.bind(this)));
+  }
 
-    // イベント委任（バブリング問題を回避）
-    list.onclick = (e) => {
-      // AUTO/DEMOボタンクリック
-      const btn = e.target.closest('[data-action]');
-      if (btn) {
-        e.stopPropagation();
-        const action = btn.dataset.action;
-        const symbol = btn.dataset.symbol;
-        if (action === 'demo') this.handleDropdownDemoToggle(symbol);
-        else if (action === 'auto') this.handleDropdownAutoToggle(symbol);
-        return;
-      }
-      // ペア行クリック（シンボル選択）
-      const row = e.target.closest('.dd-pair-row');
-      if (row) {
-        this.selectSymbol(row.dataset.pair);
-      }
-    };
-  },
+  _getCurrency() {
+    const d = this._dataFlow.get('dashboard');
+    return (d && d.account && d.account.currency) || 'JPY';
+  }
 
-  /** シンボル選択（カスタムドロップダウンから呼ぶ） */
-  async selectSymbol(symbol) {
-    this.symbol = symbol;
-    localStorage.setItem('chart_symbol', symbol);
-    // 非表示ネイティブselectも同期
-    const sel = document.getElementById('symbol-selector');
-    if (sel) sel.value = symbol;
-    // chart-titleも更新
-    const chartTitle = document.getElementById('chart-title');
-    if (chartTitle) chartTitle.textContent = symbol + ' チャート';
-    ChartManager.setSymbol(symbol);
-    // ドロップダウンを閉じる
-    const list = document.getElementById('symbol-dropdown-list');
-    if (list) list.classList.add('hidden');
-    // ファンダメンタルは即座に更新（エンジン確保を待たない）
-    if (typeof FundamentalWidget !== 'undefined') {
-      FundamentalWidget.changeSymbol(symbol);
-    }
-    // エンジン確保（なければ自動作成）
-    try {
-      await ensureSymbolEngine(symbol);
-    } catch (e) {
-      // エンジン作成失敗でもデータ取得は続行
-    }
-    // 前シンボルの分析データをクリアして再取得
-    this.lastAnalysis = null;
-    this.renderAnalysis();
-    this.fetchAnalysis();
-    this.renderTradingControl();
-    this.fetchAll();
-  },
+  mount() { /* override */ }
 
-  /** シンボルごとの自動トレードON/OFFトグル */
-  async handleSymbolAutoTradeToggle(symbol) {
-    if (this.tcBusy) return;
-    const m = this.tradingMode;
-    const symbolStates = (m && m.symbol_auto_trade) || {};
-    const currentOn = Object.prototype.hasOwnProperty.call(symbolStates, symbol)
-      ? symbolStates[symbol]
-      : false;
-    const nextOn = !currentOn;
+  destroy() {
+    this._unsubs.forEach(fn => fn());
+    this._unsubs = [];
+  }
+}
 
-    this.tcBusy = true;
-    try {
-      this.renderTradingControl();
-      const result = await toggleSymbolAutoTrade(symbol, nextOn);
-      if (result) this.tradingMode = result;
-    } catch (e) {
-      console.error(symbol + ' 自動トレード切替エラー:', e);
-    } finally {
-      this.tcBusy = false;
-      this.renderTradingControl();
-    }
-  },
+// ── MetricsStrip ──
 
-  /** ドロップダウン内DEMOトグル */
-  async handleDropdownDemoToggle(symbol) {
-    if (this.tcBusy) return;
-    const m = this.tradingMode;
-    const symbolDemoStates = (m && m.symbol_demo_mode) || {};
-    const currentOn = Object.prototype.hasOwnProperty.call(symbolDemoStates, symbol)
-      ? symbolDemoStates[symbol] : false;
+class MetricsStrip extends Component {
+  constructor(dataFlow) {
+    super('metrics-strip', dataFlow);
+    this._initialized = false;
+  }
 
-    this.tcBusy = true;
-    try {
-      const result = await toggleSymbolDemoMode(symbol, !currentOn);
-      if (result) this.tradingMode = result;
-    } catch (e) {
-      console.error(symbol + ' デモモード切替エラー:', e);
-    } finally {
-      this.tcBusy = false;
-      // ドロップダウン内ボタンを即時反映
-      this.renderSymbolDropdown(true);
-      this.fetchAnalysis();
-    }
-  },
+  mount() {
+    this.subscribe('dashboard', () => this._updateDashboardCards());
+    this.subscribe('positions', () => this._updatePositionCard());
+  }
 
-  /** ドロップダウン内AUTOトグル */
-  async handleDropdownAutoToggle(symbol) {
-    if (this.tcBusy) return;
-    const m = this.tradingMode;
-    const symbolAutoStates = (m && m.symbol_auto_trade) || {};
-    const symbolDemoStates = (m && m.symbol_demo_mode) || {};
-    const currentOn = Object.prototype.hasOwnProperty.call(symbolAutoStates, symbol)
-      ? symbolAutoStates[symbol] : false;
-    const isDemoOn = Object.prototype.hasOwnProperty.call(symbolDemoStates, symbol)
-      ? symbolDemoStates[symbol] : false;
-    const nextOn = !currentOn;
-
-    // リアルモードでONにする際は確認
-    if (nextOn && !isDemoOn) {
-      if (!confirm(`${symbol} の自動トレード（リアルモード）を開始しますか？\n実際の売買が実行されます。`)) return;
-    }
-
-    this.tcBusy = true;
-    try {
-      const result = await toggleSymbolAutoTrade(symbol, nextOn);
-      if (result) this.tradingMode = result;
-    } catch (e) {
-      console.error(symbol + ' 自動トレード切替エラー:', e);
-    } finally {
-      this.tcBusy = false;
-      // ドロップダウン内ボタンを即時反映
-      this.renderSymbolDropdown(true);
-    }
-  },
-
-  /** ヘッダー口座名を更新 */
-  updateHeaderAccountName() {
-    const el = document.getElementById('header-account-name');
-    if (!el) return;
-
-    const m = this.tradingMode;
-    const isConnected = m && m.connected;
-    const acct = isConnected && this.dashboard && this.dashboard.account
-      ? this.dashboard.account
-      : null;
-
-    if (!acct) {
-      el.classList.add('hidden');
-      return;
-    }
-
-    const nick = (typeof SettingsManager !== 'undefined')
-      ? SettingsManager.getNickname(acct.login)
-      : '';
-    el.textContent = nick || '#' + acct.login;
-    el.classList.remove('hidden');
-  },
-
-  /** trade_idキャッシュをREST取得結果で同期 */
-  _syncTradeIdCache() {
-    const active = new Set();
-    for (const p of this.positions) {
-      if (p.trade_id) this._tradeIdCache[p.ticket] = p.trade_id;
-      active.add(p.ticket);
-    }
-    // 決済済みポジションのキャッシュを除去
-    for (const ticket of Object.keys(this._tradeIdCache)) {
-      if (!active.has(Number(ticket))) delete this._tradeIdCache[ticket];
-    }
-  },
-
-  /** ポジション・トレード・サマリを即時取得（WebSocket position_update時） */
-  async fetchPositionsAndTrades() {
-    const [dash, pos, tr, summary] = await Promise.allSettled([
-      getDashboard(),
-      getPositions(null),
-      getTrades(null, 100),
-      getTradeSummary(null, 30),
-    ]);
-    if (dash.status === 'fulfilled') this.dashboard = dash.value;
-    if (pos.status === 'fulfilled') this.positions = pos.value;
-    if (tr.status === 'fulfilled') this.trades = tr.value;
-    if (summary.status === 'fulfilled') this.tradeSummary = summary.value;
-    this._syncTradeIdCache();
-    this.renderMetrics();
-    this.renderPositions();
-    this.renderTradeHistory();
-  },
-
-  /** 全データ取得 */
-  async fetchAll() {
-    const [dash, pos, tr, summary] = await Promise.allSettled([
-      getDashboard(),
-      getPositions(null),
-      getTrades(null, 100),
-      getTradeSummary(null, 30),
-    ]);
-    if (dash.status === 'fulfilled') this.dashboard = dash.value;
-    if (pos.status === 'fulfilled') this.positions = pos.value;
-    if (tr.status === 'fulfilled') this.trades = tr.value;
-    if (summary.status === 'fulfilled') this.tradeSummary = summary.value;
-    this._syncTradeIdCache();
-    this.isLoading = false;
-    this.renderMetrics();
-    this.renderPositions();
-    this.renderTradeHistory();
-  },
-
-  // ── 描画メソッド ──
-
-  /** メトリクスストリップ */
-  renderMetrics() {
-    const el = document.getElementById('metrics-strip');
-    if (!el) return;
-
-    if (!this.dashboard) {
-      el.innerHTML = '<div class="card"><p class="text-gray-400 text-sm">口座データ取得中...</p></div>';
-      return;
-    }
-
-    const d = this.dashboard;
+  _getCards() {
+    const d = this._dataFlow.get('dashboard');
+    if (!d) return null;
     const a = d.account;
-
+    const c = this._getCurrency();
     const wp = d.weekly_pnl || 0;
     const mp = d.monthly_pnl || 0;
     const tp = d.total_pnl || 0;
     const tt = d.total_trades || 0;
-
-    // 各カードのデータ定義
-    const cards = [
-      { id: 'mc-balance', label: '残高', value: this.fmtCurrency(a.balance),
-        sub: '有効証拠金: ' + this.fmtCurrency(a.equity), variant: 'neutral' },
+    return [
+      { id: 'mc-balance', label: '残高', value: fmtCurrency(a.balance, c),
+        sub: '有効証拠金: ' + fmtCurrency(a.equity, c), variant: 'neutral' },
       { id: 'mc-daily', label: '本日損益',
-        value: (d.daily_pnl >= 0 ? '+' : '') + this.fmtCurrency(d.daily_pnl),
+        value: (d.daily_pnl >= 0 ? '+' : '') + fmtCurrency(d.daily_pnl, c),
         sub: (d.daily_pnl_pct >= 0 ? '+' : '') + d.daily_pnl_pct.toFixed(2) + '%',
         variant: d.daily_pnl >= 0 ? 'profit' : 'loss' },
       { id: 'mc-weekly', label: '週間/月間',
-        value: (wp >= 0 ? '+' : '') + this.fmtCurrency(wp),
-        sub: '月間: ' + (mp >= 0 ? '+' : '') + this.fmtCurrency(mp),
+        value: (wp >= 0 ? '+' : '') + fmtCurrency(wp, c),
+        sub: '月間: ' + (mp >= 0 ? '+' : '') + fmtCurrency(mp, c),
         variant: wp >= 0 ? 'profit' : 'loss' },
       { id: 'mc-total', label: '全履歴損益',
-        value: (tp >= 0 ? '+' : '') + this.fmtCurrency(tp),
+        value: (tp >= 0 ? '+' : '') + fmtCurrency(tp, c),
         sub: tt.toLocaleString() + ' トレード',
         variant: tp >= 0 ? 'profit' : 'loss' },
       { id: 'mc-winrate', label: '勝率',
@@ -970,23 +135,78 @@ const DashboardApp = {
         variant: d.win_rate >= 55 ? 'profit' : d.win_rate >= 45 ? 'neutral' : 'loss' },
       { id: 'mc-margin', label: '証拠金維持率',
         value: a.margin_level.toFixed(0) + '%',
-        sub: '余剰: ' + this.fmtCurrency(a.free_margin),
+        sub: '余剰: ' + fmtCurrency(a.free_margin, c),
         variant: a.margin_level > 300 ? 'profit' : a.margin_level > 150 ? 'neutral' : 'loss' },
     ];
+  }
 
-    // 初回: innerHTML で構築、2回目以降: 差分更新
-    const existing = el.querySelector('[data-metric]');
-    if (!existing) {
-      // ポジションカードを証拠金の前に配置
-      const before = cards.slice(0, 5);
-      const after = cards.slice(5);
-      el.innerHTML = before.map(c => this.metricCard(c.id, c.label, c.value, c.sub, c.variant)).join('')
-        + this.positionMetricCard()
-        + after.map(c => this.metricCard(c.id, c.label, c.value, c.sub, c.variant)).join('');
+  _metricCardHtml(id, label, value, sub, variant) {
+    const valueColors = { profit: 'text-green-400', loss: 'text-red-400', neutral: 'text-gray-100' };
+    const borderColors = { profit: 'border-l-green-500/50', loss: 'border-l-red-500/50', neutral: 'border-l-gray-600' };
+    return `
+      <div class="card border-l-2 ${borderColors[variant]}" data-metric="${id}">
+        <p class="text-[10px] text-gray-400 uppercase tracking-wider mb-0.5">${label}</p>
+        <p class="text-sm font-bold tabular-nums leading-tight ${valueColors[variant]}" data-val>${value}</p>
+        <p class="text-[10px] text-gray-500 mt-0.5 tabular-nums" data-sub>${sub}</p>
+      </div>`;
+  }
+
+  _positionMetricCardHtml() {
+    const positions = this._dataFlow.get('positions') || [];
+    const totalCount = positions.length;
+    const totalProfit = positions.reduce((s, p) => s + (p.unrealized_pnl || 0), 0);
+    const variant = totalCount === 0 ? 'neutral' : (totalProfit >= 0 ? 'profit' : 'loss');
+    const borderColors = { profit: 'border-l-green-500/50', loss: 'border-l-red-500/50', neutral: 'border-l-gray-600' };
+    const valueColors = { profit: 'text-green-400', loss: 'text-red-400', neutral: 'text-gray-100' };
+    const c = this._getCurrency();
+    const pillsHtml = this._buildPositionPills(positions);
+    const profitStr = totalCount > 0
+      ? `${totalProfit >= 0 ? '+' : ''}${fmtCurrency(totalProfit, c)}`
+      : '';
+    return `
+      <div class="card border-l-2 ${borderColors[variant]}" data-metric="mc-position" style="min-height:72px">
+        <p class="text-[10px] text-gray-400 uppercase tracking-wider mb-0.5">ポジション</p>
+        <p class="text-sm font-bold tabular-nums leading-tight ${valueColors[variant]}" data-val>${totalCount} open</p>
+        <p class="text-[10px] text-gray-500 mt-0.5 tabular-nums" data-sub>${profitStr}</p>
+        <p class="flex flex-wrap gap-y-0.5 items-center mt-1 leading-none" data-pills style="min-height:14px">${pillsHtml}</p>
+      </div>`;
+  }
+
+  _buildPositionPills(positions) {
+    if (positions.length === 0) return '';
+    const bySymbol = {};
+    for (const p of positions) {
+      if (!bySymbol[p.symbol]) bySymbol[p.symbol] = { pnl: 0 };
+      bySymbol[p.symbol].pnl += (p.unrealized_pnl || 0);
+    }
+    return Object.entries(bySymbol).map(([sym, cnt]) => {
+      const arrow = cnt.pnl > 0 ? '↑' : cnt.pnl < 0 ? '↓' : '→';
+      const color = cnt.pnl > 0 ? 'text-green-400' : cnt.pnl < 0 ? 'text-red-400' : 'text-gray-400';
+      return `<span class="inline-flex items-center gap-0.5 ${color} text-[10px] font-medium">${sym}<span>${arrow}</span></span>`;
+    }).join('<span class="text-gray-700 mx-0.5">·</span>');
+  }
+
+  /** dashboard チャネル更新 → 口座・損益カードのみ差分更新 */
+  _updateDashboardCards() {
+    const el = this.root;
+    if (!el) return;
+    const cards = this._getCards();
+    if (!cards) {
+      if (!this._initialized) {
+        el.innerHTML = '<div class="card"><p class="text-gray-400 text-sm">口座データ取得中...</p></div>';
+      }
       return;
     }
-
-    // 差分更新: 各カードの値・サブテキスト・色のみ変更
+    if (!this._initialized) {
+      const before = cards.slice(0, 5);
+      const after = cards.slice(5);
+      el.innerHTML = before.map(c => this._metricCardHtml(c.id, c.label, c.value, c.sub, c.variant)).join('')
+        + this._positionMetricCardHtml()
+        + after.map(c => this._metricCardHtml(c.id, c.label, c.value, c.sub, c.variant)).join('');
+      this._initialized = true;
+      return;
+    }
+    // 差分更新: textContent のみ（innerHTML 不使用で点滅防止）
     const valueColors = { profit: 'text-green-400', loss: 'text-red-400', neutral: 'text-gray-100' };
     const borderColors = { profit: 'border-l-green-500/50', loss: 'border-l-red-500/50', neutral: 'border-l-gray-600' };
     for (const c of cards) {
@@ -999,144 +219,105 @@ const DashboardApp = {
         valEl.className = `text-sm font-bold tabular-nums leading-tight ${valueColors[c.variant]}`;
       }
       if (subEl) subEl.textContent = c.sub;
-      // ボーダー色更新
       card.className = card.className
         .replace(/border-l-(green|red|gray)-[^\s]*/g, '')
         .replace(/\s+/g, ' ').trim()
         + ' ' + borderColors[c.variant];
     }
+  }
 
-    // ポジションカード差分更新
-    this._updatePositionMetricCard();
-  },
-
-  metricCard(id, label, value, sub, variant) {
-    const valueColors = { profit: 'text-green-400', loss: 'text-red-400', neutral: 'text-gray-100' };
-    const borderColors = { profit: 'border-l-green-500/50', loss: 'border-l-red-500/50', neutral: 'border-l-gray-600' };
-    return `
-      <div class="card border-l-2 ${borderColors[variant]}" data-metric="${id}">
-        <p class="text-[10px] text-gray-400 uppercase tracking-wider mb-0.5">${label}</p>
-        <p class="text-sm font-bold tabular-nums leading-tight ${valueColors[variant]}" data-val>${value}</p>
-        <p class="text-[10px] text-gray-500 mt-0.5 tabular-nums" data-sub>${sub}</p>
-      </div>`;
-  },
-
-  /** ポジションメトリクスカード（全通貨ペアのポジションをコンパクト表示） */
-  positionMetricCard() {
-    const positions = this.positions;
-    const totalCount = positions.length;
-    const totalProfit = positions.reduce((s, p) => s + (p.unrealized_pnl || 0), 0);
-    const variant = totalCount === 0 ? 'neutral' : (totalProfit >= 0 ? 'profit' : 'loss');
-    const borderColors = { profit: 'border-l-green-500/50', loss: 'border-l-red-500/50', neutral: 'border-l-gray-600' };
-    const valueColors = { profit: 'text-green-400', loss: 'text-red-400', neutral: 'text-gray-100' };
-
-    const pillsHtml = this._buildPositionPills();
-    const profitStr = totalCount > 0
-      ? `${totalProfit >= 0 ? '+' : ''}${this.fmtCurrency(totalProfit)}`
-      : '';
-
-    return `
-      <div class="card border-l-2 ${borderColors[variant]}" data-metric="mc-position" style="min-height:72px">
-        <p class="text-[10px] text-gray-400 uppercase tracking-wider mb-0.5">ポジション</p>
-        <p class="text-sm font-bold tabular-nums leading-tight ${valueColors[variant]}" data-val>${totalCount} open</p>
-        <p class="text-[10px] text-gray-500 mt-0.5 tabular-nums" data-sub>${profitStr}</p>
-        <p class="flex flex-wrap gap-y-0.5 items-center mt-1 leading-none" data-pills style="min-height:14px">${pillsHtml}</p>
-      </div>`;
-  },
-
-  /** ポジション通貨ペア pills のHTML生成 */
-  _buildPositionPills() {
-    const positions = this.positions;
-    if (positions.length === 0) return '';
-
-    const bySymbol = {};
-    for (const p of positions) {
-      if (!bySymbol[p.symbol]) bySymbol[p.symbol] = { pnl: 0 };
-      bySymbol[p.symbol].pnl += (p.unrealized_pnl || 0);
-    }
-    return Object.entries(bySymbol).map(([sym, cnt]) => {
-      const arrow = cnt.pnl > 0 ? '↑' : cnt.pnl < 0 ? '↓' : '→';
-      const color = cnt.pnl > 0 ? 'text-green-400' : cnt.pnl < 0 ? 'text-red-400' : 'text-gray-400';
-      return `<span class="inline-flex items-center gap-0.5 ${color} text-[10px] font-medium">${sym}<span>${arrow}</span></span>`;
-    }).join('<span class="text-gray-700 mx-0.5">·</span>');
-  },
-
-  /** ポジションメトリクスカードの差分更新 */
-  _updatePositionMetricCard() {
-    const el = document.getElementById('metrics-strip');
-    if (!el) return;
+  /** positions チャネル更新 → ポジションカードのみ差分更新 */
+  _updatePositionCard() {
+    const el = this.root;
+    if (!el || !this._initialized) return;
     const card = el.querySelector('[data-metric="mc-position"]');
     if (!card) return;
 
-    const positions = this.positions;
+    const positions = this._dataFlow.get('positions') || [];
     const totalCount = positions.length;
     const totalProfit = positions.reduce((s, p) => s + (p.unrealized_pnl || 0), 0);
     const variant = totalCount === 0 ? 'neutral' : (totalProfit >= 0 ? 'profit' : 'loss');
     const valueColors = { profit: 'text-green-400', loss: 'text-red-400', neutral: 'text-gray-100' };
     const borderColors = { profit: 'border-l-green-500/50', loss: 'border-l-red-500/50', neutral: 'border-l-gray-600' };
+    const c = this._getCurrency();
 
     const valEl = card.querySelector('[data-val]');
     const subEl = card.querySelector('[data-sub]');
     const pillsEl = card.querySelector('[data-pills]');
-
     if (valEl) {
       valEl.textContent = totalCount + ' open';
       valEl.className = `text-sm font-bold tabular-nums leading-tight ${valueColors[variant]}`;
     }
     if (subEl) {
       subEl.textContent = totalCount > 0
-        ? `${totalProfit >= 0 ? '+' : ''}${this.fmtCurrency(totalProfit)}`
+        ? `${totalProfit >= 0 ? '+' : ''}${fmtCurrency(totalProfit, c)}`
         : '';
     }
     if (pillsEl) {
-      pillsEl.innerHTML = this._buildPositionPills();
+      pillsEl.innerHTML = this._buildPositionPills(positions);
     }
-    // ボーダー色更新
     card.className = card.className
       .replace(/border-l-(green|red|gray)-[^\s]*/g, '')
       .replace(/\s+/g, ' ').trim()
       + ' ' + borderColors[variant];
-  },
+  }
+}
 
-  /** ポジション描画 */
-  renderPositions() {
-    const listEl = document.getElementById('position-list');
+// ── PositionPanel ──
+
+class PositionPanel extends Component {
+  constructor(dataFlow) {
+    super('position-list', dataFlow);
+    this._expandedPositions = new Set();
+    this._posTimeCache = {};
+    this._posTimeInterval = null;
+    this._closeVolumes = {};
+  }
+
+  mount() {
+    this.subscribe('positions', () => this._render());
+    this._posTimeInterval = setInterval(() => this._tickPositionTimers(), 60000);
+  }
+
+  destroy() {
+    super.destroy();
+    if (this._posTimeInterval) {
+      clearInterval(this._posTimeInterval);
+      this._posTimeInterval = null;
+    }
+  }
+
+  _render() {
+    const listEl = this.root;
     const countEl = document.getElementById('position-count');
     if (!listEl) return;
 
-    const displayPositions = this.positions;
+    const positions = this._dataFlow.get('positions') || [];
+    this._updatePosTimeCache(positions);
 
-    // ポジション時間キャッシュを更新（opened_at, max_hold_minutes を保持）
-    this._updatePosTimeCache(displayPositions);
+    if (countEl) countEl.textContent = positions.length > 0 ? positions.length + ' open' : 'no open';
 
-    if (countEl) countEl.textContent = displayPositions.length > 0 ? displayPositions.length + ' open' : 'no open';
-
-    if (displayPositions.length === 0) {
+    if (positions.length === 0) {
       listEl.innerHTML = '<div class="flex items-center justify-center h-16 text-gray-500 text-sm">ポジションなし</div>';
       return;
     }
 
     // 決済済みポジションの展開状態をクリーンアップ
-    const activeTickets = new Set(displayPositions.map((p) => p.ticket));
+    const activeTickets = new Set(positions.map(p => p.ticket));
     for (const t of this._expandedPositions) {
       if (!activeTickets.has(t)) this._expandedPositions.delete(t);
     }
 
-    // 差分更新: ticketセットが同じならカード内部だけ更新し、
-    // DOM構造を維持して展開状態とスクロール位置を保持する
+    // 差分更新: ticketセットが同じならカード内部だけ更新
     const existingCards = listEl.querySelectorAll('[data-ticket]');
-    const existingTickets = [...existingCards].map(
-      (el) => Number(el.dataset.ticket)
-    );
-    const newTickets = displayPositions.map((p) => p.ticket);
+    const existingTickets = [...existingCards].map(el => Number(el.dataset.ticket));
+    const newTickets = positions.map(p => p.ticket);
     const sameStructure =
       existingTickets.length === newTickets.length &&
       existingTickets.every((t, i) => t === newTickets[i]);
 
     if (sameStructure) {
-      // 構造同一: カード内部のみ更新（展開状態・スクロール保持）
-      // data-close-ui（決済UI）は触らず、data-pos-innerのみ更新
-      displayPositions.forEach((p, i) => {
+      positions.forEach((p, i) => {
         const card = existingCards[i];
         if (!card) return;
         const inner = this._positionCardInner(p, i);
@@ -1152,20 +333,14 @@ const DashboardApp = {
         }
       });
     } else {
-      // 構造変化（ポジション増減）: 全体再描画
       listEl.innerHTML =
         '<div class="space-y-2">' +
-        displayPositions
-          .map((p, i) => this.positionCard(p, i))
-          .join('') +
+        positions.map((p, i) => this._positionCard(p, i)).join('') +
         '</div>';
     }
+  }
 
-    // メトリクスストリップのポジションカードも差分更新
-    this._updatePositionMetricCard();
-  },
-
-  positionCard(p, idx) {
+  _positionCard(p, idx) {
     const isBuy = p.signal_type === 'BUY';
     const borderColor = isBuy ? 'border-l-green-500' : 'border-l-red-500';
     const inner = this._positionCardInner(p, idx);
@@ -1178,10 +353,10 @@ const DashboardApp = {
         <div data-pos-inner>${inner}</div>
         <div data-close-ui="${p.ticket}" class="${closeCls}">${this._closePositionHtml(p)}</div>
       </div>`;
-  },
+  }
 
-  /** ポジションカードの内部HTML（差分更新対応） */
   _positionCardInner(p, idx) {
+    const c = this._getCurrency();
     const isProfit = p.unrealized_pnl >= 0;
     const isBuy = p.signal_type === 'BUY';
     const dirBg = isBuy ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400';
@@ -1190,14 +365,11 @@ const DashboardApp = {
     const pnlSign = isProfit ? '+' : '';
     const digits = p.entry_price > 20 ? 3 : 5;
 
-    // SL/TP/Entry/Now の4点を可視化
     let priceRowHtml = '';
     let progressHtml = '';
     if (p.stop_loss != null && p.take_profit != null) {
       const sl = p.stop_loss, tp = p.take_profit;
       const entry = p.entry_price, now = p.current_price;
-      // エントリーを常に50%（中央）に固定し、SL/TP/Nowを
-      // エントリーからの距離で対称配置する
       const halfRange = Math.max(
         Math.abs(entry - sl), Math.abs(entry - tp),
         Math.abs(entry - now), 0.0001
@@ -1268,7 +440,7 @@ const DashboardApp = {
           </div>
           <div class="flex items-center gap-2">
             <div class="flex items-baseline gap-1 ${pnlBg} px-2 py-0.5 rounded-md">
-              <span class="text-sm font-bold tabular-nums ${pnlColor}">${pnlSign}${this.fmtCurrency(p.unrealized_pnl)}</span>
+              <span class="text-sm font-bold tabular-nums ${pnlColor}">${pnlSign}${fmtCurrency(p.unrealized_pnl, c)}</span>
               <span class="text-[10px] tabular-nums ${pnlColor} opacity-70">${pnlSign}${p.unrealized_pnl_pips.toFixed(1)}p</span>
             </div>
             <span id="${arrowId}" class="text-base text-gray-400">${arrowChar}</span>
@@ -1279,9 +451,8 @@ const DashboardApp = {
           ${priceRowHtml}
           ${p.trade_id ? `<div class="mt-1 text-[9px] text-gray-700 tabular-nums truncate">ID: ${p.trade_id}</div>` : ''}
         </div>`;
-  },
+  }
 
-  /** 決済UIのHTML生成 */
   _closePositionHtml(p) {
     const vol = p.volume;
     const pct25 = Math.max(0.01, Math.round(vol * 0.25 * 100) / 100);
@@ -1306,15 +477,27 @@ const DashboardApp = {
             onclick="DashboardApp.closePosition(${p.ticket}, null)">全決済</button>
         </div>
       </div>`;
-  },
+  }
 
-  /** 選択中の部分決済ボリューム */
-  _closeVolumes: {},
+  togglePositionDetail(detailId, arrowId, ticket) {
+    const detail = document.getElementById(detailId);
+    const arrow = document.getElementById(arrowId);
+    if (!detail) return;
+    const isHidden = detail.classList.toggle('hidden');
+    if (arrow) arrow.textContent = isHidden ? '▸' : '▾';
+    if (ticket != null) {
+      const closeUi = document.querySelector(`[data-close-ui="${ticket}"]`);
+      if (closeUi) {
+        if (isHidden) closeUi.classList.add('hidden');
+        else closeUi.classList.remove('hidden');
+      }
+      if (isHidden) this._expandedPositions.delete(ticket);
+      else this._expandedPositions.add(ticket);
+    }
+  }
 
-  /** 部分決済比率の選択 */
   _selectClosePct(ticket, volume, btn) {
     this._closeVolumes[ticket] = volume;
-    // 同じチケットの選択ボタンのスタイルをリセット
     const ui = btn.closest('[data-close-ui]');
     if (ui) {
       ui.querySelectorAll('button:not([data-close-exec])').forEach(b => {
@@ -1325,32 +508,20 @@ const DashboardApp = {
         }
       });
     }
-    // 選択されたボタンをハイライト
     btn.className = btn.className
       .replace(/bg-gray-600/g, 'bg-amber-700/80')
       .replace(/text-gray-200/g, 'text-amber-100');
-    // 部分決済ボタンを有効化
-    const execBtn = document.querySelector(
-      `[data-close-exec="${ticket}"]`
-    );
+    const execBtn = document.querySelector(`[data-close-exec="${ticket}"]`);
     if (execBtn) {
       execBtn.classList.remove('opacity-50', 'pointer-events-none');
     }
-  },
+  }
 
-  /** ポジション決済実行 */
   async closePosition(ticket, volume) {
     const isPartial = volume != null;
-    // 決済UI内の全ボタンを無効化
-    const closeUi = document.querySelector(
-      `[data-close-ui="${ticket}"]`
-    );
-    const buttons = closeUi
-      ? closeUi.querySelectorAll('button') : [];
-    buttons.forEach(b => {
-      b.disabled = true;
-      b.classList.add('opacity-50');
-    });
+    const closeUi = document.querySelector(`[data-close-ui="${ticket}"]`);
+    const buttons = closeUi ? closeUi.querySelectorAll('button') : [];
+    buttons.forEach(b => { b.disabled = true; b.classList.add('opacity-50'); });
 
     try {
       const params = new URLSearchParams();
@@ -1358,7 +529,6 @@ const DashboardApp = {
       const url = `/api/v1/trading/positions/${ticket}/close?${params}`;
       const res = await fetch(url, { method: 'POST' });
       const json = await res.json();
-
       if (json.success) {
         const d = json.data;
         const msg = isPartial
@@ -1371,108 +541,164 @@ const DashboardApp = {
     } catch (e) {
       this._showCloseToast(`通信エラー: ${e.message}`, 'error');
     } finally {
-      buttons.forEach(b => {
-        b.disabled = false;
-        b.classList.remove('opacity-50');
-      });
+      buttons.forEach(b => { b.disabled = false; b.classList.remove('opacity-50'); });
     }
-  },
+  }
 
-  /** 決済結果のトースト通知 */
   _showCloseToast(msg, type) {
     const existing = document.getElementById('close-toast');
     if (existing) existing.remove();
-
     const bg = type === 'success' ? 'bg-green-600' : 'bg-red-600';
     const toast = document.createElement('div');
     toast.id = 'close-toast';
     toast.className = `fixed bottom-4 right-4 ${bg} text-white text-sm px-4 py-2 rounded-lg shadow-lg z-50 transition-opacity`;
     toast.textContent = msg;
     document.body.appendChild(toast);
-
     setTimeout(() => {
       toast.style.opacity = '0';
       setTimeout(() => toast.remove(), 300);
     }, 3000);
-  },
+  }
 
-  /** ポジションカードの詳細エリアをトグル */
-  togglePositionDetail(detailId, arrowId, ticket) {
-    const detail = document.getElementById(detailId);
-    const arrow = document.getElementById(arrowId);
-    if (!detail) return;
-    const isHidden = detail.classList.toggle('hidden');
-    if (arrow) arrow.textContent = isHidden ? '▸' : '▾';
-    // 決済UIの表示も連動
-    if (ticket != null) {
-      const closeUi = document.querySelector(`[data-close-ui="${ticket}"]`);
-      if (closeUi) {
-        if (isHidden) closeUi.classList.add('hidden');
-        else closeUi.classList.remove('hidden');
-      }
-      if (isHidden) {
-        this._expandedPositions.delete(ticket);
-      } else {
-        this._expandedPositions.add(ticket);
-      }
+  // ── 時間計算 ──
+
+  _updatePosTimeCache(positions) {
+    const activeTickets = new Set();
+    for (const p of positions) {
+      const t = Number(p.ticket);
+      activeTickets.add(t);
+      const existing = this._posTimeCache[t];
+      const openedAtMs = (existing && existing.openedAtMs)
+        ? existing.openedAtMs
+        : (p.opened_at ? new Date(p.opened_at).getTime() : null);
+      const maxHoldMin = p.max_hold_minutes != null
+        ? p.max_hold_minutes
+        : (existing ? existing.maxHoldMin : null);
+      this._posTimeCache[t] = { openedAtMs, maxHoldMin };
     }
-  },
+    for (const ticket of Object.keys(this._posTimeCache)) {
+      if (!activeTickets.has(Number(ticket))) delete this._posTimeCache[ticket];
+    }
+  }
 
+  _calcElapsedMin(ticket) {
+    const cache = this._posTimeCache[ticket];
+    if (!cache || !cache.openedAtMs) return 0;
+    return Math.max(0, Math.floor((Date.now() - cache.openedAtMs) / 60000));
+  }
 
-  /** トレード履歴フィルター適用 */
+  _fmtElapsedTime(p) {
+    if (p.opened_at || this._posTimeCache[p.ticket]) {
+      return fmtHoldTime(null, this._calcElapsedMin(p.ticket));
+    }
+    if (p.elapsed_minutes != null) return fmtHoldTime(null, p.elapsed_minutes);
+    return '0m';
+  }
+
+  _calcRemainingHtml(ticket) {
+    const cache = this._posTimeCache[ticket];
+    if (!cache || cache.maxHoldMin == null) return '';
+    const elapsed = this._calcElapsedMin(ticket);
+    const rem = Math.max(0, cache.maxHoldMin - elapsed);
+    const ratio = cache.maxHoldMin > 0 ? rem / cache.maxHoldMin : 1;
+    const cls = ratio <= 0.2 ? 'text-orange-400' : 'text-gray-500';
+    let label;
+    if (rem < 60) {
+      label = `残${rem}m`;
+    } else {
+      const h = Math.floor(rem / 60);
+      const m = rem % 60;
+      label = m > 0 ? `残${h}h${m}m` : `残${h}h`;
+    }
+    return `<span class="${cls}">/ ${label}</span>`;
+  }
+
+  _fmtRemainingTimeInner(p) {
+    return this._calcRemainingHtml(Number(p.ticket));
+  }
+
+  _tickPositionTimers() {
+    const elapsedEls = document.querySelectorAll('[data-elapsed-ticket]');
+    for (const el of elapsedEls) {
+      const ticket = Number(el.dataset.elapsedTicket);
+      const min = this._calcElapsedMin(ticket);
+      el.textContent = fmtHoldTime(null, min);
+    }
+    const remainEls = document.querySelectorAll('[data-remaining-ticket]');
+    for (const el of remainEls) {
+      const ticket = Number(el.dataset.remainingTicket);
+      el.innerHTML = this._calcRemainingHtml(ticket);
+    }
+  }
+}
+
+// ── TradeHistory ──
+
+class TradeHistory extends Component {
+  constructor(dataFlow) {
+    super('trade-history-table', dataFlow);
+    this.tradeFilterSymbol = null;
+    this.tradeFilterDays = null;
+    this.tradeHistoryExpanded = true;
+  }
+
+  mount() {
+    this.subscribe('trades', () => this._render());
+    // トレード履歴トグル
+    const toggle = document.getElementById('trade-history-toggle');
+    if (toggle) {
+      toggle.addEventListener('click', () => {
+        this.tradeHistoryExpanded = !this.tradeHistoryExpanded;
+        const table = this.root;
+        const chevron = document.getElementById('trade-history-chevron');
+        if (table) table.classList.toggle('hidden', !this.tradeHistoryExpanded);
+        if (chevron) {
+          chevron.style.transform = this.tradeHistoryExpanded ? '' : 'rotate(-90deg)';
+        }
+      });
+    }
+  }
+
   _getFilteredTrades() {
-    let filtered = this.trades;
-    // 通貨ペアフィルター
+    const data = this._dataFlow.get('trades');
+    let filtered = (data && data.trades) || [];
     if (this.tradeFilterSymbol) {
-      filtered = filtered.filter(
-        (t) => t.symbol === this.tradeFilterSymbol
-      );
+      filtered = filtered.filter(t => t.symbol === this.tradeFilterSymbol);
     }
-    // 期間フィルター
     if (this.tradeFilterDays) {
       const cutoff = Date.now() - this.tradeFilterDays * 86400000;
-      filtered = filtered.filter((t) => {
+      filtered = filtered.filter(t => {
         const ts = new Date(t.closed_at || t.opened_at).getTime();
         return ts >= cutoff;
       });
     }
     return filtered;
-  },
+  }
 
-  /** トレード履歴フィルターUI描画 */
   _renderTradeFilters() {
     const container = document.getElementById('trade-filter-bar');
     if (!container) return;
+    const data = this._dataFlow.get('trades');
+    const trades = (data && data.trades) || [];
+    const symbols = [...new Set(trades.map(t => t.symbol).filter(Boolean))].sort();
 
-    // 通貨ペア一覧を取得（トレードデータから動的生成）
-    const symbols = [
-      ...new Set(this.trades.map((t) => t.symbol).filter(Boolean)),
-    ].sort();
-
-    // 期間ボタン
     const periods = [
       { label: '1D', days: 1 },
       { label: '7D', days: 7 },
       { label: '30D', days: 30 },
       { label: 'All', days: null },
     ];
-    const periodBtns = periods
-      .map((p) => {
-        const active = this.tradeFilterDays === p.days;
-        const cls = active
-          ? 'bg-blue-600 text-white'
-          : 'bg-gray-700 text-gray-400 hover:bg-gray-600 hover:text-gray-200';
-        return `<button data-days="${p.days}" class="px-2 py-0.5 rounded text-[11px] font-medium transition-colors ${cls}">${p.label}</button>`;
-      })
-      .join('');
+    const periodBtns = periods.map(p => {
+      const active = this.tradeFilterDays === p.days;
+      const cls = active
+        ? 'bg-blue-600 text-white'
+        : 'bg-gray-700 text-gray-400 hover:bg-gray-600 hover:text-gray-200';
+      return `<button data-days="${p.days}" class="px-2 py-0.5 rounded text-[11px] font-medium transition-colors ${cls}">${p.label}</button>`;
+    }).join('');
 
-    // 通貨ペアドロップダウン
-    const symOptions = symbols
-      .map(
-        (s) =>
-          `<option value="${s}" ${s === this.tradeFilterSymbol ? 'selected' : ''}>${s}</option>`
-      )
-      .join('');
+    const symOptions = symbols.map(s =>
+      `<option value="${s}" ${s === this.tradeFilterSymbol ? 'selected' : ''}>${s}</option>`
+    ).join('');
 
     container.innerHTML = `
       <div class="flex items-center gap-2 flex-wrap">
@@ -1483,38 +709,32 @@ const DashboardApp = {
         </select>
       </div>`;
 
-    // 期間ボタンイベント
-    container.querySelectorAll('button[data-days]').forEach((btn) => {
+    container.querySelectorAll('button[data-days]').forEach(btn => {
       btn.addEventListener('click', () => {
         const v = btn.dataset.days;
         this.tradeFilterDays = v === 'null' ? null : Number(v);
-        this.renderTradeHistory();
+        this._render();
       });
     });
-    // 通貨ペアドロップダウンイベント
     const sel = document.getElementById('trade-filter-symbol');
     if (sel) {
       sel.addEventListener('change', () => {
         this.tradeFilterSymbol = sel.value || null;
-        this.renderTradeHistory();
+        this._render();
       });
     }
-  },
+  }
 
-  /** トレード履歴 */
-  renderTradeHistory() {
-    const tableEl = document.getElementById('trade-history-table');
+  _render() {
+    const tableEl = this.root;
     if (!tableEl) return;
+    const c = this._getCurrency();
 
-    // フィルターUI描画
     this._renderTradeFilters();
-
-    // フィルター適用
     const filtered = this._getFilteredTrades();
 
     if (filtered.length === 0) {
-      tableEl.innerHTML =
-        '<div class="flex items-center justify-center h-16 text-gray-500 text-sm">トレードなし</div>';
+      tableEl.innerHTML = '<div class="flex items-center justify-center h-16 text-gray-500 text-sm">トレードなし</div>';
       return;
     }
 
@@ -1534,66 +754,44 @@ const DashboardApp = {
       EXTERNAL_CLOSE: { l: 'EXT', c: 'bg-gray-700 text-gray-300 border-gray-500' },
     };
 
-    const rows = filtered
-      .map((t) => {
-        const isOpen = t.is_open === true;
-        const pnl = t.profit_loss || 0;
-        const isProfit = pnl >= 0;
-        const dirColor =
-          t.signal_type === 'BUY' ? 'text-green-400' : 'text-red-400';
+    const rows = filtered.map(t => {
+      const isOpen = t.is_open === true;
+      const pnl = t.profit_loss || 0;
+      const isProfit = pnl >= 0;
+      const dirColor = t.signal_type === 'BUY' ? 'text-green-400' : 'text-red-400';
 
-        let reasonHtml;
-        if (isOpen) {
-          reasonHtml =
-            '<span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border bg-blue-900/40 text-blue-300 border-blue-700/50">OPEN</span>';
-        } else {
-          let effectiveReason = t.exit_reason;
-          // EXTERNAL_CLOSE または理由なしの場合、exit_price から SL/TP を推定
-          if (!effectiveReason || effectiveReason === 'EXTERNAL_CLOSE') {
-            const ep = t.exit_price;
-            if (ep != null) {
-              // 相対誤差 0.01% 以内で一致判定（スリッページ許容）
-              const tol = ep * 0.0001;
-              if (t.stop_loss != null && Math.abs(ep - t.stop_loss) <= tol) {
-                effectiveReason = 'SL_HIT';
-              } else if (t.take_profit != null && Math.abs(ep - t.take_profit) <= tol) {
-                effectiveReason = 'TP_HIT';
-              }
-            }
+      let reasonHtml;
+      if (isOpen) {
+        reasonHtml = '<span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border bg-blue-900/40 text-blue-300 border-blue-700/50">OPEN</span>';
+      } else {
+        let effectiveReason = t.exit_reason;
+        if (!effectiveReason || effectiveReason === 'EXTERNAL_CLOSE') {
+          const ep = t.exit_price;
+          if (ep != null) {
+            const tol = ep * 0.0001;
+            if (t.stop_loss != null && Math.abs(ep - t.stop_loss) <= tol) effectiveReason = 'SL_HIT';
+            else if (t.take_profit != null && Math.abs(ep - t.take_profit) <= tol) effectiveReason = 'TP_HIT';
           }
-          const reason =
-            effectiveReason && exitReasonConfig[effectiveReason];
-          reasonHtml = reason
-            ? `<span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border ${reason.c}">${reason.l}</span>`
-            : '';
         }
+        const reason = effectiveReason && exitReasonConfig[effectiveReason];
+        reasonHtml = reason
+          ? `<span class="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium border ${reason.c}">${reason.l}</span>`
+          : '';
+      }
 
-        const pipsHtml =
-          !isOpen && t.profit_loss_pips !== null
-            ? `<span class="text-gray-500 ml-1">(${t.profit_loss_pips.toFixed(1)}p)</span>`
-            : '';
-        const pnlText = isOpen
-          ? '-'
-          : `${isProfit ? '+' : ''}${this.fmtCurrency(pnl)}${pipsHtml}`;
+      const pipsHtml = !isOpen && t.profit_loss_pips !== null
+        ? `<span class="text-gray-500 ml-1">(${t.profit_loss_pips.toFixed(1)}p)</span>`
+        : '';
+      const pnlText = isOpen
+        ? '-'
+        : `${isProfit ? '+' : ''}${fmtCurrency(pnl, c)}${pipsHtml}`;
 
-        const rowBg = isOpen
-          ? 'rgba(30,58,138,0.10)'
-          : isProfit
-            ? 'rgba(20,83,45,0.07)'
-            : 'rgba(127,29,29,0.07)';
-        const borderClr = isOpen
-          ? 'rgba(96,165,250,0.5)'
-          : isProfit
-            ? 'rgba(34,197,94,0.45)'
-            : 'rgba(239,68,68,0.45)';
-        const rowTextClr = isOpen
-          ? 'text-gray-400'
-          : isProfit
-            ? 'text-green-400'
-            : 'text-red-400';
-        return `<tr style="background:${rowBg}">
-        <td style="box-shadow:inset 3px 0 0 ${borderClr}" class="text-xs ${rowTextClr} whitespace-nowrap tabular-nums">${t.opened_at ? this.fmtDateTime(t.opened_at) : '-'}</td>
-        <td class="text-xs ${rowTextClr} whitespace-nowrap tabular-nums">${t.closed_at ? this.fmtDateTime(t.closed_at) : '-'}</td>
+      const rowBg = isOpen ? 'rgba(30,58,138,0.10)' : isProfit ? 'rgba(20,83,45,0.07)' : 'rgba(127,29,29,0.07)';
+      const borderClr = isOpen ? 'rgba(96,165,250,0.5)' : isProfit ? 'rgba(34,197,94,0.45)' : 'rgba(239,68,68,0.45)';
+      const rowTextClr = isOpen ? 'text-gray-400' : isProfit ? 'text-green-400' : 'text-red-400';
+      return `<tr style="background:${rowBg}">
+        <td style="box-shadow:inset 3px 0 0 ${borderClr}" class="text-xs ${rowTextClr} whitespace-nowrap tabular-nums">${t.opened_at ? fmtDateTime(t.opened_at) : '-'}</td>
+        <td class="text-xs ${rowTextClr} whitespace-nowrap tabular-nums">${t.closed_at ? fmtDateTime(t.closed_at) : '-'}</td>
         <td class="text-xs text-gray-300 whitespace-nowrap">${t.symbol || ''}</td>
         <td><span class="text-xs font-bold ${dirColor}">${t.signal_type}</span></td>
         <td class="text-xs ${rowTextClr} tabular-nums">${t.volume.toFixed(2)}</td>
@@ -1602,8 +800,7 @@ const DashboardApp = {
         <td>${reasonHtml}</td>
         <td class="text-right text-xs font-bold tabular-nums ${rowTextClr}">${pnlText}</td>
       </tr>`;
-      })
-      .join('');
+    }).join('');
 
     tableEl.innerHTML = `
       <table class="table">
@@ -1612,136 +809,834 @@ const DashboardApp = {
         </thead>
         <tbody>${rows}</tbody>
       </table>`;
-  },
+  }
+}
 
-  // ── ユーティリティ ──
+// ── AnalysisPanel ──
 
-  fmtCurrency(v) {
-    const currency = (this.dashboard && this.dashboard.account && this.dashboard.account.currency) || 'JPY';
-    const digits = currency === 'JPY' ? 0 : 2;
-    return new Intl.NumberFormat('ja-JP', { style: 'currency', currency: currency, maximumFractionDigits: digits }).format(v);
-  },
-  fmtTime(dateStr) {
-    return new Date(dateStr).toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Tokyo' });
-  },
-  fmtDateTime(dateStr) {
-    return new Date(dateStr).toLocaleDateString('ja-JP', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', timeZone: 'Asia/Tokyo' });
-  },
-  fmtHoldTime(openedAt, elapsedMin) {
-    const diffMin = elapsedMin != null
-      ? elapsedMin
-      : Math.max(0, Math.floor((Date.now() - new Date(openedAt).getTime()) / 60000));
-    if (diffMin < 60) return diffMin + 'm';
-    const diffHour = Math.floor(diffMin / 60);
-    if (diffHour < 24) return diffHour + 'h ' + (diffMin % 60) + 'm';
-    return Math.floor(diffHour / 24) + 'd ' + (diffHour % 24) + 'h';
-  },
-  /**
-   * ポジション時間キャッシュを更新する。
-   * opened_atは初回取得時のみ保存し、以降は上書きしない。
-   * ブラウザ再読み込みまでDB再取得なしでカウントアップする。
-   */
-  _updatePosTimeCache(positions) {
-    const activeTickets = new Set();
-    for (const p of positions) {
-      const t = Number(p.ticket);
-      activeTickets.add(t);
-      const existing = this._posTimeCache[t];
-      // opened_at: キャッシュ済みなら上書きしない（初回ロードで固定）
-      const openedAtMs = (existing && existing.openedAtMs)
-        ? existing.openedAtMs
-        : (p.opened_at ? new Date(p.opened_at).getTime() : null);
-      // max_hold_minutes: サーバーから取得された場合のみ更新
-      const maxHoldMin = p.max_hold_minutes != null
-        ? p.max_hold_minutes
-        : (existing ? existing.maxHoldMin : null);
-      this._posTimeCache[t] = { openedAtMs, maxHoldMin };
+class AnalysisPanel extends Component {
+  constructor(dataFlow) {
+    super('analysis-panel', dataFlow);
+  }
+
+  mount() {
+    this.subscribe('analysis', () => this._render());
+    this.subscribe('tradingMode', () => this._render());
+  }
+
+  _render() {
+    const panel = this.root;
+    if (!panel) return;
+
+    const a = this._dataFlow.get('analysis');
+    const m = this._dataFlow.get('tradingMode');
+    const isLive = m && (m.mode === 'live' || m.mode === 'demo');
+    if (!isLive) {
+      panel.classList.add('hidden');
+      return;
     }
-    // 決済済みポジションのキャッシュを除去
-    for (const ticket of Object.keys(this._posTimeCache)) {
-      if (!activeTickets.has(Number(ticket))) {
-        delete this._posTimeCache[ticket];
+    panel.classList.remove('hidden');
+
+    // 重要指標発表警告
+    const apEventBanner = document.getElementById('ap-next-event');
+    const apEventText = document.getElementById('ap-next-event-text');
+    if (apEventBanner && apEventText) {
+      const mins = (typeof FundamentalWidget !== 'undefined') ? FundamentalWidget.nextHighImpactMinutes : null;
+      if (mins !== null && mins <= 60 && mins > 0) {
+        apEventText.textContent = '重要指標まで ' + Math.round(mins) + ' 分';
+        apEventBanner.classList.remove('hidden');
+      } else {
+        apEventBanner.classList.add('hidden');
+      }
+    }
+
+    const noData = !a || (!a.engine_running && (!a.tf_scores || Object.keys(a.tf_scores).length === 0));
+    if (noData) {
+      const msg = (a && a.rationale) ? a.rationale : '分析データなし';
+      const dirBadge = document.getElementById('ap-direction-badge');
+      if (dirBadge) {
+        dirBadge.textContent = '--';
+        dirBadge.className = 'inline-flex items-center px-2 py-0.5 rounded text-xs font-bold bg-gray-700 text-gray-400';
+      }
+      const scoreText = document.getElementById('ap-score-text');
+      if (scoreText) scoreText.textContent = '--';
+      const scoreBar = document.getElementById('ap-score-bar');
+      if (scoreBar) scoreBar.style.width = '0%';
+      const htfEl = document.getElementById('ap-htf');
+      if (htfEl) { htfEl.textContent = '--'; htfEl.className = 'font-bold tabular-nums text-gray-500'; }
+      const trendEl = document.getElementById('ap-trend');
+      if (trendEl) { trendEl.textContent = '--'; trendEl.className = 'font-bold tabular-nums text-gray-500'; }
+      const penaltyEl = document.getElementById('ap-penalty');
+      if (penaltyEl) { penaltyEl.textContent = '--'; penaltyEl.className = 'font-bold tabular-nums text-gray-500'; }
+      const tfEl = document.getElementById('ap-tf-scores');
+      if (tfEl) tfEl.innerHTML = '<p class="text-gray-500 text-xs text-center py-4">' + msg + '</p>';
+      return;
+    }
+
+    // 方向バッジ
+    const dirBadge = document.getElementById('ap-direction-badge');
+    if (dirBadge) {
+      const dirStyles = {
+        BUY: 'bg-green-900/40 text-green-400 border border-green-700/50',
+        SELL: 'bg-red-900/40 text-red-400 border border-red-700/50',
+        HOLD: 'bg-gray-700 text-gray-400',
+      };
+      dirBadge.textContent = a.direction || '--';
+      dirBadge.className = 'inline-flex items-center px-2 py-0.5 rounded text-xs font-bold ' + (dirStyles[a.direction] || dirStyles.HOLD);
+    }
+
+    // スコアバー
+    const score = a.consensus_score || 0;
+    const threshold = a.entry_threshold || 1;
+    const dir = a.direction;
+    const buyScore = a.buy_score || 0;
+    const sellScore = a.sell_score || 0;
+    const scoreText = document.getElementById('ap-score-text');
+    const scoreBar = document.getElementById('ap-score-bar');
+    const thSell = document.getElementById('ap-threshold-sell');
+    const thBuy = document.getElementById('ap-threshold-buy');
+    if (scoreText) {
+      if (dir === 'HOLD' && (buyScore > 0 || sellScore > 0)) {
+        scoreText.textContent = 'B:' + buyScore.toFixed(1) + ' S:' + sellScore.toFixed(1) + ' / ' + threshold.toFixed(1);
+      } else {
+        scoreText.textContent = score.toFixed(2) + ' / ' + threshold.toFixed(1);
+      }
+    }
+    if (scoreBar) {
+      const maxHalf = threshold * 1.5;
+      let barDir = dir;
+      let barScore = score;
+      if (dir === 'HOLD' && (buyScore > 0 || sellScore > 0)) {
+        barDir = buyScore >= sellScore ? 'BUY' : 'SELL';
+        barScore = Math.max(buyScore, sellScore);
+      }
+      const halfPct = Math.min(50, (barScore / maxHalf) * 50);
+      if (barDir === 'BUY') {
+        scoreBar.style.left = '50%';
+        scoreBar.style.width = halfPct + '%';
+      } else if (barDir === 'SELL') {
+        scoreBar.style.left = (50 - halfPct) + '%';
+        scoreBar.style.width = halfPct + '%';
+      } else {
+        scoreBar.style.left = '50%';
+        scoreBar.style.width = '0%';
+      }
+      let barColor;
+      if (dir === 'BUY') {
+        barColor = score >= threshold ? 'bg-green-500' : score >= threshold * 0.7 ? 'bg-green-700' : 'bg-gray-500';
+      } else if (dir === 'SELL') {
+        barColor = score >= threshold ? 'bg-red-500' : score >= threshold * 0.7 ? 'bg-red-700' : 'bg-gray-500';
+      } else {
+        barColor = 'bg-gray-500';
+      }
+      const roundedCls = barDir === 'BUY' ? 'rounded-r-full' : barDir === 'SELL' ? 'rounded-l-full' : 'rounded-full';
+      scoreBar.className = 'absolute top-0 h-full ' + roundedCls + ' transition-all duration-500 ' + barColor;
+    }
+    if (thSell || thBuy) {
+      const maxHalf = threshold * 1.5;
+      const thHalfPct = Math.min(49, (threshold / maxHalf) * 50);
+      if (thSell) thSell.style.left = (50 - thHalfPct) + '%';
+      if (thBuy) thBuy.style.left = (50 + thHalfPct) + '%';
+    }
+
+    // サブ指標
+    const htfEl = document.getElementById('ap-htf');
+    const trendEl = document.getElementById('ap-trend');
+    const penaltyEl = document.getElementById('ap-penalty');
+    if (htfEl) {
+      htfEl.textContent = (a.htf_alignment * 100).toFixed(0) + '%';
+      htfEl.className = 'font-bold tabular-nums ' + (a.htf_alignment >= 0.6 ? 'text-green-400' : a.htf_alignment >= 0.3 ? 'text-yellow-400' : 'text-red-400');
+    }
+    if (trendEl) {
+      trendEl.textContent = (a.trend_strength || 0).toFixed(2);
+      trendEl.className = 'font-bold tabular-nums ' + (a.trend_strength >= 0.5 ? 'text-green-400' : 'text-gray-300');
+    }
+    if (penaltyEl) {
+      penaltyEl.textContent = (a.penalty_total || 0).toFixed(2);
+      penaltyEl.className = 'font-bold tabular-nums ' + (a.penalty_total >= 0.5 ? 'text-red-400' : 'text-gray-300');
+    }
+
+    // 時間足スコア
+    const tfEl = document.getElementById('ap-tf-scores');
+    if (tfEl && a.tf_scores) {
+      const tfOrder = ['M1', 'M5', 'M15', 'M30', 'H1', 'H4', 'H8', 'D1'];
+      const tfs = tfOrder.map(tf => [tf, a.tf_scores[tf] ?? null]);
+      const bd = a.tf_breakdowns || {};
+      const aligned = a.aligned_tfs || [];
+      const tfDirsRaw = a.tf_directions || {};
+      const tfDirs = {};
+      for (const [tf] of tfs) {
+        tfDirs[tf] = tfDirsRaw[tf] || 'HOLD';
+      }
+
+      let buyCount = 0, sellCount = 0, holdCount = 0;
+      for (const [tf, sc] of tfs) {
+        if (sc === null) continue;
+        if (tfDirs[tf] === 'BUY') buyCount++;
+        else if (tfDirs[tf] === 'SELL') sellCount++;
+        else holdCount++;
+      }
+      const total = buyCount + sellCount + holdCount;
+      const buyPct = total > 0 ? (buyCount / total * 100) : 0;
+      const sellPct = total > 0 ? (sellCount / total * 100) : 0;
+      const holdPct = total > 0 ? (holdCount / total * 100) : 0;
+
+      const pb = a.penalty_breakdown || {};
+      const penaltyLabel = {
+        high_spread: 'SPR', off_hours: 'HRS',
+        low_volatility: 'VOL↓', high_volatility: 'VOL↑',
+        recent_loss: 'LOSS', mtf_conflict: 'MTF', weak_trend: 'TRD',
+      };
+      const penaltyItems = Object.keys(penaltyLabel).map(k => [k, pb[k] || 0]);
+      const penaltyTotal = a.penalty_total || 0;
+      const penaltyBarW = Math.min(100, Math.round(penaltyTotal / 0.5 * 100));
+      const penaltyBorderCls = penaltyTotal > 0 ? 'border-red-700/50 bg-red-900/10' : 'border-gray-700 bg-gray-800/60';
+      const penaltyScColor = penaltyTotal > 0 ? 'text-red-400' : 'text-gray-500';
+      const penaltyCardHtml = `<div class="rounded border ${penaltyBorderCls} px-2 py-1.5">
+          <div class="flex items-center justify-between mb-0.5">
+            <span class="text-[10px] text-gray-400 uppercase font-bold">PEN</span>
+            <span class="text-xs font-bold tabular-nums ${penaltyScColor}">-${penaltyTotal.toFixed(2)}</span>
+          </div>
+          <div class="w-full bg-gray-700/50 rounded-full h-1 mb-1">
+            <div class="bg-red-500/60 h-1 rounded-full" style="width:${penaltyBarW}%"></div>
+          </div>
+          <div class="hidden xl:block space-y-0.5">
+            ${penaltyItems.map(([k, v]) => {
+              const lbl = penaltyLabel[k];
+              const c = v > 0 ? 'text-red-400' : 'text-gray-600';
+              const w = Math.min(100, Math.round(v / 0.25 * 100));
+              const valText = v > 0 ? `-${v.toFixed(2)}` : '0';
+              return `<div class="flex items-center gap-1">
+                <span class="text-[8px] text-gray-500 w-7 text-right flex-shrink-0">${lbl}</span>
+                <div class="flex-1 h-1 bg-gray-700/40 rounded-full overflow-hidden">
+                  <div class="bg-red-500/40 h-full rounded-full" style="width:${w}%"></div>
+                </div>
+                <span class="text-[9px] tabular-nums ${c} w-8 text-right flex-shrink-0">${valText}</span>
+              </div>`;
+            }).join('')}
+          </div>
+        </div>`;
+
+      const summaryHtml = `
+        <div class="mb-2">
+          <div class="flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] mb-1">
+            <span class="text-gray-500">Vote:</span>
+            <span class="text-green-400 font-bold">${buyCount} BUY</span>
+            <span class="text-gray-500">|</span>
+            <span class="text-red-400 font-bold">${sellCount} SELL</span>
+            <span class="text-gray-500">|</span>
+            <span class="text-gray-400">${holdCount} HOLD</span>
+            <span class="text-gray-500 ml-auto">${a.regime || '--'}</span>
+          </div>
+          <div class="w-full h-1.5 rounded-full overflow-hidden flex">
+            <div class="bg-green-500/70 h-full" style="width:${buyPct}%"></div>
+            <div class="bg-gray-600/50 h-full" style="width:${holdPct}%"></div>
+            <div class="bg-red-500/70 h-full" style="width:${sellPct}%"></div>
+          </div>
+        </div>`;
+
+      const indLabel = {
+        trend: 'TRD', adx: 'ADX', rsi: 'RSI',
+        macd_slope: 'MACD', divergence: 'DIV',
+        ema_cross: 'EMA', stochastic: 'STO', htf: 'HTF',
+      };
+
+      const cardsHtml = tfs.map(([tf, sc]) => {
+        if (sc === null) {
+          const naIndKeys = ['trend', 'adx', 'rsi', 'macd_slope', 'divergence', 'ema_cross', 'stochastic', 'htf'];
+          const naDetailHtml = naIndKeys.map(k => {
+            const lbl = indLabel[k] || k.slice(0, 4).toUpperCase();
+            return `<div class="flex items-center gap-1">
+              <span class="text-[8px] text-gray-500 w-7 text-right flex-shrink-0">${lbl}</span>
+              <div class="flex-1 h-1 bg-gray-600/30 rounded-full overflow-hidden"></div>
+              <span class="text-[9px] tabular-nums text-gray-500 w-6 text-right flex-shrink-0">--</span>
+            </div>`;
+          }).join('');
+          return `<div class="rounded border border-gray-600 bg-gray-700/30 px-2 py-1.5">
+            <div class="flex items-center justify-between mb-0.5">
+              <div class="flex items-center">
+                <span class="text-gray-500 text-[10px] mr-1">&#9644;</span>
+                <span class="text-[10px] text-gray-400 uppercase font-bold">${tf}</span>
+              </div>
+              <span class="text-xs font-bold tabular-nums text-gray-500">N/A</span>
+            </div>
+            <div class="w-full bg-gray-600/40 rounded-full h-1 mb-1"></div>
+            <div class="hidden xl:block space-y-0.5">${naDetailHtml}</div>
+          </div>`;
+        }
+        const isAligned = aligned.includes(tf);
+        const tfDir = tfDirs[tf];
+        const dirIcon = tfDir === 'BUY' ? '&#9650;' : tfDir === 'SELL' ? '&#9660;' : '&#9644;';
+        const dirColor = tfDir === 'BUY' ? 'text-green-400' : tfDir === 'SELL' ? 'text-red-400' : 'text-gray-500';
+        const borderCls = isAligned
+          ? (tfDir === 'SELL' ? 'border-red-600/60 bg-red-900/10' : 'border-green-600/60 bg-green-900/10')
+          : 'border-gray-700 bg-gray-800/60';
+        const alignBadge = isAligned
+          ? `<span class="text-[8px] ${tfDir === 'SELL' ? 'text-red-400' : 'text-green-400'} font-bold ml-1">&#10003;</span>`
+          : '';
+        const scColor = sc > 0.5 ? 'text-green-400' : sc > 0.2 ? 'text-yellow-400' : 'text-gray-500';
+        const barW = Math.min(100, sc * 100);
+        const barColor = tfDir === 'BUY' ? 'bg-green-500/60' : tfDir === 'SELL' ? 'bg-red-500/60' : 'bg-gray-500/40';
+
+        const detail = bd[tf];
+        let detailHtml = '';
+        if (detail) {
+          const indKeys = ['trend', 'adx', 'rsi', 'macd_slope', 'divergence', 'ema_cross', 'stochastic', 'htf'];
+          const items = indKeys.map(k => [k, detail[k] || 0]);
+          const maxAbs = Math.max(...items.map(([, v]) => Math.abs(v)), 0.1);
+          detailHtml = items.map(([k, v]) => {
+            const c2 = v > 0 ? 'text-green-400' : v < 0 ? 'text-red-400' : 'text-gray-600';
+            const bg = v > 0 ? 'bg-green-500/40' : 'bg-red-500/40';
+            const w = Math.round(Math.abs(v) / maxAbs * 100);
+            const lbl = indLabel[k] || k.slice(0, 4).toUpperCase();
+            return `<div class="flex items-center gap-1">
+              <span class="text-[8px] text-gray-500 w-7 text-right flex-shrink-0">${lbl}</span>
+              <div class="flex-1 h-1 bg-gray-700/40 rounded-full overflow-hidden">
+                <div class="${bg} h-full rounded-full" style="width:${w}%"></div>
+              </div>
+              <span class="text-[9px] tabular-nums ${c2} w-6 text-right flex-shrink-0">${v >= 0 ? '+' : ''}${v.toFixed(1)}</span>
+            </div>`;
+          }).join('');
+        }
+
+        return `<div class="rounded border ${borderCls} px-2 py-1.5">
+          <div class="flex items-center justify-between mb-0.5">
+            <div class="flex items-center">
+              <span class="${dirColor} text-[10px] mr-1">${dirIcon}</span>
+              <span class="text-[10px] text-gray-400 uppercase font-bold">${tf}</span>
+              ${alignBadge}
+            </div>
+            <span class="text-xs font-bold tabular-nums ${scColor}">${sc.toFixed(2)}</span>
+          </div>
+          <div class="w-full bg-gray-700/50 rounded-full h-1 mb-1">
+            <div class="${barColor} h-1 rounded-full" style="width:${barW}%"></div>
+          </div>
+          ${detailHtml ? `<div class="hidden xl:block space-y-0.5">${detailHtml}</div>` : ''}
+        </div>`;
+      }).join('');
+
+      tfEl.innerHTML = `<div class="w-full">${summaryHtml}</div>` + `<div class="grid grid-cols-3 sm:grid-cols-5 lg:grid-cols-9 gap-1.5 mt-2">${cardsHtml}${penaltyCardHtml}</div>`;
+    }
+  }
+}
+
+// ── TradingControl ──
+
+class TradingControl extends Component {
+  constructor(dataFlow, callbacks) {
+    super('symbol-dropdown-wrapper', dataFlow);
+    this._onSelectSymbol = callbacks.onSelectSymbol;
+    this._onFetchTradingMode = callbacks.onFetchTradingMode;
+    this._onFetchAnalysis = callbacks.onFetchAnalysis;
+    this.tcBusy = false;
+  }
+
+  mount() {
+    this.subscribe('tradingMode', () => {
+      if (!this.tcBusy) this._render();
+    });
+    this.subscribe('dashboard', () => this._updateAccountName());
+
+    const settingsMt5Btn = document.getElementById('settings-mt5-btn');
+    const trigger = document.getElementById('symbol-dropdown-trigger');
+    if (settingsMt5Btn) {
+      settingsMt5Btn.addEventListener('click', () => this.handleMT5Toggle());
+    }
+    if (trigger) {
+      trigger.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const list = document.getElementById('symbol-dropdown-list');
+        if (list) list.classList.toggle('hidden');
+      });
+    }
+    // ドロップダウン外クリックで閉じる
+    document.addEventListener('click', (e) => {
+      const wrapper = this.root;
+      const list = document.getElementById('symbol-dropdown-list');
+      if (wrapper && list && !wrapper.contains(e.target)) {
+        list.classList.add('hidden');
+      }
+    });
+  }
+
+  async handleMT5Toggle() {
+    if (this.tcBusy) return;
+    const m = this._dataFlow.get('tradingMode');
+    const isConnected = m && m.connected;
+    if (isConnected) {
+      if (!confirm('MT5から切断しますか？')) return;
+    }
+    this.tcBusy = true;
+    this._render();
+    try {
+      if (isConnected) await disconnectMT5();
+      else await connectMT5();
+      await this._onFetchTradingMode();
+    } catch (e) {
+      console.error('MT5操作エラー:', e);
+    } finally {
+      this.tcBusy = false;
+      this._render();
+    }
+  }
+
+  async handleDropdownDemoToggle(symbol) {
+    if (this.tcBusy) return;
+    const m = this._dataFlow.get('tradingMode');
+    const symbolDemoStates = (m && m.symbol_demo_mode) || {};
+    const currentOn = Object.prototype.hasOwnProperty.call(symbolDemoStates, symbol)
+      ? symbolDemoStates[symbol] : false;
+    this.tcBusy = true;
+    try {
+      const result = await toggleSymbolDemoMode(symbol, !currentOn);
+      if (result) this._dataFlow.publish('tradingMode', result);
+    } catch (e) {
+      console.error(symbol + ' デモモード切替エラー:', e);
+    } finally {
+      this.tcBusy = false;
+      this.renderSymbolDropdown(true);
+      this._onFetchAnalysis();
+    }
+  }
+
+  async handleDropdownAutoToggle(symbol) {
+    if (this.tcBusy) return;
+    const m = this._dataFlow.get('tradingMode');
+    const symbolAutoStates = (m && m.symbol_auto_trade) || {};
+    const symbolDemoStates = (m && m.symbol_demo_mode) || {};
+    const currentOn = Object.prototype.hasOwnProperty.call(symbolAutoStates, symbol)
+      ? symbolAutoStates[symbol] : false;
+    const isDemoOn = Object.prototype.hasOwnProperty.call(symbolDemoStates, symbol)
+      ? symbolDemoStates[symbol] : false;
+    const nextOn = !currentOn;
+    if (nextOn && !isDemoOn) {
+      if (!confirm(`${symbol} の自動トレード（リアルモード）を開始しますか？\n実際の売買が実行されます。`)) return;
+    }
+    this.tcBusy = true;
+    try {
+      const result = await toggleSymbolAutoTrade(symbol, nextOn);
+      if (result) this._dataFlow.publish('tradingMode', result);
+    } catch (e) {
+      console.error(symbol + ' 自動トレード切替エラー:', e);
+    } finally {
+      this.tcBusy = false;
+      this.renderSymbolDropdown(true);
+    }
+  }
+
+  _render() {
+    const mt5Badge = document.getElementById('tc-mt5-badge');
+    const mt5Btn = document.getElementById('settings-mt5-btn');
+    if (!mt5Badge) return;
+
+    const m = this._dataFlow.get('tradingMode');
+    const isLive = m && m.mode === 'live';
+    const isConnected = m && m.connected;
+
+    if (isConnected) {
+      mt5Badge.className = 'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-green-900/30 text-green-400 border border-green-800/50';
+      mt5Badge.innerHTML = '<span class="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse"></span>MT5';
+    } else if (isLive) {
+      mt5Badge.className = 'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-yellow-900/30 text-yellow-400 border border-yellow-800/50';
+      mt5Badge.innerHTML = '<span class="w-1.5 h-1.5 rounded-full bg-yellow-500"></span>MT5';
+    } else {
+      mt5Badge.className = 'inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium bg-gray-700/80 text-gray-400 border border-gray-700/50';
+      mt5Badge.innerHTML = '<span class="w-1.5 h-1.5 rounded-full bg-gray-500"></span>MT5';
+    }
+
+    const btnBase = 'px-4 py-2 rounded text-sm font-semibold transition-all';
+    if (mt5Btn) {
+      if (this.tcBusy) {
+        mt5Btn.disabled = true;
+        mt5Btn.textContent = '処理中...';
+        mt5Btn.className = btnBase + ' bg-gray-700 text-gray-500 cursor-not-allowed';
+      } else if (isConnected) {
+        mt5Btn.disabled = false;
+        mt5Btn.textContent = 'MT5 切断';
+        mt5Btn.className = btnBase + ' bg-gray-600 text-gray-200 hover:bg-gray-500';
+      } else {
+        mt5Btn.disabled = false;
+        mt5Btn.textContent = 'MT5 接続';
+        mt5Btn.className = btnBase + ' bg-blue-600 text-white hover:bg-blue-700';
+      }
+    }
+
+    this.renderSymbolDropdown();
+    this._updateAccountName();
+  }
+
+  _isDropdownOpen() {
+    const list = document.getElementById('symbol-dropdown-list');
+    return list && !list.classList.contains('hidden');
+  }
+
+  renderSymbolDropdown(force) {
+    const symbolGroups = [
+      { label: 'USD ペア', pairs: ['EURUSD', 'GBPUSD', 'AUDUSD', 'NZDUSD', 'USDCHF', 'USDCAD'] },
+      { label: 'JPY ペア', pairs: ['USDJPY', 'EURJPY', 'GBPJPY', 'AUDJPY', 'CADJPY', 'CHFJPY'] },
+    ];
+    const m = this._dataFlow.get('tradingMode');
+    const symbol = this._dataFlow.get('symbol');
+    const isConnected = m && m.connected;
+    const symbolAutoStates = (m && m.symbol_auto_trade) || {};
+    const symbolDemoStates = (m && m.symbol_demo_mode) || {};
+
+    const getPairMode = (pair) => {
+      const autoOn = Object.prototype.hasOwnProperty.call(symbolAutoStates, pair) ? symbolAutoStates[pair] : false;
+      const demoOn = Object.prototype.hasOwnProperty.call(symbolDemoStates, pair) ? symbolDemoStates[pair] : false;
+      if (!isConnected) return { label: '未接続', dotCls: 'bg-gray-600', textCls: 'text-gray-500', pulse: false };
+      if (autoOn && !demoOn) return { label: 'リアル', dotCls: 'bg-green-500', textCls: 'text-green-400', pulse: true };
+      if (autoOn && demoOn) return { label: 'デモ', dotCls: 'bg-orange-400', textCls: 'text-orange-400', pulse: true };
+      return { label: '待機', dotCls: 'bg-gray-500', textCls: 'text-gray-500', pulse: false };
+    };
+
+    // トリガーボタン更新
+    const curMode = getPairMode(symbol);
+    const trigDot = document.getElementById('symbol-trigger-dot');
+    const trigLabel = document.getElementById('symbol-trigger-label');
+    const trigMode = document.getElementById('symbol-trigger-mode');
+    if (trigDot) trigDot.className = `w-1.5 h-1.5 rounded-full flex-shrink-0 ${curMode.dotCls}${curMode.pulse ? ' animate-pulse' : ''}`;
+    if (trigLabel) trigLabel.textContent = symbol;
+    if (trigMode) {
+      trigMode.textContent = curMode.label;
+      trigMode.className = `font-normal inline-block w-[2.5rem] ${curMode.textCls}`;
+    }
+
+    const list = document.getElementById('symbol-dropdown-list');
+    if (!list) return;
+    if (this._isDropdownOpen() && !force) return;
+
+    const self = this;
+    const renderPairItem = (pair) => {
+      const mode = getPairMode(pair);
+      const isSelected = pair === symbol;
+      const selectedCls = isSelected ? 'bg-gray-700/60' : '';
+      const pulseAttr = mode.pulse ? ' animate-pulse' : '';
+      const autoOn = Object.prototype.hasOwnProperty.call(symbolAutoStates, pair) ? symbolAutoStates[pair] : false;
+      const demoOn = Object.prototype.hasOwnProperty.call(symbolDemoStates, pair) ? symbolDemoStates[pair] : false;
+
+      let toggleHtml = '';
+      if (isConnected) {
+        const demoCls = demoOn
+          ? 'bg-orange-500/25 text-orange-400 border border-orange-600/50 hover:bg-orange-500/40'
+          : 'bg-gray-700/80 text-gray-500 border border-gray-600/50 hover:bg-gray-600/80 hover:text-gray-300';
+        const autoCls = autoOn
+          ? (demoOn ? 'bg-orange-600 text-white hover:bg-orange-700' : 'bg-red-600 text-white hover:bg-red-700')
+          : 'bg-green-600/90 text-white hover:bg-green-700';
+        const autoLabel = autoOn ? 'ON' : 'OFF';
+        toggleHtml = `<div class="flex items-center gap-1 flex-shrink-0 ml-auto">
+          <button data-action="demo" data-symbol="${pair}"
+                  class="px-1.5 py-0.5 rounded text-[10px] font-bold transition-all ${demoCls}" title="デモモード">DEMO</button>
+          <button data-action="auto" data-symbol="${pair}"
+                  class="px-2 py-0.5 rounded text-[10px] font-bold transition-all min-w-[2rem] ${autoCls}" title="自動トレード">${autoLabel}</button>
+        </div>`;
+      }
+
+      return `<div class="dd-pair-row flex items-center gap-2 px-3 py-2 hover:bg-gray-700/50 cursor-pointer transition-colors select-none ${selectedCls}" data-pair="${pair}">
+        <span class="w-2 h-2 rounded-full flex-shrink-0 ${mode.dotCls}${pulseAttr}"></span>
+        <span class="font-semibold text-xs text-gray-200 tabular-nums">${pair}</span>
+        <span class="text-[10px] ${mode.textCls}">${mode.label}</span>
+        ${toggleHtml}
+        ${isSelected ? '<svg class="w-3 h-3 text-blue-400 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2.5" d="M5 13l4 4L19 7"/></svg>' : ''}
+      </div>`;
+    };
+
+    list.innerHTML = symbolGroups.map((group, groupIdx) => {
+      const divider = groupIdx > 0 ? '<div class="border-t border-gray-700/60 my-1"></div>' : '';
+      const header = `<div class="px-3 pt-1.5 pb-0.5 text-[10px] font-semibold text-gray-500 uppercase tracking-wider">${group.label}</div>`;
+      return divider + header + group.pairs.map(renderPairItem).join('');
+    }).join('');
+
+    list.onclick = (e) => {
+      const btn = e.target.closest('[data-action]');
+      if (btn) {
+        e.stopPropagation();
+        const action = btn.dataset.action;
+        const sym = btn.dataset.symbol;
+        if (action === 'demo') self.handleDropdownDemoToggle(sym);
+        else if (action === 'auto') self.handleDropdownAutoToggle(sym);
+        return;
+      }
+      const row = e.target.closest('.dd-pair-row');
+      if (row) self._onSelectSymbol(row.dataset.pair);
+    };
+  }
+
+  _updateAccountName() {
+    const el = document.getElementById('header-account-name');
+    if (!el) return;
+    const m = this._dataFlow.get('tradingMode');
+    const d = this._dataFlow.get('dashboard');
+    const isConnected = m && m.connected;
+    const acct = isConnected && d && d.account ? d.account : null;
+    if (!acct) { el.classList.add('hidden'); return; }
+    const nick = (typeof SettingsManager !== 'undefined') ? SettingsManager.getNickname(acct.login) : '';
+    el.textContent = nick || '#' + acct.login;
+    el.classList.remove('hidden');
+  }
+}
+
+// ── DashboardApp (薄いオーケストレータ) ──
+
+const DashboardApp = {
+  dataFlow: null,
+  metricsStrip: null,
+  positionPanel: null,
+  tradeHistory: null,
+  analysisPanel: null,
+  tradingControl: null,
+  // WebSocket駆動フラグ
+  wsActive: false,
+  // trade_idキャッシュ
+  _tradeIdCache: {},
+
+  // 後方互換ゲッター（settings.js等の外部参照用）
+  get dashboard() { return this.dataFlow ? this.dataFlow.get('dashboard') : null; },
+  get tradingMode() { return this.dataFlow ? this.dataFlow.get('tradingMode') : null; },
+  get symbol() { return this.dataFlow ? this.dataFlow.get('symbol') : 'USDJPY'; },
+
+  init() {
+    const df = new DataFlowManager();
+    this.dataFlow = df;
+
+    // 保存済みシンボル復元
+    const savedSymbol = localStorage.getItem('chart_symbol') || 'USDJPY';
+    df.publish('symbol', savedSymbol);
+
+    // コンポーネント生成
+    this.metricsStrip = new MetricsStrip(df);
+    this.positionPanel = new PositionPanel(df);
+    this.tradeHistory = new TradeHistory(df);
+    this.analysisPanel = new AnalysisPanel(df);
+    this.tradingControl = new TradingControl(df, {
+      onSelectSymbol: (s) => this.selectSymbol(s),
+      onFetchTradingMode: () => this.fetchTradingMode(),
+      onFetchAnalysis: () => this.fetchAnalysis(),
+    });
+
+    // コンポーネントマウント
+    this.metricsStrip.mount();
+    this.positionPanel.mount();
+    this.tradeHistory.mount();
+    this.analysisPanel.mount();
+    this.tradingControl.mount();
+
+    // グローバルブリッジ（インラインonclick互換）
+    this._closeVolumes = this.positionPanel._closeVolumes;
+
+    // UI初期化
+    const sel = document.getElementById('symbol-selector');
+    if (sel) sel.value = savedSymbol;
+    const chartTitle = document.getElementById('chart-title');
+    if (chartTitle) chartTitle.textContent = savedSymbol + ' チャート';
+
+    // チャート初期化
+    ChartManager.init('chart-container', savedSymbol);
+
+    // エンジン確保
+    ensureSymbolEngine(savedSymbol).catch(() => {});
+
+    // データ取得
+    this.fetchAll();
+    this.fetchTradingMode();
+    this.fetchAnalysis();
+
+    // ファンダメンタルウィジェット
+    if (typeof FundamentalWidget !== 'undefined') {
+      FundamentalWidget.init(savedSymbol);
+    }
+
+    // チャートは30秒毎にフル再取得
+    this.pollInterval = setInterval(() => this.fetchAll(), 30000);
+
+    // WS切断中フォールバック（10秒毎）
+    this._fallbackInterval = setInterval(() => {
+      if (!this.wsActive) {
+        this.fetchAnalysis();
+        this.fetchPositionsAndTrades();
+        this.fetchTradingMode();
+      }
+    }, 10000);
+
+    // WebSocket
+    this.dashWs = createWebSocketClient('/ws/dashboard');
+    this.dashWs.on('price_update', (msg) => {
+      this.wsActive = true;
+      const { symbol, bid, time_ms } = msg.data;
+      if (bid > 0 && symbol === df.get('symbol')) {
+        ChartManager.updateLastBar(bid, time_ms);
+      }
+    });
+    this.dashWs.on('tick_update', (msg) => {
+      this.wsActive = true;
+      this._applyTickUpdate(msg.data);
+    });
+    this.dashWs.on('position_update', () => {
+      this.wsActive = true;
+      this.fetchPositionsAndTrades();
+    });
+    this.dashWs.on('news_update', (msg) => {
+      if (typeof FundamentalWidget !== 'undefined') FundamentalWidget.onNewsUpdate(msg);
+    });
+    this.dashWs.on('calendar_update', (msg) => {
+      if (typeof FundamentalWidget !== 'undefined') FundamentalWidget.onCalendarUpdate(msg);
+    });
+    this.dashWs.onStateChange((state) => {
+      if (state === 'disconnected' || state === 'error') this.wsActive = false;
+    });
+    this.dashWs.connect();
+  },
+
+  // ── tick_update 一括適用 ──
+
+  _applyTickUpdate(data) {
+    const df = this.dataFlow;
+    const symbol = df.get('symbol');
+
+    // 分析パネル
+    if (data.analysis) {
+      if (!data.analysis.symbol || data.analysis.symbol === symbol) {
+        df.publish('analysis', data.analysis);
+      }
+    }
+
+    // メトリクス（口座情報のみ → dashboardチャネル）
+    if (data.account) {
+      const d = df.get('dashboard');
+      if (d) {
+        df.publish('dashboard', {
+          ...d,
+          account: { ...d.account, ...data.account },
+        });
+      }
+    }
+
+    // ポジション
+    if (data.positions !== undefined) {
+      const prevPositions = df.get('positions') || [];
+      const prevTickets = new Set(prevPositions.map(p => p.ticket));
+      const newTickets = new Set(data.positions.map(p => p.ticket));
+      for (const p of data.positions) {
+        p.trade_id = this._tradeIdCache[p.ticket] || '';
+      }
+      df.publish('positions', data.positions);
+      // ポジション増減時はREST再取得でtrade_idをDB同期
+      const added = data.positions.some(p => !prevTickets.has(p.ticket));
+      const removed = [...prevTickets].some(t => !newTickets.has(t));
+      if (added || removed) {
+        this.fetchPositionsAndTrades();
       }
     }
   },
 
-  /**
-   * 経過時間（分）をクライアント側で算出する。
-   * opened_at（UTC ISO文字列）から現在時刻との差分を計算。
-   * サーバー再起動後もopened_atが保持されている限り正確。
-   */
-  _calcElapsedMin(ticket) {
-    const cache = this._posTimeCache[ticket];
-    if (!cache || !cache.openedAtMs) return 0;
-    return Math.max(0, Math.floor((Date.now() - cache.openedAtMs) / 60000));
-  },
+  // ── データ取得 ──
 
-  /** 経過時間の表示（常にopened_atからクライアント側計算） */
-  _fmtElapsedTime(p) {
-    // キャッシュ経由で計算（renderPositions内で_updatePosTimeCacheが先行）
-    if (p.opened_at || this._posTimeCache[p.ticket]) {
-      return this.fmtHoldTime(null, this._calcElapsedMin(p.ticket));
+  _syncTradeIdCache() {
+    const positions = this.dataFlow.get('positions') || [];
+    const active = new Set();
+    for (const p of positions) {
+      if (p.trade_id) this._tradeIdCache[p.ticket] = p.trade_id;
+      active.add(p.ticket);
     }
-    // フォールバック: サーバー算出値
-    if (p.elapsed_minutes != null) {
-      return this.fmtHoldTime(null, p.elapsed_minutes);
-    }
-    return '0m';
-  },
-
-  /**
-   * 残り時間のHTML文字列を返す（共通ロジック）。
-   * max_hold_minutes が既知の場合、クライアント側で
-   * elapsed を引いて算出する。
-   */
-  _calcRemainingHtml(ticket) {
-    const cache = this._posTimeCache[ticket];
-    if (!cache || cache.maxHoldMin == null) return '';
-    const elapsed = this._calcElapsedMin(ticket);
-    const rem = Math.max(0, cache.maxHoldMin - elapsed);
-    const ratio = cache.maxHoldMin > 0 ? rem / cache.maxHoldMin : 1;
-    const cls = ratio <= 0.2 ? 'text-orange-400' : 'text-gray-500';
-    let label;
-    if (rem < 60) {
-      label = `残${rem}m`;
-    } else {
-      const h = Math.floor(rem / 60);
-      const m = rem % 60;
-      label = m > 0 ? `残${h}h${m}m` : `残${h}h`;
-    }
-    return `<span class="${cls}">/ ${label}</span>`;
-  },
-
-  /** カード描画用: 残り時間の内部HTML */
-  _fmtRemainingTimeInner(p) {
-    return this._calcRemainingHtml(Number(p.ticket));
-  },
-
-  /**
-   * 1分ごとのタイマーコールバック。
-   * DOM上の経過時間・残り時間テキストを直接更新する。
-   * innerHTML全体の再描画を伴わないためレイアウトシフトが発生しない。
-   */
-  _tickPositionTimers() {
-    // 経過時間の更新
-    const elapsedEls = document.querySelectorAll('[data-elapsed-ticket]');
-    for (const el of elapsedEls) {
-      const ticket = Number(el.dataset.elapsedTicket);
-      const min = this._calcElapsedMin(ticket);
-      el.textContent = this.fmtHoldTime(null, min);
-    }
-    // 残り時間の更新
-    const remainEls = document.querySelectorAll('[data-remaining-ticket]');
-    for (const el of remainEls) {
-      const ticket = Number(el.dataset.remainingTicket);
-      el.innerHTML = this._calcRemainingHtml(ticket);
+    for (const ticket of Object.keys(this._tradeIdCache)) {
+      if (!active.has(Number(ticket))) delete this._tradeIdCache[ticket];
     }
   },
 
-  escapeHtml(str) {
-    const div = document.createElement('div');
-    div.textContent = str || '';
-    return div.innerHTML;
+  async fetchPositionsAndTrades() {
+    const [dash, pos, tr, summary] = await Promise.allSettled([
+      getDashboard(),
+      getPositions(null),
+      getTrades(null, 100),
+      getTradeSummary(null, 30),
+    ]);
+    const df = this.dataFlow;
+    if (dash.status === 'fulfilled') df.publish('dashboard', dash.value);
+    if (pos.status === 'fulfilled') {
+      df.publish('positions', pos.value);
+      this._syncTradeIdCache();
+    }
+    if (tr.status === 'fulfilled' || summary.status === 'fulfilled') {
+      df.publish('trades', {
+        trades: tr.status === 'fulfilled' ? tr.value : ((df.get('trades') || {}).trades || []),
+        summary: summary.status === 'fulfilled' ? summary.value : ((df.get('trades') || {}).summary || null),
+      });
+    }
+  },
+
+  async fetchAll() {
+    const [dash, pos, tr, summary] = await Promise.allSettled([
+      getDashboard(),
+      getPositions(null),
+      getTrades(null, 100),
+      getTradeSummary(null, 30),
+    ]);
+    const df = this.dataFlow;
+    if (dash.status === 'fulfilled') df.publish('dashboard', dash.value);
+    if (pos.status === 'fulfilled') {
+      df.publish('positions', pos.value);
+      this._syncTradeIdCache();
+    }
+    if (tr.status === 'fulfilled' || summary.status === 'fulfilled') {
+      df.publish('trades', {
+        trades: tr.status === 'fulfilled' ? tr.value : ((df.get('trades') || {}).trades || []),
+        summary: summary.status === 'fulfilled' ? summary.value : ((df.get('trades') || {}).summary || null),
+      });
+    }
+  },
+
+  async fetchAnalysis() {
+    const symbol = this.dataFlow.get('symbol');
+    try {
+      const analysis = await getAnalysis(symbol);
+      this.dataFlow.publish('analysis', analysis);
+    } catch (e) {
+      this.dataFlow.publish('analysis', null);
+    }
+  },
+
+  async fetchTradingMode() {
+    try {
+      const mode = await getTradingMode();
+      this.dataFlow.publish('tradingMode', mode);
+    } catch (e) {
+      this.dataFlow.publish('tradingMode', null);
+    }
+  },
+
+  async selectSymbol(symbol) {
+    const df = this.dataFlow;
+    df.publish('symbol', symbol);
+    localStorage.setItem('chart_symbol', symbol);
+    const sel = document.getElementById('symbol-selector');
+    if (sel) sel.value = symbol;
+    const chartTitle = document.getElementById('chart-title');
+    if (chartTitle) chartTitle.textContent = symbol + ' チャート';
+    ChartManager.setSymbol(symbol);
+    const list = document.getElementById('symbol-dropdown-list');
+    if (list) list.classList.add('hidden');
+    if (typeof FundamentalWidget !== 'undefined') {
+      FundamentalWidget.changeSymbol(symbol);
+    }
+    try { await ensureSymbolEngine(symbol); } catch (e) { /* 続行 */ }
+    df.publish('analysis', null);
+    this.fetchAnalysis();
+    this.fetchAll();
+  },
+
+  // ── グローバルブリッジ（インラインonclick互換） ──
+
+  togglePositionDetail(...args) {
+    this.positionPanel.togglePositionDetail(...args);
+  },
+  closePosition(...args) {
+    return this.positionPanel.closePosition(...args);
+  },
+  _selectClosePct(...args) {
+    this.positionPanel._selectClosePct(...args);
+  },
+  updateHeaderAccountName() {
+    if (this.tradingControl) this.tradingControl._updateAccountName();
   },
 };
 
