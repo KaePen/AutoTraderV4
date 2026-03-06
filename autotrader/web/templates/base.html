@@ -47,7 +47,7 @@
             </h1>
           </div>
         </div>
-        <div class="flex items-center gap-2">
+        <div class="flex items-center gap-1 sm:gap-2 flex-shrink-0">
           <!-- 時計 -->
           <div id="header-clock" class="hidden lg:flex items-center gap-1.5 text-xs tabular-nums text-gray-400">
             <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -108,7 +108,7 @@
           </span>
           <!-- 通知ベル -->
           <div id="notification-bell-container" class="relative">
-            <button id="notification-bell-btn" class="relative p-2 rounded-lg hover:bg-gray-700 transition-colors" aria-label="Notifications">
+            <button id="notification-bell-btn" class="relative p-1.5 sm:p-2 rounded-lg hover:bg-gray-700 transition-colors" aria-label="Notifications">
               <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                       d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" />
@@ -127,7 +127,7 @@
             </div>
           </div>
           <!-- 設定ボタン -->
-          <button id="settings-btn" class="p-2 rounded-lg hover:bg-gray-700 transition-colors" aria-label="Settings">
+          <button id="settings-btn" class="p-1.5 sm:p-2 rounded-lg hover:bg-gray-700 transition-colors flex-shrink-0" aria-label="Settings">
             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
                     d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z" />
@@ -150,7 +150,7 @@
   <!-- 設定モーダル -->
   <div id="settings-modal-overlay" class="hidden fixed inset-0 bg-black/50 z-40"></div>
   <div id="settings-modal" class="hidden fixed inset-0 z-50 flex items-center justify-center p-4">
-    <div class="bg-gray-800 border border-gray-700 rounded-lg shadow-xl w-full max-w-lg" onclick="event.stopPropagation()">
+    <div class="bg-gray-800 border border-gray-700 rounded-lg shadow-xl w-full max-w-lg max-h-[calc(100vh-2rem)] flex flex-col overflow-hidden" onclick="event.stopPropagation()">
       <div class="flex items-center justify-between p-4 border-b border-gray-700">
         <h2 class="text-lg font-semibold">設定</h2>
         <button id="settings-close-btn" class="p-1 rounded hover:bg-gray-700 transition-colors" aria-label="Close">
@@ -170,12 +170,12 @@
         <button data-tab="notification" class="flex-1 px-2 sm:px-4 py-2 text-xs sm:text-sm font-medium text-gray-400 hover:text-gray-200">通知</button>
         <button data-tab="connection" class="flex-1 px-2 sm:px-4 py-2 text-xs sm:text-sm font-medium text-gray-400 hover:text-gray-200">接続</button>
       </div>
-      <div id="settings-content" class="p-4">
+      <div id="settings-content" class="p-4 overflow-y-auto flex-1 min-h-0">
         <div class="flex items-center justify-center h-40">
           <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
         </div>
       </div>
-      <div class="flex items-center justify-between gap-2 p-4 border-t border-gray-700">
+      <div class="flex items-center justify-between gap-2 p-4 border-t border-gray-700 flex-shrink-0">
         <button id="settings-mt5-btn"
                 class="px-4 py-2 rounded text-sm font-semibold transition-all bg-blue-600 hover:bg-blue-700 text-white">
           MT5 接続
