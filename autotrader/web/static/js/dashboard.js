@@ -1077,16 +1077,21 @@ const DashboardApp = {
 
     if (sameStructure) {
       // 構造同一: カード内部のみ更新（展開状態・スクロール保持）
+      // data-close-ui（決済UI）は触らず、data-pos-innerのみ更新
       displayPositions.forEach((p, i) => {
         const card = existingCards[i];
         if (!card) return;
         const inner = this._positionCardInner(p, i);
-        // onclick更新（ticketが変わる可能性）
         card.setAttribute(
           'onclick',
           `DashboardApp.togglePositionDetail('pos-detail-${i}', 'pos-arrow-${i}', ${p.ticket})`
         );
-        card.innerHTML = inner;
+        const posInner = card.querySelector('[data-pos-inner]');
+        if (posInner) {
+          posInner.innerHTML = inner;
+        } else {
+          card.innerHTML = inner;
+        }
       });
     } else {
       // 構造変化（ポジション増減）: 全体再描画
@@ -1103,11 +1108,14 @@ const DashboardApp = {
     const isBuy = p.signal_type === 'BUY';
     const borderColor = isBuy ? 'border-l-green-500' : 'border-l-red-500';
     const inner = this._positionCardInner(p, idx);
+    const isExpanded = this._expandedPositions.has(p.ticket);
+    const closeCls = isExpanded ? '' : 'hidden';
     return `
       <div class="border-l-2 ${borderColor} bg-gray-800/60 rounded-r-lg px-3 py-2 cursor-pointer select-none"
            data-ticket="${p.ticket}"
            onclick="DashboardApp.togglePositionDetail('pos-detail-${idx}', 'pos-arrow-${idx}', ${p.ticket})">
-        ${inner}
+        <div data-pos-inner>${inner}</div>
+        <div data-close-ui="${p.ticket}" class="${closeCls}">${this._closePositionHtml(p)}</div>
       </div>`;
   },
 
@@ -1209,7 +1217,6 @@ const DashboardApp = {
         <div id="${detailId}" class="${detailCls}">
           ${priceRowHtml}
           ${p.trade_id ? `<div class="mt-1 text-[9px] text-gray-700 tabular-nums truncate">ID: ${p.trade_id}</div>` : ''}
-          ${this._closePositionHtml(p)}
         </div>`;
   },
 
@@ -1224,26 +1231,22 @@ const DashboardApp = {
     const btnPartId = `close-part-${p.ticket}`;
     return `
       <div class="mt-2 pt-2 border-t border-gray-700/50" onclick="event.stopPropagation()">
-        <div class="flex items-center gap-2 mb-1.5">
+        <div class="flex items-center gap-1.5">
           <button id="${btnFullId}"
-            class="px-2.5 py-1 text-[11px] font-semibold rounded bg-red-600 hover:bg-red-500 text-white transition-colors"
+            class="shrink-0 px-2 py-1 text-[10px] font-semibold rounded bg-red-600 hover:bg-red-500 text-white transition-colors"
             onclick="DashboardApp.closePosition(${p.ticket}, null)">
             全決済
           </button>
-          <span class="text-[10px] text-gray-500">|</span>
-          <span class="text-[10px] text-gray-400">部分決済</span>
-        </div>
-        <div class="flex items-center gap-2">
+          <div class="w-px h-4 bg-gray-600 shrink-0"></div>
           <input id="${sliderId}" type="range"
             min="${minVol}" max="${vol}" step="${step}" value="${vol}"
-            class="flex-1 h-1.5 accent-amber-500 cursor-pointer"
+            class="flex-1 min-w-0 h-1.5 accent-amber-500 cursor-pointer"
             oninput="document.getElementById('${labelId}').textContent = parseFloat(this.value).toFixed(2)">
-          <span id="${labelId}" class="text-xs tabular-nums text-amber-400 w-10 text-right">${vol.toFixed(2)}</span>
-          <span class="text-[10px] text-gray-500">lot</span>
+          <span id="${labelId}" class="shrink-0 text-xs tabular-nums text-amber-400 w-8 text-right">${vol.toFixed(2)}</span>
           <button id="${btnPartId}"
-            class="px-2 py-1 text-[10px] font-semibold rounded bg-amber-600 hover:bg-amber-500 text-white transition-colors"
+            class="shrink-0 px-2 py-1 text-[10px] font-semibold rounded bg-amber-600 hover:bg-amber-500 text-white transition-colors"
             onclick="DashboardApp.closePosition(${p.ticket}, parseFloat(document.getElementById('${sliderId}').value))">
-            決済
+            部分決済
           </button>
         </div>
       </div>`;
@@ -1309,8 +1312,13 @@ const DashboardApp = {
     if (!detail) return;
     const isHidden = detail.classList.toggle('hidden');
     if (arrow) arrow.textContent = isHidden ? '▸' : '▾';
-    // 展開状態を保持
+    // 決済UIの表示も連動
     if (ticket != null) {
+      const closeUi = document.querySelector(`[data-close-ui="${ticket}"]`);
+      if (closeUi) {
+        if (isHidden) closeUi.classList.add('hidden');
+        else closeUi.classList.remove('hidden');
+      }
       if (isHidden) {
         this._expandedPositions.delete(ticket);
       } else {
