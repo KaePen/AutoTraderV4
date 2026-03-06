@@ -1650,7 +1650,8 @@ const DashboardApp = {
       const otherPositions = tickSymbol
         ? prevPositions.filter(p => p.symbol !== tickSymbol)
         : [];
-      const merged = [...otherPositions, ...data.positions];
+      const merged = [...otherPositions, ...data.positions]
+        .sort((a, b) => a.ticket - b.ticket);
       const prevTickets = new Set(prevPositions.map(p => p.ticket));
       const mergedTickets = new Set(merged.map(p => p.ticket));
       df.publish('positions', merged);
@@ -1687,7 +1688,8 @@ const DashboardApp = {
     const df = this.dataFlow;
     if (dash.status === 'fulfilled') df.publish('dashboard', dash.value);
     if (pos.status === 'fulfilled') {
-      df.publish('positions', pos.value);
+      const sorted = [...pos.value].sort((a, b) => a.ticket - b.ticket);
+      df.publish('positions', sorted);
       this._syncTradeIdCache();
     }
     if (tr.status === 'fulfilled' || summary.status === 'fulfilled') {
@@ -1708,7 +1710,8 @@ const DashboardApp = {
     const df = this.dataFlow;
     if (dash.status === 'fulfilled') df.publish('dashboard', dash.value);
     if (pos.status === 'fulfilled') {
-      df.publish('positions', pos.value);
+      const sorted = [...pos.value].sort((a, b) => a.ticket - b.ticket);
+      df.publish('positions', sorted);
       this._syncTradeIdCache();
     }
     if (tr.status === 'fulfilled' || summary.status === 'fulfilled') {
