@@ -1639,18 +1639,24 @@ const DashboardApp = {
       }
     }
 
-    // ポジション
+    // ポジション（シンボル単位マージ: 各エンジンは自シンボル分のみ送信）
     if (data.positions !== undefined) {
-      const prevPositions = df.get('positions') || [];
-      const prevTickets = new Set(prevPositions.map(p => p.ticket));
-      const newTickets = new Set(data.positions.map(p => p.ticket));
+      const tickSymbol = (data.analysis && data.analysis.symbol) || '';
       for (const p of data.positions) {
         p.trade_id = this._tradeIdCache[p.ticket] || '';
       }
-      df.publish('positions', data.positions);
+      const prevPositions = df.get('positions') || [];
+      // 送信元シンボルのポジションだけ差し替え、他シンボルは保持
+      const otherPositions = tickSymbol
+        ? prevPositions.filter(p => p.symbol !== tickSymbol)
+        : [];
+      const merged = [...otherPositions, ...data.positions];
+      const prevTickets = new Set(prevPositions.map(p => p.ticket));
+      const mergedTickets = new Set(merged.map(p => p.ticket));
+      df.publish('positions', merged);
       // ポジション増減時はREST再取得でtrade_idをDB同期
-      const added = data.positions.some(p => !prevTickets.has(p.ticket));
-      const removed = [...prevTickets].some(t => !newTickets.has(t));
+      const added = merged.some(p => !prevTickets.has(p.ticket));
+      const removed = [...prevTickets].some(t => !mergedTickets.has(t));
       if (added || removed) {
         this.fetchPositionsAndTrades();
       }
