@@ -159,31 +159,38 @@ class MetricsStrip extends Component {
     const borderColors = { profit: 'border-l-green-500/50', loss: 'border-l-red-500/50', neutral: 'border-l-gray-600' };
     const valueColors = { profit: 'text-green-400', loss: 'text-red-400', neutral: 'text-gray-100' };
     const c = this._getCurrency();
-    const pillsHtml = this._buildPositionPills(positions);
     const profitStr = totalCount > 0
       ? `${totalProfit >= 0 ? '+' : ''}${fmtCurrency(totalProfit, c)}`
       : '';
+    const symbolCount = new Set(positions.map(p => p.symbol)).size;
+    const summaryText = totalCount > 0 ? `${symbolCount}ペア` : '';
     return `
-      <div class="card border-l-2 ${borderColors[variant]}" data-metric="mc-position" style="min-height:72px">
+      <div class="card border-l-2 ${borderColors[variant]} relative" data-metric="mc-position">
         <p class="text-[10px] text-gray-400 uppercase tracking-wider mb-0.5">ポジション</p>
         <p class="text-sm font-bold tabular-nums leading-tight ${valueColors[variant]}" data-val>${totalCount} open</p>
         <p class="text-[10px] text-gray-500 mt-0.5 tabular-nums" data-sub>${profitStr}</p>
-        <p class="flex flex-wrap gap-y-0.5 items-center mt-1 leading-none" data-pills style="min-height:14px">${pillsHtml}</p>
+        <p class="text-[10px] text-gray-500 mt-0.5 tabular-nums cursor-pointer hover:text-gray-300 transition-colors" data-pos-summary>${summaryText}</p>
+        <div data-pos-popover class="hidden absolute z-50 left-0 top-full mt-1 bg-gray-800 border border-gray-700 rounded-lg shadow-xl p-2 min-w-[180px]"></div>
       </div>`;
   }
 
-  _buildPositionPills(positions) {
+  _buildPopoverContent(positions) {
     if (positions.length === 0) return '';
+    const c = this._getCurrency();
     const bySymbol = {};
     for (const p of positions) {
-      if (!bySymbol[p.symbol]) bySymbol[p.symbol] = { pnl: 0 };
+      if (!bySymbol[p.symbol]) bySymbol[p.symbol] = { pnl: 0, count: 0 };
       bySymbol[p.symbol].pnl += (p.unrealized_pnl || 0);
+      bySymbol[p.symbol].count += 1;
     }
-    return Object.entries(bySymbol).map(([sym, cnt]) => {
-      const arrow = cnt.pnl > 0 ? '↑' : cnt.pnl < 0 ? '↓' : '→';
-      const color = cnt.pnl > 0 ? 'text-green-400' : cnt.pnl < 0 ? 'text-red-400' : 'text-gray-400';
-      return `<span class="inline-flex items-center gap-0.5 ${color} text-[10px] font-medium">${sym}<span>${arrow}</span></span>`;
-    }).join('<span class="text-gray-700 mx-0.5">·</span>');
+    return Object.entries(bySymbol).map(([sym, data]) => {
+      const color = data.pnl > 0 ? 'text-green-400' : data.pnl < 0 ? 'text-red-400' : 'text-gray-400';
+      const sign = data.pnl >= 0 ? '+' : '';
+      return `<div class="flex items-center justify-between gap-3 py-0.5">
+        <span class="text-[11px] font-medium text-gray-300">${sym} <span class="text-gray-500">×${data.count}</span></span>
+        <span class="text-[11px] font-bold tabular-nums ${color}">${sign}${fmtCurrency(data.pnl, c)}</span>
+      </div>`;
+    }).join('');
   }
 
   /** dashboard チャネル更新 → 口座・損益カードのみ差分更新 */
@@ -204,6 +211,7 @@ class MetricsStrip extends Component {
         + this._positionMetricCardHtml()
         + after.map(c => this._metricCardHtml(c.id, c.label, c.value, c.sub, c.variant)).join('');
       this._initialized = true;
+      this._initPopover();
       return;
     }
     // 差分更新: textContent のみ（innerHTML 不使用で点滅防止）
@@ -243,7 +251,8 @@ class MetricsStrip extends Component {
 
     const valEl = card.querySelector('[data-val]');
     const subEl = card.querySelector('[data-sub]');
-    const pillsEl = card.querySelector('[data-pills]');
+    const summaryEl = card.querySelector('[data-pos-summary]');
+    const popoverEl = card.querySelector('[data-pos-popover]');
     if (valEl) {
       valEl.textContent = totalCount + ' open';
       valEl.className = `text-sm font-bold tabular-nums leading-tight ${valueColors[variant]}`;
@@ -253,13 +262,44 @@ class MetricsStrip extends Component {
         ? `${totalProfit >= 0 ? '+' : ''}${fmtCurrency(totalProfit, c)}`
         : '';
     }
-    if (pillsEl) {
-      pillsEl.innerHTML = this._buildPositionPills(positions);
+    if (summaryEl) {
+      const symbolCount = new Set(positions.map(p => p.symbol)).size;
+      summaryEl.textContent = totalCount > 0 ? `${symbolCount}ペア` : '';
+    }
+    // ポップオーバーが開いている場合は内容も更新
+    if (popoverEl && !popoverEl.classList.contains('hidden')) {
+      popoverEl.innerHTML = this._buildPopoverContent(positions);
     }
     card.className = card.className
       .replace(/border-l-(green|red|gray)-[^\s]*/g, '')
       .replace(/\s+/g, ' ').trim()
       + ' ' + borderColors[variant];
+  }
+
+  /** ポップオーバーのクリックイベントを設定 */
+  _initPopover() {
+    const el = this.root;
+    if (!el) return;
+    const card = el.querySelector('[data-metric="mc-position"]');
+    if (!card) return;
+    const summaryEl = card.querySelector('[data-pos-summary]');
+    const popoverEl = card.querySelector('[data-pos-popover]');
+    if (!summaryEl || !popoverEl) return;
+
+    summaryEl.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const positions = this._dataFlow.get('positions') || [];
+      if (positions.length === 0) return;
+      popoverEl.innerHTML = this._buildPopoverContent(positions);
+      popoverEl.classList.toggle('hidden');
+    });
+
+    // ポップオーバー外クリックで閉じる
+    document.addEventListener('click', (e) => {
+      if (!card.contains(e.target)) {
+        popoverEl.classList.add('hidden');
+      }
+    });
   }
 }
 
