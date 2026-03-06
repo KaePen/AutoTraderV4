@@ -337,8 +337,16 @@ class LiveTradingEngine:
             enable: デモモードを有効にするか
         """
         self._symbol_demo_mode[symbol] = enable
+        # 自エンジン担当シンボルならBotConfigのdemo_modeも更新
+        if symbol == self._active_symbol and self._bot:
+            current = self._bot.config
+            if getattr(current, "demo_mode", False) != enable:
+                new_config = dataclasses.replace(
+                    current, demo_mode=enable,
+                )
+                self.update_bot_config(new_config)
         logger.info(
-            "シンボルデモモード: %s %s",
+            "[%s] シンボルデモモード: %s",
             symbol,
             "ON" if enable else "OFF",
         )
