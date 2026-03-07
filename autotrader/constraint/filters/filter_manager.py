@@ -41,6 +41,7 @@ class FilterManager:
         use_event_filter: bool = True,
         use_volatility_filter: bool = True,
         use_session_filter: bool = True,
+        pip_unit: float = 0.01,
     ) -> None:
         self.filters: list[tuple[str, any]] = []
 
@@ -56,6 +57,7 @@ class FilterManager:
             volatility_filter = VolatilityFilter(
                 high_threshold_percentile=95.0,
                 low_threshold_percentile=10.0,
+                pip_unit=pip_unit,
             )
             self.filters.append(("volatility", volatility_filter))
 

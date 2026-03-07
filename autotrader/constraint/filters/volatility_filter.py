@@ -27,10 +27,12 @@ class VolatilityFilter:
         high_threshold_percentile: float = 95.0,
         low_threshold_percentile: float = 10.0,
         lookback_periods: int = 200,
+        pip_unit: float = 0.01,
     ) -> None:
         self.high_threshold = high_threshold_percentile
         self.low_threshold = low_threshold_percentile
         self.lookback = lookback_periods
+        self._pip_unit = pip_unit
 
     def should_skip(
         self,
@@ -94,16 +96,17 @@ class VolatilityFilter:
         Returns:
             FilterResult: フィルター結果
         """
-        # USD/JPY想定の絶対値チェック
-        if atr > 0.5:  # 50pips以上
+        # ATRをpipsに変換して判定（通貨ペア非依存）
+        atr_pips = atr / self._pip_unit
+        if atr_pips > 50.0:
             return FilterResult(
                 skip=True,
-                reason=f"極端高ATR({atr * 100:.1f}pips)",
+                reason=f"極端高ATR({atr_pips:.1f}pips)",
             )
-        if atr < 0.03:  # 3pips未満
+        if atr_pips < 3.0:
             return FilterResult(
                 skip=True,
-                reason=f"極端低ATR({atr * 100:.1f}pips)",
+                reason=f"極端低ATR({atr_pips:.1f}pips)",
             )
         return FilterResult(skip=False)
 
