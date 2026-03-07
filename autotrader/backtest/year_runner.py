@@ -388,7 +388,10 @@ def run_unified_year(
                     pos.position_id,
                 )
                 # スプレッド: 価格→pips変換
-                _entry_spread_pips = _em.get("spread", 0) * 100 if _em else 0.0
+                _entry_spread_pips = (
+                    _em.get("spread", 0) / sim_config.pip_unit
+                    if _em else 0.0
+                )
                 _pos_mode_regime[_key] = {
                     "mode": _mode,
                     "regime": _regime,
@@ -482,9 +485,11 @@ def run_unified_year(
             _pips = 0.0
             if new_trade.exit_price and new_trade.entry_price:
                 _pips = (
-                    (new_trade.exit_price - new_trade.entry_price) * 100
+                    (new_trade.exit_price - new_trade.entry_price)
+                    / sim_config.pip_unit
                     if new_trade.signal_type.value == "BUY"
-                    else (new_trade.entry_price - new_trade.exit_price) * 100
+                    else (new_trade.entry_price - new_trade.exit_price)
+                    / sim_config.pip_unit
                 )
             _ckey = new_trade.position_id or str(new_trade.opened_at)
             _sig_data = _pos_mode_regime.get(_ckey, {})
@@ -511,7 +516,7 @@ def run_unified_year(
             _xm = simulator.get_exit_metrics(
                 new_trade.trade_id,
             )
-            _exit_spread_pips = _xm.get("exit_spread", 0) * 100
+            _exit_spread_pips = _xm.get("exit_spread", 0) / sim_config.pip_unit
             # time_to_mfe計算
             _time_to_mfe_min = 0.0
             _mfe_time = _mfe_mae.get("mfe_time")

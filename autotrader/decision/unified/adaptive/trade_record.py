@@ -54,10 +54,11 @@ class TradeRecord:
 
         # SL pips（エントリーとSLの差分）
         sl_pips = 0.0
+        _pip_unit = 0.01 if "JPY" in (trade.symbol or "JPY").upper() else 0.0001
         if trade.stop_loss and trade.entry_price:
             sl_pips = abs(
                 trade.entry_price - trade.stop_loss
-            ) * 100  # USDJPY向け
+            ) / _pip_unit
 
         # exit_reason を文字列化
         exit_str = ""

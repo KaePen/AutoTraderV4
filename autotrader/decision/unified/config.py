@@ -58,6 +58,7 @@ class EvaluatorConfig:
         min_score: 最小スコア閾値
         atr_sl_multiplier: ATRベースSL係数
         atr_tp_multiplier: ATRベースTP係数
+        pip_unit: 1pipの価格単位（JPY系=0.01、非JPY系=0.0001）
     """
 
     timeframe: str = "M15"
@@ -65,6 +66,7 @@ class EvaluatorConfig:
     min_score: float = 5.0
     atr_sl_multiplier: float = 1.5
     atr_tp_multiplier: float = 2.0
+    pip_unit: float = 0.01
     ema_cross_penalty: float | None = (
         None  # EMAクロス矛盾ペナルティ（None=-2.5）
     )
@@ -495,6 +497,9 @@ class UnifiedBotConfig:
     m1_exec_gate_bb_high: float = 0.7
     # 通過に必要な最小スコア
     m1_exec_gate_threshold: float = 1.0
+    # --- pip単位 ---
+    # 1pipの価格単位（JPY系=0.01、非JPY系=0.0001）
+    pip_unit: float = 0.01
     # --- M1リトレースエントリー ---
     # リトレースエントリー有効化
     m1_retrace_entry_enabled: bool = False
@@ -515,8 +520,23 @@ class UnifiedBotConfig:
             EvaluatorConfig: 評価器設定
         """
         if timeframe in self.evaluator_configs:
-            return self.evaluator_configs[timeframe]
-        return EvaluatorConfig(timeframe=timeframe)
+            cfg = self.evaluator_configs[timeframe]
+            if cfg.pip_unit != self.pip_unit:
+                # pip_unitをボット設定から伝搬
+                cfg = EvaluatorConfig(
+                    timeframe=cfg.timeframe,
+                    strength_config=cfg.strength_config,
+                    min_score=cfg.min_score,
+                    atr_sl_multiplier=cfg.atr_sl_multiplier,
+                    atr_tp_multiplier=cfg.atr_tp_multiplier,
+                    pip_unit=self.pip_unit,
+                    ema_cross_penalty=cfg.ema_cross_penalty,
+                )
+            return cfg
+        return EvaluatorConfig(
+            timeframe=timeframe,
+            pip_unit=self.pip_unit,
+        )
 
     def get_timeframe_config(self, timeframe: str) -> TimeframeConfig:
         """時間足別設定を取得

@@ -892,7 +892,7 @@ class TimeframeEvaluator:
 
         # ATRをpipsに変換
         if atr is not None and not pd.isna(atr):
-            atr_pips = atr * 100
+            atr_pips = atr / self.config.pip_unit
         else:
             atr_pips = 15.0
 
@@ -941,14 +941,20 @@ class TimeframeEvaluator:
         # 買いの場合: スイングローの下にSL
         if structure_direction >= 0 and last_swing_low is not None:
             if not pd.isna(last_swing_low):
-                sl_distance = abs(close - last_swing_low) * 100 + buffer_pips
+                sl_distance = (
+                    abs(close - last_swing_low) / self.config.pip_unit
+                    + buffer_pips
+                )
                 if 5.0 <= sl_distance <= 80.0:
                     return sl_distance
 
         # 売りの場合: スイングハイの上にSL
         if structure_direction <= 0 and last_swing_high is not None:
             if not pd.isna(last_swing_high):
-                sl_distance = abs(last_swing_high - close) * 100 + buffer_pips
+                sl_distance = (
+                    abs(last_swing_high - close) / self.config.pip_unit
+                    + buffer_pips
+                )
                 if 5.0 <= sl_distance <= 80.0:
                     return sl_distance
 
@@ -990,14 +996,14 @@ class TimeframeEvaluator:
         # 買いの場合: 上の流動性ゾーン（買い側流動性）がTP
         if structure_direction >= 0 and buy_side_liquidity is not None:
             if not pd.isna(buy_side_liquidity):
-                tp_distance = abs(buy_side_liquidity - close) * 100
+                tp_distance = abs(buy_side_liquidity - close) / self.config.pip_unit
                 if tp_distance >= sl_pips * min_rr_ratio:
                     return tp_distance
 
         # 売りの場合: 下の流動性ゾーン（売り側流動性）がTP
         if structure_direction <= 0 and sell_side_liquidity is not None:
             if not pd.isna(sell_side_liquidity):
-                tp_distance = abs(close - sell_side_liquidity) * 100
+                tp_distance = abs(close - sell_side_liquidity) / self.config.pip_unit
                 if tp_distance >= sl_pips * min_rr_ratio:
                     return tp_distance
 

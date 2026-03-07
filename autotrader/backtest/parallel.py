@@ -66,6 +66,7 @@ class EvaluatorParams:
     stoch_oversold: float = DEFAULT_SCORING.stoch_oversold
     stoch_overbought: float = DEFAULT_SCORING.stoch_overbought
     atr_sl_multiplier: float = 1.5
+    pip_unit: float = 0.01
 
 
 # 時間足ごとの最小スコア閾値（中央設定から参照）
@@ -237,7 +238,7 @@ def evaluate_timeframe_signal(
     # SL/TP計算
     atr = row_data.get("atr_14")
     if atr is not None and close is not None and close > 0:
-        atr_pips = atr * 100  # USDJPY用
+        atr_pips = atr / params.pip_unit
 
         base_mult = get_sl_base_mult(timeframe)
 
