@@ -220,15 +220,15 @@ class PairContext:
 def load_pair_data(
     symbol: str,
     data_dir: str,
-) -> BacktestRunner:
-    """ペアデータをロードしてBacktestRunnerを返す
+) -> tuple[BacktestRunner, dict[str, pd.DataFrame]]:
+    """ペアデータをロードしてBacktestRunnerとmarket_dataを返す
 
     Args:
         symbol: 通貨ペア名
         data_dir: データディレクトリ
 
     Returns:
-        BacktestRunner: データロード済みランナー
+        tuple: (BacktestRunner, market_data辞書)
     """
     preset = get_preset(symbol)
     config = BacktestConfig(
@@ -246,8 +246,16 @@ def load_pair_data(
         verbose=False,
         log_to_file=False,
     )
-    runner.load_data()
-    return runner
+    # 全期間データをロード
+    # load_data()はDaily→D1フォールバック等を処理する
+    market_data = runner._load_all_timeframes(include_m1=False)
+    # _load_all_timeframes でD1がロードされない場合
+    # load_data() の Daily→D1 フォールバックを利用
+    if "D1" not in market_data:
+        runner.load_data()
+        if runner._d1_df is not None:
+            market_data["D1"] = runner._d1_df
+    return runner, market_data
 
 
 # =============================================================
@@ -259,6 +267,7 @@ def setup_pair_context(
     year: int,
     bot_config: UnifiedBotConfig,
     initial_balance: float,
+    full_market_data: dict[str, pd.DataFrame] | None = None,
 ) -> PairContext | None:
     """ペアごとのBot/Simulator/Arraysを初期化
 
@@ -268,22 +277,25 @@ def setup_pair_context(
         year: 対象年
         bot_config: ボット設定
         initial_balance: 初期残高
+        full_market_data: 全期間market_data（年フィルタ前）
 
     Returns:
         PairContext | None: コンテキスト（データなしならNone）
     """
-    # 基準TF選択（M5 > M15 > H1）
-    if runner._m5_df is not None:
-        df = runner._m5_df
-        tf = Timeframe.M5
-    elif runner._m15_df is not None:
-        df = runner._m15_df
-        tf = Timeframe.M15
-    elif runner._h1_df is not None:
-        df = runner._h1_df
-        tf = Timeframe.H1
-    else:
+    if full_market_data is None:
         return None
+
+    # 基準TF選択（M5 > M15 > H1）
+    base_tf_name = None
+    for tf_name in ["M5", "M15", "H1"]:
+        if tf_name in full_market_data:
+            base_tf_name = tf_name
+            break
+    if base_tf_name is None:
+        return None
+
+    tf = Timeframe(base_tf_name)
+    df = full_market_data[base_tf_name]
 
     # 年フィルタ
     start_date = datetime(year, 1, 1)
@@ -295,14 +307,15 @@ def setup_pair_context(
     if period_df.empty:
         return None
 
-    # market_data辞書構築（全TFの年フィルタ済みデータ）
+    # market_data: 年フィルタ済みデータ
     market_data: dict[str, pd.DataFrame] = {}
-    needed_years = [year]
-    all_tf_data = runner._load_all_timeframes(
-        include_m1=False,
-        needed_years=needed_years,
-    )
-    market_data.update(all_tf_data)
+    for tf_key, tf_df in full_market_data.items():
+        year_df = tf_df[
+            (tf_df["time"] >= start_date)
+            & (tf_df["time"] < end_date)
+        ].reset_index(drop=True)
+        if not year_df.empty:
+            market_data[tf_key] = year_df
 
     # Bot初期化
     bot = UnifiedTradeBot(bot_config)
@@ -597,7 +610,7 @@ def run_multi_pair_year(
 # =============================================================
 def run_test_case(
     test_config: MultiPairConfig,
-    runners: dict[str, BacktestRunner],
+    runners: dict[str, tuple[BacktestRunner, dict[str, pd.DataFrame]]],
     symbols: list[str],
     start_year: int = START_YEAR,
     end_year: int = END_YEAR,
@@ -606,7 +619,7 @@ def run_test_case(
 
     Args:
         test_config: テスト設定
-        runners: データロード済みランナー辞書
+        runners: ペア別(BacktestRunner, market_data)辞書
         symbols: 対象シンボル
         start_year: 開始年
         end_year: 終了年
@@ -640,7 +653,7 @@ def run_test_case(
         # ペアコンテキスト構築
         contexts: dict[str, PairContext] = {}
         for sym in symbols:
-            runner = runners[sym]
+            runner, full_md = runners[sym]
             # ペア別bot_config構築
             extra_overrides: dict[str, Any] = {
                 "base_risk_pct": test_config.base_risk_pct,
@@ -650,6 +663,7 @@ def run_test_case(
 
             ctx = setup_pair_context(
                 sym, runner, year, bot_config, portfolio.equity,
+                full_market_data=full_md,
             )
             if ctx is not None:
                 contexts[sym] = ctx
@@ -1206,7 +1220,9 @@ def main() -> None:
 
     # データロード（全ペア1回のみ）
     print("\nデータロード中...")
-    runners: dict[str, BacktestRunner] = {}
+    runners: dict[
+        str, tuple[BacktestRunner, dict[str, pd.DataFrame]]
+    ] = {}
     for sym in available:
         _t0 = time.time()
         runners[sym] = load_pair_data(sym, data_dir)
