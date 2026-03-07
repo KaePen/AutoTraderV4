@@ -779,4 +779,207 @@
     </mxGraphModel>
   </diagram>
 
+  <diagram id="webui-backend" name="7. WebUIデータフロー（バックエンド）">
+    <mxGraphModel dx="2400" dy="3800" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="0" pageScale="1" pageWidth="3000" pageHeight="4000" math="0" shadow="0">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+
+        <mxCell id="title7" value="WebUI データフロー（バックエンド → フロントエンド）" style="text;html=1;fontSize=22;fontStyle=1;align=center;" vertex="1" parent="1">
+          <mxGeometry x="400" y="10" width="600" height="40" as="geometry"/>
+        </mxCell>
+
+        <!-- 読み方ガイド -->
+        <mxCell id="guide7" value="このダイアグラムの読み方&#xa;━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━&#xa;&#xa;【目的】WebUIの各フィールドが「どこからデータを取得し」&#xa;「どの頻度で更新されるか」を示しています。&#xa;&#xa;【2つのデータ取得方法】&#xa;  REST API（青い矢印）: 30秒ごとにサーバーに問い合わせ&#xa;    → 確実だが遅い。フォールバック用&#xa;  WebSocket（赤い矢印）: サーバーから即座にプッシュ通知&#xa;    → 高速。価格更新は毎tick（サブ秒）で届く&#xa;&#xa;【データの旅】&#xa;  MT5 → LiveTradingEngine → EventBus&#xa;   ├→ EventBridge → WebSocket → フロントエンド（即座）&#xa;   └→ REST API → 30秒ポーリング → フロントエンド&#xa;&#xa;【WebSocket切断時の安全装置】&#xa;  WebSocketが切れると、自動的に10秒間隔の&#xa;  RESTポーリングに切り替わります。&#xa;  再接続すると即座にWebSocketに戻ります。&#xa;&#xa;【具体例: 価格が動いた時】&#xa;  MT5でUSDJPY 149.95→150.00に変動&#xa;  → Engine: price.updated イベント発火&#xa;  → EventBridge: PRICE_UPDATE をWebSocketに配信&#xa;  → dashboard.js: ChartManager.updateLastBar(150.00)&#xa;  → 画面のチャートが即座に更新される" style="rounded=1;fillColor=#E8F5E9;strokeColor=#4CAF50;fontSize=10;whiteSpace=wrap;align=left;spacingLeft=8;spacingRight=8;spacingTop=4;" vertex="1" parent="1">
+          <mxGeometry x="50" y="60" width="470" height="480" as="geometry"/>
+        </mxCell>
+
+        <!-- ===== バックエンド データソース層 ===== -->
+        <mxCell id="backend_layer" value="バックエンド データソース" style="swimlane;startSize=25;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=14;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="50" y="570" width="1300" height="260" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="mt5_src" value="MetaTrader 5&#xa;━━━━━━━━━━━━━━━━━━━━━&#xa;• ティック価格（毎秒複数回）&#xa;• ローソク足（全TF）&#xa;• ポジション情報&#xa;• 口座情報（残高/証拠金）&#xa;• 注文実行結果" style="rounded=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=10;whiteSpace=wrap;align=left;fontStyle=1;" vertex="1" parent="backend_layer">
+          <mxGeometry x="10" y="30" width="190" height="110" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="engine_src" value="LiveTradingEngine&#xa;(通貨ペアごとに1つ)&#xa;━━━━━━━━━━━━━━━━━━━━━&#xa;• last_analysis: 最新分析結果&#xa;  (方向/スコア/レジーム/ペナルティ)&#xa;• cached_positions: 保有ポジション&#xa;• signal_history: シグナル履歴&#xa;• account_info: 口座情報キャッシュ&#xa;• get_candles(): ローソク足データ&#xa;• get_indicators(): 指標データ" style="rounded=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=10;whiteSpace=wrap;align=left;fontStyle=1;" vertex="1" parent="backend_layer">
+          <mxGeometry x="220" y="30" width="230" height="160" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="enginemgr_src" value="EngineManager&#xa;(全通貨ペアの統合管理)&#xa;━━━━━━━━━━━━━━━━━━━━━&#xa;• all_cached_positions: 全ペア合算&#xa;• account_info: 口座情報（統合）&#xa;• symbols: アクティブ通貨ペア一覧&#xa;• symbol_auto_trade_states&#xa;• symbol_demo_mode_states" style="rounded=1;fillColor=#ffe6cc;strokeColor=#d79b00;fontSize=10;whiteSpace=wrap;align=left;fontStyle=1;" vertex="1" parent="backend_layer">
+          <mxGeometry x="470" y="30" width="220" height="140" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="eventbus_src" value="EventBus&#xa;(イベント駆動パイプ)&#xa;━━━━━━━━━━━━━━━━━━━━━&#xa;• price.updated（毎tick）&#xa;• tick.completed（分析完了時）&#xa;• signal.generated（シグナル発行時）&#xa;• position.opened/closed&#xa;• news.received&#xa;• calendar.updated&#xa;• logic.reloaded/change_detected" style="rounded=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;whiteSpace=wrap;align=left;fontStyle=1;" vertex="1" parent="backend_layer">
+          <mxGeometry x="710" y="30" width="220" height="150" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="db_src" value="DB (TradeRecord)&#xa;━━━━━━━━━━━━━━━━━━━━━&#xa;• トレード履歴&#xa;• 統計集計（PF/WR等）&#xa;• 日次/週次/月次損益" style="rounded=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=10;whiteSpace=wrap;align=left;fontStyle=1;" vertex="1" parent="backend_layer">
+          <mxGeometry x="950" y="30" width="180" height="80" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="market_svc" value="MarketService&#xa;━━━━━━━━━━━━━━━━━━━━━&#xa;• daily/weekly/monthly_pnl&#xa;• win_rate, today_trades&#xa;• profit_factor 計算" style="rounded=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=10;whiteSpace=wrap;align=left;" vertex="1" parent="backend_layer">
+          <mxGeometry x="1150" y="30" width="140" height="80" as="geometry"/>
+        </mxCell>
+
+        <!-- MT5 → Engine 矢印 -->
+        <mxCell id="mt5_to_engine" value="データ取得" style="rounded=1;strokeWidth=2;strokeColor=#b85450;fontSize=9;" edge="1" parent="backend_layer" source="mt5_src" target="engine_src">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="engine_to_mgr" value="集約" style="rounded=1;strokeWidth=2;strokeColor=#d79b00;fontSize=9;" edge="1" parent="backend_layer" source="engine_src" target="enginemgr_src">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="engine_to_bus" value="イベント発火" style="rounded=1;strokeWidth=2;strokeColor=#d6b656;fontSize=9;" edge="1" parent="backend_layer" source="engine_src" target="eventbus_src">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+        <!-- ===== 配信レイヤー（REST + WebSocket） ===== -->
+        <mxCell id="delivery_layer" value="配信レイヤー（REST API + WebSocket）" style="swimlane;startSize=25;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=14;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="50" y="860" width="1300" height="380" as="geometry"/>
+        </mxCell>
+
+        <!-- REST API -->
+        <mxCell id="rest_group" value="REST API（30秒ポーリング）— 確実だが遅い" style="swimlane;startSize=22;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;fontStyle=1;" vertex="1" parent="delivery_layer">
+          <mxGeometry x="10" y="30" width="630" height="340" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="api_dashboard" value="/api/v1/dashboard&#xa;━━━━━━━━━━━━━━━━━━━━━&#xa;口座情報（残高/証拠金/維持率）&#xa;損益（日次/週次/月次/全体）&#xa;勝率/本日トレード数/PF&#xa;━━━━━━━━━━━━━━━━━━━━━&#xa;取得元: EngineManager + MarketService" style="rounded=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=9;whiteSpace=wrap;align=left;" vertex="1" parent="rest_group">
+          <mxGeometry x="10" y="25" width="200" height="105" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="api_positions" value="/api/v1/positions&#xa;━━━━━━━━━━━━━━━━━━━━━&#xa;全オープンポジション一覧:&#xa;チケット/シンボル/方向/ロット/&#xa;建値/SL/TP/含み損益/保有時間&#xa;━━━━━━━━━━━━━━━━━━━━━&#xa;取得元: Engine.cached_positions" style="rounded=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=9;whiteSpace=wrap;align=left;" vertex="1" parent="rest_group">
+          <mxGeometry x="220" y="25" width="190" height="105" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="api_analysis" value="/api/v1/signals/analysis&#xa;━━━━━━━━━━━━━━━━━━━━━&#xa;最新分析結果:&#xa;方向/スコア/信頼度/閾値&#xa;レジーム/トレンド強度&#xa;ペナルティ/TF別スコア・方向&#xa;━━━━━━━━━━━━━━━━━━━━━&#xa;取得元: Engine.last_analysis" style="rounded=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=9;whiteSpace=wrap;align=left;" vertex="1" parent="rest_group">
+          <mxGeometry x="420" y="25" width="200" height="105" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="api_trades" value="/api/v1/trades&#xa;━━━━━━━━━━━━━━━━━━━━━&#xa;トレード履歴 + 統計:&#xa;エントリー/エグジット日時&#xa;損益/pips/決済理由&#xa;━━━━━━━━━━━━━━━━━━━━━&#xa;取得元: DB (TradeRecord)" style="rounded=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=9;whiteSpace=wrap;align=left;" vertex="1" parent="rest_group">
+          <mxGeometry x="10" y="140" width="200" height="100" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="api_mode" value="/api/v1/trading/mode&#xa;━━━━━━━━━━━━━━━━━━━━━&#xa;接続状態/モード(ライブ/デモ)&#xa;自動取引ON/OFF&#xa;シンボル別自動取引/デモ状態&#xa;━━━━━━━━━━━━━━━━━━━━━&#xa;取得元: EngineManager" style="rounded=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=9;whiteSpace=wrap;align=left;" vertex="1" parent="rest_group">
+          <mxGeometry x="220" y="140" width="190" height="100" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="api_candles" value="/api/v1/candles/{symbol}/{tf}&#xa;/api/v1/indicators/{symbol}/{tf}&#xa;━━━━━━━━━━━━━━━━━━━━━&#xa;ローソク足データ(OHLCV)&#xa;指標時系列(EMA/BB/RSI等)&#xa;━━━━━━━━━━━━━━━━━━━━━&#xa;取得元: Engine / pandas_ta計算" style="rounded=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=9;whiteSpace=wrap;align=left;" vertex="1" parent="rest_group">
+          <mxGeometry x="420" y="140" width="200" height="100" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="api_control" value="操作API（ユーザーアクション時のみ）&#xa;━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━&#xa;POST /trading/mt5/connect — MT5接続開始&#xa;POST /trading/mt5/disconnect — MT5切断&#xa;POST /trading/auto-trade — 自動取引切替&#xa;POST /trading/symbol-auto-trade — シンボル別切替&#xa;POST /trading/reload-logic — ロジックホットリロード&#xa;POST /positions/{ticket}/close — ポジション手動決済" style="rounded=1;fillColor=#f5f5f5;strokeColor=#999999;fontSize=9;whiteSpace=wrap;align=left;" vertex="1" parent="rest_group">
+          <mxGeometry x="10" y="250" width="610" height="80" as="geometry"/>
+        </mxCell>
+
+        <!-- WebSocket -->
+        <mxCell id="ws_group" value="WebSocket（リアルタイム即座）— 高速プッシュ" style="swimlane;startSize=22;fillColor=#f8cecc;strokeColor=#b85450;fontSize=11;fontStyle=1;" vertex="1" parent="delivery_layer">
+          <mxGeometry x="660" y="30" width="630" height="340" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="ws_bridge" value="EventBridge&#xa;━━━━━━━━━━━━━━━━━━━━━&#xa;EventBus → WebSocket変換:&#xa;Engine内のイベントを&#xa;WebSocketメッセージに変換して&#xa;接続中のブラウザに配信" style="rounded=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=9;whiteSpace=wrap;align=left;fontStyle=1;" vertex="1" parent="ws_group">
+          <mxGeometry x="10" y="25" width="200" height="90" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="ws_price" value="PRICE_UPDATE&#xa;━━━━━━━━━━━━━━━━━━━━━&#xa;頻度: 毎tick（サブ秒）&#xa;内容: bid/ask価格, 時刻&#xa;用途: チャートの最後の足を&#xa;      リアルタイム更新&#xa;━━━━━━━━━━━━━━━━━━━━━&#xa;元イベント: price.updated" style="rounded=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=9;whiteSpace=wrap;align=left;" vertex="1" parent="ws_group">
+          <mxGeometry x="220" y="25" width="190" height="120" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="ws_tick" value="TICK_UPDATE&#xa;━━━━━━━━━━━━━━━━━━━━━&#xa;頻度: 分析完了ごと&#xa;内容: 分析結果 + 口座情報&#xa;      + ポジション情報を一括&#xa;用途: 分析パネル/メトリクス/&#xa;      ポジション一覧を一括更新&#xa;━━━━━━━━━━━━━━━━━━━━━&#xa;元イベント: tick.completed" style="rounded=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=9;whiteSpace=wrap;align=left;" vertex="1" parent="ws_group">
+          <mxGeometry x="420" y="25" width="200" height="130" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="ws_position" value="POSITION_UPDATE&#xa;━━━━━━━━━━━━━━━━━━━━━&#xa;頻度: ポジション開閉時のみ&#xa;内容: 開いた/閉じた情報&#xa;用途: ポジション一覧を即再取得&#xa;━━━━━━━━━━━━━━━━━━━━━&#xa;元: position.opened/closed" style="rounded=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=9;whiteSpace=wrap;align=left;" vertex="1" parent="ws_group">
+          <mxGeometry x="10" y="130" width="200" height="100" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="ws_signal" value="SIGNAL_UPDATE&#xa;━━━━━━━━━━━━━━━━━━━━━&#xa;頻度: シグナル発行時のみ&#xa;内容: BUY/SELL/HOLDシグナル詳細&#xa;用途: シグナル履歴に追加&#xa;━━━━━━━━━━━━━━━━━━━━━&#xa;元: signal.generated" style="rounded=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=9;whiteSpace=wrap;align=left;" vertex="1" parent="ws_group">
+          <mxGeometry x="220" y="160" width="190" height="95" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="ws_news" value="NEWS/CALENDAR_UPDATE&#xa;━━━━━━━━━━━━━━━━━━━━━&#xa;頻度: ニュース受信/カレンダー更新時&#xa;内容: ニュース本文/経済指標情報&#xa;用途: ファンダメンタルウィジェット&#xa;━━━━━━━━━━━━━━━━━━━━━&#xa;元: news.received/calendar.updated" style="rounded=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=9;whiteSpace=wrap;align=left;" vertex="1" parent="ws_group">
+          <mxGeometry x="420" y="160" width="200" height="100" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="ws_logic" value="LOGIC_RELOAD / CHANGE_DETECTED&#xa;━━━━━━━━━━━━━━━━━━━━━&#xa;頻度: 設定変更検知/リロード時&#xa;内容: リロード成功/失敗/変更ファイル&#xa;用途: リロードボタン状態更新" style="rounded=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=9;whiteSpace=wrap;align=left;" vertex="1" parent="ws_group">
+          <mxGeometry x="10" y="245" width="250" height="70" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="ws_channels" value="WebSocketチャネル&#xa;━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━&#xa;dashboard: メイン画面用（全イベント受信）&#xa;signals: シグナル専用ページ用&#xa;market:{symbol}: シンボル別チャート用" style="rounded=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=9;whiteSpace=wrap;align=left;" vertex="1" parent="ws_group">
+          <mxGeometry x="280" y="265" width="340" height="60" as="geometry"/>
+        </mxCell>
+
+        <!-- ===== フロントエンド UIフィールド層 ===== -->
+        <mxCell id="frontend_layer" value="フロントエンド UIフィールド（dashboard.html + dashboard.js）" style="swimlane;startSize=25;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=14;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="50" y="1270" width="1300" height="520" as="geometry"/>
+        </mxCell>
+
+        <!-- DataFlowManager -->
+        <mxCell id="dfm" value="DataFlowManager（フロントエンドのデータハブ）&#xa;━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━&#xa;REST APIの結果とWebSocketのプッシュデータを統合して各UIコンポーネントに配信するpub/subハブ&#xa;チャネル: dashboard / positions / trades / analysis / symbol / tradingMode" style="rounded=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=10;whiteSpace=wrap;align=center;fontStyle=1;" vertex="1" parent="frontend_layer">
+          <mxGeometry x="10" y="30" width="1280" height="50" as="geometry"/>
+        </mxCell>
+
+        <!-- Metrics パネル -->
+        <mxCell id="ui_metrics" value="メトリクスパネル（MetricsStrip）&#xa;━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━&#xa;残高 ← dashboard.account.balance [REST30秒 + WS即座]&#xa;有効証拠金 ← dashboard.account.equity [REST30秒]&#xa;証拠金維持率 ← dashboard.account.margin_level [REST30秒 + WS即座]&#xa;余剰証拠金 ← dashboard.account.free_margin [REST30秒 + WS即座]&#xa;本日損益 ← dashboard.daily_pnl [REST30秒]&#xa;週間損益 ← dashboard.weekly_pnl [REST30秒]&#xa;月間損益 ← dashboard.monthly_pnl [REST30秒]&#xa;勝率 ← dashboard.win_rate [REST30秒]&#xa;PF ← trades.summary.profit_factor [REST30秒]&#xa;本日トレード数 ← dashboard.today_trades [REST30秒]&#xa;ポジション数 ← positions.length [REST30秒 + WS即座]&#xa;未決済損益 ← sum(positions.unrealized_pnl) [REST30秒 + WS即座]" style="rounded=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=9;whiteSpace=wrap;align=left;" vertex="1" parent="frontend_layer">
+          <mxGeometry x="10" y="90" width="420" height="190" as="geometry"/>
+        </mxCell>
+
+        <!-- Analysis パネル -->
+        <mxCell id="ui_analysis" value="分析パネル（AnalysisPanel）&#xa;━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━&#xa;方向(BUY/SELL) ← analysis.direction [REST30秒 + WS即座]&#xa;スコア ← analysis.consensus_score [REST30秒 + WS即座]&#xa;信頼度 ← analysis.confidence [REST30秒 + WS即座]&#xa;エントリー閾値 ← analysis.entry_threshold [REST30秒 + WS即座]&#xa;レジーム ← analysis.regime [REST30秒 + WS即座]&#xa;トレンド強度 ← analysis.trend_strength [REST30秒 + WS即座]&#xa;HTF整合度 ← analysis.htf_alignment [REST30秒 + WS即座]&#xa;ペナルティ合計 ← analysis.penalty_total [REST30秒 + WS即座]&#xa;TF別スコア ← analysis.tf_scores{M5:3.2, H1:5.1...} [REST30秒 + WS即座]&#xa;TF別方向 ← analysis.tf_directions{M5:BUY, H1:BUY...} [REST30秒 + WS即座]" style="rounded=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=9;whiteSpace=wrap;align=left;" vertex="1" parent="frontend_layer">
+          <mxGeometry x="450" y="90" width="420" height="165" as="geometry"/>
+        </mxCell>
+
+        <!-- Position パネル -->
+        <mxCell id="ui_positions" value="ポジションパネル（PositionPanel）&#xa;━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━&#xa;チケット ← positions[].ticket [REST30秒 + WS即座]&#xa;シンボル ← positions[].symbol [REST30秒 + WS即座]&#xa;方向(BUY/SELL) ← positions[].signal_type [REST30秒 + WS即座]&#xa;ロット数 ← positions[].volume [REST30秒 + WS即座]&#xa;建値 ← positions[].entry_price [REST30秒 + WS即座]&#xa;現在価格 ← positions[].current_price [REST30秒 + WS即座]&#xa;含み損益 ← positions[].unrealized_pnl [REST30秒 + WS即座]&#xa;SL/TP ← positions[].stop_loss/take_profit [REST30秒 + WS即座]&#xa;保有時間 ← positions[].elapsed_minutes [REST30秒 + WS即座]&#xa;決済ボタン → POST /positions/{ticket}/close [ユーザー操作]" style="rounded=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=9;whiteSpace=wrap;align=left;" vertex="1" parent="frontend_layer">
+          <mxGeometry x="10" y="290" width="420" height="165" as="geometry"/>
+        </mxCell>
+
+        <!-- Chart -->
+        <mxCell id="ui_chart" value="チャート（ChartManager）&#xa;━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━&#xa;ローソク足 ← /candles/{symbol}/{tf} [REST30秒]&#xa;最後の足(リアルタイム) ← WS PRICE_UPDATE [毎tick・サブ秒]&#xa;EMA(12/26/50/200) ← /indicators/{s}/{tf}/series [REST60秒]&#xa;ボリンジャーバンド ← /indicators/{s}/{tf}/series [REST60秒]&#xa;RSI ← /indicators/{s}/{tf}/series [REST60秒]" style="rounded=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=9;whiteSpace=wrap;align=left;" vertex="1" parent="frontend_layer">
+          <mxGeometry x="890" y="90" width="400" height="100" as="geometry"/>
+        </mxCell>
+
+        <!-- Trades パネル -->
+        <mxCell id="ui_trades" value="トレード履歴パネル（TradesPanel）&#xa;━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━&#xa;エントリー/エグジット日時 ← trades[].opened_at/closed_at [REST30秒]&#xa;損益(pips) ← trades[].profit_loss_pips [REST30秒]&#xa;損益(金額) ← trades[].profit_loss [REST30秒]&#xa;決済理由 ← trades[].exit_reason [REST30秒]&#xa;━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━&#xa;※DBから取得。WebSocketでの即座更新なし（POSITION_UPDATE受信時に再取得）" style="rounded=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=9;whiteSpace=wrap;align=left;" vertex="1" parent="frontend_layer">
+          <mxGeometry x="450" y="290" width="420" height="115" as="geometry"/>
+        </mxCell>
+
+        <!-- Header/Control -->
+        <mxCell id="ui_header" value="ヘッダー/接続コントロール（TradingControl）&#xa;━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━&#xa;MT5接続状態 ← tradingMode.connected [REST30秒]&#xa;モード(ライブ/デモ) ← tradingMode.mode [REST30秒]&#xa;自動取引ON/OFF ← tradingMode.auto_trade [REST30秒]&#xa;シンボル一覧 ← tradingMode.symbols [REST30秒]&#xa;シンボル別自動取引 ← tradingMode.symbol_auto_trade [REST30秒]&#xa;接続/切断ボタン → POST /trading/mt5/connect or disconnect&#xa;リロードボタン → POST /trading/reload-logic" style="rounded=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=9;whiteSpace=wrap;align=left;" vertex="1" parent="frontend_layer">
+          <mxGeometry x="890" y="200" width="400" height="125" as="geometry"/>
+        </mxCell>
+
+        <!-- Fundamental -->
+        <mxCell id="ui_fundamental" value="ファンダメンタルウィジェット&#xa;━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━&#xa;次の重要指標までの時間 ← WS CALENDAR_UPDATE [イベント時]&#xa;最新ニュース ← WS NEWS_UPDATE [ニュース受信時]" style="rounded=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=9;whiteSpace=wrap;align=left;" vertex="1" parent="frontend_layer">
+          <mxGeometry x="890" y="340" width="400" height="60" as="geometry"/>
+        </mxCell>
+
+        <!-- ===== フォールバック説明 ===== -->
+        <mxCell id="fallback_box" value="WebSocket切断時のフォールバック機構&#xa;━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━&#xa;通常時: WebSocket接続中 → WS即座更新 + REST 30秒ポーリング（バックアップ）&#xa;WS切断時: 自動的に10秒間隔のRESTポーリングに切り替え（analysis + positions + tradingMode）&#xa;WS復旧時: 即座にWebSocketに戻り、10秒ポーリングは停止" style="rounded=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;whiteSpace=wrap;align=center;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="50" y="1810" width="1300" height="70" as="geometry"/>
+        </mxCell>
+
+        <!-- ===== 更新頻度まとめ ===== -->
+        <mxCell id="freq_summary" value="更新頻度まとめ&#xa;━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━&#xa;&#xa;【毎tick（サブ秒）】チャートの最後の足の価格 ← PRICE_UPDATE&#xa;【分析完了ごと】分析パネル + 口座情報 + ポジション一括 ← TICK_UPDATE&#xa;【イベント発生時】ポジション開閉 ← POSITION_UPDATE / シグナル発行 ← SIGNAL_UPDATE&#xa;【30秒ごと(REST)】メトリクス全体 / トレード履歴 / 接続状態 ← REST APIポーリング&#xa;【60秒ごと(REST)】チャート指標オーバーレイ(EMA/BB/RSI) ← indicators/series API&#xa;【低頻度】ニュース受信時 / 経済指標更新時 / ロジックリロード時" style="rounded=1;fillColor=#E8F5E9;strokeColor=#4CAF50;fontSize=10;whiteSpace=wrap;align=left;spacingLeft=8;spacingRight=8;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="50" y="1900" width="1300" height="150" as="geometry"/>
+        </mxCell>
+
+        <!-- レイヤー間の矢印 -->
+        <mxCell id="backend_to_rest" value="HTTPリクエスト" style="rounded=1;strokeWidth=3;strokeColor=#6c8ebf;fontSize=10;fontColor=#6c8ebf;" edge="1" parent="1" source="backend_layer" target="rest_group">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="backend_to_ws" value="イベントプッシュ" style="rounded=1;strokeWidth=3;strokeColor=#b85450;fontSize=10;fontColor=#b85450;" edge="1" parent="1" source="eventbus_src" target="ws_bridge">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="rest_to_frontend" value="30秒ポーリング" style="rounded=1;strokeWidth=3;strokeColor=#6c8ebf;fontSize=10;fontColor=#6c8ebf;dashed=1;" edge="1" parent="1" source="delivery_layer" target="dfm">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="ws_to_frontend" value="即座プッシュ" style="rounded=1;strokeWidth=3;strokeColor=#b85450;fontSize=10;fontColor=#b85450;" edge="1" parent="1" source="ws_group" target="dfm">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+
+      </root>
+    </mxGraphModel>
+  </diagram>
+
 </mxfile>
