@@ -3133,6 +3133,10 @@ class LiveTradingEngine:
                 if self._config.reload_config.auto_reload_on_change:
                     logger.info("自動ホットリロード開始")
                     await self.reload_trade_logic()
+                else:
+                    # 通知のみモード: スナップショットを更新して
+                    # 次回ポーリングで同じ変更を再検知しないようにする
+                    self._reloader.mark_reloaded()
             except asyncio.CancelledError:
                 raise
             except Exception as e:
