@@ -204,7 +204,7 @@ class PositionManagerConfig:
     partial_close_2r_ratio: float = 0.05
     breakeven_at_1r: bool = True
     trailing_start_r: float = 0.5
-    trailing_atr_multiplier: float = 2.5
+    trailing_atr_multiplier: float = 2.0
     time_exit_enabled: bool = True
     spread_pips: float = 1.5
     slippage_pips: float = 0.5
@@ -285,7 +285,7 @@ class PositionManagerConfig:
     stag_trend_minutes: float | None = None
     stag_range_minutes: float | None = None
     # STAGNATION予防的SL引き締め
-    stag_pretighten_enabled: bool = False
+    stag_pretighten_enabled: bool = True
     # stag時間の何%で発動するか
     stag_pretighten_pct: float = 0.80
     # MFE閾値（これ未満で発動）
@@ -293,7 +293,7 @@ class PositionManagerConfig:
     # SLターゲットR値（エントリーからの距離）
     stag_pretighten_sl_r: float = -0.05
     # 早期利益ガード: 小利益+センチメント悪化で早期撤退
-    early_profit_guard_enabled: bool = False
+    early_profit_guard_enabled: bool = True
     # MFE最低値（一度は有利に動いた証拠）
     early_profit_guard_min_mfe_r: float = 0.05
     # 現在含み益の最低R値

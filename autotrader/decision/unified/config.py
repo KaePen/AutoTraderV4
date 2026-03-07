@@ -159,7 +159,7 @@ class SignalConfig:
     consensus_manage_weight: float = 0.5
     consensus_other_weight: float = 1.0
     bca_enabled: bool = True
-    bca_min_edge: float = 0.55
+    bca_min_edge: float = 0.60
     bca_penalty_scale: float = 1.0
     htf_score_filter_enabled: bool = True
     htf_score_filter_min_alignment: float = 0.1
@@ -416,7 +416,7 @@ class UnifiedBotConfig:
     # BCA有効化フラグ
     bca_enabled: bool = True
     # 最小方向性エッジ閾値（これ未満でブロック）
-    bca_min_edge: float = 0.55
+    bca_min_edge: float = 0.60
     # ペナルティスケール係数
     bca_penalty_scale: float = 1.0
     # --- 構造的改善設定 ---
