@@ -18,28 +18,17 @@ const FundamentalWidget = {
     this._initCollapsible();
   },
 
-  /** 折りたたみ初期化（全画面サイズ対応、スマホのみデフォルト閉） */
+  /** 折りたたみ初期化（PanelCollapser経由でlocalStorage永続化） */
   _initCollapsible() {
     const isMobile = !window.matchMedia('(min-width: 640px)').matches;
-    this._setupToggle('news-toggle', 'news-chevron', 'fundamental-news-list', isMobile);
-    this._setupToggle('calendar-toggle', 'calendar-chevron', 'fundamental-calendar-list', isMobile);
-  },
-
-  _setupToggle(toggleId, chevronId, contentId, defaultCollapsed) {
-    const toggle = document.getElementById(toggleId);
-    const chevron = document.getElementById(chevronId);
-    const content = document.getElementById(contentId);
-    if (!toggle || !content) return;
-    let expanded = !defaultCollapsed;
-    if (!expanded) {
-      content.classList.add('hidden');
-      if (chevron) chevron.style.transform = 'rotate(-90deg)';
-    }
-    toggle.addEventListener('click', () => {
-      expanded = !expanded;
-      content.classList.toggle('hidden', !expanded);
-      if (chevron) chevron.style.transform = expanded ? '' : 'rotate(-90deg)';
-    });
+    PanelCollapser.setup(
+      'news', 'news-toggle', 'news-chevron',
+      'fundamental-news-list', !isMobile
+    );
+    PanelCollapser.setup(
+      'calendar', 'calendar-toggle', 'calendar-chevron',
+      'fundamental-calendar-list', !isMobile
+    );
   },
 
   /** シンボル変更時の軽量更新（カウントダウン再起動なし） */

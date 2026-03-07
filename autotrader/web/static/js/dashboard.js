@@ -1,5 +1,58 @@
 /** ダッシュボードロジック - コンポーネントベース */
 
+// ── パネル折りたたみユーティリティ ──
+
+const PanelCollapser = {
+  _STORAGE_KEY: 'dashboard_panel_state',
+
+  /** localStorage から全パネル状態を読み込み */
+  _loadState() {
+    try {
+      return JSON.parse(localStorage.getItem(this._STORAGE_KEY)) || {};
+    } catch { return {}; }
+  },
+
+  /** 指定パネルの展開状態を保存 */
+  _saveState(panelId, expanded) {
+    const state = this._loadState();
+    state[panelId] = expanded;
+    localStorage.setItem(this._STORAGE_KEY, JSON.stringify(state));
+  },
+
+  /**
+   * パネル折りたたみを初期化
+   * @param {string} panelId - localStorage保存用キー
+   * @param {string} toggleId - トグルボタンの要素ID
+   * @param {string} chevronId - シェブロンSVGの要素ID
+   * @param {string} contentId - 折りたたむコンテンツの要素ID
+   * @param {boolean} defaultExpanded - 初期状態（保存値がない場合）
+   */
+  setup(panelId, toggleId, chevronId, contentId, defaultExpanded = true) {
+    const toggle = document.getElementById(toggleId);
+    const chevron = document.getElementById(chevronId);
+    const content = document.getElementById(contentId);
+    if (!toggle || !content) return;
+
+    const saved = this._loadState();
+    let expanded = saved[panelId] != null ? saved[panelId] : defaultExpanded;
+
+    // 初期表示適用
+    content.classList.toggle('hidden', !expanded);
+    if (chevron) {
+      chevron.style.transform = expanded ? '' : 'rotate(-90deg)';
+    }
+
+    toggle.addEventListener('click', () => {
+      expanded = !expanded;
+      content.classList.toggle('hidden', !expanded);
+      if (chevron) {
+        chevron.style.transform = expanded ? '' : 'rotate(-90deg)';
+      }
+      this._saveState(panelId, expanded);
+    });
+  },
+};
+
 // ── ユーティリティ関数 ──
 
 function fmtCurrency(v, currency) {
@@ -788,24 +841,15 @@ class TradeHistory extends Component {
     super('trade-history-table', dataFlow);
     this.tradeFilterSymbol = null;
     this.tradeFilterDays = null;
-    this.tradeHistoryExpanded = true;
   }
 
   mount() {
     this.subscribe('trades', () => this._render());
-    // トレード履歴トグル
-    const toggle = document.getElementById('trade-history-toggle');
-    if (toggle) {
-      toggle.addEventListener('click', () => {
-        this.tradeHistoryExpanded = !this.tradeHistoryExpanded;
-        const table = this.root;
-        const chevron = document.getElementById('trade-history-chevron');
-        if (table) table.classList.toggle('hidden', !this.tradeHistoryExpanded);
-        if (chevron) {
-          chevron.style.transform = this.tradeHistoryExpanded ? '' : 'rotate(-90deg)';
-        }
-      });
-    }
+    // トレード履歴トグル（PanelCollapser経由でlocalStorage永続化）
+    PanelCollapser.setup(
+      'trade-history', 'trade-history-toggle',
+      'trade-history-chevron', 'trade-history-table'
+    );
   }
 
   _getFilteredTrades() {
@@ -1725,6 +1769,24 @@ const DashboardApp = {
     if (typeof FundamentalWidget !== 'undefined') {
       FundamentalWidget.init(savedSymbol);
     }
+
+    // パネル折りたたみ初期化
+    PanelCollapser.setup(
+      'metrics', 'metrics-toggle',
+      'metrics-chevron', 'metrics-strip'
+    );
+    PanelCollapser.setup(
+      'analysis', 'analysis-toggle',
+      'analysis-chevron', 'analysis-content'
+    );
+    PanelCollapser.setup(
+      'chart', 'chart-toggle',
+      'chart-chevron', 'chart-content'
+    );
+    PanelCollapser.setup(
+      'positions', 'positions-toggle',
+      'positions-chevron', 'position-list'
+    );
 
     // チャートは30秒毎にフル再取得
     this.pollInterval = setInterval(() => this.fetchAll(), 30000);

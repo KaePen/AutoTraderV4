@@ -4,6 +4,14 @@
 <!-- 自然なページフロー。ビューポートフィット廃止でスクロール可能 -->
 <div class="flex flex-col gap-4">
   <!-- メトリクスストリップ -->
+  <div class="flex items-center gap-2 flex-shrink-0">
+    <button id="metrics-toggle" class="flex items-center gap-1 text-sm font-semibold text-gray-300 uppercase tracking-wider hover:text-white transition-colors">
+      <svg id="metrics-chevron" class="w-3.5 h-3.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+      </svg>
+      Metrics
+    </button>
+  </div>
   <div id="metrics-strip" class="flex-shrink-0 grid grid-cols-2 md:grid-cols-4 lg:grid-cols-8 gap-1.5">
     <!-- スケルトン -->
     <div class="card skeleton-card animate-pulse"><div class="h-3 skeleton w-16 mb-2"></div><div class="h-6 skeleton w-24"></div></div>
@@ -23,7 +31,12 @@
       <div id="analysis-panel" class="flex-shrink-0 card border border-gray-700 hidden">
         <!-- 1行目: タイトル + 方向 + スコア + サブ指標 + アラート -->
         <div class="flex items-center gap-2 mb-2 flex-wrap">
-          <h2 class="text-sm font-semibold text-gray-300 uppercase tracking-wider">Live Analysis</h2>
+          <button id="analysis-toggle" class="flex items-center gap-1 hover:text-white transition-colors">
+            <svg id="analysis-chevron" class="w-3.5 h-3.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+            </svg>
+            <h2 class="text-sm font-semibold text-gray-300 uppercase tracking-wider">Live Analysis</h2>
+          </button>
           <span id="ap-direction-badge" class="inline-flex items-center px-2 py-0.5 rounded text-xs font-bold bg-gray-700 text-gray-400">--</span>
           <span id="ap-score-text" class="text-[11px] tabular-nums text-gray-300 font-medium">-- / --</span>
           <span class="hidden sm:inline text-gray-700">|</span>
@@ -36,47 +49,57 @@
             <span id="ap-next-event-text">--</span>
           </div>
         </div>
-        <!-- スコアバー（中央0基準・左SELL/右BUY） -->
-        <div class="mb-3">
-          <div class="flex items-center justify-between text-[9px] text-gray-600 mb-0.5">
-            <span>SELL</span>
-            <span>BUY</span>
+        <!-- 折りたたみ対象コンテンツ -->
+        <div id="analysis-content">
+          <!-- スコアバー（中央0基準・左SELL/右BUY） -->
+          <div class="mb-3">
+            <div class="flex items-center justify-between text-[9px] text-gray-600 mb-0.5">
+              <span>SELL</span>
+              <span>BUY</span>
+            </div>
+            <div class="w-full h-3 bg-gray-700 rounded-full overflow-hidden relative">
+              <div id="ap-score-bar" class="absolute top-0 h-full rounded-full transition-all duration-500 bg-gray-500" style="left:50%;width:0%"></div>
+              <div class="absolute top-0 left-1/2 w-px h-full bg-gray-400/60"></div>
+              <div id="ap-threshold-sell" class="absolute top-0 w-0.5 h-full bg-yellow-400/70" style="left:30%"></div>
+              <div id="ap-threshold-buy" class="absolute top-0 w-0.5 h-full bg-yellow-400/70" style="left:70%"></div>
+            </div>
           </div>
-          <div class="w-full h-3 bg-gray-700 rounded-full overflow-hidden relative">
-            <div id="ap-score-bar" class="absolute top-0 h-full rounded-full transition-all duration-500 bg-gray-500" style="left:50%;width:0%"></div>
-            <div class="absolute top-0 left-1/2 w-px h-full bg-gray-400/60"></div>
-            <div id="ap-threshold-sell" class="absolute top-0 w-0.5 h-full bg-yellow-400/70" style="left:30%"></div>
-            <div id="ap-threshold-buy" class="absolute top-0 w-0.5 h-full bg-yellow-400/70" style="left:70%"></div>
-          </div>
+          <!-- 時間足スコア -->
+          <div id="ap-tf-scores" class="w-full"></div>
         </div>
-        <!-- 時間足スコア -->
-        <div id="ap-tf-scores" class="w-full"></div>
       </div>
 
       <!-- チャートカード -->
       <div class="card flex flex-col">
         <div class="flex items-center justify-between mb-3 flex-shrink-0">
           <div class="flex items-center gap-2">
-            <h2 class="text-sm font-semibold text-gray-300 uppercase tracking-wider">Chart</h2>
+            <button id="chart-toggle" class="flex items-center gap-1 hover:text-white transition-colors">
+              <svg id="chart-chevron" class="w-3.5 h-3.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+              </svg>
+              <h2 class="text-sm font-semibold text-gray-300 uppercase tracking-wider">Chart</h2>
+            </button>
             <span id="chart-title" class="hidden sm:inline text-[11px] text-gray-500 font-medium">USDJPY</span>
           </div>
           <!-- 時間足ボタン -->
           <div id="chart-timeframe-buttons" class="flex flex-wrap gap-1 justify-end"></div>
         </div>
-        <!-- OHLC情報バー（クロスヘア連動） -->
-        <div id="chart-ohlc-bar" class="flex items-center gap-1 sm:gap-3 px-1 pb-1 text-[10px] sm:text-xs tabular-nums invisible flex-shrink-0">
-          <span class="text-gray-500">O:<span id="chart-ohlc-o" class="text-gray-300 ml-0.5">-</span></span>
-          <span class="text-gray-500">H:<span id="chart-ohlc-h" class="text-green-400 ml-0.5">-</span></span>
-          <span class="text-gray-500">L:<span id="chart-ohlc-l" class="text-red-400 ml-0.5">-</span></span>
-          <span class="text-gray-500">C:<span id="chart-ohlc-c" class="ml-0.5">-</span></span>
-          <span id="chart-ohlc-chg" class="font-medium">-</span>
-          <span class="hidden sm:inline text-gray-600">|</span>
-          <span class="hidden sm:inline text-gray-500">Vol:<span id="chart-ohlc-vol" class="text-gray-400 ml-0.5">-</span></span>
-        </div>
-        <!-- メインチャート: 全ブレークポイントで固定高さ -->
-        <div id="chart-container" class="h-[216px] sm:h-[270px] md:h-[324px] lg:h-[378px] w-full relative">
-          <div id="chart-loader" class="absolute inset-0 flex items-center justify-center bg-gray-800/50 z-10">
-            <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
+        <div id="chart-content">
+          <!-- OHLC情報バー（クロスヘア連動） -->
+          <div id="chart-ohlc-bar" class="flex items-center gap-1 sm:gap-3 px-1 pb-1 text-[10px] sm:text-xs tabular-nums invisible flex-shrink-0">
+            <span class="text-gray-500">O:<span id="chart-ohlc-o" class="text-gray-300 ml-0.5">-</span></span>
+            <span class="text-gray-500">H:<span id="chart-ohlc-h" class="text-green-400 ml-0.5">-</span></span>
+            <span class="text-gray-500">L:<span id="chart-ohlc-l" class="text-red-400 ml-0.5">-</span></span>
+            <span class="text-gray-500">C:<span id="chart-ohlc-c" class="ml-0.5">-</span></span>
+            <span id="chart-ohlc-chg" class="font-medium">-</span>
+            <span class="hidden sm:inline text-gray-600">|</span>
+            <span class="hidden sm:inline text-gray-500">Vol:<span id="chart-ohlc-vol" class="text-gray-400 ml-0.5">-</span></span>
+          </div>
+          <!-- メインチャート: 全ブレークポイントで固定高さ -->
+          <div id="chart-container" class="h-[216px] sm:h-[270px] md:h-[324px] lg:h-[378px] w-full relative">
+            <div id="chart-loader" class="absolute inset-0 flex items-center justify-center bg-gray-800/50 z-10">
+              <div class="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-500"></div>
+            </div>
           </div>
         </div>
       </div>
@@ -86,7 +109,12 @@
     <!-- mobile: max-h-[50vh] / PC: JSで左カラム高さに同期 -->
     <div class="card flex flex-col overflow-hidden min-h-[160px] max-h-[50vh] lg:max-h-none" id="position-panel">
       <div class="flex items-center justify-between mb-3 flex-shrink-0">
-        <h2 class="text-sm font-semibold text-gray-300 uppercase tracking-wider">Positions</h2>
+        <button id="positions-toggle" class="flex items-center gap-1 hover:text-white transition-colors">
+          <svg id="positions-chevron" class="w-3.5 h-3.5 transition-transform" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7" />
+          </svg>
+          <h2 class="text-sm font-semibold text-gray-300 uppercase tracking-wider">Positions</h2>
+        </button>
         <span id="position-count" class="text-xs text-gray-500">no open</span>
       </div>
       <div id="position-list" class="overflow-y-auto flex-1 min-h-0">
@@ -149,6 +177,6 @@
 
 {% block scripts %}
 <script src="/static/js/chart.js?v=9"></script>
-<script src="/static/js/fundamental.js?v=4"></script>
-<script src="/static/js/dashboard.js?v=50"></script>
+<script src="/static/js/fundamental.js?v=5"></script>
+<script src="/static/js/dashboard.js?v=51"></script>
 {% endblock %}
