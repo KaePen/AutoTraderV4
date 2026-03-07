@@ -623,7 +623,7 @@ def main() -> None:
     parser.add_argument(
         "--steps",
         default="all",
-        choices=["baseline", "quality", "risk", "all"],
+        choices=["baseline", "quality", "risk", "shared_pool", "all"],
         help="実行ステップ（default: all）",
     )
     parser.add_argument(
@@ -813,6 +813,101 @@ def main() -> None:
                     available,
                     bot_overrides=risk_overrides_bl,
                 )
+
+    # === Step 4: 共有資金プール検証 ===
+    # 仮説: リスク1/N + 品質厳選 → 同等リターンで WR/DD格段改善
+    if run_all or args.steps == "shared_pool":
+        n_pairs = len(available)
+
+        # 共有プール用リスク計算: 各ペアのプリセットrisk / N
+        def _pool_risk_overrides(
+            scale: float = 1.0,
+        ) -> dict[str, dict[str, Any]]:
+            overrides: dict[str, dict[str, Any]] = {}
+            for sym in available:
+                p = get_preset(sym)
+                overrides[sym] = {
+                    "base_risk_pct": round(
+                        p.base_risk_pct / n_pairs * scale,
+                        4,
+                    ),
+                    "max_lot_per_trade": round(
+                        p.max_lot_per_trade / n_pairs * scale,
+                        2,
+                    ),
+                    "max_total_exposure_lot": round(
+                        p.max_total_exposure_lot / n_pairs * scale,
+                        2,
+                    ),
+                }
+            return overrides
+
+        # S0: 共有プール + 現行CT=9.0（ベースライン比較用）
+        results["S0_Pool_CT9"] = run_test(
+            "S0_Pool_CT9",
+            args.data_dir,
+            available,
+            bot_overrides=_pool_risk_overrides(),
+        )
+
+        # S1: 共有プール + CT=10.0（軽い厳選）
+        results["S1_Pool_CT10"] = run_test(
+            "S1_Pool_CT10",
+            args.data_dir,
+            available,
+            bot_overrides=_pool_risk_overrides(),
+            global_overrides={"consensus_threshold": 10.0},
+        )
+
+        # S2: 共有プール + CT=11.0（中程度厳選）
+        results["S2_Pool_CT11"] = run_test(
+            "S2_Pool_CT11",
+            args.data_dir,
+            available,
+            bot_overrides=_pool_risk_overrides(),
+            global_overrides={"consensus_threshold": 11.0},
+        )
+
+        # S3: 共有プール + CT=12.0（強い厳選）
+        results["S3_Pool_CT12"] = run_test(
+            "S3_Pool_CT12",
+            args.data_dir,
+            available,
+            bot_overrides=_pool_risk_overrides(),
+            global_overrides={"consensus_threshold": 12.0},
+        )
+
+        # S4: 共有プール + CT=11.0 + BCA=0.70（最大品質）
+        results["S4_Pool_CT11_BCA70"] = run_test(
+            "S4_Pool_CT11_BCA70",
+            args.data_dir,
+            available,
+            bot_overrides=_pool_risk_overrides(),
+            global_overrides={
+                "consensus_threshold": 11.0,
+                "bca_min_edge": 0.70,
+            },
+        )
+
+        # S5: 共有プール + CT=11.0 + リスク2倍
+        # 厳選で品質向上した分、リスクを少し戻して収益確保
+        results["S5_Pool_CT11_2x"] = run_test(
+            "S5_Pool_CT11_2x",
+            args.data_dir,
+            available,
+            bot_overrides=_pool_risk_overrides(scale=2.0),
+            global_overrides={"consensus_threshold": 11.0},
+        )
+
+        # S6: 共有プール + CT=12.0 + リスク3倍
+        # さらに厳選 + リスク戻しで60%目標
+        results["S6_Pool_CT12_3x"] = run_test(
+            "S6_Pool_CT12_3x",
+            args.data_dir,
+            available,
+            bot_overrides=_pool_risk_overrides(scale=3.0),
+            global_overrides={"consensus_threshold": 12.0},
+        )
 
     # === レポート生成 ===
     output_path = Path(args.output)
