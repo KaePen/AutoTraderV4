@@ -946,6 +946,47 @@ TEST_MATRIX: dict[str, MultiPairConfig] = {
         base_risk_pct=0.03,
         consensus_threshold=12.0,
     ),
+    # --- CT微調整テスト（年間70%目標）---
+    "T1": MultiPairConfig(
+        name="T1",
+        global_max_positions=6,
+        per_pair_max_positions=1,
+        global_max_exposure_lot=10.0,
+        base_risk_pct=0.02,
+        consensus_threshold=10.0,
+    ),
+    "T2": MultiPairConfig(
+        name="T2",
+        global_max_positions=6,
+        per_pair_max_positions=1,
+        global_max_exposure_lot=10.0,
+        base_risk_pct=0.02,
+        consensus_threshold=10.5,
+    ),
+    "T3": MultiPairConfig(
+        name="T3",
+        global_max_positions=6,
+        per_pair_max_positions=1,
+        global_max_exposure_lot=10.0,
+        base_risk_pct=0.02,
+        consensus_threshold=11.0,
+    ),
+    "T4": MultiPairConfig(
+        name="T4",
+        global_max_positions=6,
+        per_pair_max_positions=1,
+        global_max_exposure_lot=10.0,
+        base_risk_pct=0.015,
+        consensus_threshold=10.0,
+    ),
+    "T5": MultiPairConfig(
+        name="T5",
+        global_max_positions=6,
+        per_pair_max_positions=1,
+        global_max_exposure_lot=10.0,
+        base_risk_pct=0.015,
+        consensus_threshold=10.5,
+    ),
 }
 
 

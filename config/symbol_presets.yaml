@@ -224,6 +224,8 @@ symbols:
     base_risk_pct: 0.03
     max_lot_per_trade: 2.0
     max_total_exposure_lot: 6.0
+    signal:
+      bca_min_edge: 0.65  # 最適化結果: 0.65が最良 (+500K vs 0.55)
 
   AUDJPY:
     pip_value: 100.0
@@ -255,6 +257,8 @@ symbols:
     base_risk_pct: 0.025
     max_lot_per_trade: 1.5
     max_total_exposure_lot: 4.0
+    signal:
+      bca_min_edge: 0.65  # 最適化結果: 0.65が最良 (PF 1.89, 月間+100%)
 
   CHFJPY:
     pip_value: 100.0
