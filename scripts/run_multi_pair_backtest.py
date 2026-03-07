@@ -1,0 +1,1326 @@
+"""マルチ通貨ペア同時実行バックテスト（時系列インターリーブ方式）
+
+6 JPYペアを時系列インターリーブで同時実行し、共有資金プール＋
+グローバルポジション制限でライブに近い条件を再現する。
+
+使い方:
+    python scripts/run_multi_pair_backtest.py --data-dir data
+    python scripts/run_multi_pair_backtest.py --data-dir data --tests M0,M2
+    python scripts/run_multi_pair_backtest.py --data-dir data --symbols USDJPY,EURJPY
+"""
+
+from __future__ import annotations
+
+import argparse
+import csv
+import dataclasses
+import logging
+import math
+import sys
+import time
+from dataclasses import dataclass, field
+from datetime import datetime
+from pathlib import Path
+from typing import Any
+
+import numpy as np
+import pandas as pd
+
+# プロジェクトルートをパスに追加
+_SCRIPT_DIR = Path(__file__).resolve().parent
+_PROJECT_ROOT = _SCRIPT_DIR.parent
+if str(_PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(_PROJECT_ROOT))
+
+from autotrader.backtest.candle_arrays import CandleArrays  # noqa: E402
+from autotrader.backtest.runner import (  # noqa: E402
+    BacktestConfig,
+    BacktestRunner,
+)
+from autotrader.backtest.simulator import (  # noqa: E402
+    SimulatorConfig,
+    TradeSimulator,
+)
+from autotrader.config.paths import get_data_dir, get_log_dir  # noqa: E402
+from autotrader.config.trading_params import get_preset  # noqa: E402
+from autotrader.core.entities import Signal  # noqa: E402
+from autotrader.core.enums import (  # noqa: E402
+    ExitReason,
+    SignalType,
+    Timeframe,
+)
+from autotrader.decision.unified import (  # noqa: E402
+    UnifiedBotConfig,
+    UnifiedTradeBot,
+)
+
+# run_portfolio_backtest.py のヘルパーを再利用
+from scripts.run_portfolio_backtest import (  # noqa: E402
+    build_bot_config,
+    load_signal_overrides,
+)
+
+# --- 定数 ---
+SYMBOLS = ["USDJPY", "EURJPY", "GBPJPY", "AUDJPY", "CADJPY", "CHFJPY"]
+START_YEAR = 2020
+END_YEAR = 2025
+INITIAL_EQUITY = 1_000_000.0
+
+logger = logging.getLogger(__name__)
+
+
+# =============================================================
+# データクラス
+# =============================================================
+@dataclass
+class MultiPairConfig:
+    """テストケースのパラメータ
+
+    Attributes:
+        name: テスト名
+        global_max_positions: 全ペア合計の最大ポジション数
+        per_pair_max_positions: ペア当たりの最大ポジション数
+        global_max_exposure_lot: 全ペア合計の最大ロット
+        base_risk_pct: リスク率（ポートフォリオ全体）
+        consensus_threshold: コンセンサス閾値
+    """
+
+    name: str = "M0"
+    global_max_positions: int = 6
+    per_pair_max_positions: int = 1
+    global_max_exposure_lot: float = 10.0
+    base_risk_pct: float = 0.02
+    consensus_threshold: float = 9.0
+
+
+@dataclass
+class PortfolioState:
+    """共有ポートフォリオ状態
+
+    Attributes:
+        equity: 現在の共有資金
+        initial_equity: 初期資金
+        peak_equity: ピーク資金
+        global_open_positions: 全ペア合計ポジション数
+        global_exposure_lot: 全ペア合計ロット
+        per_pair_positions: ペア別ポジション数
+        per_pair_exposure: ペア別ロット
+        blocked_global: グローバル制限発動回数
+        blocked_per_pair: ペア別制限発動回数
+        blocked_exposure: エクスポージャー制限発動回数
+        monthly_pnl: 月次PnL辞書
+    """
+
+    equity: float = INITIAL_EQUITY
+    initial_equity: float = INITIAL_EQUITY
+    peak_equity: float = INITIAL_EQUITY
+    max_dd_pct: float = 0.0
+    global_open_positions: int = 0
+    global_exposure_lot: float = 0.0
+    per_pair_positions: dict[str, int] = field(default_factory=dict)
+    per_pair_exposure: dict[str, float] = field(default_factory=dict)
+    blocked_global: int = 0
+    blocked_per_pair: int = 0
+    blocked_exposure: int = 0
+    monthly_pnl: dict[tuple[int, int], float] = field(
+        default_factory=dict,
+    )
+
+    def can_open_position(
+        self,
+        symbol: str,
+        config: MultiPairConfig,
+    ) -> bool:
+        """新規ポジションを開けるかチェック
+
+        Args:
+            symbol: 通貨ペア名
+            config: テスト設定
+
+        Returns:
+            bool: 開ける場合True
+        """
+        # グローバルポジション制限
+        if self.global_open_positions >= config.global_max_positions:
+            self.blocked_global += 1
+            return False
+        # ペア別ポジション制限
+        pair_pos = self.per_pair_positions.get(symbol, 0)
+        if pair_pos >= config.per_pair_max_positions:
+            self.blocked_per_pair += 1
+            return False
+        # グローバルエクスポージャー制限
+        if self.global_exposure_lot >= config.global_max_exposure_lot:
+            self.blocked_exposure += 1
+            return False
+        return True
+
+    def update_positions(
+        self,
+        contexts: dict[str, "PairContext"],
+    ) -> None:
+        """全ペアのポジション情報を更新
+
+        Args:
+            contexts: ペアコンテキスト辞書
+        """
+        total_pos = 0
+        total_lot = 0.0
+        for sym, ctx in contexts.items():
+            positions = ctx.simulator.get_open_positions()
+            n = len(positions)
+            lot = sum(p.volume for p in positions)
+            self.per_pair_positions[sym] = n
+            self.per_pair_exposure[sym] = lot
+            total_pos += n
+            total_lot += lot
+        self.global_open_positions = total_pos
+        self.global_exposure_lot = total_lot
+
+    def update_peak(self) -> None:
+        """ピーク更新＆バーレベルDD追跡"""
+        if self.equity > self.peak_equity:
+            self.peak_equity = self.equity
+        if self.peak_equity > 0:
+            dd = (
+                (self.peak_equity - self.equity)
+                / self.peak_equity
+                * 100
+            )
+            if dd > self.max_dd_pct:
+                self.max_dd_pct = dd
+
+
+@dataclass
+class PairContext:
+    """ペアごとのバックテストコンテキスト
+
+    Attributes:
+        symbol: 通貨ペア名
+        bot: トレードボット
+        simulator: シミュレーター
+        arrays: CandleArrays（基準TF）
+        period_df: 基準TFデータフレーム
+        base_tf: 基準タイムフレーム
+        runner: BacktestRunner（データ保持用）
+    """
+
+    symbol: str
+    bot: UnifiedTradeBot
+    simulator: TradeSimulator
+    arrays: CandleArrays
+    period_df: pd.DataFrame
+    base_tf: Timeframe
+    runner: BacktestRunner
+
+
+# =============================================================
+# データロード
+# =============================================================
+def load_pair_data(
+    symbol: str,
+    data_dir: str,
+) -> tuple[BacktestRunner, dict[str, pd.DataFrame]]:
+    """ペアデータをロードしてBacktestRunnerとmarket_dataを返す
+
+    Args:
+        symbol: 通貨ペア名
+        data_dir: データディレクトリ
+
+    Returns:
+        tuple: (BacktestRunner, market_data辞書)
+    """
+    preset = get_preset(symbol)
+    config = BacktestConfig(
+        symbol=symbol,
+        spread_pips=preset.spread_pips,
+        slippage_pips=preset.slippage_pips,
+        pip_value=preset.pip_value,
+        max_positions=preset.max_positions,
+        bonus_max_positions=preset.bonus_max_positions,
+        bonus_score_threshold=preset.bonus_score_threshold,
+    )
+    runner = BacktestRunner(
+        data_dir=data_dir,
+        config=config,
+        verbose=False,
+        log_to_file=False,
+    )
+    # 全期間データをロード
+    # load_data()はDaily→D1フォールバック等を処理する
+    market_data = runner._load_all_timeframes(include_m1=False)
+    # _load_all_timeframes でD1がロードされない場合
+    # load_data() の Daily→D1 フォールバックを利用
+    if "D1" not in market_data:
+        runner.load_data()
+        if runner._d1_df is not None:
+            market_data["D1"] = runner._d1_df
+    return runner, market_data
+
+
+# =============================================================
+# コンテキスト構築
+# =============================================================
+def setup_pair_context(
+    symbol: str,
+    runner: BacktestRunner,
+    year: int,
+    bot_config: UnifiedBotConfig,
+    initial_balance: float,
+    full_market_data: dict[str, pd.DataFrame] | None = None,
+) -> PairContext | None:
+    """ペアごとのBot/Simulator/Arraysを初期化
+
+    Args:
+        symbol: 通貨ペア名
+        runner: データロード済みランナー
+        year: 対象年
+        bot_config: ボット設定
+        initial_balance: 初期残高
+        full_market_data: 全期間market_data（年フィルタ前）
+
+    Returns:
+        PairContext | None: コンテキスト（データなしならNone）
+    """
+    if full_market_data is None:
+        return None
+
+    # 基準TF選択（M5 > M15 > H1）
+    base_tf_name = None
+    for tf_name in ["M5", "M15", "H1"]:
+        if tf_name in full_market_data:
+            base_tf_name = tf_name
+            break
+    if base_tf_name is None:
+        return None
+
+    tf = Timeframe(base_tf_name)
+    df = full_market_data[base_tf_name]
+
+    # 年フィルタ
+    start_date = datetime(year, 1, 1)
+    end_date = datetime(year + 1, 1, 1)
+    period_df = df[
+        (df["time"] >= start_date) & (df["time"] < end_date)
+    ].reset_index(drop=True)
+
+    if period_df.empty:
+        return None
+
+    # market_data: 年フィルタ済みデータ
+    market_data: dict[str, pd.DataFrame] = {}
+    for tf_key, tf_df in full_market_data.items():
+        year_df = tf_df[
+            (tf_df["time"] >= start_date)
+            & (tf_df["time"] < end_date)
+        ].reset_index(drop=True)
+        if not year_df.empty:
+            market_data[tf_key] = year_df
+
+    # Bot初期化
+    bot = UnifiedTradeBot(bot_config)
+    bot.state = bot.state.with_initial_equity(initial_balance)
+    bot.set_market_data(market_data)
+
+    # SimulatorConfig
+    preset = get_preset(symbol)
+    _pip_unit = 0.01 if "JPY" in symbol.upper() else 0.0001
+    sim_config = SimulatorConfig(
+        initial_balance=initial_balance,
+        spread_pips=preset.spread_pips,
+        slippage_pips=preset.slippage_pips,
+        pip_value=preset.pip_value,
+        max_positions=preset.max_positions,
+        bonus_max_positions=preset.bonus_max_positions,
+        bonus_score_threshold=preset.bonus_score_threshold,
+        default_volume=1.0,
+        use_position_manager=bot_config.use_position_manager,
+        use_dynamic_lot=bot_config.use_dynamic_lot,
+        pip_unit=_pip_unit,
+        commission_per_lot=preset.commission_per_lot,
+        bot_config=bot_config,
+    )
+    simulator = TradeSimulator(config=sim_config)
+
+    arrays = CandleArrays.from_dataframe(period_df)
+
+    return PairContext(
+        symbol=symbol,
+        bot=bot,
+        simulator=simulator,
+        arrays=arrays,
+        period_df=period_df,
+        base_tf=tf,
+        runner=runner,
+    )
+
+
+# =============================================================
+# 核心: 時系列インターリーブ実行
+# =============================================================
+def run_multi_pair_year(
+    year: int,
+    contexts: dict[str, PairContext],
+    multi_config: MultiPairConfig,
+    portfolio: PortfolioState,
+) -> dict[str, list[Any]]:
+    """1年分のマルチペアインターリーブ実行
+
+    Args:
+        year: 対象年
+        contexts: ペアコンテキスト辞書
+        multi_config: テスト設定
+        portfolio: 共有ポートフォリオ状態
+
+    Returns:
+        dict: ペア別トレードリスト
+    """
+    # 全ペアのタイムスタンプをマージ
+    # 各ペアの基準TFタイムスタンプを取得
+    timestamp_pairs: list[tuple[datetime, str]] = []
+    for sym, ctx in contexts.items():
+        for idx in range(ctx.arrays.n_rows):
+            t = ctx.arrays.get_time(idx)
+            timestamp_pairs.append((t, sym))
+
+    # 時系列順にソート（同時刻はシンボル順）
+    timestamp_pairs.sort(key=lambda x: (x[0], x[1]))
+
+    # 各ペアの現在インデックス
+    pair_idx: dict[str, int] = {sym: 0 for sym in contexts}
+
+    # 月次トラッキング
+    current_month: tuple[int, int] | None = None
+    month_start_equity = portfolio.equity
+
+    # 進捗表示
+    total_bars = len(timestamp_pairs)
+    _t0 = time.time()
+
+    for bar_num, (bar_time, sym) in enumerate(timestamp_pairs):
+        ctx = contexts[sym]
+        idx = pair_idx[sym]
+
+        # インデックス整合チェック
+        expected_time = ctx.arrays.get_time(idx)
+        if expected_time != bar_time:
+            # スキップ（タイムスタンプ不一致）
+            continue
+        pair_idx[sym] = idx + 1
+
+        # 月変わり検出
+        candle_month = (bar_time.year, bar_time.month)
+        if current_month is None:
+            current_month = candle_month
+            month_start_equity = portfolio.equity
+        elif candle_month != current_month:
+            # 月末PnL記録
+            month_pnl = portfolio.equity - month_start_equity
+            portfolio.monthly_pnl[current_month] = (
+                portfolio.monthly_pnl.get(current_month, 0.0) + month_pnl
+            )
+            current_month = candle_month
+            month_start_equity = portfolio.equity
+
+        # Candle取得
+        candle = ctx.arrays.get_candle(idx, sym, ctx.base_tf)
+
+        # equity同期: 共有equityをシミュレータに反映
+        ctx.simulator.state.balance = portfolio.equity
+        ctx.simulator.state.equity = portfolio.equity
+        ctx.bot.state = ctx.bot.state.with_initial_equity(
+            portfolio.initial_equity,
+        )
+        ctx.bot.state = dataclasses.replace(
+            ctx.bot.state,
+            equity=portfolio.equity,
+        )
+
+        # ポジション情報をbot stateに同期
+        open_positions = ctx.simulator.get_open_positions()
+        exposure_lot = sum(p.volume for p in open_positions)
+        buy_lot = sum(
+            p.volume
+            for p in open_positions
+            if p.signal_type == SignalType.BUY
+        )
+        sell_lot = sum(
+            p.volume
+            for p in open_positions
+            if p.signal_type == SignalType.SELL
+        )
+        buy_count = sum(
+            1
+            for p in open_positions
+            if p.signal_type == SignalType.BUY
+        )
+        sell_count = sum(
+            1
+            for p in open_positions
+            if p.signal_type == SignalType.SELL
+        )
+        ctx.bot.state = ctx.bot.state.with_exposure(
+            open_exposure_lot=exposure_lot,
+            open_same_direction_lot=max(buy_lot, sell_lot),
+            open_buy_count=buy_count,
+            open_sell_count=sell_count,
+        )
+
+        # シグナル生成
+        current_time = pd.Timestamp(bar_time)
+        consolidated = ctx.bot.generate_signal(
+            current_time,
+            candle,
+        )
+
+        # Signal変換
+        signal = None
+        if (
+            consolidated.direction != SignalType.HOLD
+            and consolidated.confidence >= 0.5
+        ):
+            sl_price = None
+            tp_price = None
+            if consolidated.sl_pips > 0:
+                _base = (
+                    consolidated.entry_price
+                    if consolidated.entry_price is not None
+                    else candle.close
+                )
+                if consolidated.direction == SignalType.BUY:
+                    sl_price = _base - consolidated.sl_pips / 100
+                    tp_price = _base + consolidated.tp_pips / 100
+                else:
+                    sl_price = _base + consolidated.sl_pips / 100
+                    tp_price = _base - consolidated.tp_pips / 100
+
+            signal = Signal(
+                symbol=sym,
+                timeframe=ctx.base_tf,
+                signal_type=consolidated.direction,
+                confidence=min(consolidated.confidence, 1.0),
+                stop_loss=sl_price,
+                take_profit=tp_price,
+                reasoning=consolidated.rationale,
+                regime=consolidated.regime,
+                mode=consolidated.mode,
+                consensus_score=consolidated.consensus_score,
+                lot=consolidated.lot,
+            )
+
+        # グローバル制限チェック（シグナルありの場合のみ）
+        if signal is not None:
+            if not portfolio.can_open_position(sym, multi_config):
+                signal = None  # エントリーブロック
+
+        # balance記録
+        balance_before = ctx.simulator.state.balance
+        prev_trade_count = len(ctx.simulator.get_closed_trades())
+
+        # process_candle実行
+        _consensus_scores = None
+        if consolidated is not None:
+            _consensus_scores = (
+                consolidated.buy_score,
+                consolidated.sell_score,
+            )
+        ctx.simulator.process_candle(
+            candle,
+            signal,
+            consensus_scores=_consensus_scores,
+        )
+
+        # PnL差分キャプチャ
+        pnl_delta = ctx.simulator.state.balance - balance_before
+        portfolio.equity += pnl_delta
+        portfolio.update_peak()
+
+        # 決済時: bot.on_trade_executed呼び出し
+        closed_trades = ctx.simulator.get_closed_trades()
+        if len(closed_trades) > prev_trade_count:
+            new_trade = closed_trades[-1]
+            pnl = new_trade.profit_loss or 0
+            from autotrader.decision.unified.adaptive import (
+                TradeRecord,
+            )
+
+            _trade_record = TradeRecord.from_trade(new_trade)
+            ctx.bot.on_trade_executed(
+                bar_time,
+                pnl=pnl,
+                trade_record=_trade_record,
+            )
+
+        # ポジション情報更新
+        portfolio.update_positions(contexts)
+
+        # 進捗表示（5000バーごと）
+        if bar_num % 5000 == 0 and bar_num > 0:
+            elapsed = time.time() - _t0
+            pct = bar_num / total_bars * 100
+            print(
+                f"    {year}年: {pct:.0f}% "
+                f"({bar_num}/{total_bars}) "
+                f"{elapsed:.0f}s",
+                end="\r",
+            )
+
+    # 年末: 全ペア強制決済
+    for sym, ctx in contexts.items():
+        last_idx = ctx.arrays.n_rows - 1
+        if last_idx >= 0:
+            last_candle = ctx.arrays.get_candle(
+                last_idx, sym, ctx.base_tf,
+            )
+            balance_before = ctx.simulator.state.balance
+            ctx.simulator.force_close_all(
+                last_candle, ExitReason.FORCE_CLOSE,
+            )
+            pnl_delta = ctx.simulator.state.balance - balance_before
+            portfolio.equity += pnl_delta
+            portfolio.update_peak()
+
+    # 最終月PnL記録
+    if current_month is not None:
+        month_pnl = portfolio.equity - month_start_equity
+        portfolio.monthly_pnl[current_month] = (
+            portfolio.monthly_pnl.get(current_month, 0.0) + month_pnl
+        )
+
+    # ポジション更新
+    portfolio.update_positions(contexts)
+
+    elapsed = time.time() - _t0
+    print(
+        f"    {year}年: 100% "
+        f"({total_bars}/{total_bars}) "
+        f"{elapsed:.0f}s          ",
+    )
+
+    # ペア別トレード返却
+    pair_trades: dict[str, list[Any]] = {}
+    for sym, ctx in contexts.items():
+        pair_trades[sym] = ctx.simulator.get_closed_trades()
+
+    return pair_trades
+
+
+# =============================================================
+# テストケース実行
+# =============================================================
+def run_test_case(
+    test_config: MultiPairConfig,
+    runners: dict[str, tuple[BacktestRunner, dict[str, pd.DataFrame]]],
+    symbols: list[str],
+    start_year: int = START_YEAR,
+    end_year: int = END_YEAR,
+) -> dict[str, Any]:
+    """テストケースを2020-2025で実行
+
+    Args:
+        test_config: テスト設定
+        runners: ペア別(BacktestRunner, market_data)辞書
+        symbols: 対象シンボル
+        start_year: 開始年
+        end_year: 終了年
+
+    Returns:
+        dict: テスト結果
+    """
+    print(f"\n{'=' * 60}")
+    print(f"  テスト: {test_config.name}")
+    print(
+        f"  global_max={test_config.global_max_positions}, "
+        f"per_pair={test_config.per_pair_max_positions}, "
+        f"exposure={test_config.global_max_exposure_lot}, "
+        f"risk={test_config.base_risk_pct}, "
+        f"CT={test_config.consensus_threshold}"
+    )
+    print(f"{'=' * 60}")
+
+    portfolio = PortfolioState(
+        equity=INITIAL_EQUITY,
+        initial_equity=INITIAL_EQUITY,
+        peak_equity=INITIAL_EQUITY,
+    )
+
+    all_pair_trades: dict[str, list[Any]] = {sym: [] for sym in symbols}
+    yearly_results: list[dict[str, Any]] = []
+
+    for year in range(start_year, end_year + 1):
+        year_start_equity = portfolio.equity
+
+        # ペアコンテキスト構築
+        contexts: dict[str, PairContext] = {}
+        for sym in symbols:
+            runner, full_md = runners[sym]
+            # ペア別bot_config構築
+            extra_overrides: dict[str, Any] = {
+                "base_risk_pct": test_config.base_risk_pct,
+                "consensus_threshold": test_config.consensus_threshold,
+            }
+            bot_config = build_bot_config(sym, extra_overrides)
+
+            ctx = setup_pair_context(
+                sym, runner, year, bot_config, portfolio.equity,
+                full_market_data=full_md,
+            )
+            if ctx is not None:
+                contexts[sym] = ctx
+
+        if not contexts:
+            continue
+
+        # インターリーブ実行
+        pair_trades = run_multi_pair_year(
+            year, contexts, test_config, portfolio,
+        )
+
+        # トレード蓄積
+        for sym, trades in pair_trades.items():
+            all_pair_trades[sym].extend(trades)
+
+        # 年次サマリー
+        year_pnl = portfolio.equity - year_start_equity
+        year_trades = sum(len(t) for t in pair_trades.values())
+        yearly_results.append(
+            {
+                "year": year,
+                "pnl": year_pnl,
+                "trades": year_trades,
+                "equity": portfolio.equity,
+            }
+        )
+        print(
+            f"  {year}年: "
+            f"PnL={year_pnl:+,.0f}, "
+            f"Trades={year_trades}, "
+            f"Equity={portfolio.equity:,.0f}"
+        )
+
+    # 結果集約
+    result = aggregate_results(
+        test_config.name,
+        portfolio,
+        all_pair_trades,
+        yearly_results,
+        symbols,
+        end_year - start_year + 1,
+    )
+    _print_result_summary(result)
+    return result
+
+
+# =============================================================
+# 結果集約
+# =============================================================
+def aggregate_results(
+    test_name: str,
+    portfolio: PortfolioState,
+    pair_trades: dict[str, list[Any]],
+    yearly_results: list[dict[str, Any]],
+    symbols: list[str],
+    num_years: int,
+) -> dict[str, Any]:
+    """テスト結果を集約
+
+    Args:
+        test_name: テスト名
+        portfolio: ポートフォリオ状態
+        pair_trades: ペア別トレードリスト
+        yearly_results: 年次結果
+        symbols: シンボルリスト
+        num_years: 年数
+
+    Returns:
+        dict: 集約結果
+    """
+    total_profit = portfolio.equity - portfolio.initial_equity
+
+    # 月次PnL
+    sorted_months = sorted(portfolio.monthly_pnl.keys())
+    monthly_pnl_list = [
+        portfolio.monthly_pnl[m] for m in sorted_months
+    ]
+
+    # DD計算（バーレベルDDと月次DDの大きい方）
+    equity = portfolio.initial_equity
+    peak = equity
+    max_dd_monthly = 0.0
+    for pnl in monthly_pnl_list:
+        equity += pnl
+        if equity > peak:
+            peak = equity
+        dd = (peak - equity) / peak * 100 if peak > 0 else 0.0
+        if dd > max_dd_monthly:
+            max_dd_monthly = dd
+    # バーレベルDDと月次DDの大きい方を採用
+    max_dd = max(max_dd_monthly, portfolio.max_dd_pct)
+
+    # Sharpe
+    if len(monthly_pnl_list) > 1:
+        arr = np.array(monthly_pnl_list)
+        mean_m = np.mean(arr)
+        std_m = np.std(arr, ddof=1)
+        sharpe = (
+            (mean_m / std_m) * math.sqrt(12) if std_m > 0 else 0.0
+        )
+    else:
+        sharpe = 0.0
+
+    # WR/PF
+    total_trades = 0
+    total_wins = 0
+    total_gp = 0.0
+    total_gl = 0.0
+    pair_metrics: dict[str, dict[str, Any]] = {}
+
+    for sym in symbols:
+        trades = pair_trades.get(sym, [])
+        n_trades = len(trades)
+        wins = sum(1 for t in trades if (t.profit_loss or 0) > 0)
+        gp = sum(
+            t.profit_loss for t in trades if (t.profit_loss or 0) > 0
+        )
+        gl = abs(
+            sum(
+                t.profit_loss
+                for t in trades
+                if (t.profit_loss or 0) <= 0
+            )
+        )
+        np_ = sum(t.profit_loss or 0 for t in trades)
+
+        total_trades += n_trades
+        total_wins += wins
+        total_gp += gp
+        total_gl += gl
+
+        wr = wins / n_trades * 100 if n_trades > 0 else 0.0
+        pf = gp / gl if gl > 0 else float("inf")
+
+        pair_metrics[sym] = {
+            "trades": n_trades,
+            "profit": np_,
+            "wr": wr,
+            "pf": pf,
+            "contribution": 0.0,  # 後で計算
+        }
+
+    # 寄与率
+    for sym in symbols:
+        pm = pair_metrics[sym]
+        pm["contribution"] = (
+            pm["profit"] / total_profit * 100
+            if total_profit > 0
+            else 0.0
+        )
+
+    wr = total_wins / total_trades * 100 if total_trades > 0 else 0.0
+    pf = total_gp / total_gl if total_gl > 0 else float("inf")
+
+    # 月間勝率
+    winning_months = sum(1 for p in monthly_pnl_list if p > 0)
+    monthly_wr = (
+        winning_months / len(monthly_pnl_list) * 100
+        if monthly_pnl_list
+        else 0.0
+    )
+
+    # 年間収益率
+    annual_return = (
+        (total_profit / portfolio.initial_equity)
+        / num_years
+        * 100
+        if num_years > 0
+        else 0.0
+    )
+
+    return {
+        "test_name": test_name,
+        "total_profit": total_profit,
+        "annual_return_pct": annual_return,
+        "max_dd_pct": max_dd,
+        "sharpe": sharpe,
+        "wr": wr,
+        "pf": pf,
+        "monthly_wr": monthly_wr,
+        "total_trades": total_trades,
+        "pair_metrics": pair_metrics,
+        "yearly_results": yearly_results,
+        "monthly_pnl": portfolio.monthly_pnl,
+        "blocked_global": portfolio.blocked_global,
+        "blocked_per_pair": portfolio.blocked_per_pair,
+        "blocked_exposure": portfolio.blocked_exposure,
+        "final_equity": portfolio.equity,
+    }
+
+
+def _print_result_summary(result: dict[str, Any]) -> None:
+    """テスト結果サマリー出力"""
+    print(f"\n  --- {result['test_name']} サマリー ---")
+    print(f"  総利益:     {result['total_profit']:>+12,.0f}")
+    print(f"  年間収益率: {result['annual_return_pct']:>8.1f}%")
+    print(f"  最大DD:     {result['max_dd_pct']:>8.2f}%")
+    print(f"  Sharpe:     {result['sharpe']:>8.2f}")
+    print(f"  WR:         {result['wr']:>8.1f}%")
+    print(f"  PF:         {result['pf']:>8.2f}")
+    print(f"  月間勝率:   {result['monthly_wr']:>8.1f}%")
+    print(f"  トレード数: {result['total_trades']}")
+    print(
+        f"  制限発動: global={result['blocked_global']}, "
+        f"per_pair={result['blocked_per_pair']}, "
+        f"exposure={result['blocked_exposure']}"
+    )
+
+    print("\n  ペア別:")
+    for sym, pm in result["pair_metrics"].items():
+        if pm["trades"] > 0:
+            print(
+                f"    {sym:8s} | "
+                f"Profit: {pm['profit']:>+10,.0f} | "
+                f"WR: {pm['wr']:5.1f}% | "
+                f"PF: {pm['pf']:5.2f} | "
+                f"Trades: {pm['trades']:4d} | "
+                f"寄与: {pm['contribution']:5.1f}%"
+            )
+
+
+# =============================================================
+# テストマトリクス定義
+# =============================================================
+TEST_MATRIX: dict[str, MultiPairConfig] = {
+    "M0": MultiPairConfig(
+        name="M0",
+        global_max_positions=6,
+        per_pair_max_positions=1,
+        global_max_exposure_lot=10.0,
+        base_risk_pct=0.02,
+        consensus_threshold=9.0,
+    ),
+    "M1": MultiPairConfig(
+        name="M1",
+        global_max_positions=6,
+        per_pair_max_positions=1,
+        global_max_exposure_lot=10.0,
+        base_risk_pct=0.02,
+        consensus_threshold=10.0,
+    ),
+    "M2": MultiPairConfig(
+        name="M2",
+        global_max_positions=6,
+        per_pair_max_positions=1,
+        global_max_exposure_lot=10.0,
+        base_risk_pct=0.02,
+        consensus_threshold=11.0,
+    ),
+    "M3": MultiPairConfig(
+        name="M3",
+        global_max_positions=6,
+        per_pair_max_positions=1,
+        global_max_exposure_lot=10.0,
+        base_risk_pct=0.02,
+        consensus_threshold=12.0,
+    ),
+    "M4": MultiPairConfig(
+        name="M4",
+        global_max_positions=6,
+        per_pair_max_positions=2,
+        global_max_exposure_lot=10.0,
+        base_risk_pct=0.015,
+        consensus_threshold=11.0,
+    ),
+    "M5": MultiPairConfig(
+        name="M5",
+        global_max_positions=8,
+        per_pair_max_positions=2,
+        global_max_exposure_lot=12.0,
+        base_risk_pct=0.015,
+        consensus_threshold=10.0,
+    ),
+    "M6": MultiPairConfig(
+        name="M6",
+        global_max_positions=4,
+        per_pair_max_positions=1,
+        global_max_exposure_lot=6.0,
+        base_risk_pct=0.03,
+        consensus_threshold=12.0,
+    ),
+    # --- CT微調整テスト（年間70%目標）---
+    "T1": MultiPairConfig(
+        name="T1",
+        global_max_positions=6,
+        per_pair_max_positions=1,
+        global_max_exposure_lot=10.0,
+        base_risk_pct=0.02,
+        consensus_threshold=10.0,
+    ),
+    "T2": MultiPairConfig(
+        name="T2",
+        global_max_positions=6,
+        per_pair_max_positions=1,
+        global_max_exposure_lot=10.0,
+        base_risk_pct=0.02,
+        consensus_threshold=10.5,
+    ),
+    "T3": MultiPairConfig(
+        name="T3",
+        global_max_positions=6,
+        per_pair_max_positions=1,
+        global_max_exposure_lot=10.0,
+        base_risk_pct=0.02,
+        consensus_threshold=11.0,
+    ),
+    "T4": MultiPairConfig(
+        name="T4",
+        global_max_positions=6,
+        per_pair_max_positions=1,
+        global_max_exposure_lot=10.0,
+        base_risk_pct=0.015,
+        consensus_threshold=10.0,
+    ),
+    "T5": MultiPairConfig(
+        name="T5",
+        global_max_positions=6,
+        per_pair_max_positions=1,
+        global_max_exposure_lot=10.0,
+        base_risk_pct=0.015,
+        consensus_threshold=10.5,
+    ),
+}
+
+
+# =============================================================
+# レポート生成
+# =============================================================
+def generate_report(
+    results: dict[str, dict[str, Any]],
+    symbols: list[str],
+    output_path: Path,
+) -> None:
+    """Markdownレポートを生成
+
+    Args:
+        results: テスト名→結果辞書
+        symbols: シンボルリスト
+        output_path: 出力パス
+    """
+    lines: list[str] = []
+    lines.append(
+        "# マルチ通貨ペアバックテスト（時系列インターリーブ方式）\n"
+    )
+    lines.append(
+        f"検証期間: {START_YEAR}-{END_YEAR} "
+        f"({END_YEAR - START_YEAR + 1}年)\n"
+    )
+    lines.append(f"対象ペア: {', '.join(symbols)}\n")
+    lines.append(f"初期残高: {INITIAL_EQUITY:,.0f}\n")
+    lines.append("")
+
+    # サマリーテーブル
+    lines.append("## テスト結果サマリー\n")
+    lines.append(
+        "| テスト | 総利益 | 年間収益率 | DD | Sharpe "
+        "| WR | PF | 月間+ | Trades |"
+    )
+    lines.append(
+        "|--------|--------|-----------|-----|--------"
+        "|-----|-----|------|--------|"
+    )
+    for name, r in results.items():
+        lines.append(
+            f"| {name} | "
+            f"{r['total_profit']:+,.0f} | "
+            f"{r['annual_return_pct']:.1f}% | "
+            f"{r['max_dd_pct']:.2f}% | "
+            f"{r['sharpe']:.2f} | "
+            f"{r['wr']:.1f}% | "
+            f"{r['pf']:.2f} | "
+            f"{r['monthly_wr']:.1f}% | "
+            f"{r['total_trades']} |"
+        )
+    lines.append("")
+
+    # グローバル制限発動統計
+    lines.append("## グローバル制限発動統計\n")
+    lines.append(
+        "| テスト | global制限 | per_pair制限 | exposure制限 |"
+    )
+    lines.append("|--------|-----------|-------------|-------------|")
+    for name, r in results.items():
+        lines.append(
+            f"| {name} | "
+            f"{r['blocked_global']} | "
+            f"{r['blocked_per_pair']} | "
+            f"{r['blocked_exposure']} |"
+        )
+    lines.append("")
+
+    # ペア別内訳（各テスト）
+    for name, r in results.items():
+        lines.append(f"## {name} ペア別内訳\n")
+        lines.append(
+            "| ペア | 利益 | WR | PF | Trades | 寄与率 |"
+        )
+        lines.append(
+            "|------|------|-----|-----|--------|--------|"
+        )
+        for sym in symbols:
+            pm = r["pair_metrics"].get(sym, {})
+            if pm.get("trades", 0) > 0:
+                lines.append(
+                    f"| {sym} | "
+                    f"{pm['profit']:+,.0f} | "
+                    f"{pm['wr']:.1f}% | "
+                    f"{pm['pf']:.2f} | "
+                    f"{pm['trades']} | "
+                    f"{pm['contribution']:.1f}% |"
+                )
+        lines.append("")
+
+    # 年次推移（最初のテスト）
+    first = next(iter(results.values()), None)
+    if first and first.get("yearly_results"):
+        lines.append("## 年次推移（最初のテスト）\n")
+        lines.append("| 年 | PnL | Trades | Equity |")
+        lines.append("|----|-----|--------|--------|")
+        for yr in first["yearly_results"]:
+            lines.append(
+                f"| {yr['year']} | "
+                f"{yr['pnl']:+,.0f} | "
+                f"{yr['trades']} | "
+                f"{yr['equity']:,.0f} |"
+            )
+        lines.append("")
+
+    # 推奨設定
+    lines.append("## 推奨設定\n")
+    best_name = ""
+    best_score = -999.0
+    for name, r in results.items():
+        if r["max_dd_pct"] < 5.0 and r["wr"] > 65.0:
+            score = r["sharpe"]
+            if score > best_score:
+                best_score = score
+                best_name = name
+
+    if best_name:
+        br = results[best_name]
+        lines.append(f"推奨テスト: **{best_name}**\n")
+        lines.append(f"- 年間収益率: {br['annual_return_pct']:.1f}%")
+        lines.append(f"- DD: {br['max_dd_pct']:.2f}%")
+        lines.append(f"- Sharpe: {br['sharpe']:.2f}")
+        lines.append(f"- WR: {br['wr']:.1f}%")
+        lines.append(f"- PF: {br['pf']:.2f}")
+    else:
+        lines.append(
+            "WR>65%かつDD<5%を満たすテストなし。設定調整が必要。\n"
+        )
+
+    lines.append("")
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(output_path, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines))
+
+    print(f"\nレポート出力: {output_path}")
+
+
+def save_trades_csv(
+    results: dict[str, dict[str, Any]],
+    log_dir: Path,
+) -> None:
+    """全テストのトレードを統合CSVに出力
+
+    Args:
+        results: テスト結果辞書
+        log_dir: ログディレクトリ
+    """
+    log_dir.mkdir(parents=True, exist_ok=True)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    summary_path = log_dir / f"summary_{timestamp}.log"
+
+    # サマリーログ
+    lines: list[str] = []
+    lines.append("=== マルチ通貨ペアバックテスト サマリー ===\n")
+    for name, r in results.items():
+        lines.append(f"--- {name} ---")
+        lines.append(f"総利益: {r['total_profit']:+,.0f}")
+        lines.append(f"年間収益率: {r['annual_return_pct']:.1f}%")
+        lines.append(f"最大DD: {r['max_dd_pct']:.2f}%")
+        lines.append(f"Sharpe: {r['sharpe']:.2f}")
+        lines.append(f"WR: {r['wr']:.1f}%")
+        lines.append(f"PF: {r['pf']:.2f}")
+        lines.append(f"月間勝率: {r['monthly_wr']:.1f}%")
+        lines.append(f"Trades: {r['total_trades']}")
+        lines.append(
+            f"制限発動: global={r['blocked_global']}, "
+            f"per_pair={r['blocked_per_pair']}, "
+            f"exposure={r['blocked_exposure']}"
+        )
+        lines.append("")
+
+    with open(summary_path, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines))
+
+    print(f"サマリーログ: {summary_path}")
+
+
+# =============================================================
+# メイン
+# =============================================================
+def find_available_symbols(data_dir: str) -> list[str]:
+    """データが存在するシンボルを検出
+
+    Args:
+        data_dir: データディレクトリ
+
+    Returns:
+        list[str]: 利用可能シンボルリスト
+    """
+    available = []
+    base = Path(data_dir)
+    for sym in SYMBOLS:
+        sym_dir = base / sym
+        if sym_dir.exists() and any(sym_dir.iterdir()):
+            available.append(sym)
+    return available
+
+
+def main() -> None:
+    """メインエントリーポイント"""
+    parser = argparse.ArgumentParser(
+        description="マルチ通貨ペア同時実行バックテスト"
+        "（時系列インターリーブ方式）",
+    )
+    parser.add_argument(
+        "--data-dir",
+        default=None,
+        help="データディレクトリ（省略時は自動解決）",
+    )
+    parser.add_argument(
+        "--tests",
+        default="M0",
+        help="テストケース（カンマ区切り、例: M0,M1,M2 or all）",
+    )
+    parser.add_argument(
+        "--symbols",
+        default=None,
+        help="対象シンボル（カンマ区切り、省略時は自動検出）",
+    )
+    parser.add_argument(
+        "--output",
+        default="reports/multi_pair_backtest.md",
+        help="レポート出力先",
+    )
+    parser.add_argument(
+        "--start-year",
+        type=int,
+        default=START_YEAR,
+        help="開始年",
+    )
+    parser.add_argument(
+        "--end-year",
+        type=int,
+        default=END_YEAR,
+        help="終了年",
+    )
+    args = parser.parse_args()
+
+    logging.basicConfig(
+        level=logging.WARNING,
+        format="%(levelname)s: %(message)s",
+    )
+
+    # データディレクトリ解決
+    data_dir = args.data_dir or get_data_dir()
+
+    # シンボル検出
+    if args.symbols:
+        available = [s.strip() for s in args.symbols.split(",")]
+    else:
+        available = find_available_symbols(data_dir)
+
+    if not available:
+        print(
+            f"エラー: {data_dir} にデータが見つかりません。"
+            f"\n対象: {', '.join(SYMBOLS)}"
+        )
+        sys.exit(1)
+
+    print(f"検出ペア: {', '.join(available)}")
+    missing = set(SYMBOLS) - set(available)
+    if missing:
+        print(f"データなし（スキップ）: {', '.join(sorted(missing))}")
+
+    # テストケース選択
+    if args.tests.lower() == "all":
+        test_names = list(TEST_MATRIX.keys())
+    else:
+        test_names = [t.strip() for t in args.tests.split(",")]
+
+    # データロード（全ペア1回のみ）
+    print("\nデータロード中...")
+    runners: dict[
+        str, tuple[BacktestRunner, dict[str, pd.DataFrame]]
+    ] = {}
+    for sym in available:
+        _t0 = time.time()
+        runners[sym] = load_pair_data(sym, data_dir)
+        elapsed = time.time() - _t0
+        print(f"  {sym}: {elapsed:.1f}s")
+
+    # テスト実行
+    results: dict[str, dict[str, Any]] = {}
+    for test_name in test_names:
+        if test_name not in TEST_MATRIX:
+            print(f"警告: 不明なテスト '{test_name}' をスキップ")
+            continue
+
+        test_config = TEST_MATRIX[test_name]
+        result = run_test_case(
+            test_config,
+            runners,
+            available,
+            start_year=args.start_year,
+            end_year=args.end_year,
+        )
+        results[test_name] = result
+
+    if not results:
+        print("テスト結果なし。")
+        sys.exit(1)
+
+    # レポート生成
+    output_path = Path(args.output)
+    generate_report(results, available, output_path)
+
+    # ログ出力
+    log_dir = Path(get_log_dir()) / "multi_pair"
+    save_trades_csv(results, log_dir)
+
+    # 最終サマリー
+    print(f"\n{'=' * 80}")
+    print("  最終サマリー")
+    print(f"{'=' * 80}")
+    print(
+        f"{'テスト':8s} | {'年間収益率':>10s} | {'DD':>6s} | "
+        f"{'Sharpe':>7s} | {'WR':>6s} | {'PF':>6s} | "
+        f"{'月間+':>6s} | {'Trades':>7s}"
+    )
+    print("-" * 80)
+    for name, r in results.items():
+        print(
+            f"{name:8s} | "
+            f"{r['annual_return_pct']:>9.1f}% | "
+            f"{r['max_dd_pct']:>5.2f}% | "
+            f"{r['sharpe']:>7.2f} | "
+            f"{r['wr']:>5.1f}% | "
+            f"{r['pf']:>5.2f} | "
+            f"{r['monthly_wr']:>5.1f}% | "
+            f"{r['total_trades']:>7d}"
+        )
+
+
+if __name__ == "__main__":
+    main()
