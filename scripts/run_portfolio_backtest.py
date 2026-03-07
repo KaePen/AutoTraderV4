@@ -140,6 +140,7 @@ def build_bot_config(
     overrides: dict[str, Any] = {}
 
     # プリセット値（位置管理・リスク管理）
+    _pip_unit = 0.01 if "JPY" in symbol.upper() else 0.0001
     overrides.update(
         {
             "max_positions": preset.max_positions,
@@ -149,6 +150,7 @@ def build_bot_config(
             "max_lot_per_trade": preset.max_lot_per_trade,
             "max_total_exposure_lot": preset.max_total_exposure_lot,
             "equity_floor_pct": preset.equity_floor_pct,
+            "pip_unit": _pip_unit,
         }
     )
 

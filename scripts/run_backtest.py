@@ -1385,6 +1385,7 @@ def run_single_backtest(args: argparse.Namespace):
     # マージ: preset < YAML < --override < 旧CLI < --bot/--pm（後者優先）
     _bot_overrides: dict[str, object] = {}
     # プリセット値をベースレイヤーとして注入（最低優先、CLI/YAMLで上書き可能）
+    _pip_unit = 0.01 if "JPY" in args.symbol.upper() else 0.0001
     _bot_overrides.update({
         "max_positions": _preset.max_positions,
         "bonus_max_positions": _preset.bonus_max_positions,
@@ -1393,6 +1394,7 @@ def run_single_backtest(args: argparse.Namespace):
         "max_lot_per_trade": _preset.max_lot_per_trade,
         "max_total_exposure_lot": _preset.max_total_exposure_lot,
         "equity_floor_pct": _preset.equity_floor_pct,
+        "pip_unit": _pip_unit,
     })
     _bot_overrides.update(_yaml_bot)
     _bot_overrides.update(_dot_bot)

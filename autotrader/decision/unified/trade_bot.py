@@ -1495,7 +1495,7 @@ class UnifiedTradeBot:
                 current_time,
             )
             if _m1_row_sl is not None:
-                _pip_unit = 0.01  # JPYペア
+                _pip_unit = self.config.pip_unit
                 _current_close = (
                     candle.close
                     if candle
@@ -1572,7 +1572,7 @@ class UnifiedTradeBot:
             if _m1_row_rt is not None:
                 _atr_val = _m1_row_rt.get("atr_14")
                 if _atr_val is not None and not pd.isna(_atr_val):
-                    _pip_unit_rt = 0.01
+                    _pip_unit_rt = self.config.pip_unit
                     _retrace_pips = (
                         float(_atr_val)
                         / _pip_unit_rt
@@ -2273,7 +2273,7 @@ class UnifiedTradeBot:
         Returns:
             ConsolidatedSignal: エントリーシグナル
         """
-        _pip_unit = 0.01  # JPYペア
+        _pip_unit = self.config.pip_unit
         _base = (
             entry_price
             if entry_price is not None
