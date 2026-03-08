@@ -127,13 +127,16 @@ class Job:
     def effective_year_workers(self) -> int:
         """実効年並列数（0なら年数から自動計算）
 
-        multi_pairジョブはシングルスレッドで
-        インターリーブ実行するため、固定で3を返す。
+        multi_pairジョブでmax_year_workers > 1の場合、
+        年並列実行のため実際のワーカー数を返す。
+        max_year_workers == 0 なら年数から自動計算。
         """
         if self.type in ("multi_pair", "portfolio"):
             if self.max_year_workers > 0:
                 return self.max_year_workers
-            return 3  # 固定コスト（実際はシングルスレッド）
+            # 0=自動: 年数から計算
+            start, end = parse_years(self.years)
+            return max(1, end - start + 1)
         if self.max_year_workers > 0:
             return self.max_year_workers
         start, end = parse_years(self.years)
@@ -142,8 +145,7 @@ class Job:
     def cpu_cost(self) -> float:
         """このジョブが消費するCPUスレッド数
 
-        multi_pairジョブは内部がシングルスレッド
-        （インターリーブ処理）のため、CPUコストは控えめ。
+        年並列実行時は max_year_workers * THREADS_PER_YEAR。
         """
         return self.effective_year_workers() * THREADS_PER_YEAR
 
@@ -565,16 +567,19 @@ def execute_job(
 def execute_multi_pair_job(
     job: Job,
     cancel_event: threading.Event,
+    max_year_workers: int = 1,
     result_id: str = "",
 ) -> JobResult:
     """マルチ通貨ペアインターリーブジョブを実行
 
     時系列インターリーブ方式で複数ペアを共有エクイティプール＋
     グローバルポジション制限で同時実行する。
+    max_year_workers > 1 の場合、年並列実行を行う。
 
     Args:
         job: 実行するジョブ（type="multi_pair"）
         cancel_event: キャンセルイベント
+        max_year_workers: 年並列ワーカー数（1=順次）
         result_id: 連番付き結果ID
 
     Returns:
@@ -583,14 +588,8 @@ def execute_multi_pair_job(
     from scripts.run_multi_pair_backtest import (
         TEST_MATRIX,
         MultiPairConfig,
-        PortfolioState,
-        aggregate_results,
         load_pair_data,
-        run_multi_pair_year,
-        setup_pair_context,
-    )
-    from scripts.run_portfolio_backtest import (
-        build_bot_config,
+        run_test_case,
     )
 
     _rid = result_id or job.id
@@ -621,21 +620,15 @@ def execute_multi_pair_job(
 
     start_time = time.time()
     start_year, end_year = parse_years(job.years)
-    num_years = end_year - start_year + 1
 
     # バックテスト共通設定
     bt_ovr = job.overrides.get("backtest", {})
     data_dir = bt_ovr.get("data_dir", DEFAULT_DATA_DIR)
-    initial_balance = bt_ovr.get(
-        "initial_balance",
-        1_000_000,
-    )
 
     # MultiPairConfig 構築
     mpc = job.multi_pair_config
     test_name = mpc.get("test_name", "")
     if test_name and test_name in TEST_MATRIX:
-        # TEST_MATRIXから取得
         multi_config = TEST_MATRIX[test_name]
         logger.info(
             "[%s] TEST_MATRIX '%s' を使用",
@@ -643,7 +636,6 @@ def execute_multi_pair_job(
             test_name,
         )
     else:
-        # カスタム設定
         multi_config = MultiPairConfig(
             name=mpc.get("name", job.id),
             global_max_positions=mpc.get(
@@ -668,120 +660,50 @@ def execute_multi_pair_job(
             ),
         )
 
+    # bot追加オーバーライド
+    bot_extra: dict[str, Any] = {}
+    bot_ovr_cfg = job.overrides.get("bot", {})
+    if bot_ovr_cfg:
+        bot_extra.update(bot_ovr_cfg)
+
+    is_parallel = max_year_workers > 1
+
     try:
-        # データロード（全ペア1回のみ）
         logger.info(
-            "[%s] データロード中... (%s, %s)",
+            "[%s] マルチペア実行開始 (%s, %s, workers=%d)",
             _rid,
             symbols_str,
             job.years,
-        )
-        runners = {}
-        for sym in symbols:
-            runners[sym] = load_pair_data(sym, data_dir)
-            logger.info("[%s] %s ロード完了", _rid, sym)
-
-        # ポートフォリオ状態初期化
-        portfolio = PortfolioState(
-            equity=float(initial_balance),
-            initial_equity=float(initial_balance),
-            peak_equity=float(initial_balance),
+            max_year_workers,
         )
 
-        all_pair_trades: dict[str, list[Any]] = {sym: [] for sym in symbols}
-        yearly_results: list[dict[str, Any]] = []
-
-        # 年ループ
-        for year in range(start_year, end_year + 1):
-            # キャンセルチェック（年単位）
-            if cancel_event.is_set():
-                result.status = "cancelled"
-                result.error = "ユーザーにより停止"
-                break
-
-            year_start_equity = portfolio.equity
-
-            # ペアコンテキスト構築
-            contexts = {}
+        # データロード（順次実行時のみ事前ロード）
+        runners: dict[str, Any] = {}
+        if not is_parallel:
             for sym in symbols:
-                runner, full_md = runners[sym]
-                # ペア別bot_config構築
-                extra_overrides: dict[str, Any] = {
-                    "base_risk_pct": (multi_config.base_risk_pct),
-                    "consensus_threshold": (multi_config.consensus_threshold),
-                }
-                # ジョブ指定のbot overridesもマージ
-                bot_ovr = job.overrides.get("bot", {})
-                if bot_ovr:
-                    extra_overrides.update(bot_ovr)
-
-                bot_config = build_bot_config(
-                    sym,
-                    extra_overrides,
+                runners[sym] = load_pair_data(
+                    sym, data_dir,
                 )
-                ctx = setup_pair_context(
-                    sym,
-                    runner,
-                    year,
-                    bot_config,
-                    portfolio.equity,
-                    full_market_data=full_md,
+                logger.info(
+                    "[%s] %s ロード完了", _rid, sym,
                 )
-                if ctx is not None:
-                    contexts[sym] = ctx
 
-            if not contexts:
-                continue
+        # run_test_caseに委譲（順次/並列を統一処理）
+        agg = run_test_case(
+            test_config=multi_config,
+            runners=runners,
+            symbols=symbols,
+            start_year=start_year,
+            end_year=end_year,
+            max_year_workers=max_year_workers,
+            data_dir=data_dir,
+            bot_extra_overrides=bot_extra,
+        )
 
-            # インターリーブ実行
-            logger.info(
-                "[%s] %d年 インターリーブ実行中 (%dペア)...",
-                _rid,
-                year,
-                len(contexts),
-            )
-            pair_trades = run_multi_pair_year(
-                year,
-                contexts,
-                multi_config,
-                portfolio,
-            )
-
-            # トレード蓄積
-            for sym, trades in pair_trades.items():
-                all_pair_trades[sym].extend(trades)
-
-            # 年次サマリー
-            year_pnl = portfolio.equity - year_start_equity
-            year_trades = sum(len(t) for t in pair_trades.values())
-            yearly_results.append(
-                {
-                    "year": year,
-                    "pnl": year_pnl,
-                    "trades": year_trades,
-                    "equity": portfolio.equity,
-                }
-            )
-            logger.info(
-                "[%s] %d年完了: PnL=%+.0f, Trades=%d, Equity=%.0f",
-                _rid,
-                year,
-                year_pnl,
-                year_trades,
-                portfolio.equity,
-            )
-
-        # 結果集約
-        if result.status != "cancelled":
-            agg = aggregate_results(
-                multi_config.name,
-                portfolio,
-                all_pair_trades,
-                yearly_results,
-                symbols,
-                num_years,
-            )
-
+        if cancel_event.is_set():
+            result.status = "cancelled"
+            result.error = "ユーザーにより停止"
+        else:
             result.status = "completed"
             result.net_profit = agg["total_profit"]
             result.trades = agg["total_trades"]
@@ -790,7 +712,7 @@ def execute_multi_pair_job(
             result.max_drawdown = agg["max_dd_pct"]
             result.sharpe_ratio = agg["sharpe"]
             result.monthly_plus_rate = agg["monthly_wr"]
-            result.yearly_details = yearly_results
+            result.yearly_details = agg["yearly_results"]
 
             # ペア別結果
             pair_details = []
@@ -804,7 +726,9 @@ def execute_multi_pair_job(
                             "trades": pm["trades"],
                             "win_rate": pm["wr"],
                             "profit_factor": pm["pf"],
-                            "contribution_pct": (pm["contribution"]),
+                            "contribution_pct": (
+                                pm["contribution"]
+                            ),
                         }
                     )
             result.pair_details = pair_details
@@ -812,15 +736,23 @@ def execute_multi_pair_job(
             # ポートフォリオメトリクス
             result.portfolio_metrics = {
                 "total_profit": agg["total_profit"],
-                "annual_return_pct": (agg["annual_return_pct"]),
+                "annual_return_pct": (
+                    agg["annual_return_pct"]
+                ),
                 "max_dd_pct": agg["max_dd_pct"],
                 "sharpe_ratio": agg["sharpe"],
                 "portfolio_wr": agg["wr"],
                 "portfolio_pf": agg["pf"],
                 "monthly_win_rate": agg["monthly_wr"],
-                "blocked_global": (agg["blocked_global"]),
-                "blocked_per_pair": (agg["blocked_per_pair"]),
-                "blocked_exposure": (agg["blocked_exposure"]),
+                "blocked_global": (
+                    agg["blocked_global"]
+                ),
+                "blocked_per_pair": (
+                    agg["blocked_per_pair"]
+                ),
+                "blocked_exposure": (
+                    agg["blocked_exposure"]
+                ),
                 "final_equity": agg["final_equity"],
             }
 
@@ -1079,7 +1011,8 @@ def main() -> None:
             holder[0] = execute_multi_pair_job(
                 job,
                 cancel_ev,
-                rid,
+                max_year_workers=workers,
+                result_id=rid,
             )
         else:
             holder[0] = execute_job(
