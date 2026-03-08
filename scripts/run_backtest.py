@@ -1297,6 +1297,9 @@ def run_single_backtest(args: argparse.Namespace):
         get_pip_unit as _get_pip_unit,
     )
     from autotrader.config.trading_params import (
+        get_quote_ccy_rate as _get_qcr,
+    )
+    from autotrader.config.trading_params import (
         get_symbol_overrides as _get_symbol_overrides,
     )
 
@@ -1399,6 +1402,7 @@ def run_single_backtest(args: argparse.Namespace):
     _bot_overrides: dict[str, object] = {}
     # プリセット値をベースレイヤーとして注入（最低優先）
     _pip_unit = _get_pip_unit(args.symbol)
+    _quote_ccy_rate = _get_qcr(args.symbol)
     _bot_overrides.update({
         "max_positions": _preset.max_positions,
         "bonus_max_positions": _preset.bonus_max_positions,
@@ -1408,6 +1412,7 @@ def run_single_backtest(args: argparse.Namespace):
         "max_total_exposure_lot": _preset.max_total_exposure_lot,
         "equity_floor_pct": _preset.equity_floor_pct,
         "pip_unit": _pip_unit,
+        "quote_ccy_rate": _quote_ccy_rate,
     })
     # ペア別 signal/filter/risk_mgmt 上書き（プリセット < ペア別 < YAML < CLI）
     _bot_overrides.update(_sym_signal)

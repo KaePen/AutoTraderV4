@@ -195,8 +195,11 @@ class TradeSimulator:
         self._slippage_price = (
             self.config.slippage_pips * self._pip_unit
         )
+        # pip_value = 100,000通貨 × pip_unit × quote_ccy_rate
+        # USDJPY: 100,000 × 0.01 × 1.0 = 1,000 JPY/pip/lot
+        # EURUSD: 100,000 × 0.0001 × 150.0 = 1,500 JPY/pip/lot
         self._pip_value = (
-            self.config.pip_value * self.config.quote_ccy_rate
+            100_000 * self._pip_unit * self.config.quote_ccy_rate
         )
         # bonus_max_positions が有効な場合は単一ポジション高速パスを無効化
         self._single_position = (

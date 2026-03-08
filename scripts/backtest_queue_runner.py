@@ -408,6 +408,7 @@ def execute_job(
     from autotrader.config.trading_params import (
         get_pip_unit,
         get_preset,
+        get_quote_ccy_rate,
         get_symbol_overrides,
     )
     from autotrader.decision.unified import UnifiedBotConfig
@@ -437,6 +438,7 @@ def execute_job(
 
         # bot overrides 構築
         pip_unit = get_pip_unit(job.symbol)
+        qcr = get_quote_ccy_rate(job.symbol)
         bot_ovr: dict[str, Any] = {}
         # L1: プリセット
         bot_ovr.update(
@@ -449,6 +451,7 @@ def execute_job(
                 "max_total_exposure_lot": (preset.max_total_exposure_lot),
                 "equity_floor_pct": preset.equity_floor_pct,
                 "pip_unit": pip_unit,
+                "quote_ccy_rate": qcr,
             }
         )
         # L2: ペア別 signal/filter/risk_mgmt

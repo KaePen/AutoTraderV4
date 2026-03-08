@@ -35,7 +35,7 @@ from autotrader.backtest.service import (  # noqa: E402
     BacktestService,
     BacktestServiceConfig,
 )
-from autotrader.config.trading_params import get_pip_unit, get_preset  # noqa: E402
+from autotrader.config.trading_params import get_pip_unit, get_preset, get_quote_ccy_rate  # noqa: E402
 from autotrader.decision.unified import UnifiedBotConfig  # noqa: E402
 
 # --- 定数 ---
@@ -141,6 +141,7 @@ def build_bot_config(
 
     # プリセット値（位置管理・リスク管理）
     _pip_unit = get_pip_unit(symbol)
+    _qcr = get_quote_ccy_rate(symbol)
     overrides.update(
         {
             "max_positions": preset.max_positions,
@@ -151,6 +152,7 @@ def build_bot_config(
             "max_total_exposure_lot": preset.max_total_exposure_lot,
             "equity_floor_pct": preset.equity_floor_pct,
             "pip_unit": _pip_unit,
+            "quote_ccy_rate": _qcr,
         }
     )
 
