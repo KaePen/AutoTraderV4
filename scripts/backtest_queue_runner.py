@@ -85,10 +85,18 @@ THREADS_PER_YEAR = 1.5  # 1年あたりの必要CPUスレッド数
 
 @dataclass
 class Job:
-    """バックテストジョブ"""
+    """バックテストジョブ
+
+    type が "single" の場合は1通貨ペア、
+    "portfolio" の場合は複数ペアを順次実行し集約する。
+    """
 
     id: str
-    symbol: str = "USDJPY"
+    type: str = "single"  # "single" or "portfolio"
+    symbol: str = "USDJPY"  # single用
+    symbols: list[str] = field(
+        default_factory=list,
+    )  # portfolio用
     years: str = "2023-2025"
     description: str = ""
     max_year_workers: int = 0  # 0=年数から自動計算
@@ -99,7 +107,9 @@ class Job:
         """dictからJob生成"""
         return cls(
             id=d["id"],
+            type=d.get("type", "single"),
             symbol=d.get("symbol", "USDJPY"),
+            symbols=d.get("symbols", []),
             years=d.get("years", "2023-2025"),
             description=d.get("description", ""),
             max_year_workers=d.get("max_year_workers", 0),
@@ -114,7 +124,11 @@ class Job:
         return max(1, end - start + 1)
 
     def cpu_cost(self) -> float:
-        """このジョブが消費するCPUスレッド数"""
+        """このジョブが消費するCPUスレッド数
+
+        ポートフォリオジョブは内部で1ペアずつ順次実行するため、
+        CPUコストは1ペア分の年並列ワーカー数で計算する。
+        """
         return self.effective_year_workers() * THREADS_PER_YEAR
 
 
@@ -124,6 +138,7 @@ class JobResult:
 
     job_id: str
     status: str = "pending"
+    job_type: str = "single"
     symbol: str = ""
     years: str = ""
     description: str = ""
@@ -147,6 +162,13 @@ class JobResult:
     log_dir: str = ""
     trades_csv: str = ""
     summary_log: str = ""
+    # ポートフォリオ用追加フィールド
+    portfolio_metrics: dict[str, Any] = field(
+        default_factory=dict,
+    )
+    pair_details: list[dict[str, Any]] = field(
+        default_factory=list,
+    )
 
 
 @dataclass
@@ -218,8 +240,7 @@ class QueueState:
             self.queue_hash = current_hash
             self.save()
             logger.info(
-                "キュー内容変更検知: completed_ids"
-                " リセット（旧%d件）",
+                "キュー内容変更検知: completed_ids リセット（旧%d件）",
                 old_count,
             )
         elif not self.queue_hash:
@@ -236,7 +257,9 @@ class QueueState:
         """状態ファイルに保存"""
         STATE_FILE.write_text(
             json.dumps(
-                asdict(self), indent=2, ensure_ascii=False,
+                asdict(self),
+                indent=2,
+                ensure_ascii=False,
             ),
             encoding="utf-8",
         )
@@ -250,13 +273,16 @@ class QueueState:
             )
             return cls(
                 completed_ids=data.get(
-                    "completed_ids", [],
+                    "completed_ids",
+                    [],
                 ),
                 job_counter=data.get(
-                    "job_counter", 0,
+                    "job_counter",
+                    0,
                 ),
                 queue_hash=data.get(
-                    "queue_hash", "",
+                    "queue_hash",
+                    "",
                 ),
             )
         return cls()
@@ -298,7 +324,8 @@ def cleanup_stale_running(state: QueueState) -> None:
     if cleaned > 0:
         state.save()
         logger.info(
-            "中断ジョブ %d件をクリーンアップ完了", cleaned,
+            "中断ジョブ %d件をクリーンアップ完了",
+            cleaned,
         )
 
 
@@ -387,27 +414,21 @@ def execute_job(
         sym_ovr = get_symbol_overrides(job.symbol)
 
         # bot overrides 構築
-        pip_unit = (
-            0.01 if "JPY" in job.symbol.upper() else 0.0001
-        )
+        pip_unit = 0.01 if "JPY" in job.symbol.upper() else 0.0001
         bot_ovr: dict[str, Any] = {}
         # L1: プリセット
-        bot_ovr.update({
-            "max_positions": preset.max_positions,
-            "bonus_max_positions": (
-                preset.bonus_max_positions
-            ),
-            "bonus_score_threshold": (
-                preset.bonus_score_threshold
-            ),
-            "base_risk_pct": preset.base_risk_pct,
-            "max_lot_per_trade": preset.max_lot_per_trade,
-            "max_total_exposure_lot": (
-                preset.max_total_exposure_lot
-            ),
-            "equity_floor_pct": preset.equity_floor_pct,
-            "pip_unit": pip_unit,
-        })
+        bot_ovr.update(
+            {
+                "max_positions": preset.max_positions,
+                "bonus_max_positions": (preset.bonus_max_positions),
+                "bonus_score_threshold": (preset.bonus_score_threshold),
+                "base_risk_pct": preset.base_risk_pct,
+                "max_lot_per_trade": preset.max_lot_per_trade,
+                "max_total_exposure_lot": (preset.max_total_exposure_lot),
+                "equity_floor_pct": preset.equity_floor_pct,
+                "pip_unit": pip_unit,
+            }
+        )
         # L2: ペア別 signal/filter/risk_mgmt
         bot_ovr.update(sym_ovr.get("signal", {}))
         bot_ovr.update(sym_ovr.get("filter", {}))
@@ -426,10 +447,12 @@ def execute_job(
         # バックテスト設定
         bt_ovr = job.overrides.get("backtest", {})
         data_dir = bt_ovr.get(
-            "data_dir", DEFAULT_DATA_DIR,
+            "data_dir",
+            DEFAULT_DATA_DIR,
         )
         initial_balance = bt_ovr.get(
-            "initial_balance", 1_000_000,
+            "initial_balance",
+            1_000_000,
         )
 
         svc_config = BacktestServiceConfig(
@@ -441,12 +464,8 @@ def execute_job(
             spread_pips=preset.spread_pips,
             slippage_pips=preset.slippage_pips,
             max_positions=preset.max_positions,
-            bonus_max_positions=(
-                bot_config.bonus_max_positions
-            ),
-            bonus_score_threshold=(
-                bot_config.bonus_score_threshold
-            ),
+            bonus_max_positions=(bot_config.bonus_max_positions),
+            bonus_score_threshold=(bot_config.bonus_score_threshold),
             pip_value=preset.pip_value,
             commission_per_lot=preset.commission_per_lot,
             use_short_timeframe=True,
@@ -499,9 +518,7 @@ def execute_job(
             result.profit_factor = bt_result.profit_factor
             result.max_drawdown = bt_result.max_drawdown
             result.sharpe_ratio = bt_result.sharpe_ratio
-            result.yearly_details = (
-                bt_result.yearly_results
-            )
+            result.yearly_details = bt_result.yearly_results
 
             # 月間プラス率を計算
             if bt_result.monthly_results:
@@ -512,9 +529,7 @@ def execute_job(
                 )
                 total = len(bt_result.monthly_results)
                 result.monthly_plus_rate = (
-                    plus_months / total * 100
-                    if total > 0
-                    else 0
+                    plus_months / total * 100 if total > 0 else 0
                 )
 
     except Exception as e:
@@ -523,7 +538,221 @@ def execute_job(
         logger.exception("[%s] ジョブ失敗: %s", job.id, e)
 
     result.elapsed_seconds = round(
-        time.time() - start_time, 1,
+        time.time() - start_time,
+        1,
+    )
+    result.finished_at = datetime.now().isoformat()
+    _save_result(result)
+    return result
+
+
+def execute_portfolio_job(
+    job: Job,
+    cancel_event: threading.Event,
+    max_year_workers: int = 5,
+    result_id: str = "",
+) -> JobResult:
+    """ポートフォリオジョブを実行（複数ペア順次→集約）
+
+    各ペアを順次バックテストし、完了後にポートフォリオ
+    レベルのメトリクスを集約する。
+
+    Args:
+        job: 実行するポートフォリオジョブ
+        cancel_event: キャンセルイベント
+        max_year_workers: 年並列実行数
+        result_id: 連番付き結果ID
+
+    Returns:
+        JobResult: ポートフォリオ集約結果
+    """
+    from scripts.run_portfolio_backtest import (
+        PairResult,
+        aggregate_portfolio,
+        build_bot_config,
+    )
+
+    from autotrader.backtest.service import (
+        BacktestService,
+        BacktestServiceConfig,
+    )
+    from autotrader.config.trading_params import (
+        get_preset,
+    )
+
+    _rid = result_id or job.id
+    symbols_str = ",".join(job.symbols)
+    result = JobResult(
+        job_id=_rid,
+        status="running",
+        job_type="portfolio",
+        symbol=symbols_str,
+        years=job.years,
+        description=job.description,
+        started_at=datetime.now().isoformat(),
+        overrides_used=job.overrides,
+    )
+    _save_result(result)
+
+    start_time = time.time()
+    start_year, end_year = parse_years(job.years)
+    num_years = end_year - start_year + 1
+
+    # バックテスト共通設定
+    bt_ovr = job.overrides.get("backtest", {})
+    data_dir = bt_ovr.get("data_dir", DEFAULT_DATA_DIR)
+    initial_balance = bt_ovr.get(
+        "initial_balance",
+        1_000_000,
+    )
+
+    # ジョブ指定のbot overrides
+    bot_overrides = job.overrides.get("bot", {})
+
+    pair_results: list[PairResult] = []
+    pair_details: list[dict[str, Any]] = []
+
+    try:
+        for symbol in job.symbols:
+            if cancel_event.is_set():
+                result.status = "cancelled"
+                result.error = "ユーザーにより停止"
+                break
+
+            logger.info(
+                "[%s] ペア実行中: %s (%d/%d)",
+                _rid,
+                symbol,
+                len(pair_results) + 1,
+                len(job.symbols),
+            )
+
+            # build_bot_config で設定構築（再利用）
+            bot_config = build_bot_config(
+                symbol,
+                bot_overrides or None,
+            )
+            preset = get_preset(symbol)
+
+            svc_config = BacktestServiceConfig(
+                start_year=start_year,
+                end_year=end_year,
+                initial_balance=initial_balance,
+                data_dir=data_dir,
+                symbol=symbol,
+                spread_pips=preset.spread_pips,
+                slippage_pips=preset.slippage_pips,
+                bonus_max_positions=(bot_config.bonus_max_positions),
+                bonus_score_threshold=(bot_config.bonus_score_threshold),
+                pip_value=preset.pip_value,
+                commission_per_lot=(preset.commission_per_lot),
+                use_short_timeframe=True,
+            )
+
+            service = BacktestService(svc_config)
+            runner = service.create_runner()
+            runner.set_cancel_callback(
+                cancel_event.is_set,
+            )
+            runner.load_data()
+
+            bt_result = runner.run_unified(
+                start_year=start_year,
+                end_year=end_year,
+                config=bot_config,
+                use_m1=True,
+                max_year_workers=max_year_workers,
+            )
+
+            if cancel_event.is_set():
+                result.status = "cancelled"
+                result.error = "ユーザーにより停止"
+                break
+
+            # 月次PnL辞書を構築
+            monthly_pnl: dict[tuple[int, int], float] = {}
+            for m in bt_result.monthly_results:
+                key = (m["year"], m["month"])
+                monthly_pnl[key] = m.get("pnl", 0.0)
+
+            pr = PairResult(
+                symbol=symbol,
+                result=bt_result,
+                bot_config=bot_config,
+                monthly_pnl=monthly_pnl,
+            )
+            pair_results.append(pr)
+
+            # ペア個別結果を記録
+            pair_details.append(
+                {
+                    "symbol": symbol,
+                    "net_profit": bt_result.net_profit,
+                    "trades": bt_result.trades,
+                    "win_rate": bt_result.win_rate,
+                    "profit_factor": (bt_result.profit_factor),
+                    "max_drawdown": (bt_result.max_drawdown),
+                    "sharpe_ratio": (bt_result.sharpe_ratio),
+                }
+            )
+
+            logger.info(
+                "[%s] %s 完了: profit=%.0f, WR=%.1f%%, PF=%.2f",
+                _rid,
+                symbol,
+                bt_result.net_profit,
+                bt_result.win_rate,
+                bt_result.profit_factor,
+            )
+
+        # ポートフォリオ集約
+        if pair_results and result.status != "cancelled":
+            metrics = aggregate_portfolio(
+                job.id,
+                pair_results,
+                num_years=num_years,
+            )
+
+            result.status = "completed"
+            result.net_profit = metrics.total_profit
+            result.win_rate = metrics.portfolio_wr
+            result.profit_factor = metrics.portfolio_pf
+            result.max_drawdown = metrics.max_dd_pct
+            result.sharpe_ratio = metrics.sharpe_ratio
+            result.monthly_plus_rate = metrics.monthly_win_rate
+            result.pair_details = pair_details
+
+            # 相関マトリクスをJSON直列化可能に変換
+            corr = {}
+            for k, v in metrics.correlation_matrix.items():
+                corr[k] = dict(v)
+
+            result.portfolio_metrics = {
+                "total_profit": metrics.total_profit,
+                "annual_return_pct": (metrics.annual_return_pct),
+                "max_dd_pct": metrics.max_dd_pct,
+                "sharpe_ratio": metrics.sharpe_ratio,
+                "portfolio_wr": metrics.portfolio_wr,
+                "portfolio_pf": metrics.portfolio_pf,
+                "monthly_win_rate": (metrics.monthly_win_rate),
+                "correlation_matrix": corr,
+            }
+
+            # 全ペアのトレード数合計
+            result.trades = sum(pr.result.trades for pr in pair_results)
+
+    except Exception as e:
+        result.status = "failed"
+        result.error = str(e)
+        logger.exception(
+            "[%s] ポートフォリオジョブ失敗: %s",
+            job.id,
+            e,
+        )
+
+    result.elapsed_seconds = round(
+        time.time() - start_time,
+        1,
     )
     result.finished_at = datetime.now().isoformat()
     _save_result(result)
@@ -599,8 +828,7 @@ def _kill_job_child_processes(
         children = parent.children(recursive=True)
         # ジョブ開始後に生成された子プロセスのみ対象
         targets = [
-            c for c in children
-            if c.create_time() >= rj.started_at - 1.0
+            c for c in children if c.create_time() >= rj.started_at - 1.0
         ]
         for child in targets:
             try:
@@ -645,8 +873,7 @@ def force_stop_running_job(
         rj.thread.join(timeout=10)
         if rj.thread.is_alive():
             logger.warning(
-                ">>> [%s] デーモンスレッド残存"
-                "（プロセス終了時に回収）",
+                ">>> [%s] デーモンスレッド残存（プロセス終了時に回収）",
                 rj.job.id,
             )
 
@@ -655,7 +882,8 @@ def force_stop_running_job(
     if _rpath.exists():
         _rpath.unlink()
         logger.info(
-            ">>> 結果ファイル削除: %s", _rpath.name,
+            ">>> 結果ファイル削除: %s",
+            _rpath.name,
         )
 
 
@@ -722,8 +950,7 @@ def main() -> None:
     print(f"  結果ディレクトリ: {RESULTS_DIR}")
     print(f"  ポーリング間隔: {POLL_INTERVAL}s")
     print(
-        f"  CPUスレッド: {cpu_threads}"
-        f" (1年={THREADS_PER_YEAR}スレッド)",
+        f"  CPUスレッド: {cpu_threads} (1年={THREADS_PER_YEAR}スレッド)",
     )
     print()
     print("  コマンド:")
@@ -764,10 +991,21 @@ def main() -> None:
         workers: int,
         rid: str = "",
     ) -> None:
-        """ジョブ実行スレッド"""
-        holder[0] = execute_job(
-            job, cancel_ev, workers, rid,
-        )
+        """ジョブ実行スレッド（typeに応じて振り分け）"""
+        if job.type == "portfolio":
+            holder[0] = execute_portfolio_job(
+                job,
+                cancel_ev,
+                workers,
+                rid,
+            )
+        else:
+            holder[0] = execute_job(
+                job,
+                cancel_ev,
+                workers,
+                rid,
+            )
 
     while True:
         # -------------------------------------------------------
@@ -781,8 +1019,7 @@ def main() -> None:
                 if cmd == "stop":
                     if running_jobs:
                         logger.info(
-                            ">>> 全ジョブ停止中"
-                            " (%d件)...",
+                            ">>> 全ジョブ停止中 (%d件)...",
                             len(running_jobs),
                         )
                         # 全ジョブにcancel通知
@@ -821,8 +1058,7 @@ def main() -> None:
                             old_cpu = cpu_threads
                             cpu_threads = new_cpu
                             logger.info(
-                                ">>> CPUスレッド: "
-                                "%d → %d",
+                                ">>> CPUスレッド: %d → %d",
                                 old_cpu,
                                 cpu_threads,
                             )
@@ -845,14 +1081,12 @@ def main() -> None:
                                 )
                         except ValueError:
                             logger.error(
-                                ">>> 無効な値: %s"
-                                " (例: cpu 8)",
+                                ">>> 無効な値: %s (例: cpu 8)",
                                 parts[1],
                             )
                     else:
                         logger.info(
-                            ">>> 現在のCPUスレッド:"
-                            " %d (使用例: cpu 8)",
+                            ">>> 現在のCPUスレッド: %d (使用例: cpu 8)",
                             cpu_threads,
                         )
 
@@ -864,35 +1098,27 @@ def main() -> None:
                     _done = len(state.completed_ids)
                     _total = len(_jobs)
                     _remain = _total - _done
-                    print(
-                        f"  状態: "
-                        f"{'一時停止' if paused else '稼働中'}"
-                    )
-                    print(
-                        f"  CPUスレッド: "
-                        f"{used:.1f}/{cpu_threads} 使用中"
-                    )
-                    print(
-                        f"  実行中ジョブ: "
-                        f"{len(running_jobs)}件"
-                    )
+                    print(f"  状態: {'一時停止' if paused else '稼働中'}")
+                    print(f"  CPUスレッド: {used:.1f}/{cpu_threads} 使用中")
+                    print(f"  実行中ジョブ: {len(running_jobs)}件")
                     for rj in running_jobs:
-                        elapsed = (
-                            time.time() - rj.started_at
-                        )
+                        elapsed = time.time() - rj.started_at
+                        # ポートフォリオの場合はシンボル一覧
+                        if rj.job.type == "portfolio":
+                            _sym = ",".join(rj.job.symbols)
+                            _label = f"[portfolio] {_sym}"
+                        else:
+                            _label = rj.job.symbol
                         print(
                             f"    - [{rj.job.id}]"
-                            f" {rj.job.symbol}"
+                            f" {_label}"
                             f" {rj.job.years}"
                             f" workers="
                             f"{rj.max_year_workers}"
                             f" cost={rj.cpu_cost:.1f}"
                             f" ({elapsed:.0f}s)"
                         )
-                    print(
-                        f"  進捗: {_done}/{_total}"
-                        f" (残り{_remain}件)"
-                    )
+                    print(f"  進捗: {_done}/{_total} (残り{_remain}件)")
 
                 elif cmd == "quit":
                     if running_jobs:
@@ -920,17 +1146,56 @@ def main() -> None:
         for rj in finished:
             _res = rj.result_holder[0]
             if _res and _res.status == "completed":
-                logger.info(
-                    "[%s] 完了: profit=%.0f,"
-                    " WR=%.1f%%, PF=%.2f, DD=%.2f%%"
-                    " (%.0fs)",
-                    _res.job_id,
-                    _res.net_profit,
-                    _res.win_rate,
-                    _res.profit_factor,
-                    _res.max_drawdown,
-                    _res.elapsed_seconds,
-                )
+                if _res.job_type == "portfolio":
+                    _pm = _res.portfolio_metrics
+                    logger.info(
+                        "[%s] ポートフォリオ完了:"
+                        " profit=%.0f,"
+                        " 年間=%.1f%%,"
+                        " WR=%.1f%%,"
+                        " PF=%.2f,"
+                        " DD=%.2f%%,"
+                        " Sharpe=%.2f,"
+                        " 月間+=%.1f%%"
+                        " (%dペア, %.0fs)",
+                        _res.job_id,
+                        _res.net_profit,
+                        _pm.get(
+                            "annual_return_pct",
+                            0,
+                        ),
+                        _res.win_rate,
+                        _res.profit_factor,
+                        _res.max_drawdown,
+                        _res.sharpe_ratio,
+                        _res.monthly_plus_rate,
+                        len(_res.pair_details),
+                        _res.elapsed_seconds,
+                    )
+                    # 各ペアの結果も表示
+                    for pd in _res.pair_details:
+                        logger.info(
+                            "  %s: profit=%.0f, WR=%.1f%%, PF=%.2f, DD=%.2f%%",
+                            pd["symbol"],
+                            pd["net_profit"],
+                            pd["win_rate"],
+                            pd["profit_factor"],
+                            pd["max_drawdown"],
+                        )
+                else:
+                    logger.info(
+                        "[%s] 完了: profit=%.0f,"
+                        " WR=%.1f%%,"
+                        " PF=%.2f,"
+                        " DD=%.2f%%"
+                        " (%.0fs)",
+                        _res.job_id,
+                        _res.net_profit,
+                        _res.win_rate,
+                        _res.profit_factor,
+                        _res.max_drawdown,
+                        _res.elapsed_seconds,
+                    )
                 # 元のjob.idで完了記録（連番なし）
                 _orig_id = rj.job.id
                 if _orig_id not in state.completed_ids:
@@ -938,7 +1203,8 @@ def main() -> None:
                 state.save()
             elif _res and _res.status == "cancelled":
                 logger.info(
-                    "[%s] キャンセル済み", _res.job_id,
+                    "[%s] キャンセル済み",
+                    _res.job_id,
                 )
             elif _res and _res.status == "failed":
                 logger.error(
@@ -955,9 +1221,7 @@ def main() -> None:
         # -------------------------------------------------------
         if not paused:
             jobs = load_queue()
-            running_ids = {
-                rj.job.id for rj in running_jobs
-            }
+            running_ids = {rj.job.id for rj in running_jobs}
             _done = set(state.completed_ids)
             for job in jobs:
                 # 完了済みスキップ
@@ -982,13 +1246,17 @@ def main() -> None:
                 _cnt = state.next_counter()
                 _rid = f"{_cnt:03d}_{job.id}"
 
-                # ジョブ起動
+                # ジョブ起動ログ
+                if job.type == "portfolio":
+                    _sym_label = "[portfolio] " + ",".join(job.symbols)
+                else:
+                    _sym_label = job.symbol
                 logger.info(
                     "[%s] 開始: %s %s %s"
                     " (workers=%d, cost=%.1f,"
                     " used=%.1f/%.0f)",
                     _rid,
-                    job.symbol,
+                    _sym_label,
                     job.years,
                     job.description,
                     workers,
@@ -1001,8 +1269,11 @@ def main() -> None:
                 t = threading.Thread(
                     target=_run_job_wrapper,
                     args=(
-                        job, cancel_ev, holder,
-                        workers, _rid,
+                        job,
+                        cancel_ev,
+                        holder,
+                        workers,
+                        _rid,
                     ),
                     daemon=True,
                 )
