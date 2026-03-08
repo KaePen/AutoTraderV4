@@ -1,18 +1,22 @@
 #!/usr/bin/env python3
-"""バックテストキューランナー
+"""バックテストキューランナー（並行実行・CPUバジェット管理）
 
 キューファイル（backtest_queue.json）を監視し、
-ジョブを順次実行する常駐スクリプト。
+CPUバジェット内で複数ジョブを並行実行する常駐スクリプト。
+
+各ジョブは max_year_workers を申告し、1年=1.5スレッドとして
+利用可能CPUスレッド数の範囲内で同時実行される。
 
 使い方:
     uv run python scripts/backtest_queue_runner.py --cpu-threads 12
 
 対話コマンド:
-    stop   - 実行中ジョブを即時停止、ログ削除、キュー先頭に戻す
-    pause  - 新規ジョブの取得を一時停止
-    resume - 一時停止を解除
-    status - 現在の状態を表示
-    quit   - ランナーを終了
+    stop    - 全実行中ジョブ停止+ログ削除+キュー先頭に戻す
+    pause   - 新規ジョブ取得を一時停止
+    resume  - 一時停止解除
+    status  - 現在の状態表示
+    cpu N   - CPUスレッド数を動的変更（超過分は最新ジョブから停止）
+    quit    - ランナー終了
 """
 
 from __future__ import annotations
@@ -67,6 +71,7 @@ RESULTS_DIR = _DATA_ROOT / "backtest_results"
 DEFAULT_DATA_DIR = str(_DATA_ROOT / "data")
 
 POLL_INTERVAL = 2.0  # キューポーリング間隔（秒）
+THREADS_PER_YEAR = 1.5  # 1年あたりの必要CPUスレッド数
 
 
 # ===================================================================
@@ -82,6 +87,7 @@ class Job:
     symbol: str = "USDJPY"
     years: str = "2023-2025"
     description: str = ""
+    max_year_workers: int = 0  # 0=年数から自動計算
     overrides: dict[str, Any] = field(default_factory=dict)
 
     @classmethod
@@ -92,8 +98,20 @@ class Job:
             symbol=d.get("symbol", "USDJPY"),
             years=d.get("years", "2023-2025"),
             description=d.get("description", ""),
+            max_year_workers=d.get("max_year_workers", 0),
             overrides=d.get("overrides", {}),
         )
+
+    def effective_year_workers(self) -> int:
+        """実効年並列数（0なら年数から自動計算）"""
+        if self.max_year_workers > 0:
+            return self.max_year_workers
+        start, end = parse_years(self.years)
+        return max(1, end - start + 1)
+
+    def cpu_cost(self) -> float:
+        """このジョブが消費するCPUスレッド数"""
+        return self.effective_year_workers() * THREADS_PER_YEAR
 
 
 @dataclass
@@ -101,7 +119,7 @@ class JobResult:
     """ジョブ実行結果"""
 
     job_id: str
-    status: str = "pending"  # pending|running|completed|failed|cancelled
+    status: str = "pending"
     symbol: str = ""
     years: str = ""
     description: str = ""
@@ -125,6 +143,23 @@ class JobResult:
 
 
 @dataclass
+class RunningJob:
+    """実行中ジョブのトラッキング"""
+
+    job: Job
+    thread: threading.Thread
+    cancel_event: threading.Event
+    result_holder: list[JobResult | None]
+    max_year_workers: int
+    started_at: float  # time.time()
+
+    @property
+    def cpu_cost(self) -> float:
+        """消費CPUスレッド数"""
+        return self.max_year_workers * THREADS_PER_YEAR
+
+
+@dataclass
 class QueueState:
     """キュー処理状態"""
 
@@ -134,7 +169,9 @@ class QueueState:
     def save(self) -> None:
         """状態ファイルに保存"""
         STATE_FILE.write_text(
-            json.dumps(asdict(self), indent=2, ensure_ascii=False),
+            json.dumps(
+                asdict(self), indent=2, ensure_ascii=False,
+            ),
             encoding="utf-8",
         )
 
@@ -147,7 +184,9 @@ class QueueState:
             )
             return cls(
                 next_index=data.get("next_index", 0),
-                completed_ids=data.get("completed_ids", []),
+                completed_ids=data.get(
+                    "completed_ids", [],
+                ),
             )
         return cls()
 
@@ -201,7 +240,6 @@ def execute_job(
     Returns:
         JobResult: 実行結果
     """
-    from autotrader.backtest.runner import BacktestRunner
     from autotrader.backtest.service import (
         BacktestService,
         BacktestServiceConfig,
@@ -234,7 +272,7 @@ def execute_job(
         preset = get_preset(job.symbol)
         sym_ovr = get_symbol_overrides(job.symbol)
 
-        # bot overrides 構築（run_backtest.py と同じ優先順位）
+        # bot overrides 構築
         pip_unit = (
             0.01 if "JPY" in job.symbol.upper() else 0.0001
         )
@@ -242,11 +280,17 @@ def execute_job(
         # L1: プリセット
         bot_ovr.update({
             "max_positions": preset.max_positions,
-            "bonus_max_positions": preset.bonus_max_positions,
-            "bonus_score_threshold": preset.bonus_score_threshold,
+            "bonus_max_positions": (
+                preset.bonus_max_positions
+            ),
+            "bonus_score_threshold": (
+                preset.bonus_score_threshold
+            ),
             "base_risk_pct": preset.base_risk_pct,
             "max_lot_per_trade": preset.max_lot_per_trade,
-            "max_total_exposure_lot": preset.max_total_exposure_lot,
+            "max_total_exposure_lot": (
+                preset.max_total_exposure_lot
+            ),
             "equity_floor_pct": preset.equity_floor_pct,
             "pip_unit": pip_unit,
         })
@@ -267,7 +311,9 @@ def execute_job(
 
         # バックテスト設定
         bt_ovr = job.overrides.get("backtest", {})
-        data_dir = bt_ovr.get("data_dir", DEFAULT_DATA_DIR)
+        data_dir = bt_ovr.get(
+            "data_dir", DEFAULT_DATA_DIR,
+        )
         initial_balance = bt_ovr.get(
             "initial_balance", 1_000_000,
         )
@@ -281,8 +327,12 @@ def execute_job(
             spread_pips=preset.spread_pips,
             slippage_pips=preset.slippage_pips,
             max_positions=preset.max_positions,
-            bonus_max_positions=bot_config.bonus_max_positions,
-            bonus_score_threshold=bot_config.bonus_score_threshold,
+            bonus_max_positions=(
+                bot_config.bonus_max_positions
+            ),
+            bonus_score_threshold=(
+                bot_config.bonus_score_threshold
+            ),
             pip_value=preset.pip_value,
             commission_per_lot=preset.commission_per_lot,
             use_short_timeframe=True,
@@ -296,8 +346,11 @@ def execute_job(
 
         # データ読み込み
         logger.info(
-            "[%s] データ読み込み中... (%s %s)",
-            job.id, job.symbol, job.years,
+            "[%s] データ読み込み中... (%s %s, workers=%d)",
+            job.id,
+            job.symbol,
+            job.years,
+            max_year_workers,
         )
         runner.load_data()
 
@@ -323,7 +376,9 @@ def execute_job(
             result.profit_factor = bt_result.profit_factor
             result.max_drawdown = bt_result.max_drawdown
             result.sharpe_ratio = bt_result.sharpe_ratio
-            result.yearly_details = bt_result.yearly_results
+            result.yearly_details = (
+                bt_result.yearly_results
+            )
 
             # 月間プラス率を計算
             if bt_result.monthly_results:
@@ -332,10 +387,10 @@ def execute_job(
                     for m in bt_result.monthly_results
                     if m.get("profit", 0) > 0
                 )
-                total_months = len(bt_result.monthly_results)
+                total = len(bt_result.monthly_results)
                 result.monthly_plus_rate = (
-                    plus_months / total_months * 100
-                    if total_months > 0
+                    plus_months / total * 100
+                    if total > 0
                     else 0
                 )
 
@@ -376,17 +431,65 @@ def stdin_reader(
     cmd_queue: "import queue; queue.Queue[str]",
 ) -> None:
     """stdinからコマンドを読み取るスレッド"""
-    import queue as _q  # noqa: PLC0415
-
     while True:
         try:
-            line = input().strip().lower()
+            line = input().strip()
             if line:
                 cmd_queue.put(line)
         except EOFError:
             break
         except Exception:
             break
+
+
+# ===================================================================
+# CPUバジェット管理
+# ===================================================================
+
+
+def calc_used_threads(
+    running: list[RunningJob],
+) -> float:
+    """実行中ジョブの合計CPUスレッド消費量"""
+    return sum(rj.cpu_cost for rj in running)
+
+
+def stop_newest_jobs_until_budget(
+    running: list[RunningJob],
+    cpu_threads: int,
+    state: QueueState,
+) -> None:
+    """CPUバジェット超過時、最新ジョブから停止
+
+    Args:
+        running: 実行中ジョブリスト（変更される）
+        cpu_threads: 利用可能CPUスレッド数
+        state: キュー状態
+    """
+    # 開始時刻の新しい順にソート
+    by_newest = sorted(
+        running, key=lambda rj: rj.started_at, reverse=True,
+    )
+    for rj in by_newest:
+        if calc_used_threads(running) <= cpu_threads:
+            break
+        logger.info(
+            ">>> CPU超過: [%s] を停止中 (cost=%.1f)...",
+            rj.job.id,
+            rj.cpu_cost,
+        )
+        rj.cancel_event.set()
+        rj.thread.join(timeout=15)
+        # ログ削除
+        _rpath = RESULTS_DIR / f"{rj.job.id}.json"
+        if _rpath.exists():
+            _rpath.unlink()
+            logger.info(">>> ログ削除: %s", _rpath.name)
+        # completed_ids から除外（再実行対象に戻す）
+        if rj.job.id in state.completed_ids:
+            state.completed_ids.remove(rj.job.id)
+        running.remove(rj)
+    state.save()
 
 
 # ===================================================================
@@ -405,34 +508,29 @@ def main() -> None:
         "--cpu-threads",
         type=int,
         default=os.cpu_count() or 4,
-        help=(
-            "使用可能なCPUスレッド数"
-            "（デフォルト: OS検出値）"
-        ),
+        help="使用可能なCPUスレッド数（デフォルト: OS検出値）",
     )
     cli_args = parser.parse_args()
 
-    # 1年 ≈ 1.5スレッド の計算式
-    max_year_workers = max(
-        1, math.floor(cli_args.cpu_threads / 1.5),
-    )
+    cpu_threads: int = cli_args.cpu_threads
 
     print("=" * 60)
-    print("  バックテストキューランナー")
+    print("  バックテストキューランナー（並行実行）")
     print("=" * 60)
     print(f"  キューファイル: {QUEUE_FILE}")
     print(f"  結果ディレクトリ: {RESULTS_DIR}")
     print(f"  ポーリング間隔: {POLL_INTERVAL}s")
     print(
-        f"  CPUスレッド: {cli_args.cpu_threads}"
-        f" → 年並列数: {max_year_workers}",
+        f"  CPUスレッド: {cpu_threads}"
+        f" (1年={THREADS_PER_YEAR}スレッド)",
     )
     print()
     print("  コマンド:")
-    print("    stop   - 実行中ジョブ停止+ログ削除+キュー先頭")
+    print("    stop   - 全ジョブ停止+ログ削除+キュー先頭")
     print("    pause  - 新規ジョブ取得を一時停止")
     print("    resume - 一時停止解除")
     print("    status - 現在の状態表示")
+    print("    cpu N  - CPUスレッド数を変更")
     print("    quit   - ランナー終了")
     print("=" * 60)
 
@@ -451,39 +549,49 @@ def main() -> None:
 
     # 状態
     state = QueueState.load()
-    cancel_event = threading.Event()
     paused = False
-    current_job: Job | None = None
-    job_thread: threading.Thread | None = None
-    job_result_holder: list[JobResult | None] = [None]
+    running_jobs: list[RunningJob] = []
 
-    def _run_job(j: Job) -> None:
+    def _run_job_wrapper(
+        job: Job,
+        cancel_ev: threading.Event,
+        holder: list[JobResult | None],
+        workers: int,
+    ) -> None:
         """ジョブ実行スレッド"""
-        job_result_holder[0] = execute_job(
-            j, cancel_event, max_year_workers,
-        )
+        holder[0] = execute_job(job, cancel_ev, workers)
 
     while True:
+        # -------------------------------------------------------
         # コマンド処理
+        # -------------------------------------------------------
         try:
             while True:
-                cmd = cmd_queue.get_nowait()
+                raw_cmd = cmd_queue.get_nowait()
+                cmd = raw_cmd.lower().strip()
+
                 if cmd == "stop":
-                    if job_thread and job_thread.is_alive():
-                        logger.info(">>> ジョブ停止中...")
-                        cancel_event.set()
-                        job_thread.join(timeout=10)
-                        # ログ削除
-                        if current_job:
-                            _result_path = (
-                                RESULTS_DIR / f"{current_job.id}.json"
+                    if running_jobs:
+                        logger.info(
+                            ">>> 全ジョブ停止中"
+                            " (%d件)...",
+                            len(running_jobs),
+                        )
+                        for rj in running_jobs:
+                            rj.cancel_event.set()
+                        for rj in running_jobs:
+                            rj.thread.join(timeout=15)
+                            _rp = (
+                                RESULTS_DIR
+                                / f"{rj.job.id}.json"
                             )
-                            if _result_path.exists():
-                                _result_path.unlink()
+                            if _rp.exists():
+                                _rp.unlink()
                                 logger.info(
                                     ">>> ログ削除: %s",
-                                    _result_path.name,
+                                    _rp.name,
                                 )
+                        running_jobs.clear()
                         # キュー先頭に戻す
                         state.next_index = 0
                         state.completed_ids.clear()
@@ -491,9 +599,6 @@ def main() -> None:
                         logger.info(
                             ">>> キュー先頭にリセット",
                         )
-                        cancel_event.clear()
-                        current_job = None
-                        job_thread = None
                     else:
                         logger.info(
                             ">>> 実行中ジョブなし",
@@ -507,115 +612,243 @@ def main() -> None:
                     paused = False
                     logger.info(">>> 再開")
 
+                elif cmd.startswith("cpu"):
+                    parts = cmd.split()
+                    if len(parts) == 2:
+                        try:
+                            new_cpu = int(parts[1])
+                            if new_cpu < 1:
+                                new_cpu = 1
+                            old_cpu = cpu_threads
+                            cpu_threads = new_cpu
+                            logger.info(
+                                ">>> CPUスレッド: "
+                                "%d → %d",
+                                old_cpu,
+                                cpu_threads,
+                            )
+                            # 超過チェック
+                            used = calc_used_threads(
+                                running_jobs,
+                            )
+                            if used > cpu_threads:
+                                logger.info(
+                                    ">>> 使用中: %.1f"
+                                    " > 上限: %d"
+                                    " → 最新ジョブから停止",
+                                    used,
+                                    cpu_threads,
+                                )
+                                stop_newest_jobs_until_budget(
+                                    running_jobs,
+                                    cpu_threads,
+                                    state,
+                                )
+                        except ValueError:
+                            logger.error(
+                                ">>> 無効な値: %s"
+                                " (例: cpu 8)",
+                                parts[1],
+                            )
+                    else:
+                        logger.info(
+                            ">>> 現在のCPUスレッド:"
+                            " %d (使用例: cpu 8)",
+                            cpu_threads,
+                        )
+
                 elif cmd == "status":
                     _jobs = load_queue()
-                    _running = (
-                        current_job.id
-                        if current_job
-                        else "なし"
+                    used = calc_used_threads(
+                        running_jobs,
                     )
                     print(
-                        f"  状態: {'一時停止' if paused else '実行中'}"
-                    )
-                    print(f"  現在のジョブ: {_running}")
-                    print(
-                        f"  キュー位置: {state.next_index}/{len(_jobs)}"
+                        f"  状態: "
+                        f"{'一時停止' if paused else '稼働中'}"
                     )
                     print(
-                        f"  完了済み: {len(state.completed_ids)}件"
+                        f"  CPUスレッド: "
+                        f"{used:.1f}/{cpu_threads} 使用中"
                     )
                     print(
-                        f"  CPUスレッド: {cli_args.cpu_threads}"
-                        f" → 年並列数: {max_year_workers}"
+                        f"  実行中ジョブ: "
+                        f"{len(running_jobs)}件"
+                    )
+                    for rj in running_jobs:
+                        elapsed = time.time() - rj.started_at
+                        print(
+                            f"    - [{rj.job.id}]"
+                            f" {rj.job.symbol}"
+                            f" {rj.job.years}"
+                            f" workers={rj.max_year_workers}"
+                            f" cost={rj.cpu_cost:.1f}"
+                            f" ({elapsed:.0f}s)"
+                        )
+                    print(
+                        f"  キュー位置: "
+                        f"{state.next_index}/{len(_jobs)}"
+                    )
+                    print(
+                        f"  完了済み: "
+                        f"{len(state.completed_ids)}件"
                     )
 
                 elif cmd == "quit":
-                    if job_thread and job_thread.is_alive():
-                        cancel_event.set()
-                        job_thread.join(timeout=10)
+                    if running_jobs:
+                        logger.info(
+                            ">>> 全ジョブ停止中...",
+                        )
+                        for rj in running_jobs:
+                            rj.cancel_event.set()
+                        for rj in running_jobs:
+                            rj.thread.join(timeout=15)
                     logger.info(">>> ランナー終了")
                     return
 
         except _q.Empty:
             pass
 
-        # ジョブ完了チェック
-        if job_thread and not job_thread.is_alive():
-            _res = job_result_holder[0]
+        # -------------------------------------------------------
+        # 完了ジョブの回収
+        # -------------------------------------------------------
+        finished: list[RunningJob] = []
+        for rj in running_jobs:
+            if not rj.thread.is_alive():
+                finished.append(rj)
+
+        for rj in finished:
+            _res = rj.result_holder[0]
             if _res and _res.status == "completed":
                 logger.info(
-                    "[%s] 完了: profit=%.0f, WR=%.1f%%, DD=%.2f%%",
+                    "[%s] 完了: profit=%.0f,"
+                    " WR=%.1f%%, PF=%.2f, DD=%.2f%%"
+                    " (%.0fs)",
                     _res.job_id,
                     _res.net_profit,
                     _res.win_rate,
+                    _res.profit_factor,
                     _res.max_drawdown,
+                    _res.elapsed_seconds,
                 )
                 if _res.job_id not in state.completed_ids:
-                    state.completed_ids.append(_res.job_id)
-                state.next_index += 1
+                    state.completed_ids.append(
+                        _res.job_id,
+                    )
                 state.save()
             elif _res and _res.status == "cancelled":
-                logger.info("[%s] キャンセル済み", _res.job_id)
+                logger.info(
+                    "[%s] キャンセル済み", _res.job_id,
+                )
             elif _res and _res.status == "failed":
                 logger.error(
-                    "[%s] 失敗: %s", _res.job_id, _res.error,
+                    "[%s] 失敗: %s",
+                    _res.job_id,
+                    _res.error,
                 )
-                state.next_index += 1
                 state.save()
-            current_job = None
-            job_thread = None
-            cancel_event.clear()
+            running_jobs.remove(rj)
 
-        # 新規ジョブ取得
-        if (
-            not paused
-            and job_thread is None
-            and not cancel_event.is_set()
-        ):
+        # -------------------------------------------------------
+        # 新規ジョブ取得（CPUバジェット内で複数起動）
+        # -------------------------------------------------------
+        if not paused:
             jobs = load_queue()
-            if state.next_index < len(jobs):
-                job = jobs[state.next_index]
+            # next_index からスキャン
+            idx = state.next_index
+            while idx < len(jobs):
+                job = jobs[idx]
+
                 # 既に完了済みならスキップ
                 if job.id in state.completed_ids:
-                    state.next_index += 1
+                    idx += 1
+                    state.next_index = idx
                     state.save()
                     continue
+
+                # 既に実行中ならスキップ
+                if any(
+                    rj.job.id == job.id
+                    for rj in running_jobs
+                ):
+                    idx += 1
+                    state.next_index = idx
+                    continue
+
                 # 結果ファイルが既にあればスキップ
-                _existing = RESULTS_DIR / f"{job.id}.json"
+                _existing = (
+                    RESULTS_DIR / f"{job.id}.json"
+                )
                 if _existing.exists():
                     try:
-                        _ex_data = json.loads(
-                            _existing.read_text(encoding="utf-8"),
+                        _ex = json.loads(
+                            _existing.read_text(
+                                encoding="utf-8",
+                            ),
                         )
-                        if _ex_data.get("status") == "completed":
+                        if _ex.get("status") == "completed":
                             logger.info(
-                                "[%s] スキップ（結果ファイルあり）",
+                                "[%s] スキップ"
+                                "（結果ファイルあり）",
                                 job.id,
                             )
-                            if job.id not in state.completed_ids:
-                                state.completed_ids.append(job.id)
-                            state.next_index += 1
+                            if (
+                                job.id
+                                not in state.completed_ids
+                            ):
+                                state.completed_ids.append(
+                                    job.id,
+                                )
+                            idx += 1
+                            state.next_index = idx
                             state.save()
                             continue
                     except (json.JSONDecodeError, KeyError):
                         pass
 
+                # CPUバジェットチェック
+                workers = job.effective_year_workers()
+                cost = job.cpu_cost()
+                used = calc_used_threads(running_jobs)
+                remaining = cpu_threads - used
+
+                if cost > remaining:
+                    # バジェット不足 → これ以降は次サイクルで
+                    break
+
+                # ジョブ起動
                 logger.info(
-                    "[%s] 開始: %s %s %s",
+                    "[%s] 開始: %s %s %s"
+                    " (workers=%d, cost=%.1f,"
+                    " used=%.1f/%.0f)",
                     job.id,
                     job.symbol,
                     job.years,
                     job.description,
+                    workers,
+                    cost,
+                    used + cost,
+                    cpu_threads,
                 )
-                current_job = job
-                cancel_event.clear()
-                job_result_holder[0] = None
-                job_thread = threading.Thread(
-                    target=_run_job,
-                    args=(job,),
+                cancel_ev = threading.Event()
+                holder: list[JobResult | None] = [None]
+                t = threading.Thread(
+                    target=_run_job_wrapper,
+                    args=(job, cancel_ev, holder, workers),
                     daemon=True,
                 )
-                job_thread.start()
+                rj = RunningJob(
+                    job=job,
+                    thread=t,
+                    cancel_event=cancel_ev,
+                    result_holder=holder,
+                    max_year_workers=workers,
+                    started_at=time.time(),
+                )
+                running_jobs.append(rj)
+                t.start()
+
+                idx += 1
+                state.next_index = idx
 
         time.sleep(POLL_INTERVAL)
 
