@@ -23,6 +23,7 @@ from autotrader.backtest.metrics import BacktestMetrics, MetricsCalculator
 from autotrader.backtest.simulator import SimulatorConfig, TradeSimulator
 from autotrader.calculator.precompute import PrecomputeEngine
 from autotrader.config import DEFAULT_TRADING_PARAMS
+from autotrader.config.trading_params import get_pip_unit
 from autotrader.constraint.hard_guard import HardGuard, HardGuardConfig
 from autotrader.constraint.soft_guard import SoftGuard, SoftGuardConfig
 from autotrader.core.entities import Candle, Signal, Trade
@@ -459,9 +460,7 @@ class UnifiedBotAdapter:
         self._bot = bot
         self._symbol = symbol
         self._min_confidence = min_confidence
-        self._pip_unit = (
-            0.01 if "JPY" in symbol.upper() else 0.0001
-        )
+        self._pip_unit = get_pip_unit(symbol)
 
     def generate_signal(
         self,
@@ -1205,7 +1204,7 @@ class ParallelMultiTFBacktestEngine:
 
         # 価格からSL/TPを計算
         close_price = candle.close
-        pip_unit = 0.01 if "JPY" in self._config.symbol else 0.0001
+        pip_unit = get_pip_unit(self._config.symbol)
 
         if signal_type == SignalType.BUY:
             sl_price = close_price - result.sl_pips * pip_unit
@@ -1264,7 +1263,7 @@ class ParallelMultiTFBacktestEngine:
 
         # 価格からSL/TPを計算
         close_price = candle.close
-        pip_unit = 0.01 if "JPY" in self._config.symbol else 0.0001
+        pip_unit = get_pip_unit(self._config.symbol)
 
         if signal_type == SignalType.BUY:
             sl_price = close_price - eval_result.sl_pips * pip_unit

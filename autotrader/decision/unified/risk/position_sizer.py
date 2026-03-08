@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from autotrader.config.trading_params import get_pip_unit
 from autotrader.core.enums import MarketRegime
 from autotrader.core.interfaces.position_sizing import (
     SizingContext,
@@ -588,10 +589,7 @@ class PositionSizer:
             float: TP価格
         """
         # 基本TP（ATRベース、RR比1.5）
-        _pu = (
-            0.01 if "JPY" in self.config.symbol.upper()
-            else 0.0001
-        )
+        _pu = get_pip_unit(self.config.symbol)
         base_tp = entry_price + direction * sl_pips * 1.5 * _pu
 
         if not self.config.liquidity_tp_enabled:

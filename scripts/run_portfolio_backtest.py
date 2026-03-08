@@ -35,7 +35,7 @@ from autotrader.backtest.service import (  # noqa: E402
     BacktestService,
     BacktestServiceConfig,
 )
-from autotrader.config.trading_params import get_preset  # noqa: E402
+from autotrader.config.trading_params import get_pip_unit, get_preset  # noqa: E402
 from autotrader.decision.unified import UnifiedBotConfig  # noqa: E402
 
 # --- 定数 ---
@@ -140,7 +140,7 @@ def build_bot_config(
     overrides: dict[str, Any] = {}
 
     # プリセット値（位置管理・リスク管理）
-    _pip_unit = 0.01 if "JPY" in symbol.upper() else 0.0001
+    _pip_unit = get_pip_unit(symbol)
     overrides.update(
         {
             "max_positions": preset.max_positions,

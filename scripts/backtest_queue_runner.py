@@ -403,6 +403,7 @@ def execute_job(
         BacktestServiceConfig,
     )
     from autotrader.config.trading_params import (
+        get_pip_unit,
         get_preset,
         get_symbol_overrides,
     )
@@ -432,7 +433,7 @@ def execute_job(
         sym_ovr = get_symbol_overrides(job.symbol)
 
         # bot overrides 構築
-        pip_unit = 0.01 if "JPY" in job.symbol.upper() else 0.0001
+        pip_unit = get_pip_unit(job.symbol)
         bot_ovr: dict[str, Any] = {}
         # L1: プリセット
         bot_ovr.update(

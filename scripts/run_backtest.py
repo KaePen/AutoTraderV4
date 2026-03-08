@@ -1294,6 +1294,9 @@ def run_single_backtest(args: argparse.Namespace):
     )
     from autotrader.config.trading_params import get_preset as _get_preset
     from autotrader.config.trading_params import (
+        get_pip_unit as _get_pip_unit,
+    )
+    from autotrader.config.trading_params import (
         get_symbol_overrides as _get_symbol_overrides,
     )
 
@@ -1395,7 +1398,7 @@ def run_single_backtest(args: argparse.Namespace):
     # マージ: preset < sym_signal/filter < YAML < --override < 旧CLI < --bot/--pm
     _bot_overrides: dict[str, object] = {}
     # プリセット値をベースレイヤーとして注入（最低優先）
-    _pip_unit = 0.01 if "JPY" in args.symbol.upper() else 0.0001
+    _pip_unit = _get_pip_unit(args.symbol)
     _bot_overrides.update({
         "max_positions": _preset.max_positions,
         "bonus_max_positions": _preset.bonus_max_positions,

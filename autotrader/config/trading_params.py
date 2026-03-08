@@ -54,6 +54,8 @@ class SymbolPreset:
 
     Attributes:
         symbol: 通貨ペア名
+        pip_unit: 1pipあたりの価格変動量（JPY=0.01, USD=0.0001）
+        quote_ccy_rate: クォート通貨→口座通貨(JPY)変換レート
         pip_value: 1pipあたりの価値（円）
         spread_pips: スプレッド（pips）
         slippage_pips: スリッページ（pips）
@@ -76,6 +78,8 @@ class SymbolPreset:
     """
 
     symbol: str = "USDJPY"
+    pip_unit: float = 0.01
+    quote_ccy_rate: float = 1.0
     pip_value: float = 100.0
     spread_pips: float = 1.5
     slippage_pips: float = 0.5
@@ -115,6 +119,7 @@ class SymbolPreset:
             breakeven_at_1r=self.breakeven_at_1r,
             spread_pips=self.spread_pips,
             slippage_pips=self.slippage_pips,
+            pip_unit=self.pip_unit,
         )
 
     def to_trading_params(self) -> TradingParams:
@@ -297,3 +302,40 @@ def reload_presets(path: Path | None = None) -> None:
     _presets_loaded = False
     _loaded_path = None
     _load_presets(path)
+
+
+# -------------------------------------------------------------------
+# ヘルパー関数（プリセット未登録シンボルでも動作）
+# -------------------------------------------------------------------
+
+
+def get_pip_unit(symbol: str) -> float:
+    """シンボルからpip単位を取得.
+
+    プリセット登録済みならプリセット値、未登録なら通貨名から推定。
+
+    Args:
+        symbol: 通貨ペア名（例: "USDJPY", "EURUSD"）
+
+    Returns:
+        float: pip単位（JPYペア=0.01, その他=0.0001）
+    """
+    if _presets_loaded and symbol in _preset_cache:
+        return _preset_cache[symbol].pip_unit
+    return 0.01 if "JPY" in symbol.upper() else 0.0001
+
+
+def get_quote_ccy_rate(symbol: str) -> float:
+    """クォート通貨→口座通貨(JPY)変換レート概算を取得.
+
+    プリセット登録済みならプリセット値、未登録なら通貨名から推定。
+
+    Args:
+        symbol: 通貨ペア名（例: "USDJPY", "EURUSD"）
+
+    Returns:
+        float: 変換レート（JPYペア=1.0, USDペア≈150.0）
+    """
+    if _presets_loaded and symbol in _preset_cache:
+        return _preset_cache[symbol].quote_ccy_rate
+    return 1.0 if "JPY" in symbol.upper() else 150.0

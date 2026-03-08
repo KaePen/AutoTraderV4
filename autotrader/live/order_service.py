@@ -10,6 +10,7 @@ import logging
 from datetime import UTC, datetime
 
 from autotrader.adapters.mt5.data_provider import MT5DataProvider
+from autotrader.config.trading_params import get_pip_unit
 from autotrader.adapters.mt5.exceptions import MT5DataError
 from autotrader.adapters.mt5.trade_executor import MT5TradeExecutor
 from autotrader.core.entities import Signal
@@ -80,7 +81,7 @@ class OrderService:
         Returns:
             float: pipサイズ
         """
-        return 0.01 if "JPY" in symbol.upper() else 0.0001
+        return get_pip_unit(symbol)
 
     @staticmethod
     def get_pip_value(symbol: str) -> float:

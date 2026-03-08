@@ -10,7 +10,9 @@ import pytest
 from autotrader.config.trading_params import (
     SymbolPreset,
     TradingParams,
+    get_pip_unit,
     get_preset,
+    get_quote_ccy_rate,
     reload_presets,
 )
 
@@ -442,3 +444,131 @@ class TestToPmConfig:
         preset = SymbolPreset(slippage_pips=0.8)
         pm_cfg = preset.to_pm_config()
         assert pm_cfg.slippage_pips == 0.8
+
+    def test_pip_unit_matches(self):
+        """pip_unit が PM設定に引き継がれる"""
+        preset = SymbolPreset(pip_unit=0.0001)
+        pm_cfg = preset.to_pm_config()
+        assert pm_cfg.pip_unit == 0.0001
+
+
+# ---------------------------------------------------------------------------
+# pip_unit / quote_ccy_rate フィールドテスト
+# ---------------------------------------------------------------------------
+
+
+class TestPipUnitField:
+    """pip_unit フィールドの検証"""
+
+    def test_usdjpy_pip_unit(self):
+        """USDJPY pip_unit=0.01"""
+        preset = get_preset("USDJPY")
+        assert preset.pip_unit == 0.01
+
+    def test_eurjpy_pip_unit(self):
+        """EURJPY pip_unit=0.01（JPYペア）"""
+        preset = get_preset("EURJPY")
+        assert preset.pip_unit == 0.01
+
+    def test_eurusd_pip_unit(self):
+        """EURUSD pip_unit=0.0001（USDペア）"""
+        preset = get_preset("EURUSD")
+        assert preset.pip_unit == 0.0001
+
+    def test_gbpusd_pip_unit(self):
+        """GBPUSD pip_unit=0.0001"""
+        preset = get_preset("GBPUSD")
+        assert preset.pip_unit == 0.0001
+
+    def test_default_pip_unit(self):
+        """SymbolPreset デフォルト pip_unit=0.01"""
+        preset = SymbolPreset()
+        assert preset.pip_unit == 0.01
+
+
+class TestQuoteCcyRateField:
+    """quote_ccy_rate フィールドの検証"""
+
+    def test_usdjpy_quote_ccy_rate(self):
+        """USDJPY quote_ccy_rate=1.0"""
+        preset = get_preset("USDJPY")
+        assert preset.quote_ccy_rate == 1.0
+
+    def test_eurjpy_quote_ccy_rate(self):
+        """EURJPY quote_ccy_rate=1.0（JPYペア）"""
+        preset = get_preset("EURJPY")
+        assert preset.quote_ccy_rate == 1.0
+
+    def test_eurusd_quote_ccy_rate(self):
+        """EURUSD quote_ccy_rate=150.0"""
+        preset = get_preset("EURUSD")
+        assert preset.quote_ccy_rate == 150.0
+
+    def test_gbpusd_quote_ccy_rate(self):
+        """GBPUSD quote_ccy_rate=150.0"""
+        preset = get_preset("GBPUSD")
+        assert preset.quote_ccy_rate == 150.0
+
+    def test_usdchf_quote_ccy_rate(self):
+        """USDCHF quote_ccy_rate=170.0（CHF→JPY）"""
+        preset = get_preset("USDCHF")
+        assert preset.quote_ccy_rate == 170.0
+
+    def test_default_quote_ccy_rate(self):
+        """SymbolPreset デフォルト quote_ccy_rate=1.0"""
+        preset = SymbolPreset()
+        assert preset.quote_ccy_rate == 1.0
+
+
+# ---------------------------------------------------------------------------
+# ヘルパー関数テスト
+# ---------------------------------------------------------------------------
+
+
+class TestGetPipUnit:
+    """get_pip_unit() ヘルパー関数"""
+
+    def test_usdjpy(self):
+        assert get_pip_unit("USDJPY") == 0.01
+
+    def test_eurjpy(self):
+        assert get_pip_unit("EURJPY") == 0.01
+
+    def test_eurusd(self):
+        assert get_pip_unit("EURUSD") == 0.0001
+
+    def test_gbpusd(self):
+        assert get_pip_unit("GBPUSD") == 0.0001
+
+    def test_unknown_jpy_pair(self):
+        """未登録JPYペアもJPY判定で0.01"""
+        assert get_pip_unit("NZDJPY") == 0.01
+
+    def test_unknown_usd_pair(self):
+        """未登録USDペアも0.0001"""
+        assert get_pip_unit("EURGBP") == 0.0001
+
+    def test_case_insensitive(self):
+        """小文字でも動作"""
+        assert get_pip_unit("usdjpy") == 0.01
+
+
+class TestGetQuoteCcyRate:
+    """get_quote_ccy_rate() ヘルパー関数"""
+
+    def test_usdjpy(self):
+        assert get_quote_ccy_rate("USDJPY") == 1.0
+
+    def test_eurjpy(self):
+        assert get_quote_ccy_rate("EURJPY") == 1.0
+
+    def test_eurusd(self):
+        assert get_quote_ccy_rate("EURUSD") == 150.0
+
+    def test_unknown_jpy_pair(self):
+        """未登録JPYペアは1.0"""
+        assert get_quote_ccy_rate("NZDJPY") == 1.0
+
+    def test_unknown_non_jpy(self):
+        """未登録非JPYペアは150.0"""
+        assert get_quote_ccy_rate("EURGBP") == 150.0
