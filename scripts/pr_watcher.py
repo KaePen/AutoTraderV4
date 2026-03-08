@@ -443,7 +443,11 @@ def cleanup_stale() -> None:
                 branch = branch[2:]
             if not branch or branch == "main":
                 continue
-            if _delete_branch(branch, respect_activity=True):
+            if _delete_branch(
+                branch,
+                force=True,
+                respect_activity=True,
+            ):
                 print(
                     f"[INFO] マージ済みブランチ削除: {branch}",
                     flush=True,
@@ -639,6 +643,7 @@ def get_open_prs() -> list[dict[str, object]]:
 def auto_merge_pr(
     pr: dict[str, object],
     merged: set[int] | None = None,
+    pending_cleanup: set[str] | None = None,
 ) -> None:
     """PRを差分確認してmainにマージする。
 
@@ -656,6 +661,7 @@ def auto_merge_pr(
     Args:
         pr: PR情報辞書（number, title, headRefName）
         merged: マージ成功したPR番号のセット（成功時に追加）
+        pending_cleanup: 削除延期ブランチのセット（リトライ用）
     """
     num = pr["number"]
     branch = pr["headRefName"]
@@ -745,7 +751,8 @@ def auto_merge_pr(
         )
 
     # 5. ローカルクリーンアップ（アクティブworktree保護）
-    # エージェントが使用中の場合はスキップし、cleanup_stale()に委譲
+    # 失敗時は pending_cleanup に追加してリトライ対象にする
+    _cleanup_ok = False
     wt_path = _get_worktree_for_branch(branch)
     if wt_path:
         reason = _is_worktree_active(wt_path)
@@ -756,14 +763,17 @@ def auto_merge_pr(
                 flush=True,
             )
         else:
-            _delete_branch(
-                branch, force=True, respect_activity=False
+            _cleanup_ok = _delete_branch(
+                branch, force=True, respect_activity=False,
             )
     else:
         # worktreeなし → ブランチだけ削除
-        _delete_branch(
-            branch, force=True, respect_activity=False
+        _cleanup_ok = _delete_branch(
+            branch, force=True, respect_activity=False,
         )
+
+    if not _cleanup_ok and pending_cleanup is not None:
+        pending_cleanup.add(branch)
 
     # 6. worktree prune（壊れた登録があれば解消）
     _git(["worktree", "prune"])
@@ -803,8 +813,10 @@ def main() -> None:
 
     # in_flight: 処理中（重複submit防止）
     # merged: マージ成功済み（再試行不要）
+    # pending_cleanup: 削除延期ブランチ（リトライ対象）
     in_flight: set[int] = set()
     merged: set[int] = set()
+    pending_cleanup: set[str] = set()
     cycle_count = 0
 
     def _on_future_done(
@@ -856,7 +868,10 @@ def main() -> None:
                         pr_num = pr["number"]
                         in_flight.add(pr_num)
                         fut = executor.submit(
-                            auto_merge_pr, pr, merged,
+                            auto_merge_pr,
+                            pr,
+                            merged,
+                            pending_cleanup,
                         )
                         fut.add_done_callback(
                             lambda f, n=pr_num: _on_future_done(f, n)
@@ -866,6 +881,25 @@ def main() -> None:
                             f" をキューに追加: {pr['title']}",
                             flush=True,
                         )
+
+                # 削除延期ブランチのリトライ
+                if pending_cleanup:
+                    done = set()
+                    for br in list(pending_cleanup):
+                        if _delete_branch(
+                            br,
+                            force=True,
+                            respect_activity=True,
+                        ):
+                            print(
+                                f"[INFO] 延期ブランチ削除"
+                                f"成功: {br}",
+                                flush=True,
+                            )
+                            done.add(br)
+                    pending_cleanup -= done
+                    if done:
+                        _git(["worktree", "prune"])
 
                 time.sleep(POLL_INTERVAL_SEC)
         except KeyboardInterrupt:
