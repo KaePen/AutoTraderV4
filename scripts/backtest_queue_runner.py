@@ -158,6 +158,7 @@ class RunningJob:
     result_holder: list[JobResult | None]
     max_year_workers: int
     started_at: float  # time.time()
+    result_id: str = ""  # 連番付きID
 
     @property
     def cpu_cost(self) -> float:
@@ -169,11 +170,20 @@ class RunningJob:
 class QueueState:
     """キュー処理状態（completed_ids ベース）
 
-    next_index は廃止。再起動時は常にキュー先頭から
-    スキャンし、completed_ids にあるジョブをスキップする。
+    再起動時は常にキュー先頭からスキャンし、
+    completed_ids にあるジョブをスキップする。
+    job_counter はグローバル連番で結果ファイル名の
+    一意性を保証する。
     """
 
     completed_ids: list[str] = field(default_factory=list)
+    job_counter: int = 0
+
+    def next_counter(self) -> int:
+        """連番を発行して保存"""
+        self.job_counter += 1
+        self.save()
+        return self.job_counter
 
     def save(self) -> None:
         """状態ファイルに保存"""
@@ -194,6 +204,9 @@ class QueueState:
             return cls(
                 completed_ids=data.get(
                     "completed_ids", [],
+                ),
+                job_counter=data.get(
+                    "job_counter", 0,
                 ),
             )
         return cls()
@@ -277,6 +290,7 @@ def execute_job(
     job: Job,
     cancel_event: threading.Event,
     max_year_workers: int = 5,
+    result_id: str = "",
 ) -> JobResult:
     """バックテストジョブを実行
 
@@ -284,6 +298,7 @@ def execute_job(
         job: 実行するジョブ
         cancel_event: キャンセルイベント
         max_year_workers: 年並列実行数
+        result_id: 連番付き結果ID
 
     Returns:
         JobResult: 実行結果
@@ -301,8 +316,9 @@ def execute_job(
         PositionManagerConfig,
     )
 
+    _rid = result_id or job.id
     result = JobResult(
-        job_id=job.id,
+        job_id=_rid,
         status="running",
         symbol=job.symbol,
         years=job.years,
@@ -540,13 +556,13 @@ def stop_newest_jobs_until_budget(
         rj.cancel_event.set()
         rj.thread.join(timeout=15)
         # ログ削除
-        _rpath = RESULTS_DIR / f"{rj.job.id}.json"
+        _rpath = RESULTS_DIR / f"{rj.result_id}.json"
         if _rpath.exists():
             _rpath.unlink()
             logger.info(">>> ログ削除: %s", _rpath.name)
         # completed_ids から除外（再実行対象に戻す）
-        if rj.job.id in state.completed_ids:
-            state.completed_ids.remove(rj.job.id)
+        if rj.result_id in state.completed_ids:
+            state.completed_ids.remove(rj.result_id)
         running.remove(rj)
     state.save()
 
@@ -619,9 +635,12 @@ def main() -> None:
         cancel_ev: threading.Event,
         holder: list[JobResult | None],
         workers: int,
+        rid: str = "",
     ) -> None:
         """ジョブ実行スレッド"""
-        holder[0] = execute_job(job, cancel_ev, workers)
+        holder[0] = execute_job(
+            job, cancel_ev, workers, rid,
+        )
 
     while True:
         # -------------------------------------------------------
@@ -645,7 +664,7 @@ def main() -> None:
                             rj.thread.join(timeout=15)
                             _rp = (
                                 RESULTS_DIR
-                                / f"{rj.job.id}.json"
+                                / f"{rj.result_id}.json"
                             )
                             if _rp.exists():
                                 _rp.unlink()
@@ -820,49 +839,23 @@ def main() -> None:
             running_ids = {
                 rj.job.id for rj in running_jobs
             }
+            # completed_ids から元のjob.idを抽出
+            # 形式: "001_eurjpy_bca055" → "eurjpy_bca055"
+            _done_originals = {
+                cid.split("_", 1)[1]
+                if "_" in cid
+                and cid.split("_", 1)[0].isdigit()
+                else cid
+                for cid in state.completed_ids
+            }
             for job in jobs:
                 # 完了済みスキップ
-                if job.id in state.completed_ids:
+                if job.id in _done_originals:
                     continue
 
                 # 実行中スキップ
                 if job.id in running_ids:
                     continue
-
-                # 結果ファイルで完了済みならスキップ
-                _existing = (
-                    RESULTS_DIR / f"{job.id}.json"
-                )
-                if _existing.exists():
-                    try:
-                        _ex = json.loads(
-                            _existing.read_text(
-                                encoding="utf-8",
-                            ),
-                        )
-                        if (
-                            _ex.get("status")
-                            == "completed"
-                        ):
-                            logger.info(
-                                "[%s] スキップ"
-                                "（結果ファイルあり）",
-                                job.id,
-                            )
-                            if (
-                                job.id
-                                not in state.completed_ids
-                            ):
-                                state.completed_ids.append(
-                                    job.id,
-                                )
-                                state.save()
-                            continue
-                    except (
-                        json.JSONDecodeError,
-                        KeyError,
-                    ):
-                        pass
 
                 # CPUバジェットチェック
                 workers = job.effective_year_workers()
@@ -874,12 +867,16 @@ def main() -> None:
                     # バジェット不足 → 次サイクルで
                     break
 
+                # 連番付き結果ID生成
+                _cnt = state.next_counter()
+                _rid = f"{_cnt:03d}_{job.id}"
+
                 # ジョブ起動
                 logger.info(
                     "[%s] 開始: %s %s %s"
                     " (workers=%d, cost=%.1f,"
                     " used=%.1f/%.0f)",
-                    job.id,
+                    _rid,
                     job.symbol,
                     job.years,
                     job.description,
@@ -893,7 +890,8 @@ def main() -> None:
                 t = threading.Thread(
                     target=_run_job_wrapper,
                     args=(
-                        job, cancel_ev, holder, workers,
+                        job, cancel_ev, holder,
+                        workers, _rid,
                     ),
                     daemon=True,
                 )
@@ -904,6 +902,7 @@ def main() -> None:
                     result_holder=holder,
                     max_year_workers=workers,
                     started_at=time.time(),
+                    result_id=_rid,
                 )
                 running_jobs.append(rj_new)
                 running_ids.add(job.id)
