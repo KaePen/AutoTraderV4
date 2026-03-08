@@ -140,6 +140,9 @@ class JobResult:
     overrides_used: dict[str, Any] = field(
         default_factory=dict,
     )
+    log_dir: str = ""
+    trades_csv: str = ""
+    summary_log: str = ""
 
 
 @dataclass
@@ -343,6 +346,15 @@ def execute_job(
 
         # キャンセルコールバック設定
         runner.set_cancel_callback(cancel_event.is_set)
+
+        # ログパスを記録
+        _fl = runner._file_listener
+        if _fl is not None:
+            result.log_dir = str(_fl.log_dir)
+            result.trades_csv = str(_fl.trades_file)
+            result.summary_log = str(
+                _fl.summary_file,
+            )
 
         # データ読み込み
         logger.info(
