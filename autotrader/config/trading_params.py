@@ -141,6 +141,10 @@ _DEFAULT_PRESET_PATH = (
     Path(__file__).resolve().parents[2] / "config" / "symbol_presets.yaml"
 )
 _preset_cache: dict[str, SymbolPreset] = {}
+# ペア別 signal/filter/pm_config 上書き辞書
+_symbol_overrides_cache: dict[
+    str, dict[str, dict[str, Any]]
+] = {}
 _presets_loaded: bool = False
 _loaded_path: Path | None = None  # 現在キャッシュしているYAMLパス
 
@@ -174,13 +178,47 @@ def _load_presets(path: Path | None = None) -> None:
     defaults: dict[str, Any] = raw.get("defaults", {})
     symbols: dict[str, Any] = raw.get("symbols", {})
 
+    # グローバルの signal/filter/risk_mgmt/pm_config デフォルト
+    _global_signal: dict[str, Any] = raw.get("signal", {})
+    _global_filter: dict[str, Any] = raw.get("filter", {})
+    _global_risk: dict[str, Any] = raw.get("risk_mgmt", {})
+    _global_pm: dict[str, Any] = raw.get("pm_config", {})
+
     valid = {f.name for f in dataclasses.fields(SymbolPreset)}
     for sym, overrides in symbols.items():
-        merged = {**defaults, **(overrides or {})}
+        _ovr = overrides or {}
+        merged = {**defaults, **_ovr}
         # symbol フィールドを注入
         merged["symbol"] = sym
-        filtered = {k: v for k, v in merged.items() if k in valid}
+        filtered = {
+            k: v for k, v in merged.items() if k in valid
+        }
         _preset_cache[sym] = SymbolPreset(**filtered)
+
+        # ペア別 signal/filter/risk_mgmt/pm_config 上書きを保存
+        # グローバルデフォルト → ペア別で上書き
+        _sym_signal = {
+            **_global_signal,
+            **(_ovr.get("signal") or {}),
+        }
+        _sym_filter = {
+            **_global_filter,
+            **(_ovr.get("filter") or {}),
+        }
+        _sym_risk = {
+            **_global_risk,
+            **(_ovr.get("risk_mgmt") or {}),
+        }
+        _sym_pm = {
+            **_global_pm,
+            **(_ovr.get("pm_config") or {}),
+        }
+        _symbol_overrides_cache[sym] = {
+            "signal": _sym_signal,
+            "filter": _sym_filter,
+            "risk_mgmt": _sym_risk,
+            "pm_config": _sym_pm,
+        }
 
     _presets_loaded = True
 
@@ -214,6 +252,37 @@ def get_preset(
     return SymbolPreset(symbol=symbol)
 
 
+def get_symbol_overrides(
+    symbol: str,
+    path: Path | None = None,
+) -> dict[str, dict[str, Any]]:
+    """ペア別の signal/filter/pm_config 上書き辞書を取得.
+
+    YAMLのグローバル signal/filter/pm_config をベースに、
+    symbols[X] 内の signal/filter/pm_config で上書きしたもの。
+
+    Args:
+        symbol: 通貨ペア名
+        path: YAMLファイルパス
+
+    Returns:
+        dict: {"signal": {...}, "filter": {...}, "pm_config": {...}}
+    """
+    effective_path = (
+        path if path is not None else _DEFAULT_PRESET_PATH
+    )
+    if not _presets_loaded or effective_path != _loaded_path:
+        _preset_cache.clear()
+        _symbol_overrides_cache.clear()
+        _load_presets(path)
+    return _symbol_overrides_cache.get(symbol, {
+        "signal": {},
+        "filter": {},
+        "risk_mgmt": {},
+        "pm_config": {},
+    })
+
+
 def reload_presets(path: Path | None = None) -> None:
     """プリセットキャッシュをリセットして再読み込み.
 
@@ -224,6 +293,7 @@ def reload_presets(path: Path | None = None) -> None:
     """
     global _presets_loaded, _loaded_path
     _preset_cache.clear()
+    _symbol_overrides_cache.clear()
     _presets_loaded = False
     _loaded_path = None
     _load_presets(path)

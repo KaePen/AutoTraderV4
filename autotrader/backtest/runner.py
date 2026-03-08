@@ -709,6 +709,7 @@ class BacktestRunner:
 
         # シミュレーター設定
         _pip_unit = 0.01 if "JPY" in self.config.symbol.upper() else 0.0001
+        _quote_ccy_rate = 1.0 if "JPY" in self.config.symbol.upper() else 150.0
         sim_config = SimulatorConfig(
             initial_balance=self.config.initial_balance,
             spread_pips=self.config.spread_pips,
@@ -718,6 +719,7 @@ class BacktestRunner:
             bonus_score_threshold=self.config.bonus_score_threshold,
             default_volume=volume,
             pip_unit=_pip_unit,
+            quote_ccy_rate=_quote_ccy_rate,
         )
 
         # 年別・月別結果を収集
@@ -1198,6 +1200,7 @@ class BacktestRunner:
 
         # シミュレーター設定
         _pip_unit = 0.01 if "JPY" in self.config.symbol.upper() else 0.0001
+        _quote_ccy_rate = 1.0 if "JPY" in self.config.symbol.upper() else 150.0
         sim_config = SimulatorConfig(
             initial_balance=self.config.initial_balance,
             spread_pips=self.config.spread_pips,
@@ -1211,6 +1214,7 @@ class BacktestRunner:
             pm_config=pm_config,
             use_dynamic_lot=bot_config.use_dynamic_lot,
             pip_unit=_pip_unit,
+            quote_ccy_rate=_quote_ccy_rate,
             commission_per_lot=self.config.commission_per_lot,
             use_session_spread=self.config.use_session_spread,
         )

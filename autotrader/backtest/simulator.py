@@ -40,6 +40,8 @@ class SimulatorConfig:
         commission_per_lot: ロット当たり手数料
         strategy_max_positions: 戦略別最大ポジション数
         pip_unit: 1pipの価格単位（JPY系=0.01、非JPY系=0.0001）
+        quote_ccy_rate: クォート通貨→口座通貨(JPY)変換レート
+                        JPYペア=1.0、USDペア≈147.0
         bonus_max_positions: 高品質シグナル時に追加するポジション数（0=無効）
         bonus_score_threshold: bonus発動のconsensus_score閾値
     """
@@ -58,6 +60,8 @@ class SimulatorConfig:
     )
     # 1pipの価格単位（JPY系=0.01、非JPY系=0.0001）
     pip_unit: float = 0.01
+    # クォート通貨→口座通貨(JPY)変換レート（USDペアのPnLを円建てに変換）
+    quote_ccy_rate: float = 1.0
     commission_per_lot: float = field(
         default_factory=lambda: DEFAULT_TRADING_PARAMS.commission_per_lot
     )
@@ -108,6 +112,10 @@ class SimulatorConfig:
         """
         p = get_preset(symbol)
         pip_unit = 0.01 if "JPY" in symbol else 0.0001
+        # クォート通貨→口座通貨(JPY)変換レート
+        # JPYペア: 1.0（変換不要）
+        # USDペア: USD/JPY ≈ 150（近似値）
+        quote_ccy_rate = 1.0 if "JPY" in symbol else 150.0
         return cls(
             initial_balance=initial_balance,
             spread_pips=p.spread_pips,
@@ -116,6 +124,7 @@ class SimulatorConfig:
             default_volume=default_volume,
             slippage_pips=p.slippage_pips,
             pip_unit=pip_unit,
+            quote_ccy_rate=quote_ccy_rate,
             commission_per_lot=p.commission_per_lot,
             bonus_max_positions=p.bonus_max_positions,
             bonus_score_threshold=p.bonus_score_threshold,
@@ -185,7 +194,9 @@ class TradeSimulator:
         self._slippage_price = (
             self.config.slippage_pips * self._pip_unit
         )
-        self._pip_value = self.config.pip_value
+        self._pip_value = (
+            self.config.pip_value * self.config.quote_ccy_rate
+        )
         # bonus_max_positions が有効な場合は単一ポジション高速パスを無効化
         self._single_position = (
             self.config.max_positions == 1
