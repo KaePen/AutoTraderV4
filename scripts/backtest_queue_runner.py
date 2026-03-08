@@ -25,6 +25,7 @@ CPUバジェット内で複数ジョブを並行実行する常駐スクリプ�
 from __future__ import annotations
 
 import argparse
+import hashlib
 import io
 import json
 import logging
@@ -166,6 +167,30 @@ class RunningJob:
         return self.max_year_workers * THREADS_PER_YEAR
 
 
+def _compute_queue_hash() -> str:
+    """キューファイルのジョブID一覧からハッシュを計算
+
+    キュー内容（ジョブIDリスト）が変わったら
+    completed_ids をリセットするために使用。
+
+    Returns:
+        str: ハッシュ文字列（空キューは空文字列）
+    """
+    if not QUEUE_FILE.exists():
+        return ""
+    try:
+        data = json.loads(
+            QUEUE_FILE.read_text(encoding="utf-8"),
+        )
+        ids = [j.get("id", "") for j in data.get("jobs", [])]
+        content = json.dumps(ids, sort_keys=True)
+        return hashlib.sha256(
+            content.encode(),
+        ).hexdigest()[:16]
+    except (json.JSONDecodeError, KeyError):
+        return ""
+
+
 @dataclass
 class QueueState:
     """キュー処理状態（completed_ids ベース）
@@ -174,10 +199,32 @@ class QueueState:
     completed_ids にあるジョブをスキップする。
     job_counter はグローバル連番で結果ファイル名の
     一意性を保証する。
+    queue_hash でキューファイルの変更を検知し、
+    変更時は completed_ids を自動リセットする。
     """
 
     completed_ids: list[str] = field(default_factory=list)
     job_counter: int = 0
+    queue_hash: str = ""
+
+    def sync_with_queue(self) -> None:
+        """キューハッシュを検証し、変更時にリセット"""
+        current_hash = _compute_queue_hash()
+        if not current_hash:
+            return
+        if self.queue_hash and self.queue_hash != current_hash:
+            old_count = len(self.completed_ids)
+            self.completed_ids.clear()
+            self.queue_hash = current_hash
+            self.save()
+            logger.info(
+                "キュー内容変更検知: completed_ids"
+                " リセット（旧%d件）",
+                old_count,
+            )
+        elif not self.queue_hash:
+            self.queue_hash = current_hash
+            self.save()
 
     def next_counter(self) -> int:
         """連番を発行して保存"""
@@ -207,6 +254,9 @@ class QueueState:
                 ),
                 job_counter=data.get(
                     "job_counter", 0,
+                ),
+                queue_hash=data.get(
+                    "queue_hash", "",
                 ),
             )
         return cls()
@@ -637,8 +687,8 @@ def stop_newest_jobs_until_budget(
         )
         force_stop_running_job(rj)
         # completed_ids から除外（再実行対象に戻す）
-        if rj.result_id in state.completed_ids:
-            state.completed_ids.remove(rj.result_id)
+        if rj.job.id in state.completed_ids:
+            state.completed_ids.remove(rj.job.id)
         running.remove(rj)
     state.save()
 
@@ -687,8 +737,9 @@ def main() -> None:
 
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 
-    # 状態読み込み + 中断ジョブのクリーンアップ
+    # 状態読み込み + キューハッシュ検証 + 中断ジョブクリーンアップ
     state = QueueState.load()
+    state.sync_with_queue()
     cleanup_stale_running(state)
 
     # コマンドキュー
@@ -880,10 +931,10 @@ def main() -> None:
                     _res.max_drawdown,
                     _res.elapsed_seconds,
                 )
-                if _res.job_id not in state.completed_ids:
-                    state.completed_ids.append(
-                        _res.job_id,
-                    )
+                # 元のjob.idで完了記録（連番なし）
+                _orig_id = rj.job.id
+                if _orig_id not in state.completed_ids:
+                    state.completed_ids.append(_orig_id)
                 state.save()
             elif _res and _res.status == "cancelled":
                 logger.info(
@@ -907,18 +958,10 @@ def main() -> None:
             running_ids = {
                 rj.job.id for rj in running_jobs
             }
-            # completed_ids から元のjob.idを抽出
-            # 形式: "001_eurjpy_bca055" → "eurjpy_bca055"
-            _done_originals = {
-                cid.split("_", 1)[1]
-                if "_" in cid
-                and cid.split("_", 1)[0].isdigit()
-                else cid
-                for cid in state.completed_ids
-            }
+            _done = set(state.completed_ids)
             for job in jobs:
                 # 完了済みスキップ
-                if job.id in _done_originals:
+                if job.id in _done:
                     continue
 
                 # 実行中スキップ
