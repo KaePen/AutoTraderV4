@@ -1,11 +1,11 @@
 """マルチ通貨ペア同時実行バックテスト（時系列インターリーブ方式）
 
-6 JPYペアを時系列インターリーブで同時実行し、共有資金プール＋
+JPY/USDペアを時系列インターリーブで同時実行し、共有資金プール＋
 グローバルポジション制限でライブに近い条件を再現する。
 
 使い方:
     python scripts/run_multi_pair_backtest.py --data-dir data
-    python scripts/run_multi_pair_backtest.py --data-dir data --tests M0,M2
+    python scripts/run_multi_pair_backtest.py --data-dir data --tests R1,M0
     python scripts/run_multi_pair_backtest.py --data-dir data --symbols USDJPY,EURJPY
 """
 
@@ -66,7 +66,15 @@ from scripts.run_portfolio_backtest import (  # noqa: E402
 )
 
 # --- 定数 ---
-SYMBOLS = ["USDJPY", "EURJPY", "GBPJPY", "AUDJPY", "CADJPY", "CHFJPY"]
+JPY_SYMBOLS = [
+    "USDJPY", "EURJPY", "GBPJPY",
+    "AUDJPY", "CADJPY", "CHFJPY",
+]
+USD_SYMBOLS = [
+    "EURUSD", "GBPUSD", "AUDUSD",
+    "NZDUSD", "USDCAD", "USDCHF",
+]
+SYMBOLS = JPY_SYMBOLS + USD_SYMBOLS
 START_YEAR = 2020
 END_YEAR = 2025
 INITIAL_EQUITY = 1_000_000.0
@@ -1343,6 +1351,15 @@ def _print_result_summary(result: dict[str, Any]) -> None:
 # テストマトリクス定義
 # =============================================================
 TEST_MATRIX: dict[str, MultiPairConfig] = {
+    # 推奨設定（JPYポートフォリオ検証結果）
+    "R1": MultiPairConfig(
+        name="R1",
+        global_max_positions=6,
+        per_pair_max_positions=1,
+        global_max_exposure_lot=10.0,
+        base_risk_pct=0.015,
+        consensus_threshold=9.5,
+    ),
     "M0": MultiPairConfig(
         name="M0",
         global_max_positions=6,
@@ -1653,8 +1670,8 @@ def main() -> None:
     )
     parser.add_argument(
         "--tests",
-        default="M0",
-        help="テストケース（カンマ区切り、例: M0,M1,M2 or all）",
+        default="R1",
+        help="テストケース（カンマ区切り、例: R1,M0,M1 or all）",
     )
     parser.add_argument(
         "--symbols",

@@ -276,3 +276,12 @@ symbols:
     base_risk_pct: 0.025
     max_lot_per_trade: 2.0
     max_total_exposure_lot: 5.0
+
+# --- マルチ通貨ペア ポートフォリオ設定 ---
+# JPYポートフォリオ検証結果に基づく推奨設定
+multi_pair:
+  global_max_positions: 6
+  per_pair_max_positions: 1
+  global_max_exposure_lot: 10.0
+  base_risk_pct: 0.015
+  consensus_threshold: 9.5
