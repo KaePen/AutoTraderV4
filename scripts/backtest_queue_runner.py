@@ -38,7 +38,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-
 # Windows cp932エンコーディング回避
 if sys.platform == "win32":
     sys.stdout = io.TextIOWrapper(
@@ -88,19 +87,24 @@ class Job:
     """バックテストジョブ
 
     type が "single" の場合は1通貨ペア、
-    "portfolio" の場合は複数ペアを順次実行し集約する。
+    "multi_pair" の場合は時系列インターリーブ方式で
+    複数ペアを共有エクイティプールで同時実行する。
+    後方互換のため "portfolio" も "multi_pair" として処理する。
     """
 
     id: str
-    type: str = "single"  # "single" or "portfolio"
+    type: str = "single"  # "single" or "multi_pair" ("portfolio"も可)
     symbol: str = "USDJPY"  # single用
     symbols: list[str] = field(
         default_factory=list,
-    )  # portfolio用
+    )  # multi_pair用
     years: str = "2023-2025"
     description: str = ""
     max_year_workers: int = 0  # 0=年数から自動計算
     overrides: dict[str, Any] = field(default_factory=dict)
+    multi_pair_config: dict[str, Any] = field(
+        default_factory=dict,
+    )
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> Job:
@@ -114,10 +118,22 @@ class Job:
             description=d.get("description", ""),
             max_year_workers=d.get("max_year_workers", 0),
             overrides=d.get("overrides", {}),
+            multi_pair_config=d.get(
+                "multi_pair_config",
+                {},
+            ),
         )
 
     def effective_year_workers(self) -> int:
-        """実効年並列数（0なら年数から自動計算）"""
+        """実効年並列数（0なら年数から自動計算）
+
+        multi_pairジョブはシングルスレッドで
+        インターリーブ実行するため、固定で3を返す。
+        """
+        if self.type in ("multi_pair", "portfolio"):
+            if self.max_year_workers > 0:
+                return self.max_year_workers
+            return 3  # 固定コスト（実際はシングルスレッド）
         if self.max_year_workers > 0:
             return self.max_year_workers
         start, end = parse_years(self.years)
@@ -126,8 +142,8 @@ class Job:
     def cpu_cost(self) -> float:
         """このジョブが消費するCPUスレッド数
 
-        ポートフォリオジョブは内部で1ペアずつ順次実行するため、
-        CPUコストは1ペア分の年並列ワーカー数で計算する。
+        multi_pairジョブは内部がシングルスレッド
+        （インターリーブ処理）のため、CPUコストは控えめ。
         """
         return self.effective_year_workers() * THREADS_PER_YEAR
 
@@ -546,46 +562,55 @@ def execute_job(
     return result
 
 
-def execute_portfolio_job(
+def execute_multi_pair_job(
     job: Job,
     cancel_event: threading.Event,
-    max_year_workers: int = 5,
     result_id: str = "",
 ) -> JobResult:
-    """ポートフォリオジョブを実行（複数ペア順次→集約）
+    """マルチ通貨ペアインターリーブジョブを実行
 
-    各ペアを順次バックテストし、完了後にポートフォリオ
-    レベルのメトリクスを集約する。
+    時系列インターリーブ方式で複数ペアを共有エクイティプール＋
+    グローバルポジション制限で同時実行する。
 
     Args:
-        job: 実行するポートフォリオジョブ
+        job: 実行するジョブ（type="multi_pair"）
         cancel_event: キャンセルイベント
-        max_year_workers: 年並列実行数
         result_id: 連番付き結果ID
 
     Returns:
-        JobResult: ポートフォリオ集約結果
+        JobResult: インターリーブ実行結果
     """
+    from scripts.run_multi_pair_backtest import (
+        TEST_MATRIX,
+        MultiPairConfig,
+        PortfolioState,
+        aggregate_results,
+        load_pair_data,
+        run_multi_pair_year,
+        setup_pair_context,
+    )
     from scripts.run_portfolio_backtest import (
-        PairResult,
-        aggregate_portfolio,
         build_bot_config,
     )
 
-    from autotrader.backtest.service import (
-        BacktestService,
-        BacktestServiceConfig,
-    )
-    from autotrader.config.trading_params import (
-        get_preset,
-    )
-
     _rid = result_id or job.id
-    symbols_str = ",".join(job.symbols)
+
+    # 対象シンボル決定（空なら全6ペア）
+    _default_symbols = [
+        "USDJPY",
+        "EURJPY",
+        "GBPJPY",
+        "AUDJPY",
+        "CADJPY",
+        "CHFJPY",
+    ]
+    symbols = job.symbols or _default_symbols
+    symbols_str = ",".join(symbols)
+
     result = JobResult(
         job_id=_rid,
         status="running",
-        job_type="portfolio",
+        job_type="multi_pair",
         symbol=symbols_str,
         years=job.years,
         description=job.description,
@@ -606,146 +631,204 @@ def execute_portfolio_job(
         1_000_000,
     )
 
-    # ジョブ指定のbot overrides
-    bot_overrides = job.overrides.get("bot", {})
-
-    pair_results: list[PairResult] = []
-    pair_details: list[dict[str, Any]] = []
+    # MultiPairConfig 構築
+    mpc = job.multi_pair_config
+    test_name = mpc.get("test_name", "")
+    if test_name and test_name in TEST_MATRIX:
+        # TEST_MATRIXから取得
+        multi_config = TEST_MATRIX[test_name]
+        logger.info(
+            "[%s] TEST_MATRIX '%s' を使用",
+            _rid,
+            test_name,
+        )
+    else:
+        # カスタム設定
+        multi_config = MultiPairConfig(
+            name=mpc.get("name", job.id),
+            global_max_positions=mpc.get(
+                "global_max_positions",
+                6,
+            ),
+            per_pair_max_positions=mpc.get(
+                "per_pair_max_positions",
+                1,
+            ),
+            global_max_exposure_lot=mpc.get(
+                "global_max_exposure_lot",
+                10.0,
+            ),
+            base_risk_pct=mpc.get(
+                "base_risk_pct",
+                0.02,
+            ),
+            consensus_threshold=mpc.get(
+                "consensus_threshold",
+                9.0,
+            ),
+        )
 
     try:
-        for symbol in job.symbols:
+        # データロード（全ペア1回のみ）
+        logger.info(
+            "[%s] データロード中... (%s, %s)",
+            _rid,
+            symbols_str,
+            job.years,
+        )
+        runners = {}
+        for sym in symbols:
+            runners[sym] = load_pair_data(sym, data_dir)
+            logger.info("[%s] %s ロード完了", _rid, sym)
+
+        # ポートフォリオ状態初期化
+        portfolio = PortfolioState(
+            equity=float(initial_balance),
+            initial_equity=float(initial_balance),
+            peak_equity=float(initial_balance),
+        )
+
+        all_pair_trades: dict[str, list[Any]] = {sym: [] for sym in symbols}
+        yearly_results: list[dict[str, Any]] = []
+
+        # 年ループ
+        for year in range(start_year, end_year + 1):
+            # キャンセルチェック（年単位）
             if cancel_event.is_set():
                 result.status = "cancelled"
                 result.error = "ユーザーにより停止"
                 break
 
+            year_start_equity = portfolio.equity
+
+            # ペアコンテキスト構築
+            contexts = {}
+            for sym in symbols:
+                runner, full_md = runners[sym]
+                # ペア別bot_config構築
+                extra_overrides: dict[str, Any] = {
+                    "base_risk_pct": (multi_config.base_risk_pct),
+                    "consensus_threshold": (multi_config.consensus_threshold),
+                }
+                # ジョブ指定のbot overridesもマージ
+                bot_ovr = job.overrides.get("bot", {})
+                if bot_ovr:
+                    extra_overrides.update(bot_ovr)
+
+                bot_config = build_bot_config(
+                    sym,
+                    extra_overrides,
+                )
+                ctx = setup_pair_context(
+                    sym,
+                    runner,
+                    year,
+                    bot_config,
+                    portfolio.equity,
+                    full_market_data=full_md,
+                )
+                if ctx is not None:
+                    contexts[sym] = ctx
+
+            if not contexts:
+                continue
+
+            # インターリーブ実行
             logger.info(
-                "[%s] ペア実行中: %s (%d/%d)",
+                "[%s] %d年 インターリーブ実行中 (%dペア)...",
                 _rid,
-                symbol,
-                len(pair_results) + 1,
-                len(job.symbols),
+                year,
+                len(contexts),
+            )
+            pair_trades = run_multi_pair_year(
+                year,
+                contexts,
+                multi_config,
+                portfolio,
             )
 
-            # build_bot_config で設定構築（再利用）
-            bot_config = build_bot_config(
-                symbol,
-                bot_overrides or None,
-            )
-            preset = get_preset(symbol)
+            # トレード蓄積
+            for sym, trades in pair_trades.items():
+                all_pair_trades[sym].extend(trades)
 
-            svc_config = BacktestServiceConfig(
-                start_year=start_year,
-                end_year=end_year,
-                initial_balance=initial_balance,
-                data_dir=data_dir,
-                symbol=symbol,
-                spread_pips=preset.spread_pips,
-                slippage_pips=preset.slippage_pips,
-                bonus_max_positions=(bot_config.bonus_max_positions),
-                bonus_score_threshold=(bot_config.bonus_score_threshold),
-                pip_value=preset.pip_value,
-                commission_per_lot=(preset.commission_per_lot),
-                use_short_timeframe=True,
-            )
-
-            service = BacktestService(svc_config)
-            runner = service.create_runner()
-            runner.set_cancel_callback(
-                cancel_event.is_set,
-            )
-            runner.load_data()
-
-            bt_result = runner.run_unified(
-                start_year=start_year,
-                end_year=end_year,
-                config=bot_config,
-                use_m1=True,
-                max_year_workers=max_year_workers,
-            )
-
-            if cancel_event.is_set():
-                result.status = "cancelled"
-                result.error = "ユーザーにより停止"
-                break
-
-            # 月次PnL辞書を構築
-            monthly_pnl: dict[tuple[int, int], float] = {}
-            for m in bt_result.monthly_results:
-                key = (m["year"], m["month"])
-                monthly_pnl[key] = m.get("pnl", 0.0)
-
-            pr = PairResult(
-                symbol=symbol,
-                result=bt_result,
-                bot_config=bot_config,
-                monthly_pnl=monthly_pnl,
-            )
-            pair_results.append(pr)
-
-            # ペア個別結果を記録
-            pair_details.append(
+            # 年次サマリー
+            year_pnl = portfolio.equity - year_start_equity
+            year_trades = sum(len(t) for t in pair_trades.values())
+            yearly_results.append(
                 {
-                    "symbol": symbol,
-                    "net_profit": bt_result.net_profit,
-                    "trades": bt_result.trades,
-                    "win_rate": bt_result.win_rate,
-                    "profit_factor": (bt_result.profit_factor),
-                    "max_drawdown": (bt_result.max_drawdown),
-                    "sharpe_ratio": (bt_result.sharpe_ratio),
+                    "year": year,
+                    "pnl": year_pnl,
+                    "trades": year_trades,
+                    "equity": portfolio.equity,
                 }
             )
-
             logger.info(
-                "[%s] %s 完了: profit=%.0f, WR=%.1f%%, PF=%.2f",
+                "[%s] %d年完了: PnL=%+.0f, Trades=%d, Equity=%.0f",
                 _rid,
-                symbol,
-                bt_result.net_profit,
-                bt_result.win_rate,
-                bt_result.profit_factor,
+                year,
+                year_pnl,
+                year_trades,
+                portfolio.equity,
             )
 
-        # ポートフォリオ集約
-        if pair_results and result.status != "cancelled":
-            metrics = aggregate_portfolio(
-                job.id,
-                pair_results,
-                num_years=num_years,
+        # 結果集約
+        if result.status != "cancelled":
+            agg = aggregate_results(
+                multi_config.name,
+                portfolio,
+                all_pair_trades,
+                yearly_results,
+                symbols,
+                num_years,
             )
 
             result.status = "completed"
-            result.net_profit = metrics.total_profit
-            result.win_rate = metrics.portfolio_wr
-            result.profit_factor = metrics.portfolio_pf
-            result.max_drawdown = metrics.max_dd_pct
-            result.sharpe_ratio = metrics.sharpe_ratio
-            result.monthly_plus_rate = metrics.monthly_win_rate
+            result.net_profit = agg["total_profit"]
+            result.trades = agg["total_trades"]
+            result.win_rate = agg["wr"]
+            result.profit_factor = agg["pf"]
+            result.max_drawdown = agg["max_dd_pct"]
+            result.sharpe_ratio = agg["sharpe"]
+            result.monthly_plus_rate = agg["monthly_wr"]
+            result.yearly_details = yearly_results
+
+            # ペア別結果
+            pair_details = []
+            for sym in symbols:
+                pm = agg["pair_metrics"].get(sym, {})
+                if pm.get("trades", 0) > 0:
+                    pair_details.append(
+                        {
+                            "symbol": sym,
+                            "net_profit": pm["profit"],
+                            "trades": pm["trades"],
+                            "win_rate": pm["wr"],
+                            "profit_factor": pm["pf"],
+                            "contribution_pct": (pm["contribution"]),
+                        }
+                    )
             result.pair_details = pair_details
 
-            # 相関マトリクスをJSON直列化可能に変換
-            corr = {}
-            for k, v in metrics.correlation_matrix.items():
-                corr[k] = dict(v)
-
+            # ポートフォリオメトリクス
             result.portfolio_metrics = {
-                "total_profit": metrics.total_profit,
-                "annual_return_pct": (metrics.annual_return_pct),
-                "max_dd_pct": metrics.max_dd_pct,
-                "sharpe_ratio": metrics.sharpe_ratio,
-                "portfolio_wr": metrics.portfolio_wr,
-                "portfolio_pf": metrics.portfolio_pf,
-                "monthly_win_rate": (metrics.monthly_win_rate),
-                "correlation_matrix": corr,
+                "total_profit": agg["total_profit"],
+                "annual_return_pct": (agg["annual_return_pct"]),
+                "max_dd_pct": agg["max_dd_pct"],
+                "sharpe_ratio": agg["sharpe"],
+                "portfolio_wr": agg["wr"],
+                "portfolio_pf": agg["pf"],
+                "monthly_win_rate": agg["monthly_wr"],
+                "blocked_global": (agg["blocked_global"]),
+                "blocked_per_pair": (agg["blocked_per_pair"]),
+                "blocked_exposure": (agg["blocked_exposure"]),
+                "final_equity": agg["final_equity"],
             }
-
-            # 全ペアのトレード数合計
-            result.trades = sum(pr.result.trades for pr in pair_results)
 
     except Exception as e:
         result.status = "failed"
         result.error = str(e)
         logger.exception(
-            "[%s] ポートフォリオジョブ失敗: %s",
+            "[%s] マルチペアジョブ失敗: %s",
             job.id,
             e,
         )
@@ -992,11 +1075,10 @@ def main() -> None:
         rid: str = "",
     ) -> None:
         """ジョブ実行スレッド（typeに応じて振り分け）"""
-        if job.type == "portfolio":
-            holder[0] = execute_portfolio_job(
+        if job.type in ("multi_pair", "portfolio"):
+            holder[0] = execute_multi_pair_job(
                 job,
                 cancel_ev,
-                workers,
                 rid,
             )
         else:
@@ -1103,10 +1185,13 @@ def main() -> None:
                     print(f"  実行中ジョブ: {len(running_jobs)}件")
                     for rj in running_jobs:
                         elapsed = time.time() - rj.started_at
-                        # ポートフォリオの場合はシンボル一覧
-                        if rj.job.type == "portfolio":
+                        # multi_pairの場合はシンボル一覧
+                        if rj.job.type in (
+                            "multi_pair",
+                            "portfolio",
+                        ):
                             _sym = ",".join(rj.job.symbols)
-                            _label = f"[portfolio] {_sym}"
+                            _label = f"[multi_pair] {_sym}"
                         else:
                             _label = rj.job.symbol
                         print(
@@ -1146,10 +1231,10 @@ def main() -> None:
         for rj in finished:
             _res = rj.result_holder[0]
             if _res and _res.status == "completed":
-                if _res.job_type == "portfolio":
+                if _res.job_type == "multi_pair":
                     _pm = _res.portfolio_metrics
                     logger.info(
-                        "[%s] ポートフォリオ完了:"
+                        "[%s] マルチペア完了:"
                         " profit=%.0f,"
                         " 年間=%.1f%%,"
                         " WR=%.1f%%,"
@@ -1172,15 +1257,42 @@ def main() -> None:
                         len(_res.pair_details),
                         _res.elapsed_seconds,
                     )
+                    # 制限発動統計
+                    _bg = _pm.get(
+                        "blocked_global",
+                        0,
+                    )
+                    _bp = _pm.get(
+                        "blocked_per_pair",
+                        0,
+                    )
+                    _be = _pm.get(
+                        "blocked_exposure",
+                        0,
+                    )
+                    if _bg or _bp or _be:
+                        logger.info(
+                            "  制限発動: global=%d, per_pair=%d, exposure=%d",
+                            _bg,
+                            _bp,
+                            _be,
+                        )
                     # 各ペアの結果も表示
                     for pd in _res.pair_details:
                         logger.info(
-                            "  %s: profit=%.0f, WR=%.1f%%, PF=%.2f, DD=%.2f%%",
+                            "  %s:"
+                            " profit=%.0f,"
+                            " WR=%.1f%%,"
+                            " PF=%.2f,"
+                            " 寄与=%.1f%%",
                             pd["symbol"],
                             pd["net_profit"],
                             pd["win_rate"],
                             pd["profit_factor"],
-                            pd["max_drawdown"],
+                            pd.get(
+                                "contribution_pct",
+                                0,
+                            ),
                         )
                 else:
                     logger.info(
@@ -1247,8 +1359,11 @@ def main() -> None:
                 _rid = f"{_cnt:03d}_{job.id}"
 
                 # ジョブ起動ログ
-                if job.type == "portfolio":
-                    _sym_label = "[portfolio] " + ",".join(job.symbols)
+                if job.type in (
+                    "multi_pair",
+                    "portfolio",
+                ):
+                    _sym_label = "[multi_pair] " + ",".join(job.symbols)
                 else:
                     _sym_label = job.symbol
                 logger.info(
