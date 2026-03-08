@@ -102,7 +102,12 @@ class LiveTradingEngine:
             symbol=config.symbol,
         )
         self._bot = UnifiedTradeBot(config.bot_config)
-        self._pm = PositionManager()
+        _live_pip_unit = (
+            0.01 if "JPY" in config.symbol.upper() else 0.0001
+        )
+        self._pm = PositionManager(
+            PositionManagerConfig(pip_unit=_live_pip_unit),
+        )
         self._sizer = PositionSizer(
             self._build_sizer_config(config.bot_config, config.symbol)
         )
@@ -3088,7 +3093,9 @@ class LiveTradingEngine:
         new_bot = self._reloader.create_new_bot(
             self._config.bot_config
         )
-        new_pm = self._reloader.create_new_pm()
+        new_pm = self._reloader.create_new_pm(
+            self._config.symbol,
+        )
         sizer_config = self._build_sizer_config(
             self._config.bot_config, self._config.symbol
         )

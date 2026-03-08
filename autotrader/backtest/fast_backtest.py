@@ -221,6 +221,11 @@ def _process_chunk_worker(
                 ):
                     sl_price = None
                     tp_price = None
+                    _pu = (
+                        0.01
+                        if "JPY" in symbol.upper()
+                        else 0.0001
+                    )
                     if consolidated.sl_pips > 0:
                         if (
                             consolidated.direction
@@ -228,20 +233,20 @@ def _process_chunk_worker(
                         ):
                             sl_price = (
                                 candle.close
-                                - consolidated.sl_pips / 100
+                                - consolidated.sl_pips * _pu
                             )
                             tp_price = (
                                 candle.close
-                                + consolidated.tp_pips / 100
+                                + consolidated.tp_pips * _pu
                             )
                         else:
                             sl_price = (
                                 candle.close
-                                + consolidated.sl_pips / 100
+                                + consolidated.sl_pips * _pu
                             )
                             tp_price = (
                                 candle.close
-                                - consolidated.tp_pips / 100
+                                - consolidated.tp_pips * _pu
                             )
 
                     signal = Signal(

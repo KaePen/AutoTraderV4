@@ -588,7 +588,11 @@ class PositionSizer:
             float: TP価格
         """
         # 基本TP（ATRベース、RR比1.5）
-        base_tp = entry_price + direction * sl_pips * 1.5 * 0.01
+        _pu = (
+            0.01 if "JPY" in self.config.symbol.upper()
+            else 0.0001
+        )
+        base_tp = entry_price + direction * sl_pips * 1.5 * _pu
 
         if not self.config.liquidity_tp_enabled:
             return base_tp
