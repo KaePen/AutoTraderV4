@@ -93,9 +93,9 @@ defaults:
   max_positions: 2
   bonus_max_positions: 1
   bonus_score_threshold: 7.0
-  base_risk_pct: 0.025        # 2025年DD対策: 0.02 → 0.025
-  max_lot_per_trade: 2.5      # 2025年DD対策: 2.0 → 2.5
-  max_total_exposure_lot: 4.0 # 2025年DD対策: 5.0 → 4.0
+  base_risk_pct: 0.015        # pip_value修正後DD対策: 0.025 → 0.015
+  max_lot_per_trade: 1.5      # pip_value修正後DD対策: 2.5 → 1.5
+  max_total_exposure_lot: 3.0 # pip_value修正後DD対策: 4.0 → 3.0
   equity_floor_pct: 0.30
   # トレーリングストップ設定（デフォルトON）
   use_position_manager: true
@@ -115,10 +115,13 @@ symbols:
     slippage_pips: 0.3
     default_sl_pips: 15.0
     default_tp_pips: 30.0
+    # EURUSD最適化結果 (2026-03-09, 2023-2025検証, pip_value修正後)
+    # +18.6M, WR 75.5%, MaxDD 9.21%, Trades 3,844
     max_positions: 2
     bonus_score_threshold: 7.0
-    base_risk_pct: 0.02
-    max_lot_per_trade: 2.0
+    base_risk_pct: 0.01
+    max_lot_per_trade: 1.5
+    max_total_exposure_lot: 3.0
 
   GBPUSD:
     pip_unit: 0.0001
@@ -128,10 +131,13 @@ symbols:
     slippage_pips: 0.3
     default_sl_pips: 20.0  # GBPは値動きが大きめ
     default_tp_pips: 40.0
-    max_positions: 2
+    # GBPUSD最適化結果 (2026-03-09, 2023-2025検証, pip_value修正後)
+    # +14.2M, WR 75.2%, MaxDD 7.33%, Trades 3,233
+    max_positions: 1
     bonus_score_threshold: 7.0
-    base_risk_pct: 0.02
-    max_lot_per_trade: 2.0
+    base_risk_pct: 0.01
+    max_lot_per_trade: 1.5
+    max_total_exposure_lot: 2.0
     # トレーリングストップ有効化
     use_position_manager: true
     trailing_start_r: 1.5
@@ -146,10 +152,13 @@ symbols:
     slippage_pips: 0.3
     default_sl_pips: 15.0
     default_tp_pips: 30.0
+    # AUDUSD最適化結果 (2026-03-09, 2023-2025検証, pip_value修正後)
+    # +9.7M, WR 72.8%, MaxDD 7.98%, Trades 3,214
     max_positions: 2
     bonus_score_threshold: 7.0
-    base_risk_pct: 0.02
-    max_lot_per_trade: 2.0
+    base_risk_pct: 0.01
+    max_lot_per_trade: 1.5
+    max_total_exposure_lot: 3.0
 
   NZDUSD:
     pip_unit: 0.0001
@@ -159,10 +168,13 @@ symbols:
     slippage_pips: 0.5
     default_sl_pips: 15.0
     default_tp_pips: 30.0
-    max_positions: 2
+    # NZDUSD最適化結果 (2026-03-09, 2023-2025検証, pip_value修正後)
+    # +3.5M, WR 70.3%, MaxDD 7.29%, Trades 2,204
+    max_positions: 1
     bonus_score_threshold: 7.0
-    base_risk_pct: 0.02
+    base_risk_pct: 0.01
     max_lot_per_trade: 1.5
+    max_total_exposure_lot: 2.0
 
   USDCHF:
     pip_unit: 0.0001
@@ -200,12 +212,14 @@ symbols:
     slippage_pips: 0.5
     default_sl_pips: 20.0
     default_tp_pips: 40.0
-    max_positions: 8
+    # USDJPY最適化結果 (2026-03-09, 2023-2025検証, pip_value修正後)
+    # +31.3M, WR 74.1%, MaxDD 9.13%, Trades 5,734
+    max_positions: 3
     bonus_max_positions: 0
     bonus_score_threshold: 7.0
-    base_risk_pct: 0.08
-    max_lot_per_trade: 5.0
-    max_total_exposure_lot: 16.0
+    base_risk_pct: 0.02
+    max_lot_per_trade: 2.0
+    max_total_exposure_lot: 5.0
     equity_floor_pct: 0.30
 
   EURJPY:
@@ -214,14 +228,13 @@ symbols:
     slippage_pips: 0.7
     default_sl_pips: 25.0
     default_tp_pips: 50.0
-    # EURJPY最適化結果 (2026-03-06, 2023-2025検証)
-    # pos=4/risk=0.04: +5,907K (旧pos=2/risk=0.02: +2,119K, +179%)
-    # WR 72.2%, PF 2.07, DD 2.80%, Sharpe 7.73, 月間+ 100%
-    max_positions: 4
+    # EURJPY最適化結果 (2026-03-09, 2023-2025検証, pip_value修正後)
+    # +33.6M, WR 74.8%, MaxDD 5.61%, Trades 5,609
+    max_positions: 2
     bonus_score_threshold: 7.5
-    base_risk_pct: 0.04
-    max_lot_per_trade: 3.0
-    max_total_exposure_lot: 8.0
+    base_risk_pct: 0.02
+    max_lot_per_trade: 2.0
+    max_total_exposure_lot: 4.0
     signal:
       bca_min_edge: 0.70  # 最適化結果: 0.70が最良 (+50K vs 0.65, PF/Sharpe/WR改善)
 
@@ -231,15 +244,14 @@ symbols:
     slippage_pips: 1.0
     default_sl_pips: 30.0
     default_tp_pips: 60.0
-    # GBPJPY最適化結果 (2026-03-06, 2023-2025検証)
-    # pos=3/risk=0.03: +3,010K (旧pos=1/risk=0.015: +1,291K, +133%)
-    # WR 70.0%, PF 1.78, DD 2.62%, Sharpe 5.89, 月間+ 100%
-    max_positions: 3
-    bonus_max_positions: 1
+    # GBPJPY最適化結果 (2026-03-09, 2023-2025検証, pip_value修正後)
+    # +20.2M, WR 73.1%, MaxDD 9.79%, Trades 6,315
+    max_positions: 2
+    bonus_max_positions: 0
     bonus_score_threshold: 8.0
-    base_risk_pct: 0.03
-    max_lot_per_trade: 2.0
-    max_total_exposure_lot: 6.0
+    base_risk_pct: 0.015
+    max_lot_per_trade: 1.5
+    max_total_exposure_lot: 3.0
     signal:
       bca_min_edge: 0.65  # 最適化結果: 0.65が最良 (+500K vs 0.55)
 
@@ -249,14 +261,13 @@ symbols:
     slippage_pips: 0.7
     default_sl_pips: 20.0
     default_tp_pips: 40.0
-    # AUDJPY最適化結果 (2026-03-06, 2023-2025検証)
-    # pos=3/risk=0.03: +2,207K (旧pos=2/risk=0.02: +1,263K, +75%)
-    # WR 67.9%, PF 1.86, DD 2.49%, Sharpe 5.66, 月間+ 97.2%
-    max_positions: 3
+    # AUDJPY最適化結果 (2026-03-09, 2023-2025検証, pip_value修正後)
+    # +9.5M, WR 70.9%, MaxDD 9.22%, Trades 5,164
+    max_positions: 2
     bonus_score_threshold: 7.0
-    base_risk_pct: 0.03
-    max_lot_per_trade: 2.0
-    max_total_exposure_lot: 6.0
+    base_risk_pct: 0.012
+    max_lot_per_trade: 1.5
+    max_total_exposure_lot: 3.0
     signal:
       bca_min_edge: 0.55  # 最適化結果: 0.55が最良（最高利益）
 
@@ -266,15 +277,13 @@ symbols:
     slippage_pips: 0.7
     default_sl_pips: 20.0
     default_tp_pips: 40.0
-    # CADJPY最適化結果 (2026-03-06, 2023-2025検証)
-    # pos=2/risk=0.025: +1,610K (旧pos=2/risk=0.02: +1,126K, +43%)
-    # WR 67.3%, PF 1.87, DD 2.81%, Sharpe 5.71, 月間+ 94.4%
-    # pos=3はDD 3.94%で基準超過のため見送り
+    # CADJPY最適化結果 (2026-03-09, 2023-2025検証, pip_value修正後)
+    # +8.0M, WR 70.0%, MaxDD 9.66%, Trades 4,721
     max_positions: 2
     bonus_score_threshold: 7.0
-    base_risk_pct: 0.025
-    max_lot_per_trade: 1.5
-    max_total_exposure_lot: 4.0
+    base_risk_pct: 0.012
+    max_lot_per_trade: 1.0
+    max_total_exposure_lot: 2.0
     signal:
       bca_min_edge: 0.65  # 最適化結果: 0.65が最良 (PF 1.89, 月間+100%)
 
@@ -284,14 +293,13 @@ symbols:
     slippage_pips: 0.7
     default_sl_pips: 25.0
     default_tp_pips: 50.0
-    # CHFJPY最適化結果 (2026-03-06, 2023-2025検証)
-    # pos=3/risk=0.025: +2,496K (旧pos=2/risk=0.02: +1,807K, +38%)
-    # WR 70.0%, PF -, DD 2.65%, Sharpe 5.9, 月間+ -
-    max_positions: 3
+    # CHFJPY最適化結果 (2026-03-09, 2023-2025検証, pip_value修正後)
+    # +18.4M, WR 72.9%, MaxDD 9.68%, Trades 6,029
+    max_positions: 2
     bonus_score_threshold: 7.5
-    base_risk_pct: 0.025
-    max_lot_per_trade: 2.0
-    max_total_exposure_lot: 5.0
+    base_risk_pct: 0.015
+    max_lot_per_trade: 1.5
+    max_total_exposure_lot: 3.0
 
 # --- マルチ通貨ペア ポートフォリオ設定 ---
 # JPYポートフォリオ検証結果に基づく推奨設定
