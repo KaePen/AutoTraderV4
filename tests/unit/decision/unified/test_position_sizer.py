@@ -19,6 +19,7 @@ class TestLiquidityTP:
         """テストセットアップ"""
         self.sizer = PositionSizer(
             PositionSizerConfig(
+                symbol="USDJPY",
                 liquidity_tp_enabled=True,
                 liquidity_tp_safety_margin=0.01,
             )
@@ -82,7 +83,10 @@ class TestLiquidityTP:
     def test_liquidity_tp_disabled(self) -> None:
         """流動性TP無効時は基本TPを使用"""
         sizer = PositionSizer(
-            PositionSizerConfig(liquidity_tp_enabled=False)
+            PositionSizerConfig(
+                symbol="USDJPY",
+                liquidity_tp_enabled=False,
+            )
         )
         entry_price = 150.00
         sl_pips = 20.0

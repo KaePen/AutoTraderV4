@@ -251,6 +251,8 @@ class PositionManagerConfig:
     range_day_half_r_trigger: float = 0.5
     # BE移動クッション: BE価格に余裕を持たせノイズによるBE_HIT削減
     be_cushion_pips: float = 3.0
+    # pip単位（JPY=0.01, USD=0.0001）
+    pip_unit: float = 0.01
     # コンセンサス逆転exit
     consensus_exit_enabled: bool = True
     # 逆方向スコアがこの閾値以上で発動
@@ -694,9 +696,10 @@ class PositionManager:
         """
         # entry=fill(Ask/Bid+slip), exit=trigger±slip
         # 両方にslippage適用 → BE損益ゼロには2倍必要
-        slip_offset = self.config.slippage_pips * 2 * 0.01
+        _pu = self.config.pip_unit
+        slip_offset = self.config.slippage_pips * 2 * _pu
         # クッション: BE_HIT頻度低減のため利益方向に余裕
-        cushion = self.config.be_cushion_pips * 0.01
+        cushion = self.config.be_cushion_pips * _pu
         offset = slip_offset + cushion
         if position.direction == SignalType.BUY:
             return position.entry_price + offset

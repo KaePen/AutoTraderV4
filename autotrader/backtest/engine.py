@@ -459,6 +459,9 @@ class UnifiedBotAdapter:
         self._bot = bot
         self._symbol = symbol
         self._min_confidence = min_confidence
+        self._pip_unit = (
+            0.01 if "JPY" in symbol.upper() else 0.0001
+        )
 
     def generate_signal(
         self,
@@ -488,13 +491,14 @@ class UnifiedBotAdapter:
         # SL/TPを価格に変換
         sl_price = None
         tp_price = None
+        _pu = self._pip_unit
         if consolidated.sl_pips > 0:
             if consolidated.direction == SignalType.BUY:
-                sl_price = candle.close - consolidated.sl_pips / 100
-                tp_price = candle.close + consolidated.tp_pips / 100
+                sl_price = candle.close - consolidated.sl_pips * _pu
+                tp_price = candle.close + consolidated.tp_pips * _pu
             else:
-                sl_price = candle.close + consolidated.sl_pips / 100
-                tp_price = candle.close - consolidated.tp_pips / 100
+                sl_price = candle.close + consolidated.sl_pips * _pu
+                tp_price = candle.close - consolidated.tp_pips * _pu
 
         return Signal(
             symbol=self._symbol,

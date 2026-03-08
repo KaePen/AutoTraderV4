@@ -276,12 +276,17 @@ class BacktestDiagnostics:
                         sl_pips = consolidated.sl_pips
                         tp_pips = consolidated.tp_pips
 
+                        _pu = (
+                            0.01
+                            if "JPY" in self.symbol.upper()
+                            else 0.0001
+                        )
                         if consolidated.direction == SignalType.BUY:
-                            sl_price = close - sl_pips / 100
-                            tp_price = close + tp_pips / 100
+                            sl_price = close - sl_pips * _pu
+                            tp_price = close + tp_pips * _pu
                         else:
-                            sl_price = close + sl_pips / 100
-                            tp_price = close - tp_pips / 100
+                            sl_price = close + sl_pips * _pu
+                            tp_price = close - tp_pips * _pu
 
                         from autotrader.core.entities import Signal
 

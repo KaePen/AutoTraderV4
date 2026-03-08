@@ -144,8 +144,13 @@ class TradeLogicReloader:
         )
         return mod.UnifiedTradeBot(config)
 
-    def create_new_pm(self) -> Any:
+    def create_new_pm(
+        self, symbol: str = "USDJPY",
+    ) -> Any:
         """動的インポートで新しい PositionManager インスタンスを生成
+
+        Args:
+            symbol: 通貨ペア（pip_unit判定用）
 
         Returns:
             PositionManager: reload 後のクラス定義で生成した新インスタンス
@@ -153,7 +158,9 @@ class TradeLogicReloader:
         mod = importlib.import_module(
             "autotrader.decision.unified.position_manager"
         )
-        return mod.PositionManager()
+        _pu = 0.01 if "JPY" in symbol.upper() else 0.0001
+        cfg = mod.PositionManagerConfig(pip_unit=_pu)
+        return mod.PositionManager(cfg)
 
     def create_new_sizer(self, sizer_config: Any) -> Any:
         """動的インポートで新しい PositionSizer インスタンスを生成

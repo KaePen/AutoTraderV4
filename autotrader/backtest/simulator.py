@@ -212,6 +212,10 @@ class TradeSimulator:
                 spread_pips=self.config.spread_pips,
                 slippage_pips=self.config.slippage_pips,
             )
+            # pip_unitを伝搬（JPY=0.01, USD=0.0001）
+            if pm_cfg.pip_unit != self._pip_unit:
+                from dataclasses import replace
+                pm_cfg = replace(pm_cfg, pip_unit=self._pip_unit)
             self._pm = PositionManager(pm_cfg)
         # UnifiedBotConfig（TradingPlan生成用）
         self._bot_config = self.config.bot_config
