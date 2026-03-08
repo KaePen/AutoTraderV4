@@ -30,6 +30,7 @@ import io
 import json
 import logging
 import os
+import subprocess
 import sys
 import threading
 import time
@@ -105,6 +106,7 @@ class Job:
     multi_pair_config: dict[str, Any] = field(
         default_factory=dict,
     )
+    code_dir: str = ""  # 指定時はそのディレクトリのコードで実行
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> Job:
@@ -122,6 +124,7 @@ class Job:
                 "multi_pair_config",
                 {},
             ),
+            code_dir=d.get("code_dir", ""),
         )
 
     def effective_year_workers(self) -> int:
@@ -791,6 +794,220 @@ def _save_result(result: JobResult) -> None:
 
 
 # ===================================================================
+# サブプロセス実行（code_dir 指定時）
+# ===================================================================
+
+
+def execute_job_subprocess(
+    job: Job,
+    cancel_event: threading.Event,
+    max_year_workers: int = 5,
+    result_id: str = "",
+) -> JobResult:
+    """code_dir指定ジョブをサブプロセスで実行
+
+    code_dirのコードでバックテストを実行するため、
+    サブプロセスとしてqueue_runnerの--execute-jobモードを起動する。
+    サブプロセスはcode_dir内のautotraderモジュールを使用する。
+
+    Args:
+        job: 実行するジョブ（code_dir指定済み）
+        cancel_event: キャンセルイベント
+        max_year_workers: 年並列実行数
+        result_id: 連番付き結果ID
+
+    Returns:
+        JobResult: 実行結果
+    """
+    import tempfile  # noqa: PLC0415
+
+    _rid = result_id or job.id
+    code_dir = job.code_dir
+
+    # ジョブ情報をJSONファイルに書き出し
+    job_data = {
+        "job": asdict(job),
+        "max_year_workers": max_year_workers,
+        "result_id": _rid,
+        "results_dir": str(RESULTS_DIR),
+        "data_dir": DEFAULT_DATA_DIR,
+    }
+
+    result = JobResult(
+        job_id=_rid,
+        status="running",
+        symbol=job.symbol,
+        years=job.years,
+        description=job.description,
+        started_at=datetime.now().isoformat(),
+        overrides_used=job.overrides,
+    )
+    _save_result(result)
+
+    start_time = time.time()
+
+    try:
+        # ジョブ情報を一時ファイルに保存
+        with tempfile.NamedTemporaryFile(
+            mode="w",
+            suffix=".json",
+            delete=False,
+            encoding="utf-8",
+        ) as f:
+            json.dump(job_data, f, ensure_ascii=False)
+            job_file = f.name
+
+        # code_dir内のqueue_runnerを--execute-jobで起動
+        runner_script = (
+            Path(code_dir) / "scripts" / "backtest_queue_runner.py"
+        )
+        cmd = [
+            sys.executable,
+            str(runner_script),
+            "--execute-job",
+            job_file,
+        ]
+
+        logger.info(
+            "[%s] サブプロセス実行: code_dir=%s",
+            _rid,
+            code_dir,
+        )
+
+        proc = subprocess.Popen(
+            cmd,
+            cwd=code_dir,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+
+        # キャンセル監視しつつ出力を読み取り
+        while proc.poll() is None:
+            if cancel_event.is_set():
+                proc.terminate()
+                try:
+                    proc.wait(timeout=10)
+                except subprocess.TimeoutExpired:
+                    proc.kill()
+                result.status = "cancelled"
+                result.error = "ユーザーにより停止"
+                break
+            # 出力をログに転送
+            if proc.stdout:
+                line = proc.stdout.readline()
+                if line:
+                    logger.info(
+                        "[%s:sub] %s",
+                        _rid,
+                        line.rstrip(),
+                    )
+            time.sleep(0.1)
+
+        # 残りの出力を読み取り
+        if proc.stdout:
+            for line in proc.stdout:
+                logger.info(
+                    "[%s:sub] %s",
+                    _rid,
+                    line.rstrip(),
+                )
+
+        # 結果ファイルを読み取り
+        result_path = RESULTS_DIR / f"{_rid}.json"
+        if result_path.exists():
+            saved = json.loads(
+                result_path.read_text(encoding="utf-8"),
+            )
+            result = JobResult(**{
+                k: v
+                for k, v in saved.items()
+                if k in JobResult.__dataclass_fields__
+            })
+        elif result.status != "cancelled":
+            rc = proc.returncode
+            if rc != 0:
+                result.status = "failed"
+                result.error = (
+                    f"サブプロセス終了コード: {rc}"
+                )
+            else:
+                result.status = "completed"
+
+    except Exception as e:
+        result.status = "failed"
+        result.error = str(e)
+        logger.exception(
+            "[%s] サブプロセスジョブ失敗: %s",
+            job.id,
+            e,
+        )
+    finally:
+        # 一時ファイル削除
+        try:
+            if "job_file" in locals():
+                os.unlink(job_file)
+        except OSError:
+            pass
+
+    result.elapsed_seconds = round(
+        time.time() - start_time,
+        1,
+    )
+    result.finished_at = datetime.now().isoformat()
+    _save_result(result)
+    return result
+
+
+def _execute_job_from_file(job_file: str) -> None:
+    """--execute-jobモード: ジョブファイルから単一ジョブを実行
+
+    サブプロセスとして呼ばれ、指定ジョブを実行して終了する。
+    cwd は code_dir に設定されている前提。
+
+    Args:
+        job_file: ジョブ情報JSONファイルのパス
+    """
+    data = json.loads(
+        Path(job_file).read_text(encoding="utf-8"),
+    )
+    job = Job.from_dict(data["job"])
+    workers = data.get("max_year_workers", 5)
+    rid = data.get("result_id", job.id)
+
+    # 結果ディレクトリを親プロセスと共有
+    global RESULTS_DIR  # noqa: PLW0603
+    results_dir = data.get("results_dir", "")
+    if results_dir:
+        RESULTS_DIR = Path(results_dir)
+
+    # データディレクトリ上書き
+    global DEFAULT_DATA_DIR  # noqa: PLW0603
+    dd = data.get("data_dir", "")
+    if dd:
+        DEFAULT_DATA_DIR = dd
+
+    cancel_ev = threading.Event()
+
+    if job.type in ("multi_pair", "portfolio"):
+        execute_multi_pair_job(
+            job,
+            cancel_ev,
+            max_year_workers=workers,
+            result_id=rid,
+        )
+    else:
+        execute_job(
+            job,
+            cancel_ev,
+            workers,
+            rid,
+        )
+
+
+# ===================================================================
 # 対話コマンドリーダー
 # ===================================================================
 
@@ -955,7 +1172,18 @@ def main() -> None:
         default=os.cpu_count() or 4,
         help="使用可能なCPUスレッド数（デフォルト: OS検出値）",
     )
+    parser.add_argument(
+        "--execute-job",
+        type=str,
+        default="",
+        help="単一ジョブ実行モード（JSONファイルパス）",
+    )
     cli_args = parser.parse_args()
+
+    # --execute-job モード: サブプロセスとして単一ジョブ実行
+    if cli_args.execute_job:
+        _execute_job_from_file(cli_args.execute_job)
+        return
 
     cpu_threads: int = cli_args.cpu_threads
 
@@ -1007,8 +1235,16 @@ def main() -> None:
         workers: int,
         rid: str = "",
     ) -> None:
-        """ジョブ実行スレッド（typeに応じて振り分け）"""
-        if job.type in ("multi_pair", "portfolio"):
+        """ジョブ実行スレッド（typeとcode_dirに応じて振り分け）"""
+        # code_dir指定時はサブプロセスで実行
+        if job.code_dir:
+            holder[0] = execute_job_subprocess(
+                job,
+                cancel_ev,
+                max_year_workers=workers,
+                result_id=rid,
+            )
+        elif job.type in ("multi_pair", "portfolio"):
             holder[0] = execute_multi_pair_job(
                 job,
                 cancel_ev,
@@ -1128,6 +1364,11 @@ def main() -> None:
                             _label = f"[multi_pair] {_sym}"
                         else:
                             _label = rj.job.symbol
+                        _cd = (
+                            f" code_dir={rj.job.code_dir}"
+                            if rj.job.code_dir
+                            else ""
+                        )
                         print(
                             f"    - [{rj.job.id}]"
                             f" {_label}"
@@ -1136,6 +1377,7 @@ def main() -> None:
                             f"{rj.max_year_workers}"
                             f" cost={rj.cpu_cost:.1f}"
                             f" ({elapsed:.0f}s)"
+                            f"{_cd}"
                         )
                     print(f"  進捗: {_done}/{_total} (残り{_remain}件)")
 
@@ -1300,10 +1542,15 @@ def main() -> None:
                     _sym_label = "[multi_pair] " + ",".join(job.symbols)
                 else:
                     _sym_label = job.symbol
+                _code_label = (
+                    f" code_dir={job.code_dir}"
+                    if job.code_dir
+                    else ""
+                )
                 logger.info(
                     "[%s] 開始: %s %s %s"
                     " (workers=%d, cost=%.1f,"
-                    " used=%.1f/%.0f)",
+                    " used=%.1f/%.0f)%s",
                     _rid,
                     _sym_label,
                     job.years,
@@ -1312,6 +1559,7 @@ def main() -> None:
                     cost,
                     used + cost,
                     cpu_threads,
+                    _code_label,
                 )
                 cancel_ev = threading.Event()
                 holder: list[JobResult | None] = [None]
