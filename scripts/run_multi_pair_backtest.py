@@ -18,7 +18,11 @@ import logging
 import math
 import sys
 import time
-from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures import (
+    ProcessPoolExecutor,
+    ThreadPoolExecutor,
+    as_completed,
+)
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -257,6 +261,51 @@ def load_pair_data(
         if runner._d1_df is not None:
             market_data["D1"] = runner._d1_df
     return runner, market_data
+
+
+def load_all_pair_data(
+    symbols: list[str],
+    data_dir: str,
+    max_workers: int = 6,
+) -> dict[str, tuple[BacktestRunner, dict[str, pd.DataFrame]]]:
+    """全ペアのデータをスレッド並列でロード
+
+    I/Oバウンド（CSV/Parquet読み込み）のためスレッド並列が最適。
+    各呼び出しが独立したオブジェクトを返すためスレッドセーフ。
+
+    Args:
+        symbols: シンボルリスト
+        data_dir: データディレクトリ
+        max_workers: 並列ワーカー数
+
+    Returns:
+        dict[str, tuple[BacktestRunner, dict[str, pd.DataFrame]]]:
+            シンボル→(BacktestRunner, market_data)
+    """
+    runners: dict[
+        str, tuple[BacktestRunner, dict[str, pd.DataFrame]]
+    ] = {}
+    workers = min(max_workers, len(symbols))
+    _t0 = time.time()
+    print(
+        f"\nデータロード中... "
+        f"({len(symbols)}ペア, workers={workers})"
+    )
+
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        futures = {
+            executor.submit(load_pair_data, sym, data_dir): sym
+            for sym in symbols
+        }
+        for future in as_completed(futures):
+            sym = futures[future]
+            _elapsed = time.time() - _t0
+            runners[sym] = future.result()
+            print(f"  {sym}: ロード完了 ({_elapsed:.1f}s)")
+
+    total = time.time() - _t0
+    print(f"  全ペアロード完了: {total:.1f}s")
+    return runners
 
 
 # =============================================================
@@ -648,12 +697,10 @@ def _run_year_worker(args: tuple) -> dict[str, Any] | None:
     # MultiPairConfig 復元
     mc = MultiPairConfig(**multi_config_dict)
 
-    # データロード（各ワーカーが独自にロード）
-    runners: dict[
-        str, tuple[BacktestRunner, dict[str, pd.DataFrame]]
-    ] = {}
-    for sym in symbols:
-        runners[sym] = load_pair_data(sym, data_dir)
+    # データロード（各ワーカーが独自にスレッド並列ロード）
+    runners = load_all_pair_data(
+        symbols, data_dir, max_workers=min(6, len(symbols)),
+    )
 
     # ポートフォリオ初期化（年独立: 毎年100万リセット）
     portfolio = PortfolioState(
@@ -1686,12 +1733,7 @@ def main() -> None:
         str, tuple[BacktestRunner, dict[str, pd.DataFrame]]
     ] = {}
     if not is_parallel:
-        print("\nデータロード中...")
-        for sym in available:
-            _t0 = time.time()
-            runners[sym] = load_pair_data(sym, data_dir)
-            elapsed = time.time() - _t0
-            print(f"  {sym}: {elapsed:.1f}s")
+        runners = load_all_pair_data(available, data_dir)
     else:
         print(
             "\n各ワーカーがデータを独自にロードします。"
