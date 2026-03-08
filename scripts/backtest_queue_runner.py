@@ -57,11 +57,12 @@ logging.basicConfig(
 )
 logger = logging.getLogger("queue_runner")
 
-# パス定数
-QUEUE_FILE = _project_root / "backtest_queue.json"
-STATE_FILE = _project_root / "backtest_queue_state.json"
-RESULTS_DIR = _project_root / "backtest_results"
-DEFAULT_DATA_DIR = "D:/Projects/AutoTraderV4_data/data"
+# パス定数（データ専用ディレクトリに出力）
+_DATA_ROOT = Path("D:/Projects/AutoTraderV4_data")
+QUEUE_FILE = _DATA_ROOT / "backtest_queue.json"
+STATE_FILE = _DATA_ROOT / "backtest_queue_state.json"
+RESULTS_DIR = _DATA_ROOT / "backtest_results"
+DEFAULT_DATA_DIR = str(_DATA_ROOT / "data")
 
 POLL_INTERVAL = 2.0  # キューポーリング間隔（秒）
 
