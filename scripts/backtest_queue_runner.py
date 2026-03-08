@@ -7,6 +7,9 @@ CPUバジェット内で複数ジョブを並行実行する常駐スクリプ�
 各ジョブは max_year_workers を申告し、1年=1.5スレッドとして
 利用可能CPUスレッド数の範囲内で同時実行される。
 
+再起動安全: completed_ids ベースで管理し、
+中断されたジョブは再起動時に自動的に再実行される。
+
 使い方:
     uv run python scripts/backtest_queue_runner.py --cpu-threads 12
 
@@ -164,9 +167,12 @@ class RunningJob:
 
 @dataclass
 class QueueState:
-    """キュー処理状態"""
+    """キュー処理状態（completed_ids ベース）
 
-    next_index: int = 0
+    next_index は廃止。再起動時は常にキュー先頭から
+    スキャンし、completed_ids にあるジョブをスキップする。
+    """
+
     completed_ids: list[str] = field(default_factory=list)
 
     def save(self) -> None:
@@ -186,12 +192,51 @@ class QueueState:
                 STATE_FILE.read_text(encoding="utf-8"),
             )
             return cls(
-                next_index=data.get("next_index", 0),
                 completed_ids=data.get(
                     "completed_ids", [],
                 ),
             )
         return cls()
+
+
+# ===================================================================
+# 起動時クリーンアップ
+# ===================================================================
+
+
+def cleanup_stale_running(state: QueueState) -> None:
+    """前回中断されたジョブの結果ファイルをクリーンアップ
+
+    status が "running" の結果ファイルを削除し、
+    再起動時に再実行されるようにする。
+    """
+    if not RESULTS_DIR.exists():
+        return
+    cleaned = 0
+    for path in RESULTS_DIR.glob("*.json"):
+        try:
+            data = json.loads(
+                path.read_text(encoding="utf-8"),
+            )
+            status = data.get("status", "")
+            job_id = data.get("job_id", "")
+            if status == "running":
+                path.unlink()
+                # completed_ids から除外（念のため）
+                if job_id in state.completed_ids:
+                    state.completed_ids.remove(job_id)
+                cleaned += 1
+                logger.info(
+                    "クリーンアップ: %s (中断済み)",
+                    path.name,
+                )
+        except (json.JSONDecodeError, KeyError, OSError):
+            continue
+    if cleaned > 0:
+        state.save()
+        logger.info(
+            "中断ジョブ %d件をクリーンアップ完了", cleaned,
+        )
 
 
 # ===================================================================
@@ -480,7 +525,9 @@ def stop_newest_jobs_until_budget(
     """
     # 開始時刻の新しい順にソート
     by_newest = sorted(
-        running, key=lambda rj: rj.started_at, reverse=True,
+        running,
+        key=lambda rj: rj.started_at,
+        reverse=True,
     )
     for rj in by_newest:
         if calc_used_threads(running) <= cpu_threads:
@@ -548,6 +595,10 @@ def main() -> None:
 
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 
+    # 状態読み込み + 中断ジョブのクリーンアップ
+    state = QueueState.load()
+    cleanup_stale_running(state)
+
     # コマンドキュー
     cmd_queue: _q.Queue[str] = _q.Queue()
 
@@ -560,7 +611,6 @@ def main() -> None:
     reader_thread.start()
 
     # 状態
-    state = QueueState.load()
     paused = False
     running_jobs: list[RunningJob] = []
 
@@ -604,8 +654,7 @@ def main() -> None:
                                     _rp.name,
                                 )
                         running_jobs.clear()
-                        # キュー先頭に戻す
-                        state.next_index = 0
+                        # 全リセット
                         state.completed_ids.clear()
                         state.save()
                         logger.info(
@@ -674,6 +723,9 @@ def main() -> None:
                     used = calc_used_threads(
                         running_jobs,
                     )
+                    _done = len(state.completed_ids)
+                    _total = len(_jobs)
+                    _remain = _total - _done
                     print(
                         f"  状態: "
                         f"{'一時停止' if paused else '稼働中'}"
@@ -687,22 +739,21 @@ def main() -> None:
                         f"{len(running_jobs)}件"
                     )
                     for rj in running_jobs:
-                        elapsed = time.time() - rj.started_at
+                        elapsed = (
+                            time.time() - rj.started_at
+                        )
                         print(
                             f"    - [{rj.job.id}]"
                             f" {rj.job.symbol}"
                             f" {rj.job.years}"
-                            f" workers={rj.max_year_workers}"
+                            f" workers="
+                            f"{rj.max_year_workers}"
                             f" cost={rj.cpu_cost:.1f}"
                             f" ({elapsed:.0f}s)"
                         )
                     print(
-                        f"  キュー位置: "
-                        f"{state.next_index}/{len(_jobs)}"
-                    )
-                    print(
-                        f"  完了済み: "
-                        f"{len(state.completed_ids)}件"
+                        f"  進捗: {_done}/{_total}"
+                        f" (残り{_remain}件)"
                     )
 
                 elif cmd == "quit":
@@ -762,31 +813,23 @@ def main() -> None:
 
         # -------------------------------------------------------
         # 新規ジョブ取得（CPUバジェット内で複数起動）
+        # 常にインデックス0からスキャン（再起動安全）
         # -------------------------------------------------------
         if not paused:
             jobs = load_queue()
-            # next_index からスキャン
-            idx = state.next_index
-            while idx < len(jobs):
-                job = jobs[idx]
-
-                # 既に完了済みならスキップ
+            running_ids = {
+                rj.job.id for rj in running_jobs
+            }
+            for job in jobs:
+                # 完了済みスキップ
                 if job.id in state.completed_ids:
-                    idx += 1
-                    state.next_index = idx
-                    state.save()
                     continue
 
-                # 既に実行中ならスキップ
-                if any(
-                    rj.job.id == job.id
-                    for rj in running_jobs
-                ):
-                    idx += 1
-                    state.next_index = idx
+                # 実行中スキップ
+                if job.id in running_ids:
                     continue
 
-                # 結果ファイルが既にあればスキップ
+                # 結果ファイルで完了済みならスキップ
                 _existing = (
                     RESULTS_DIR / f"{job.id}.json"
                 )
@@ -797,7 +840,10 @@ def main() -> None:
                                 encoding="utf-8",
                             ),
                         )
-                        if _ex.get("status") == "completed":
+                        if (
+                            _ex.get("status")
+                            == "completed"
+                        ):
                             logger.info(
                                 "[%s] スキップ"
                                 "（結果ファイルあり）",
@@ -810,11 +856,12 @@ def main() -> None:
                                 state.completed_ids.append(
                                     job.id,
                                 )
-                            idx += 1
-                            state.next_index = idx
-                            state.save()
+                                state.save()
                             continue
-                    except (json.JSONDecodeError, KeyError):
+                    except (
+                        json.JSONDecodeError,
+                        KeyError,
+                    ):
                         pass
 
                 # CPUバジェットチェック
@@ -824,7 +871,7 @@ def main() -> None:
                 remaining = cpu_threads - used
 
                 if cost > remaining:
-                    # バジェット不足 → これ以降は次サイクルで
+                    # バジェット不足 → 次サイクルで
                     break
 
                 # ジョブ起動
@@ -845,10 +892,12 @@ def main() -> None:
                 holder: list[JobResult | None] = [None]
                 t = threading.Thread(
                     target=_run_job_wrapper,
-                    args=(job, cancel_ev, holder, workers),
+                    args=(
+                        job, cancel_ev, holder, workers,
+                    ),
                     daemon=True,
                 )
-                rj = RunningJob(
+                rj_new = RunningJob(
                     job=job,
                     thread=t,
                     cancel_event=cancel_ev,
@@ -856,11 +905,9 @@ def main() -> None:
                     max_year_workers=workers,
                     started_at=time.time(),
                 )
-                running_jobs.append(rj)
+                running_jobs.append(rj_new)
+                running_ids.add(job.id)
                 t.start()
-
-                idx += 1
-                state.next_index = idx
 
         time.sleep(POLL_INTERVAL)
 
