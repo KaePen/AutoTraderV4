@@ -28,7 +28,6 @@ import argparse
 import io
 import json
 import logging
-import math
 import os
 import sys
 import threading
@@ -37,6 +36,8 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any
+
+import psutil
 
 # Windows cp932エンコーディング回避
 if sys.platform == "win32":
@@ -527,6 +528,86 @@ def calc_used_threads(
     return sum(rj.cpu_cost for rj in running)
 
 
+def _kill_job_child_processes(
+    rj: RunningJob,
+) -> int:
+    """ジョブの子プロセスを強制終了
+
+    ジョブ開始時刻以降に作成された子プロセスを特定し、
+    強制終了する。
+
+    Args:
+        rj: 対象のRunningJob
+
+    Returns:
+        int: 終了させたプロセス数
+    """
+    killed = 0
+    try:
+        parent = psutil.Process(os.getpid())
+        children = parent.children(recursive=True)
+        # ジョブ開始後に生成された子プロセスのみ対象
+        targets = [
+            c for c in children
+            if c.create_time() >= rj.started_at - 1.0
+        ]
+        for child in targets:
+            try:
+                child.kill()
+                killed += 1
+            except psutil.NoSuchProcess:
+                pass
+        if targets:
+            psutil.wait_procs(targets, timeout=5)
+    except psutil.NoSuchProcess:
+        pass
+    return killed
+
+
+def force_stop_running_job(
+    rj: RunningJob,
+) -> None:
+    """ジョブを確実に停止（子プロセスも強制終了）
+
+    1. cancel_event でgraceful停止を試行
+    2. タイムアウトしたら子プロセスを強制終了
+    3. スレッド終了を待機
+
+    Args:
+        rj: 停止対象のRunningJob
+    """
+    rj.cancel_event.set()
+
+    # graceful停止を短時間試行
+    rj.thread.join(timeout=5)
+
+    if rj.thread.is_alive():
+        # 子プロセス強制終了
+        killed = _kill_job_child_processes(rj)
+        if killed > 0:
+            logger.info(
+                ">>> [%s] 子プロセス%d個を強制終了",
+                rj.job.id,
+                killed,
+            )
+        # スレッド終了を再待機
+        rj.thread.join(timeout=10)
+        if rj.thread.is_alive():
+            logger.warning(
+                ">>> [%s] デーモンスレッド残存"
+                "（プロセス終了時に回収）",
+                rj.job.id,
+            )
+
+    # 結果ファイル削除
+    _rpath = RESULTS_DIR / f"{rj.result_id}.json"
+    if _rpath.exists():
+        _rpath.unlink()
+        logger.info(
+            ">>> 結果ファイル削除: %s", _rpath.name,
+        )
+
+
 def stop_newest_jobs_until_budget(
     running: list[RunningJob],
     cpu_threads: int,
@@ -553,13 +634,7 @@ def stop_newest_jobs_until_budget(
             rj.job.id,
             rj.cpu_cost,
         )
-        rj.cancel_event.set()
-        rj.thread.join(timeout=15)
-        # ログ削除
-        _rpath = RESULTS_DIR / f"{rj.result_id}.json"
-        if _rpath.exists():
-            _rpath.unlink()
-            logger.info(">>> ログ削除: %s", _rpath.name)
+        force_stop_running_job(rj)
         # completed_ids から除外（再実行対象に戻す）
         if rj.result_id in state.completed_ids:
             state.completed_ids.remove(rj.result_id)
@@ -658,20 +733,12 @@ def main() -> None:
                             " (%d件)...",
                             len(running_jobs),
                         )
+                        # 全ジョブにcancel通知
                         for rj in running_jobs:
                             rj.cancel_event.set()
+                        # 全ジョブを確実に停止
                         for rj in running_jobs:
-                            rj.thread.join(timeout=15)
-                            _rp = (
-                                RESULTS_DIR
-                                / f"{rj.result_id}.json"
-                            )
-                            if _rp.exists():
-                                _rp.unlink()
-                                logger.info(
-                                    ">>> ログ削除: %s",
-                                    _rp.name,
-                                )
+                            force_stop_running_job(rj)
                         running_jobs.clear()
                         # 全リセット
                         state.completed_ids.clear()
@@ -783,7 +850,7 @@ def main() -> None:
                         for rj in running_jobs:
                             rj.cancel_event.set()
                         for rj in running_jobs:
-                            rj.thread.join(timeout=15)
+                            force_stop_running_job(rj)
                     logger.info(">>> ランナー終了")
                     return
 

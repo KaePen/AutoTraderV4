@@ -1371,7 +1371,22 @@ class BacktestRunner:
                             ): year
                             for year in years
                         }
+                        _cancelled = False
                         for future in as_completed(futures):
+                            # キャンセルチェック（並列実行中）
+                            if self._check_cancel_requested():
+                                _log.info(
+                                    "キャンセル検出:"
+                                    " 並列実行を中断"
+                                )
+                                for f in futures:
+                                    f.cancel()
+                                executor.shutdown(
+                                    wait=False,
+                                    cancel_futures=True,
+                                )
+                                _cancelled = True
+                                break
                             try:
                                 year_result = future.result()
                             except Exception as exc:
@@ -1394,6 +1409,17 @@ class BacktestRunner:
 
                     _stop_drain.set()
                     _drain_thread.join(timeout=2.0)
+
+                    if _cancelled:
+                        self._emitter.emit_backtest_end(
+                            {"cancelled": True},
+                        )
+                        return (
+                            self
+                            ._aggregate_results_from_yearly(
+                                yearly_results,
+                            )
+                        )
 
                 # 失敗した年を警告
                 _missing = set(years) - {r["year"] for r in yearly_results}
