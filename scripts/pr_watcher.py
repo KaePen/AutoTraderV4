@@ -636,7 +636,10 @@ def get_open_prs() -> list[dict[str, object]]:
     return json.loads(result.stdout)
 
 
-def auto_merge_pr(pr: dict[str, object]) -> None:
+def auto_merge_pr(
+    pr: dict[str, object],
+    merged: set[int] | None = None,
+) -> None:
     """PRを差分確認してmainにマージする。
 
     マージ後のローカルクリーンアップはアクティブチェック付きで実行。
@@ -652,6 +655,7 @@ def auto_merge_pr(pr: dict[str, object]) -> None:
 
     Args:
         pr: PR情報辞書（number, title, headRefName）
+        merged: マージ成功したPR番号のセット（成功時に追加）
     """
     num = pr["number"]
     branch = pr["headRefName"]
@@ -764,6 +768,8 @@ def auto_merge_pr(pr: dict[str, object]) -> None:
     # 6. worktree prune（壊れた登録があれば解消）
     _git(["worktree", "prune"])
 
+    if merged is not None:
+        merged.add(num)
     print(f"[INFO] PR #{num} マージ完了: {title}", flush=True)
 
 
@@ -795,22 +801,26 @@ def main() -> None:
     with _merge_lock:
         cleanup_stale()
 
-    # セッション中のみ処理済みを記憶（再起動時はリセット）
-    processed: set[int] = set()
+    # in_flight: 処理中（重複submit防止）
+    # merged: マージ成功済み（再試行不要）
+    in_flight: set[int] = set()
+    merged: set[int] = set()
     cycle_count = 0
 
     def _on_future_done(
         future: object,
         pr_num: int,
     ) -> None:
-        """ワーカーの未処理例外をログ出力する。"""
+        """ワーカー完了時: 成功ならmergedに、失敗ならin_flightから除外して再試行可能にする。"""
         from concurrent.futures import Future
 
+        in_flight.discard(pr_num)
         if isinstance(future, Future):
             exc = future.exception()
             if exc:
                 print(
-                    f"[ERROR] PR #{pr_num} 未処理例外: {exc}",
+                    f"[ERROR] PR #{pr_num} 未処理例外"
+                    f"（次サイクルで再試行）: {exc}",
                     flush=True,
                 )
 
@@ -820,7 +830,12 @@ def main() -> None:
         try:
             while True:
                 prs = get_open_prs()
-                new_prs = [pr for pr in prs if pr["number"] not in processed]
+                # マージ済み・処理中のPRをスキップ
+                skip = merged | in_flight
+                new_prs = [
+                    pr for pr in prs
+                    if pr["number"] not in skip
+                ]
 
                 cycle_count += 1
 
@@ -839,8 +854,10 @@ def main() -> None:
                 else:
                     for pr in new_prs:
                         pr_num = pr["number"]
-                        processed.add(pr_num)
-                        fut = executor.submit(auto_merge_pr, pr)
+                        in_flight.add(pr_num)
+                        fut = executor.submit(
+                            auto_merge_pr, pr, merged,
+                        )
                         fut.add_done_callback(
                             lambda f, n=pr_num: _on_future_done(f, n)
                         )
