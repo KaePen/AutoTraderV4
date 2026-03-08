@@ -55,7 +55,11 @@ from autotrader.calculator.features.divergence_features import (
     DivergenceDetector,
 )
 from autotrader.config import DEFAULT_TRADING_PARAMS
-from autotrader.config.trading_params import get_preset
+from autotrader.config.trading_params import (
+    get_pip_unit,
+    get_preset,
+    get_quote_ccy_rate,
+)
 from autotrader.core.entities import Candle, Signal
 from autotrader.core.enums import (
     ExitReason,
@@ -708,8 +712,8 @@ class BacktestRunner:
         volume = volume or 1.0
 
         # シミュレーター設定
-        _pip_unit = 0.01 if "JPY" in self.config.symbol.upper() else 0.0001
-        _quote_ccy_rate = 1.0 if "JPY" in self.config.symbol.upper() else 150.0
+        _pip_unit = get_pip_unit(self.config.symbol)
+        _quote_ccy_rate = get_quote_ccy_rate(self.config.symbol)
         sim_config = SimulatorConfig(
             initial_balance=self.config.initial_balance,
             spread_pips=self.config.spread_pips,
@@ -1199,8 +1203,8 @@ class BacktestRunner:
             multi_mode_controller.set_market_data(market_data)
 
         # シミュレーター設定
-        _pip_unit = 0.01 if "JPY" in self.config.symbol.upper() else 0.0001
-        _quote_ccy_rate = 1.0 if "JPY" in self.config.symbol.upper() else 150.0
+        _pip_unit = get_pip_unit(self.config.symbol)
+        _quote_ccy_rate = get_quote_ccy_rate(self.config.symbol)
         sim_config = SimulatorConfig(
             initial_balance=self.config.initial_balance,
             spread_pips=self.config.spread_pips,

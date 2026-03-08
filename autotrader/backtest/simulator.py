@@ -15,7 +15,11 @@ from autotrader.backtest.position_event_logger import (
     PositionEventType,
 )
 from autotrader.config import DEFAULT_TRADING_PARAMS
-from autotrader.config.trading_params import get_preset
+from autotrader.config.trading_params import (
+    get_pip_unit,
+    get_preset,
+    get_quote_ccy_rate,
+)
 from autotrader.core.entities import Candle, Position, Signal, Trade
 from autotrader.core.enums import ExitReason, SignalType, TradingStrategyMode
 from autotrader.core.exceptions import BacktestError
@@ -111,11 +115,8 @@ class SimulatorConfig:
             SimulatorConfig: プリセットベースの設定
         """
         p = get_preset(symbol)
-        pip_unit = 0.01 if "JPY" in symbol else 0.0001
-        # クォート通貨→口座通貨(JPY)変換レート
-        # JPYペア: 1.0（変換不要）
-        # USDペア: USD/JPY ≈ 150（近似値）
-        quote_ccy_rate = 1.0 if "JPY" in symbol else 150.0
+        pip_unit = get_pip_unit(symbol)
+        quote_ccy_rate = get_quote_ccy_rate(symbol)
         return cls(
             initial_balance=initial_balance,
             spread_pips=p.spread_pips,

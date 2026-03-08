@@ -79,7 +79,9 @@ pm_config:
 # --- 通貨ペア別プリセット ---
 defaults:
   pip_unit: 0.01          # JPYペア: 1pip = 0.01
-  quote_ccy_rate: 1.0     # JPYペア: クォート通貨=JPY、変換不要
+  # quote_ccy_rate: クォート通貨→口座通貨(JPY)変換レート
+  # JPYペアは1.0固定。非JPYペアは概算値（将来: バックテスト中に動的取得予定）
+  quote_ccy_rate: 1.0
   pip_value: 100.0
   spread_pips: 1.5
   slippage_pips: 0.5

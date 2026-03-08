@@ -47,7 +47,11 @@ from autotrader.backtest.simulator import (  # noqa: E402
     TradeSimulator,
 )
 from autotrader.config.paths import get_data_dir, get_log_dir  # noqa: E402
-from autotrader.config.trading_params import get_preset  # noqa: E402
+from autotrader.config.trading_params import (  # noqa: E402
+    get_pip_unit,
+    get_preset,
+    get_quote_ccy_rate,
+)
 from autotrader.core.entities import Signal  # noqa: E402
 from autotrader.core.enums import (  # noqa: E402
     ExitReason,
@@ -382,8 +386,8 @@ def setup_pair_context(
 
     # SimulatorConfig
     preset = get_preset(symbol)
-    _pip_unit = 0.01 if "JPY" in symbol.upper() else 0.0001
-    _quote_ccy_rate = 1.0 if "JPY" in symbol.upper() else 150.0
+    _pip_unit = get_pip_unit(symbol)
+    _quote_ccy_rate = get_quote_ccy_rate(symbol)
     sim_config = SimulatorConfig(
         initial_balance=initial_balance,
         spread_pips=preset.spread_pips,

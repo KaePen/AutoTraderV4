@@ -11,6 +11,7 @@ import logging
 from datetime import UTC, datetime
 
 from autotrader.adapters.mt5.data_provider import MT5DataProvider
+from autotrader.config.trading_params import get_pip_unit
 from autotrader.adapters.mt5.exceptions import MT5DataError, MT5Error
 from autotrader.adapters.mt5.trade_executor import MT5TradeExecutor
 from autotrader.core.entities import Signal
@@ -57,7 +58,7 @@ class PositionSyncService:
     @staticmethod
     def _get_pip_size(symbol: str) -> float:
         """通貨ペアのpipサイズを返す"""
-        return 0.01 if "JPY" in symbol.upper() else 0.0001
+        return get_pip_unit(symbol)
 
     @staticmethod
     def _get_pip_value(symbol: str) -> float:

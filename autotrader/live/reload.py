@@ -12,6 +12,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
+from autotrader.config.trading_params import get_pip_unit
+
 logger = logging.getLogger(__name__)
 
 
@@ -158,7 +160,7 @@ class TradeLogicReloader:
         mod = importlib.import_module(
             "autotrader.decision.unified.position_manager"
         )
-        _pu = 0.01 if "JPY" in symbol.upper() else 0.0001
+        _pu = get_pip_unit(symbol)
         cfg = mod.PositionManagerConfig(pip_unit=_pu)
         return mod.PositionManager(cfg)
 

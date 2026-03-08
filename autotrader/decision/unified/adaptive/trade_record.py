@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime
 
+from autotrader.config.trading_params import get_pip_unit
 from autotrader.core.entities import ExitReason, Trade
 
 
@@ -54,7 +55,7 @@ class TradeRecord:
 
         # SL pips（エントリーとSLの差分）
         sl_pips = 0.0
-        _pip_unit = 0.01 if "JPY" in (trade.symbol or "JPY").upper() else 0.0001
+        _pip_unit = get_pip_unit(trade.symbol or "JPY")
         if trade.stop_loss and trade.entry_price:
             sl_pips = abs(
                 trade.entry_price - trade.stop_loss

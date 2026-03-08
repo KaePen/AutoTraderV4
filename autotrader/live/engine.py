@@ -31,6 +31,7 @@ from autotrader.core.enums import (
 from autotrader.core.event_bus import get_event_bus
 from autotrader.core.exceptions import TradingError, ValidationError
 from autotrader.core.interfaces.position_sizing import SizingContext
+from autotrader.config.trading_params import get_pip_unit
 from autotrader.decision.unified.config import UnifiedBotConfig
 from autotrader.decision.unified.position_manager import (
     ManagementActionType,
@@ -102,9 +103,7 @@ class LiveTradingEngine:
             symbol=config.symbol,
         )
         self._bot = UnifiedTradeBot(config.bot_config)
-        _live_pip_unit = (
-            0.01 if "JPY" in config.symbol.upper() else 0.0001
-        )
+        _live_pip_unit = get_pip_unit(config.symbol)
         self._pm = PositionManager(
             PositionManagerConfig(pip_unit=_live_pip_unit),
         )
@@ -453,7 +452,7 @@ class LiveTradingEngine:
         Returns:
             float: pipサイズ
         """
-        return 0.01 if "JPY" in symbol.upper() else 0.0001
+        return get_pip_unit(symbol)
 
     @staticmethod
     def _get_pip_value(symbol: str) -> float:
