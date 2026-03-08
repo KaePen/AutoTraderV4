@@ -18,7 +18,8 @@ import logging
 import math
 import sys
 import time
-from dataclasses import dataclass, field
+from concurrent.futures import ProcessPoolExecutor
+from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -608,6 +609,324 @@ def run_multi_pair_year(
 
 
 # =============================================================
+# 年並列ワーカー（別プロセスで実行）
+# =============================================================
+def _run_year_worker(args: tuple) -> dict[str, Any] | None:
+    """年並列ワーカー（別プロセスで実行）
+
+    各ワーカーが独立にデータロード→コンテキスト構築→
+    インターリーブ実行を行う。
+    結果はシリアライズ可能なdictで返す。
+
+    Args:
+        args: (year, symbols, data_dir,
+               multi_config_dict, bot_extra_overrides)
+
+    Returns:
+        dict | None: 年の実行結果（データなしならNone）
+    """
+    (
+        year,
+        symbols,
+        data_dir,
+        multi_config_dict,
+        bot_extra_overrides,
+    ) = args
+
+    # ワーカープロセス内でインポート（spawn対応）
+    import sys as _sys
+    from pathlib import Path as _Path
+
+    _sr = _Path(__file__).resolve().parent.parent
+    if str(_sr) not in _sys.path:
+        _sys.path.insert(0, str(_sr))
+
+    from scripts.run_portfolio_backtest import (
+        build_bot_config as _build_bot_config,
+    )
+
+    # MultiPairConfig 復元
+    mc = MultiPairConfig(**multi_config_dict)
+
+    # データロード（各ワーカーが独自にロード）
+    runners: dict[
+        str, tuple[BacktestRunner, dict[str, pd.DataFrame]]
+    ] = {}
+    for sym in symbols:
+        runners[sym] = load_pair_data(sym, data_dir)
+
+    # ポートフォリオ初期化（年独立: 毎年100万リセット）
+    portfolio = PortfolioState(
+        equity=INITIAL_EQUITY,
+        initial_equity=INITIAL_EQUITY,
+        peak_equity=INITIAL_EQUITY,
+    )
+
+    # ペアコンテキスト構築
+    contexts: dict[str, PairContext] = {}
+    for sym in symbols:
+        runner, full_md = runners[sym]
+        extra_overrides: dict[str, Any] = {
+            "base_risk_pct": mc.base_risk_pct,
+            "consensus_threshold": mc.consensus_threshold,
+        }
+        extra_overrides.update(bot_extra_overrides)
+        bot_config = _build_bot_config(sym, extra_overrides)
+
+        ctx = setup_pair_context(
+            sym,
+            runner,
+            year,
+            bot_config,
+            portfolio.equity,
+            full_market_data=full_md,
+        )
+        if ctx is not None:
+            contexts[sym] = ctx
+
+    if not contexts:
+        return None
+
+    # インターリーブ実行
+    pair_trades = run_multi_pair_year(
+        year, contexts, mc, portfolio,
+    )
+
+    # 結果をシリアライズ可能なdictに変換
+    year_pnl = portfolio.equity - portfolio.initial_equity
+    year_trades = sum(len(t) for t in pair_trades.values())
+
+    # 月次PnLをstr化（tupleキーはpickle不可ではないが
+    # JSON化で問題になるためstr変換）
+    monthly_pnl_str: dict[str, float] = {}
+    for (y, m), pnl in portfolio.monthly_pnl.items():
+        monthly_pnl_str[f"{y:04d}-{m:02d}"] = pnl
+
+    # ペア別サマリー（Tradeオブジェクトは転送不可）
+    pair_summaries: dict[str, dict[str, Any]] = {}
+    for sym in symbols:
+        trades = pair_trades.get(sym, [])
+        n = len(trades)
+        wins = sum(
+            1 for t in trades if (t.profit_loss or 0) > 0
+        )
+        gp = sum(
+            t.profit_loss
+            for t in trades
+            if (t.profit_loss or 0) > 0
+        )
+        gl = abs(
+            sum(
+                t.profit_loss
+                for t in trades
+                if (t.profit_loss or 0) <= 0
+            )
+        )
+        np_ = sum(t.profit_loss or 0 for t in trades)
+        pair_summaries[sym] = {
+            "trades": n,
+            "wins": wins,
+            "gross_profit": gp,
+            "gross_loss": gl,
+            "net_profit": np_,
+        }
+
+    return {
+        "year": year,
+        "year_pnl": year_pnl,
+        "year_trades": year_trades,
+        "final_equity": portfolio.equity,
+        "max_dd_pct": portfolio.max_dd_pct,
+        "monthly_pnl": monthly_pnl_str,
+        "blocked_global": portfolio.blocked_global,
+        "blocked_per_pair": portfolio.blocked_per_pair,
+        "blocked_exposure": portfolio.blocked_exposure,
+        "pair_summaries": pair_summaries,
+    }
+
+
+# =============================================================
+# 年並列結果の集約
+# =============================================================
+def aggregate_year_results(
+    test_name: str,
+    year_results: list[dict[str, Any]],
+    symbols: list[str],
+    num_years: int,
+) -> dict[str, Any]:
+    """年並列結果をポートフォリオメトリクスに集約
+
+    Args:
+        test_name: テスト名
+        year_results: 年ワーカーの結果リスト
+        symbols: シンボルリスト
+        num_years: 年数
+
+    Returns:
+        dict: 集約結果（aggregate_resultsと同形式）
+    """
+    total_profit = sum(yr["year_pnl"] for yr in year_results)
+    max_dd_pct = max(yr["max_dd_pct"] for yr in year_results)
+
+    # 月次PnLを結合（"YYYY-MM" -> pnl）
+    all_monthly: dict[str, float] = {}
+    for yr in year_results:
+        for key, pnl in yr["monthly_pnl"].items():
+            all_monthly[key] = (
+                all_monthly.get(key, 0.0) + pnl
+            )
+
+    sorted_months = sorted(all_monthly.keys())
+    monthly_pnl_list = [all_monthly[m] for m in sorted_months]
+
+    # 月次DDも計算（バーレベルDDとの比較用）
+    equity = INITIAL_EQUITY
+    peak = equity
+    max_dd_monthly = 0.0
+    for pnl in monthly_pnl_list:
+        equity += pnl
+        if equity > peak:
+            peak = equity
+        dd = (
+            (peak - equity) / peak * 100
+            if peak > 0
+            else 0.0
+        )
+        if dd > max_dd_monthly:
+            max_dd_monthly = dd
+    # 年独立実行なので各年のバーレベルDDの最大値を使用
+    max_dd = max(max_dd_pct, max_dd_monthly)
+
+    # Sharpe
+    if len(monthly_pnl_list) > 1:
+        arr = np.array(monthly_pnl_list)
+        mean_m = np.mean(arr)
+        std_m = np.std(arr, ddof=1)
+        sharpe = (
+            (mean_m / std_m) * math.sqrt(12)
+            if std_m > 0
+            else 0.0
+        )
+    else:
+        sharpe = 0.0
+
+    # ペア別メトリクス集約
+    total_trades = 0
+    total_wins = 0
+    total_gp = 0.0
+    total_gl = 0.0
+    pair_metrics: dict[str, dict[str, Any]] = {}
+
+    for sym in symbols:
+        n = 0
+        wins = 0
+        gp = 0.0
+        gl = 0.0
+        np_ = 0.0
+        for yr in year_results:
+            ps = yr["pair_summaries"].get(sym, {})
+            n += ps.get("trades", 0)
+            wins += ps.get("wins", 0)
+            gp += ps.get("gross_profit", 0.0)
+            gl += ps.get("gross_loss", 0.0)
+            np_ += ps.get("net_profit", 0.0)
+        total_trades += n
+        total_wins += wins
+        total_gp += gp
+        total_gl += gl
+
+        wr = wins / n * 100 if n > 0 else 0.0
+        pf = gp / gl if gl > 0 else float("inf")
+        pair_metrics[sym] = {
+            "trades": n,
+            "profit": np_,
+            "wr": wr,
+            "pf": pf,
+            "contribution": 0.0,
+        }
+
+    # 寄与率
+    for sym in symbols:
+        pm = pair_metrics[sym]
+        pm["contribution"] = (
+            pm["profit"] / total_profit * 100
+            if total_profit > 0
+            else 0.0
+        )
+
+    wr = (
+        total_wins / total_trades * 100
+        if total_trades > 0
+        else 0.0
+    )
+    pf = total_gp / total_gl if total_gl > 0 else float("inf")
+
+    # 月間勝率
+    winning_months = sum(1 for p in monthly_pnl_list if p > 0)
+    monthly_wr = (
+        winning_months / len(monthly_pnl_list) * 100
+        if monthly_pnl_list
+        else 0.0
+    )
+
+    # 年間収益率
+    annual_return = (
+        (total_profit / INITIAL_EQUITY) / num_years * 100
+        if num_years > 0
+        else 0.0
+    )
+
+    # blocked合計
+    blocked_global = sum(
+        yr["blocked_global"] for yr in year_results
+    )
+    blocked_per_pair = sum(
+        yr["blocked_per_pair"] for yr in year_results
+    )
+    blocked_exposure = sum(
+        yr["blocked_exposure"] for yr in year_results
+    )
+
+    # yearly_results構築
+    yearly_results = [
+        {
+            "year": yr["year"],
+            "pnl": yr["year_pnl"],
+            "trades": yr["year_trades"],
+            "equity": yr["final_equity"],
+        }
+        for yr in sorted(year_results, key=lambda x: x["year"])
+    ]
+
+    # monthly_pnlをtuple形式に戻す（既存コードとの互換性）
+    monthly_pnl_tuples: dict[tuple[int, int], float] = {}
+    for key, pnl in all_monthly.items():
+        parts = key.split("-")
+        monthly_pnl_tuples[(int(parts[0]), int(parts[1]))] = pnl
+
+    final_equity = INITIAL_EQUITY + total_profit
+
+    return {
+        "test_name": test_name,
+        "total_profit": total_profit,
+        "annual_return_pct": annual_return,
+        "max_dd_pct": max_dd,
+        "sharpe": sharpe,
+        "wr": wr,
+        "pf": pf,
+        "monthly_wr": monthly_wr,
+        "total_trades": total_trades,
+        "pair_metrics": pair_metrics,
+        "yearly_results": yearly_results,
+        "monthly_pnl": monthly_pnl_tuples,
+        "blocked_global": blocked_global,
+        "blocked_per_pair": blocked_per_pair,
+        "blocked_exposure": blocked_exposure,
+        "final_equity": final_equity,
+    }
+
+
+# =============================================================
 # テストケース実行
 # =============================================================
 def run_test_case(
@@ -616,19 +935,29 @@ def run_test_case(
     symbols: list[str],
     start_year: int = START_YEAR,
     end_year: int = END_YEAR,
+    max_year_workers: int = 1,
+    data_dir: str = "",
+    bot_extra_overrides: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """テストケースを2020-2025で実行
+    """テストケースを実行（順次 or 年並列）
 
     Args:
         test_config: テスト設定
         runners: ペア別(BacktestRunner, market_data)辞書
+            （順次実行時のみ使用）
         symbols: 対象シンボル
         start_year: 開始年
         end_year: 終了年
+        max_year_workers: 年並列数（1=順次, >1=並列）
+        data_dir: データディレクトリ（並列実行時に必須）
+        bot_extra_overrides: 追加botオーバーライド
 
     Returns:
         dict: テスト結果
     """
+    num_years = end_year - start_year + 1
+    _extra = bot_extra_overrides or {}
+
     print(f"\n{'=' * 60}")
     print(f"  テスト: {test_config.name}")
     print(
@@ -638,16 +967,83 @@ def run_test_case(
         f"risk={test_config.base_risk_pct}, "
         f"CT={test_config.consensus_threshold}"
     )
+    if max_year_workers > 1:
+        print(f"  年並列: {max_year_workers}ワーカー")
     print(f"{'=' * 60}")
 
+    # --- 年並列実行 ---
+    if max_year_workers > 1:
+        mc_dict = asdict(test_config)
+        worker_args = [
+            (
+                year,
+                symbols,
+                data_dir,
+                mc_dict,
+                _extra,
+            )
+            for year in range(start_year, end_year + 1)
+        ]
+
+        year_results: list[dict[str, Any]] = []
+        with ProcessPoolExecutor(
+            max_workers=max_year_workers,
+        ) as executor:
+            futures = executor.map(
+                _run_year_worker, worker_args,
+            )
+            for yr_result in futures:
+                if yr_result is not None:
+                    year_results.append(yr_result)
+                    print(
+                        f"  {yr_result['year']}年: "
+                        f"PnL={yr_result['year_pnl']:+,.0f}, "
+                        f"Trades={yr_result['year_trades']}, "
+                        f"Equity="
+                        f"{yr_result['final_equity']:,.0f}"
+                    )
+
+        if not year_results:
+            # データなし時のフォールバック
+            return {
+                "test_name": test_config.name,
+                "total_profit": 0.0,
+                "annual_return_pct": 0.0,
+                "max_dd_pct": 0.0,
+                "sharpe": 0.0,
+                "wr": 0.0,
+                "pf": 0.0,
+                "monthly_wr": 0.0,
+                "total_trades": 0,
+                "pair_metrics": {},
+                "yearly_results": [],
+                "monthly_pnl": {},
+                "blocked_global": 0,
+                "blocked_per_pair": 0,
+                "blocked_exposure": 0,
+                "final_equity": INITIAL_EQUITY,
+            }
+
+        result = aggregate_year_results(
+            test_config.name,
+            year_results,
+            symbols,
+            num_years,
+        )
+        _print_result_summary(result)
+        return result
+
+    # --- 順次実行（既存ロジック） ---
     portfolio = PortfolioState(
         equity=INITIAL_EQUITY,
         initial_equity=INITIAL_EQUITY,
         peak_equity=INITIAL_EQUITY,
     )
 
-    all_pair_trades: dict[str, list[Any]] = {sym: [] for sym in symbols}
-    yearly_results: list[dict[str, Any]] = []
+    all_pair_trades: dict[str, list[Any]] = {
+        sym: [] for sym in symbols
+    }
+    yearly_results_seq: list[dict[str, Any]] = []
 
     for year in range(start_year, end_year + 1):
         year_start_equity = portfolio.equity
@@ -659,12 +1055,18 @@ def run_test_case(
             # ペア別bot_config構築
             extra_overrides: dict[str, Any] = {
                 "base_risk_pct": test_config.base_risk_pct,
-                "consensus_threshold": test_config.consensus_threshold,
+                "consensus_threshold": (
+                    test_config.consensus_threshold
+                ),
             }
-            bot_config = build_bot_config(sym, extra_overrides)
+            extra_overrides.update(_extra)
+            bot_config = build_bot_config(
+                sym, extra_overrides,
+            )
 
             ctx = setup_pair_context(
-                sym, runner, year, bot_config, portfolio.equity,
+                sym, runner, year, bot_config,
+                portfolio.equity,
                 full_market_data=full_md,
             )
             if ctx is not None:
@@ -684,8 +1086,10 @@ def run_test_case(
 
         # 年次サマリー
         year_pnl = portfolio.equity - year_start_equity
-        year_trades = sum(len(t) for t in pair_trades.values())
-        yearly_results.append(
+        year_trades = sum(
+            len(t) for t in pair_trades.values()
+        )
+        yearly_results_seq.append(
             {
                 "year": year,
                 "pnl": year_pnl,
@@ -705,9 +1109,9 @@ def run_test_case(
         test_config.name,
         portfolio,
         all_pair_trades,
-        yearly_results,
+        yearly_results_seq,
         symbols,
-        end_year - start_year + 1,
+        num_years,
     )
     _print_result_summary(result)
     return result
@@ -1227,6 +1631,12 @@ def main() -> None:
         default=END_YEAR,
         help="終了年",
     )
+    parser.add_argument(
+        "--max-year-workers",
+        type=int,
+        default=1,
+        help="年並列ワーカー数（1=順次, 0=年数から自動）",
+    )
     args = parser.parse_args()
 
     logging.basicConfig(
@@ -1261,16 +1671,31 @@ def main() -> None:
     else:
         test_names = [t.strip() for t in args.tests.split(",")]
 
-    # データロード（全ペア1回のみ）
-    print("\nデータロード中...")
+    # 年並列ワーカー数の決定
+    num_years = args.end_year - args.start_year + 1
+    max_year_workers = args.max_year_workers
+    if max_year_workers == 0:
+        max_year_workers = num_years
+    is_parallel = max_year_workers > 1
+
+    if is_parallel:
+        print(f"\n年並列モード: {max_year_workers}ワーカー")
+
+    # データロード（順次実行時のみ事前ロード）
     runners: dict[
         str, tuple[BacktestRunner, dict[str, pd.DataFrame]]
     ] = {}
-    for sym in available:
-        _t0 = time.time()
-        runners[sym] = load_pair_data(sym, data_dir)
-        elapsed = time.time() - _t0
-        print(f"  {sym}: {elapsed:.1f}s")
+    if not is_parallel:
+        print("\nデータロード中...")
+        for sym in available:
+            _t0 = time.time()
+            runners[sym] = load_pair_data(sym, data_dir)
+            elapsed = time.time() - _t0
+            print(f"  {sym}: {elapsed:.1f}s")
+    else:
+        print(
+            "\n各ワーカーがデータを独自にロードします。"
+        )
 
     # テスト実行
     results: dict[str, dict[str, Any]] = {}
@@ -1286,6 +1711,8 @@ def main() -> None:
             available,
             start_year=args.start_year,
             end_year=args.end_year,
+            max_year_workers=max_year_workers,
+            data_dir=data_dir,
         )
         results[test_name] = result
 
