@@ -5,7 +5,7 @@
 ジョブを順次実行する常駐スクリプト。
 
 使い方:
-    uv run python scripts/backtest_queue_runner.py
+    uv run python scripts/backtest_queue_runner.py --cpu-threads 12
 
 対話コマンド:
     stop   - 実行中ジョブを即時停止、ログ削除、キュー先頭に戻す
@@ -17,9 +17,11 @@
 
 from __future__ import annotations
 
+import argparse
 import io
 import json
 import logging
+import math
 import os
 import sys
 import threading
@@ -57,11 +59,12 @@ logging.basicConfig(
 )
 logger = logging.getLogger("queue_runner")
 
-# パス定数
-QUEUE_FILE = _project_root / "backtest_queue.json"
-STATE_FILE = _project_root / "backtest_queue_state.json"
-RESULTS_DIR = _project_root / "backtest_results"
-DEFAULT_DATA_DIR = "D:/Projects/AutoTraderV4_data/data"
+# パス定数（データ専用ディレクトリに出力）
+_DATA_ROOT = Path("D:/Projects/AutoTraderV4_data")
+QUEUE_FILE = _DATA_ROOT / "backtest_queue.json"
+STATE_FILE = _DATA_ROOT / "backtest_queue_state.json"
+RESULTS_DIR = _DATA_ROOT / "backtest_results"
+DEFAULT_DATA_DIR = str(_DATA_ROOT / "data")
 
 POLL_INTERVAL = 2.0  # キューポーリング間隔（秒）
 
@@ -186,12 +189,14 @@ def parse_years(years_str: str) -> tuple[int, int]:
 def execute_job(
     job: Job,
     cancel_event: threading.Event,
+    max_year_workers: int = 5,
 ) -> JobResult:
     """バックテストジョブを実行
 
     Args:
         job: 実行するジョブ
         cancel_event: キャンセルイベント
+        max_year_workers: 年並列実行数
 
     Returns:
         JobResult: 実行結果
@@ -304,6 +309,7 @@ def execute_job(
             config=bot_config,
             pm_config=pm_config,
             use_m1=True,
+            max_year_workers=max_year_workers,
         )
 
         if cancel_event.is_set():
@@ -392,12 +398,35 @@ def main() -> None:
     """キューランナーのメインループ"""
     import queue as _q  # noqa: PLC0415
 
+    parser = argparse.ArgumentParser(
+        description="バックテストキューランナー",
+    )
+    parser.add_argument(
+        "--cpu-threads",
+        type=int,
+        default=os.cpu_count() or 4,
+        help=(
+            "使用可能なCPUスレッド数"
+            "（デフォルト: OS検出値）"
+        ),
+    )
+    cli_args = parser.parse_args()
+
+    # 1年 ≈ 1.5スレッド の計算式
+    max_year_workers = max(
+        1, math.floor(cli_args.cpu_threads / 1.5),
+    )
+
     print("=" * 60)
     print("  バックテストキューランナー")
     print("=" * 60)
     print(f"  キューファイル: {QUEUE_FILE}")
     print(f"  結果ディレクトリ: {RESULTS_DIR}")
     print(f"  ポーリング間隔: {POLL_INTERVAL}s")
+    print(
+        f"  CPUスレッド: {cli_args.cpu_threads}"
+        f" → 年並列数: {max_year_workers}",
+    )
     print()
     print("  コマンド:")
     print("    stop   - 実行中ジョブ停止+ログ削除+キュー先頭")
@@ -430,7 +459,9 @@ def main() -> None:
 
     def _run_job(j: Job) -> None:
         """ジョブ実行スレッド"""
-        job_result_holder[0] = execute_job(j, cancel_event)
+        job_result_holder[0] = execute_job(
+            j, cancel_event, max_year_workers,
+        )
 
     while True:
         # コマンド処理
@@ -492,6 +523,10 @@ def main() -> None:
                     )
                     print(
                         f"  完了済み: {len(state.completed_ids)}件"
+                    )
+                    print(
+                        f"  CPUスレッド: {cli_args.cpu_threads}"
+                        f" → 年並列数: {max_year_workers}"
                     )
 
                 elif cmd == "quit":
