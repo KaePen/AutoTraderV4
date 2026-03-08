@@ -273,12 +273,14 @@ def _remove_worktree(
     branch: str,
     *,
     respect_activity: bool = True,
+    quiet: bool = False,
 ) -> bool:
     """ブランチに紐づくworktreeを削除する。
 
     Args:
         branch: ブランチ名
         respect_activity: Trueの場合、アクティブなworktreeは削除しない
+        quiet: Trueの場合、SKIP/WARNログを抑制する
 
     Returns:
         bool: 削除した場合True
@@ -291,10 +293,11 @@ def _remove_worktree(
     if respect_activity:
         reason = _is_worktree_active(wt_path)
         if reason:
-            print(
-                f"[SKIP] worktree保護（{reason}）: {wt_path}",
-                flush=True,
-            )
+            if not quiet:
+                print(
+                    f"[SKIP] worktree保護（{reason}）: {wt_path}",
+                    flush=True,
+                )
             return False
 
     r = _git(["worktree", "remove", "--force", wt_path])
@@ -314,6 +317,7 @@ def _delete_branch(
     *,
     force: bool = False,
     respect_activity: bool = True,
+    quiet: bool = False,
 ) -> bool:
     """ローカルブランチを削除する（worktreeがあれば先に除去）。
 
@@ -323,6 +327,7 @@ def _delete_branch(
         branch: ブランチ名
         force: -D（強制）を使うかどうか
         respect_activity: Trueの場合、アクティブなworktreeは削除しない
+        quiet: Trueの場合、SKIP/WARNログを抑制する
 
     Returns:
         bool: 削除した場合True
@@ -330,13 +335,17 @@ def _delete_branch(
     wt_path = _get_worktree_for_branch(branch)
     if wt_path:
         removed = _remove_worktree(
-            branch, respect_activity=respect_activity
+            branch,
+            respect_activity=respect_activity,
+            quiet=quiet,
         )
         if not removed:
-            print(
-                f"[WARN] worktree除去失敗のためブランチ削除スキップ: {branch}",
-                flush=True,
-            )
+            if not quiet:
+                print(
+                    f"[WARN] worktree除去失敗のため"
+                    f"ブランチ削除スキップ: {branch}",
+                    flush=True,
+                )
             return False
     flag = "-D" if force else "-d"
     r = _git(["branch", flag, branch])
@@ -350,17 +359,17 @@ def _delete_branch(
     return False
 
 
-def _cleanup_orphan_tmp_dirs() -> int:
+def _cleanup_orphan_tmp_dirs() -> tuple[int, int]:
     """tmp/配下の孤立ディレクトリを削除する。
 
     有効なworktreeに紐づかないディレクトリを削除。
     ただしアクティブなディレクトリは保護する。
 
     Returns:
-        int: 削除したディレクトリ数
+        tuple[int, int]: (削除数, 保護数)
     """
     if not TMP_DIR.exists():
-        return 0
+        return 0, 0
 
     # 有効なworktreeパスを収集
     valid_paths: set[str] = set()
@@ -372,6 +381,7 @@ def _cleanup_orphan_tmp_dirs() -> int:
                 valid_paths.add(resolved)
 
     removed = 0
+    protected = 0
     for entry in TMP_DIR.iterdir():
         if not entry.is_dir():
             continue
@@ -381,10 +391,7 @@ def _cleanup_orphan_tmp_dirs() -> int:
         # 安全チェック: アクティブなディレクトリは保護
         reason = _is_worktree_active(entry)
         if reason:
-            print(
-                f"[SKIP] ディレクトリ保護（{reason}）: {entry.name}",
-                flush=True,
-            )
+            protected += 1
             continue
 
         try:
@@ -399,7 +406,7 @@ def _cleanup_orphan_tmp_dirs() -> int:
                 f"[WARN] ディレクトリ削除失敗: {entry.name}: {e}",
                 flush=True,
             )
-    return removed
+    return removed, protected
 
 
 def cleanup_stale() -> None:
@@ -417,6 +424,7 @@ def cleanup_stale() -> None:
     """
     print("[INFO] クリーンアップ開始...", flush=True)
     cleaned = 0
+    protected_count = 0
 
     # 1. worktree prune
     _git(["worktree", "prune"])
@@ -447,12 +455,18 @@ def cleanup_stale() -> None:
                 branch,
                 force=True,
                 respect_activity=True,
+                quiet=True,
             ):
                 print(
                     f"[INFO] マージ済みブランチ削除: {branch}",
                     flush=True,
                 )
                 cleaned += 1
+            else:
+                # 削除失敗 = アクティブworktreeで保護された
+                wt = _get_worktree_for_branch(branch)
+                if wt and _is_worktree_active(wt):
+                    protected_count += 1
 
     # 4. 孤立ローカルブランチ（リモート無し＆worktree無し）
     r = _git(["branch"])
@@ -477,11 +491,7 @@ def cleanup_stale() -> None:
                 if wt:
                     reason = _is_worktree_active(wt)
                     if reason:
-                        print(
-                            f"[SKIP] 孤立ブランチ保護"
-                            f"（{reason}）: {branch}",
-                            flush=True,
-                        )
+                        protected_count += 1
                         continue
                     # worktreeあるがアクティブでない → 削除可能
                     print(
@@ -493,12 +503,19 @@ def cleanup_stale() -> None:
                     branch,
                     force=True,
                     respect_activity=True,
+                    quiet=True,
                 ):
                     print(
                         f"[INFO] 孤立ブランチ削除: {branch}",
                         flush=True,
                     )
                     cleaned += 1
+                else:
+                    # quiet=Trueで抑制されたが保護された場合
+                    if not wt:
+                        wt = _get_worktree_for_branch(branch)
+                    if wt and _is_worktree_active(wt):
+                        protected_count += 1
 
     # 5. マージ済みリモートブランチを削除
     r = _git(["branch", "-r", "--merged", "main"])
@@ -526,7 +543,16 @@ def cleanup_stale() -> None:
                 cleaned += 1
 
     # 6. tmp/配下の孤立ディレクトリを削除（アクティブ保護）
-    cleaned += _cleanup_orphan_tmp_dirs()
+    tmp_removed, tmp_protected = _cleanup_orphan_tmp_dirs()
+    cleaned += tmp_removed
+    protected_count += tmp_protected
+
+    # アクティブworktree保護のサマリ出力
+    if protected_count > 0:
+        print(
+            f"[INFO] アクティブworktree: {protected_count}件保護中",
+            flush=True,
+        )
 
     status = f"{cleaned}件処理" if cleaned > 0 else "不要なゴミなし"
     print(f"[INFO] クリーンアップ完了: {status}", flush=True)
@@ -890,6 +916,7 @@ def main() -> None:
                             br,
                             force=True,
                             respect_activity=True,
+                            quiet=True,
                         ):
                             print(
                                 f"[INFO] 延期ブランチ削除"
