@@ -509,12 +509,12 @@ class UnifiedTradeBot:
         self.consensus = ModeAwareScoreConsensus(_consensus_cfg)
 
         # ポジションサイザー（資金管理パラメータを設定から注入）
-        # pip_unitからクォート通貨のpip_value(JPY建て)を計算
-        # JPY(pip_unit=0.01): 100,000×0.01=¥1,000/pip/lot
-        # USD(pip_unit=0.0001): 100,000×0.0001=$10×150≈¥1,500/pip/lot
+        # pip_value = 100,000通貨 × pip_unit × quote_ccy_rate
+        # USDJPY: 100,000 × 0.01 × 1.0 = 1,000 JPY/pip/lot
+        # EURUSD: 100,000 × 0.0001 × 150.0 = 1,500 JPY/pip/lot
         _sizer_pv = (
-            1000.0 if self.config.pip_unit >= 0.001
-            else 1500.0
+            100_000 * self.config.pip_unit
+            * self.config.quote_ccy_rate
         )
         self.position_sizer = PositionSizer(
             PositionSizerConfig(

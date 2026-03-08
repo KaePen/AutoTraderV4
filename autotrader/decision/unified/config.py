@@ -500,6 +500,8 @@ class UnifiedBotConfig:
     # --- pip単位 ---
     # 1pipの価格単位（JPY系=0.01、非JPY系=0.0001）
     pip_unit: float = 0.01
+    # クォート通貨→口座通貨(JPY)変換レート
+    quote_ccy_rate: float = 1.0
     # --- M1リトレースエントリー ---
     # リトレースエントリー有効化
     m1_retrace_entry_enabled: bool = False
