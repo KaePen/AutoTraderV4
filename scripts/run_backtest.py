@@ -1293,6 +1293,9 @@ def run_single_backtest(args: argparse.Namespace):
         BacktestServiceConfig,
     )
     from autotrader.config.trading_params import get_preset as _get_preset
+    from autotrader.config.trading_params import (
+        get_symbol_overrides as _get_symbol_overrides,
+    )
 
     start_year, end_year = parse_years(args.years)
 
@@ -1382,9 +1385,16 @@ def run_single_backtest(args: argparse.Namespace):
     _legacy_bot = _collect_legacy_bot_overrides(args)
     _legacy_pm = _collect_legacy_pm_overrides(args)
 
-    # マージ: preset < YAML < --override < 旧CLI < --bot/--pm（後者優先）
+    # ペア別 signal/filter/pm_config 上書き取得
+    _sym_ovr = _get_symbol_overrides(args.symbol)
+    _sym_signal = _sym_ovr.get("signal", {})
+    _sym_filter = _sym_ovr.get("filter", {})
+    _sym_risk = _sym_ovr.get("risk_mgmt", {})
+    _sym_pm = _sym_ovr.get("pm_config", {})
+
+    # マージ: preset < sym_signal/filter < YAML < --override < 旧CLI < --bot/--pm
     _bot_overrides: dict[str, object] = {}
-    # プリセット値をベースレイヤーとして注入（最低優先、CLI/YAMLで上書き可能）
+    # プリセット値をベースレイヤーとして注入（最低優先）
     _pip_unit = 0.01 if "JPY" in args.symbol.upper() else 0.0001
     _bot_overrides.update({
         "max_positions": _preset.max_positions,
@@ -1396,12 +1406,18 @@ def run_single_backtest(args: argparse.Namespace):
         "equity_floor_pct": _preset.equity_floor_pct,
         "pip_unit": _pip_unit,
     })
+    # ペア別 signal/filter/risk_mgmt 上書き（プリセット < ペア別 < YAML < CLI）
+    _bot_overrides.update(_sym_signal)
+    _bot_overrides.update(_sym_filter)
+    _bot_overrides.update(_sym_risk)
     _bot_overrides.update(_yaml_bot)
     _bot_overrides.update(_dot_bot)
     _bot_overrides.update(_legacy_bot)
     _bot_overrides.update(_auto_bot)
 
     _pm_overrides: dict[str, object] = {}
+    # ペア別 pm_config 上書き（最低優先）
+    _pm_overrides.update(_sym_pm)
     _pm_overrides.update(_yaml_pm)
     _pm_overrides.update(_dot_pm)
     _pm_overrides.update(_legacy_pm)
