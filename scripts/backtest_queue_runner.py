@@ -37,7 +37,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-import psutil
 
 # Windows cp932エンコーディング回避
 if sys.platform == "win32":
@@ -542,6 +541,8 @@ def _kill_job_child_processes(
     Returns:
         int: 終了させたプロセス数
     """
+    import psutil  # noqa: PLC0415
+
     killed = 0
     try:
         parent = psutil.Process(os.getpid())
