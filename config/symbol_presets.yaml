@@ -78,6 +78,8 @@ pm_config:
 
 # --- 通貨ペア別プリセット ---
 defaults:
+  pip_unit: 0.01          # JPYペア: 1pip = 0.01
+  quote_ccy_rate: 1.0     # JPYペア: クォート通貨=JPY、変換不要
   pip_value: 100.0
   spread_pips: 1.5
   slippage_pips: 0.5
@@ -104,6 +106,8 @@ defaults:
 # ------------------------------------------------------------------
 symbols:
   EURUSD:
+    pip_unit: 0.0001       # 非JPYペア: 1pip = 0.0001
+    quote_ccy_rate: 150.0  # USD→JPY概算レート
     pip_value: 10.0        # EUR/USD 1pip=$0.0001×100,000=$10
     spread_pips: 1.0
     slippage_pips: 0.3
@@ -115,6 +119,8 @@ symbols:
     max_lot_per_trade: 2.0
 
   GBPUSD:
+    pip_unit: 0.0001
+    quote_ccy_rate: 150.0
     pip_value: 10.0        # GBP/USD 1pip=$10/lot
     spread_pips: 1.5
     slippage_pips: 0.3
@@ -131,6 +137,8 @@ symbols:
     breakeven_at_1r: true
 
   AUDUSD:
+    pip_unit: 0.0001
+    quote_ccy_rate: 150.0
     pip_value: 10.0        # AUD/USD 1pip=$10/lot
     spread_pips: 1.5
     slippage_pips: 0.3
@@ -142,6 +150,8 @@ symbols:
     max_lot_per_trade: 2.0
 
   NZDUSD:
+    pip_unit: 0.0001
+    quote_ccy_rate: 150.0
     pip_value: 10.0        # NZD/USD 1pip=$10/lot
     spread_pips: 2.0       # NZDは流動性やや低め
     slippage_pips: 0.5
@@ -153,6 +163,8 @@ symbols:
     max_lot_per_trade: 1.5
 
   USDCHF:
+    pip_unit: 0.0001
+    quote_ccy_rate: 170.0  # CHF→JPY概算レート
     pip_value: 9.0         # 1pip=10CHF/lot、CHF≈1.1USD → ~$9.1
     spread_pips: 1.5
     slippage_pips: 0.3
@@ -164,6 +176,8 @@ symbols:
     max_lot_per_trade: 2.0
 
   USDCAD:
+    pip_unit: 0.0001
+    quote_ccy_rate: 110.0  # CAD→JPY概算レート
     pip_value: 7.5         # 1pip=10CAD/lot、CAD≈0.75USD → ~$7.3
     spread_pips: 2.0
     slippage_pips: 0.5
