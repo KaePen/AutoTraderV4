@@ -113,15 +113,41 @@ def build_engine_config(symbol: str) -> object:
 def _create_engine_manager():
     """EngineManagerを環境変数+YAML設定から生成
 
+    symbol_presets.yaml の multi_pair セクションから
+    グローバル制限値を読み込み、EngineManager に適用する。
+
     Returns:
         EngineManager: エンジンマネージャー
     """
+    from autotrader.config.config_loader import ConfigLoader
     from autotrader.live.engine_manager import (
         EngineManager,
     )
 
     mt5_config = _get_mt5_config()
-    return EngineManager(mt5_config)
+
+    # symbol_presets.yaml の multi_pair セクションを読み込み
+    loader = ConfigLoader()
+    presets_data = loader._load_presets_yaml()
+    mp = presets_data.get("multi_pair", {})
+
+    global_max_pos = mp.get("global_max_positions", 6)
+    global_max_exp = mp.get(
+        "global_max_exposure_lot", 10.0,
+    )
+
+    logger.info(
+        "EngineManager: global_max_positions=%d,"
+        " global_max_exposure_lot=%.1f",
+        global_max_pos,
+        global_max_exp,
+    )
+
+    return EngineManager(
+        mt5_config,
+        global_max_positions=global_max_pos,
+        global_max_exposure_lot=global_max_exp,
+    )
 
 
 def _create_live_engine():
