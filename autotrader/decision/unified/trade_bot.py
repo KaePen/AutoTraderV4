@@ -2,7 +2,7 @@
 
 新アーキテクチャ対応版:
 - MarketRegimeDetector: レジーム検出
-- TradingModeSelector: モード選択
+- TradingPlan: UNIVERSALモードプラン
 - ModeAwareScoreConsensus: コンセンサス統合
 - PositionSizer: ロット計算
 - PositionManager: ポジション管理
@@ -21,13 +21,13 @@ from autotrader.constraint.filters.m1_execution_gate import (
     M1ExecutionGate,
     M1ExecutionGateConfig,
 )
+from autotrader.constraint.filters.session_transition_filter import (
+    SessionTransitionFilter,
+)
 from autotrader.constraint.soft_guard import (
     SoftGuard,
     SoftGuardConfig,
     SoftGuardResult,
-)
-from autotrader.constraint.filters.session_transition_filter import (
-    SessionTransitionFilter,
 )
 from autotrader.core.enums import MarketRegime, SignalType
 from autotrader.core.interfaces.position_sizing import SizingContext
@@ -39,15 +39,15 @@ from .adaptive import (
     TunerConfig,
 )
 from .config import RiskConfig, UnifiedBotConfig
+from .mode_selector import TradingPlan
+from .pipeline_pkg.directional_edge import DirectionalEdgeAssessor
+from .risk.position_sizer import PositionSizer, PositionSizerConfig
 from .scoring.consensus import (
     ConsensusConfig,
     ConsensusResult,
     ModeAwareScoreConsensus,
 )
-from .mode_selector import ModeSelectorConfig, TradingModeSelector, TradingPlan
-from .risk.position_sizer import PositionSizer, PositionSizerConfig
 from .scoring.consolidator import ConsolidatedSignal
-from .pipeline_pkg.directional_edge import DirectionalEdgeAssessor
 from .scoring.timeframe_evaluator import TimeframeEvaluator, TimeframeSignal
 from .timeframe_router import TimeframeRouter
 
@@ -485,10 +485,7 @@ class UnifiedTradeBot:
 
         self.regime_detector = MarketRegimeDetector(RegimeDetectorConfig())
 
-        # モード選択器（UNIVERSAL固定）
-        self.mode_selector = TradingModeSelector(
-            bot_config=self.config,
-        )
+        # モード選択（UNIVERSAL固定、TradingPlan直接生成）
 
         # タイムフレームルーター
         self.tf_router = TimeframeRouter()
@@ -834,7 +831,7 @@ class UnifiedTradeBot:
             return self._hold_signal(session_result.reason)
 
         # 3. 初期プラン（デフォルトTF値）
-        plan = self.mode_selector.select()
+        plan = TradingPlan.create_universal(self.config)
 
         # 4. 全TF評価 → tf_signals
         tf_signals: dict[str, TimeframeSignal] = {}

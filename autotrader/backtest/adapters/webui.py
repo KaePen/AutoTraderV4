@@ -37,7 +37,6 @@ class WebUIAdapter:
         use_short_timeframe = getattr(request, "use_short_timeframe", True)
 
         # 新オプション（後方互換性）
-        use_multi_mode = getattr(request, "use_multi_mode", False)
         parallel_years = getattr(request, "parallel_years", False)
         max_workers = getattr(request, "max_workers", None)
         symbol = getattr(request, "symbol", "USDJPY")
@@ -51,7 +50,6 @@ class WebUIAdapter:
             symbol=symbol,
             data_dir=data_dir,
             use_short_timeframe=use_short_timeframe,
-            use_multi_mode=use_multi_mode,
             parallel_years=parallel_years,
             max_workers=max_workers,
             max_positions=max_positions,

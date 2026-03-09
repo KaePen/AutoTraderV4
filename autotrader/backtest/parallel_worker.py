@@ -45,7 +45,7 @@ def _run_year_worker(
     Args:
         task_args: (data_dir_base, backtest_config, bot_config,
                     sim_config, year, year_market_data,
-                    use_m1, use_multi_mode, fundamental_provider,
+                    use_m1, fundamental_provider,
                     period_start, period_end) のタプル
 
     Returns:
@@ -56,7 +56,7 @@ def _run_year_worker(
     from autotrader.backtest.year_runner import run_unified_year
 
     # adaptive_config は後方互換のためオプション
-    if len(task_args) >= 12:
+    if len(task_args) >= 11:
         (
             data_dir_base,
             backtest_config,
@@ -65,7 +65,6 @@ def _run_year_worker(
             year,
             year_market_data,
             use_m1,
-            use_multi_mode,
             fundamental_provider,
             period_start,
             period_end,
@@ -80,7 +79,6 @@ def _run_year_worker(
             year,
             year_market_data,
             use_m1,
-            use_multi_mode,
             fundamental_provider,
             period_start,
             period_end,

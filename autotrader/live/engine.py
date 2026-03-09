@@ -45,6 +45,10 @@ from autotrader.decision.unified.position_sizer import (
 from autotrader.decision.unified.signal_consolidator import (
     ConsolidatedSignal,
 )
+from autotrader.decision.unified.mode_selector import (
+    UNIVERSAL_MODE,
+    TradingPlan,
+)
 from autotrader.decision.unified.trade_bot import UnifiedTradeBot
 from autotrader.live.config import FundamentalConfig, LiveTradingConfig
 from autotrader.live.mt5_utils import mt5_reason_to_exit_reason
@@ -1437,11 +1441,6 @@ class LiveTradingEngine:
             volume: ロット数
             entry_tick: エントリー時のtick情報（ask/bid）
         """
-        from autotrader.decision.unified.mode_selector import (
-            UNIVERSAL_MODE,
-            TradingModeSelector,
-        )
-
         # エントリー価格（実際のask/bid価格）
         is_buy = signal.signal_type == SignalType.BUY
         if entry_tick:
@@ -1481,9 +1480,9 @@ class LiveTradingEngine:
         # モードは常にUNIVERSAL
         mode = UNIVERSAL_MODE
 
-        # ModeSelector経由でプランパラメータを取得し
+        # UNIVERSALプランを取得し
         # regimeとselection_reasonを付与
-        _base_plan = TradingModeSelector().get_plan_for_mode()
+        _base_plan = TradingPlan.create_universal()
         plan = dataclasses.replace(
             _base_plan,
             selection_reason="live",
@@ -1491,7 +1490,7 @@ class LiveTradingEngine:
         )
         logger.info(
             "PM登録プラン: mode=%s primary_tf=%s",
-            mode.value,
+            mode,
             plan.primary_tf,
         )
 
@@ -2260,10 +2259,6 @@ class LiveTradingEngine:
             pos_id = str(pos.ticket)
             if self._pm.get_position(pos_id) is None:
                 import dataclasses as _dc
-
-                from autotrader.decision.unified.mode_selector import (
-                    TradingPlan,
-                )
 
                 plan = TradingPlan.create_universal(
                     self._bot.config,

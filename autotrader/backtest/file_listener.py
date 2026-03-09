@@ -15,6 +15,7 @@ from autotrader.backtest.events import (
     SignalEvent,
     TradeEvent,
 )
+from autotrader.decision.unified.mode_selector import UNIVERSAL_MODE
 
 # CSV出力カラム定義
 CSV_COLUMNS = [
@@ -351,7 +352,7 @@ class FileEventListener(EventListener):
                 continue
             regime = parts[1].strip()
             mode = parts[2].strip()
-            if regime == "RANGE" and mode == "UNIVERSAL":
+            if regime == "RANGE" and mode == UNIVERSAL_MODE:
                 exit_r = parts[0].strip()
                 range_day[exit_r] = s
 

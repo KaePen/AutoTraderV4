@@ -25,6 +25,10 @@ from autotrader.decision.unified.position_manager import (
     PositionManager,
 )
 from autotrader.decision.unified.position_sizer import PositionSizer
+from autotrader.decision.unified.mode_selector import (
+    UNIVERSAL_MODE,
+    TradingPlan,
+)
 from autotrader.decision.unified.trade_bot import UnifiedTradeBot
 from autotrader.live.tick_entry_optimizer import TickEntryOptimizer
 
@@ -349,11 +353,6 @@ class OrderService:
             active_symbol: アクティブシンボル
             save_position_state: 状態保存コールバック
         """
-        from autotrader.decision.unified.mode_selector import (
-            UNIVERSAL_MODE,
-            TradingModeSelector,
-        )
-
         # エントリー価格（実際のask/bid価格）
         is_buy = signal.signal_type == SignalType.BUY
         if entry_tick:
@@ -392,8 +391,8 @@ class OrderService:
         # モードは常にUNIVERSAL
         mode = UNIVERSAL_MODE
 
-        # ModeSelector経由でプランパラメータを取得
-        _base_plan = TradingModeSelector().get_plan_for_mode()
+        # UNIVERSALプランを取得
+        _base_plan = TradingPlan.create_universal()
         plan = dataclasses.replace(
             _base_plan,
             selection_reason="live",
@@ -401,7 +400,7 @@ class OrderService:
         )
         logger.info(
             "PM登録プラン: mode=%s primary_tf=%s",
-            mode.value,
+            mode,
             plan.primary_tf,
         )
 
