@@ -270,7 +270,6 @@ class PairContext:
         simulator: シミュレーター
         arrays: CandleArrays（基準TF）
         base_tf: 基準タイムフレーム
-        runner: BacktestRunner（データ保持用）
     """
 
     symbol: str
@@ -278,7 +277,6 @@ class PairContext:
     simulator: TradeSimulator
     arrays: CandleArrays
     base_tf: Timeframe
-    runner: BacktestRunner
 
 
 # =============================================================
@@ -373,69 +371,111 @@ def load_all_pair_data(
     return runners
 
 
+def load_year_data(
+    symbols: list[str],
+    data_dir: str,
+    year: int,
+    max_workers: int = 6,
+) -> dict[str, dict[str, pd.DataFrame]]:
+    """1年分の全ペアデータをロード（年フィルタ済み）
+
+    全期間データをペアごとにロード→年フィルタ→全期間データ即時解放。
+    ピークメモリ: 1ペア全期間(~600MB) + 既処理ペア年データ(~100MB/ペア)
+
+    Args:
+        symbols: シンボルリスト
+        data_dir: データディレクトリ
+        year: 対象年
+        max_workers: 並列ワーカー数
+
+    Returns:
+        dict[str, dict[str, pd.DataFrame]]:
+            シンボル→TF名→年フィルタ済みDataFrame
+    """
+    start_date = datetime(year, 1, 1)
+    end_date = datetime(year + 1, 1, 1)
+
+    result: dict[str, dict[str, pd.DataFrame]] = {}
+    workers = min(max_workers, len(symbols))
+    _t0 = time.time()
+    print(
+        f"\n  {year}年データロード中... "
+        f"({len(symbols)}ペア, workers={workers})"
+    )
+
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        futures = {
+            executor.submit(
+                load_pair_data, sym, data_dir,
+            ): sym
+            for sym in symbols
+        }
+        for future in as_completed(futures):
+            sym = futures[future]
+            _runner, full_md = future.result()
+            # 年フィルタ
+            year_md: dict[str, pd.DataFrame] = {}
+            for tf_key, tf_df in full_md.items():
+                year_df = tf_df[
+                    (tf_df["time"] >= start_date)
+                    & (tf_df["time"] < end_date)
+                ].reset_index(drop=True)
+                if not year_df.empty:
+                    year_md[tf_key] = year_df
+            result[sym] = year_md
+            # 全期間データを即時解放
+            del full_md, _runner
+
+    gc.collect()
+    total = time.time() - _t0
+    print(f"    全ペアロード完了: {total:.1f}s")
+    return result
+
+
 # =============================================================
 # コンテキスト構築
 # =============================================================
 def setup_pair_context(
     symbol: str,
-    runner: BacktestRunner,
     year: int,
     bot_config: UnifiedBotConfig,
     initial_balance: float,
-    full_market_data: dict[str, pd.DataFrame] | None = None,
+    year_market_data: dict[str, pd.DataFrame] | None = None,
 ) -> PairContext | None:
     """ペアごとのBot/Simulator/Arraysを初期化
 
     Args:
         symbol: 通貨ペア名
-        runner: データロード済みランナー
         year: 対象年
         bot_config: ボット設定
         initial_balance: 初期残高
-        full_market_data: 全期間market_data（年フィルタ前）
+        year_market_data: 年フィルタ済みmarket_data
 
     Returns:
         PairContext | None: コンテキスト（データなしならNone）
     """
-    if full_market_data is None:
+    if not year_market_data:
         return None
 
     # 基準TF選択（M1 > M5 > M15 > H1）
     base_tf_name = None
     for tf_name in ["M1", "M5", "M15", "H1"]:
-        if tf_name in full_market_data:
+        if tf_name in year_market_data:
             base_tf_name = tf_name
             break
     if base_tf_name is None:
         return None
 
     tf = Timeframe(base_tf_name)
-    df = full_market_data[base_tf_name]
+    base_df = year_market_data[base_tf_name]
 
-    # 年フィルタ
-    start_date = datetime(year, 1, 1)
-    end_date = datetime(year + 1, 1, 1)
-    period_df = df[
-        (df["time"] >= start_date) & (df["time"] < end_date)
-    ].reset_index(drop=True)
-
-    if period_df.empty:
+    if base_df.empty:
         return None
 
-    # market_data: 年フィルタ済みデータ
-    market_data: dict[str, pd.DataFrame] = {}
-    for tf_key, tf_df in full_market_data.items():
-        year_df = tf_df[
-            (tf_df["time"] >= start_date)
-            & (tf_df["time"] < end_date)
-        ].reset_index(drop=True)
-        if not year_df.empty:
-            market_data[tf_key] = year_df
-
-    # Bot初期化
+    # Bot初期化（年フィルタ済みデータをそのまま使用）
     bot = UnifiedTradeBot(bot_config)
     bot.state = bot.state.with_initial_equity(initial_balance)
-    bot.set_market_data(market_data)
+    bot.set_market_data(year_market_data)
 
     # SimulatorConfig
     preset = get_preset(symbol)
@@ -459,8 +499,7 @@ def setup_pair_context(
     )
     simulator = TradeSimulator(config=sim_config)
 
-    arrays = CandleArrays.from_dataframe(period_df)
-    del period_df  # DataFrame のメモリ解放（CandleArrays に変換済み）
+    arrays = CandleArrays.from_dataframe(base_df)
 
     return PairContext(
         symbol=symbol,
@@ -468,7 +507,6 @@ def setup_pair_context(
         simulator=simulator,
         arrays=arrays,
         base_tf=tf,
-        runner=runner,
     )
 
 
@@ -814,9 +852,10 @@ def _run_year_worker(args: tuple) -> dict[str, Any] | None:
             f"高メモリ使用。max_year_workers=1 を推奨"
         )
 
-    # データロード（各ワーカーが独自にスレッド並列ロード）
-    runners = load_all_pair_data(
-        symbols, data_dir, max_workers=min(6, len(symbols)),
+    # 年単位データロード（全期間→年フィルタ→即時解放）
+    year_data = load_year_data(
+        symbols, data_dir,
+        year, max_workers=min(6, len(symbols)),
     )
 
     # ポートフォリオ初期化（年独立: 毎年100万リセット）
@@ -829,7 +868,6 @@ def _run_year_worker(args: tuple) -> dict[str, Any] | None:
     # ペアコンテキスト構築
     contexts: dict[str, PairContext] = {}
     for sym in symbols:
-        runner, full_md = runners[sym]
         extra_overrides: dict[str, Any] = {
             "base_risk_pct": mc.base_risk_pct,
             "consensus_threshold": mc.consensus_threshold,
@@ -837,16 +875,20 @@ def _run_year_worker(args: tuple) -> dict[str, Any] | None:
         extra_overrides.update(bot_extra_overrides)
         bot_config = _build_bot_config(sym, extra_overrides)
 
+        sym_year_md = year_data.get(sym)
         ctx = setup_pair_context(
             sym,
-            runner,
             year,
             bot_config,
             portfolio.equity,
-            full_market_data=full_md,
+            year_market_data=sym_year_md,
         )
         if ctx is not None:
             contexts[sym] = ctx
+
+    # 年データはBot内部にコピー済み → 解放
+    del year_data
+    gc.collect()
 
     if not contexts:
         return None
@@ -1102,32 +1144,38 @@ def aggregate_year_results(
 # =============================================================
 def run_test_case(
     test_config: MultiPairConfig,
-    runners: dict[str, tuple[BacktestRunner, dict[str, pd.DataFrame]]],
     symbols: list[str],
     start_year: int = START_YEAR,
     end_year: int = END_YEAR,
     max_year_workers: int = 1,
     data_dir: str = "",
     bot_extra_overrides: dict[str, Any] | None = None,
+    year_data_cache: dict[
+        int, dict[str, dict[str, pd.DataFrame]]
+    ] | None = None,
 ) -> dict[str, Any]:
     """テストケースを実行（順次 or 年並列）
 
     Args:
         test_config: テスト設定
-        runners: ペア別(BacktestRunner, market_data)辞書
-            （順次実行時のみ使用）
         symbols: 対象シンボル
         start_year: 開始年
         end_year: 終了年
         max_year_workers: 年並列数（1=順次, >1=並列）
-        data_dir: データディレクトリ（並列実行時に必須）
+        data_dir: データディレクトリ
         bot_extra_overrides: 追加botオーバーライド
+        year_data_cache: 年→ペア→TF→DataFrame の
+            事前ロード済みキャッシュ（複数テスト共有用）
 
     Returns:
         dict: テスト結果
     """
     num_years = end_year - start_year + 1
     _extra = bot_extra_overrides or {}
+
+    # データディレクトリ解決
+    if not data_dir:
+        data_dir = str(get_data_dir())
 
     # 8ペア以上では年並列を無効化（メモリ不足防止）
     if len(symbols) >= 8 and max_year_workers > 1:
@@ -1137,16 +1185,6 @@ def run_test_case(
             f"{max_year_workers} → 1)"
         )
         max_year_workers = 1
-
-    # 年並列→順次に切り替わった場合、データロードが必要
-    if max_year_workers <= 1 and not runners:
-        if not data_dir:
-            data_dir = str(get_data_dir())
-        runners = load_all_pair_data(
-            symbols,
-            data_dir,
-            max_workers=min(6, len(symbols)),
-        )
 
     print(f"\n{'=' * 60}")
     print(f"  テスト: {test_config.name}")
@@ -1243,10 +1281,18 @@ def run_test_case(
             peak_equity=INITIAL_EQUITY,
         )
 
+        # 年データ取得（キャッシュ or 年単位ロード）
+        if year_data_cache is not None and year in year_data_cache:
+            year_data = year_data_cache[year]
+        else:
+            year_data = load_year_data(
+                symbols, data_dir, year,
+                max_workers=min(6, len(symbols)),
+            )
+
         # ペアコンテキスト構築
         contexts: dict[str, PairContext] = {}
         for sym in symbols:
-            runner, full_md = runners[sym]
             # ペア別bot_config構築
             extra_overrides: dict[str, Any] = {
                 "base_risk_pct": test_config.base_risk_pct,
@@ -1259,10 +1305,11 @@ def run_test_case(
                 sym, extra_overrides,
             )
 
+            sym_year_md = year_data.get(sym)
             ctx = setup_pair_context(
-                sym, runner, year, bot_config,
+                sym, year, bot_config,
                 INITIAL_EQUITY,
-                full_market_data=full_md,
+                year_market_data=sym_year_md,
             )
             if ctx is not None:
                 contexts[sym] = ctx
@@ -1934,35 +1981,25 @@ def main() -> None:
     if is_parallel:
         print(f"\n年並列モード: {max_year_workers}ワーカー")
 
-    # データロード（順次実行時のみ事前ロード）
-    runners: dict[
-        str, tuple[BacktestRunner, dict[str, pd.DataFrame]]
-    ] = {}
-    if not is_parallel:
-        runners = load_all_pair_data(available, data_dir)
-    else:
-        print(
-            "\n各ワーカーがデータを独自にロードします。"
-        )
-
     # テスト実行
     results: dict[str, dict[str, Any]] = {}
+    selected_tests: list[MultiPairConfig] = []
     for test_name in test_names:
         if test_name not in TEST_MATRIX:
             print(f"警告: 不明なテスト '{test_name}' をスキップ")
             continue
+        selected_tests.append(TEST_MATRIX[test_name])
 
-        test_config = TEST_MATRIX[test_name]
+    for test_config in selected_tests:
         result = run_test_case(
             test_config,
-            runners,
             available,
             start_year=args.start_year,
             end_year=args.end_year,
             max_year_workers=max_year_workers,
             data_dir=data_dir,
         )
-        results[test_name] = result
+        results[test_config.name] = result
 
     if not results:
         print("テスト結果なし。")
