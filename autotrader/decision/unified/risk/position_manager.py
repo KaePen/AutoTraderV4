@@ -15,7 +15,7 @@ from autotrader.core.entities import (
     PositionState,
     PositionStateMachine,
 )
-from autotrader.core.enums import ExitReason, SignalType, TradingStrategyMode
+from autotrader.core.enums import ExitReason, SignalType
 from autotrader.decision.unified.mode_selector import TradingPlan
 
 logger = logging.getLogger(__name__)
@@ -208,8 +208,8 @@ class PositionManagerConfig:
     time_exit_enabled: bool = True
     spread_pips: float = 1.5
     slippage_pips: float = 0.5
-    be_enabled_modes: tuple[TradingStrategyMode, ...] = (
-        TradingStrategyMode.UNIVERSAL,
+    be_enabled_modes: tuple[str, ...] = (
+        "UNIVERSAL",
     )
     early_breakeven_r: float = 0.3
     early_breakeven_enabled: bool = False

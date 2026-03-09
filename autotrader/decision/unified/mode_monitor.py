@@ -10,7 +10,8 @@ from typing import TYPE_CHECKING
 
 import pandas as pd
 
-from autotrader.core.enums import SignalType, TradingStrategyMode
+from autotrader.core.enums import SignalType
+from autotrader.decision.unified.mode_selector import UNIVERSAL_MODE
 from autotrader.decision.unified.timeframe_evaluator import (
     TimeframeEvaluator,
     TimeframeSignal,
@@ -26,7 +27,7 @@ class ModeConfig:
     """モード別設定
 
     Attributes:
-        mode: トレーディングモード
+        mode: トレーディングモード（常に"UNIVERSAL"）
         primary_tf: プライマリ時間足
         entry_tf: エントリー判断時間足
         confirm_tfs: 確認用時間足リスト
@@ -36,7 +37,7 @@ class ModeConfig:
         min_confidence: 最小確度
     """
 
-    mode: TradingStrategyMode
+    mode: str
     primary_tf: str
     entry_tf: str
     confirm_tfs: list[str]
@@ -70,7 +71,7 @@ def _universal_config_from_bot_config(
         }
     ]
     return ModeConfig(
-        mode=TradingStrategyMode.UNIVERSAL,
+        mode=UNIVERSAL_MODE,
         primary_tf=bot_config.default_primary_tf,
         entry_tf=bot_config.default_entry_tf,
         confirm_tfs=_confirm,
@@ -90,7 +91,7 @@ class ModeSignal:
     """モード別シグナル
 
     Attributes:
-        mode: トレーディングモード
+        mode: トレーディングモード（常に"UNIVERSAL"）
         direction: シグナル方向
         confidence: 確度
         sl_pips: 損切りpips
@@ -101,7 +102,7 @@ class ModeSignal:
         confirm_signals: 確認TFシグナルリスト
     """
 
-    mode: TradingStrategyMode
+    mode: str
     direction: SignalType
     confidence: float
     sl_pips: float
@@ -405,7 +406,7 @@ class ModeMonitor:
         Returns:
             str: 判断理由
         """
-        mode_name = self._config.mode.value
+        mode_name = self._config.mode
         direction = primary_signal.direction.value
         primary_reason = primary_signal.reason
 
@@ -419,7 +420,7 @@ class ModeMonitor:
         return " | ".join(parts)
 
     @property
-    def mode(self) -> TradingStrategyMode:
+    def mode(self) -> str:
         """モードを取得"""
         return self._config.mode
 

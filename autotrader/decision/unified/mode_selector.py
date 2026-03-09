@@ -8,10 +8,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from autotrader.core.enums import TradingStrategyMode
-
 if TYPE_CHECKING:
     from autotrader.decision.unified.config import UnifiedBotConfig
+
+# UNIVERSALモード定数（旧TradingStrategyMode.UNIVERSAL）
+UNIVERSAL_MODE: str = "UNIVERSAL"
 
 
 @dataclass(frozen=True)
@@ -21,7 +22,7 @@ class TradingPlan:
     選択されたモードと参照時間足の設定。
 
     Attributes:
-        mode: トレーディングモード
+        mode: トレーディングモード（常に"UNIVERSAL"）
         primary_tf: 主要時間足（シグナル判断の基準）
         entry_tf: エントリー時間足（タイミング判断）
         confirm_tfs: 確認用時間足リスト
@@ -30,7 +31,7 @@ class TradingPlan:
         tp_sl_ratio_range: TP/SL比率の推奨範囲
     """
 
-    mode: TradingStrategyMode
+    mode: str
     primary_tf: str
     entry_tf: str
     confirm_tfs: list[str]
@@ -91,7 +92,7 @@ class TradingPlan:
             }
         ]
         return cls(
-            mode=TradingStrategyMode.UNIVERSAL,
+            mode=UNIVERSAL_MODE,
             primary_tf=config.default_primary_tf,
             entry_tf=config.default_entry_tf,
             confirm_tfs=_confirm,
@@ -141,16 +142,16 @@ class TradingModeSelector:
         Returns:
             TradingPlan: UNIVERSALトレーディングプラン
         """
-        return self.get_plan_for_mode(TradingStrategyMode.UNIVERSAL)
+        return self.get_plan_for_mode()
 
     def get_plan_for_mode(
         self,
-        mode: TradingStrategyMode,
+        mode: str = UNIVERSAL_MODE,
     ) -> TradingPlan:
         """指定モードのプランを取得（UNIVERSAL固定）
 
         Args:
-            mode: トレーディングモード（UNIVERSALのみ有効）
+            mode: トレーディングモード（無視、常にUNIVERSAL）
 
         Returns:
             TradingPlan: UNIVERSALトレーディングプラン

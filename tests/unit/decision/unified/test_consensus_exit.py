@@ -6,7 +6,7 @@ from datetime import datetime
 
 import pytest
 
-from autotrader.core.enums import SignalType, TradingStrategyMode
+from autotrader.core.enums import SignalType
 from autotrader.decision.unified.mode_selector import TradingPlan
 from autotrader.decision.unified.position_manager import (
     ManagedPosition,
@@ -36,7 +36,7 @@ def _make_pm(
 def _make_plan() -> TradingPlan:
     """テスト用TradingPlan"""
     return TradingPlan(
-        mode=TradingStrategyMode.UNIVERSAL,
+        mode="UNIVERSAL",
         primary_tf="M15",
         entry_tf="M5",
         confirm_tfs=["H1", "H4"],

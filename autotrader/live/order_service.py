@@ -349,8 +349,8 @@ class OrderService:
             active_symbol: アクティブシンボル
             save_position_state: 状態保存コールバック
         """
-        from autotrader.core.enums import TradingStrategyMode
         from autotrader.decision.unified.mode_selector import (
+            UNIVERSAL_MODE,
             TradingModeSelector,
         )
 
@@ -389,19 +389,11 @@ class OrderService:
             tp_price,
         )
 
-        # signal.modeから実際のモードを解決
-        mode = TradingStrategyMode.UNIVERSAL
-        if signal.mode:
-            try:
-                mode = TradingStrategyMode(signal.mode.upper())
-            except ValueError:
-                logger.warning(
-                    "不明なモード: %s、UNIVERSALを使用",
-                    signal.mode,
-                )
+        # モードは常にUNIVERSAL
+        mode = UNIVERSAL_MODE
 
-        # ModeSelector経由でモード別プランパラメータを取得
-        _base_plan = TradingModeSelector().get_plan_for_mode(mode)
+        # ModeSelector経由でプランパラメータを取得
+        _base_plan = TradingModeSelector().get_plan_for_mode()
         plan = dataclasses.replace(
             _base_plan,
             selection_reason="live",

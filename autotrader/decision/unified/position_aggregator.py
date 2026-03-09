@@ -10,8 +10,9 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import TYPE_CHECKING
 
-from autotrader.core.enums import SignalType, TradingStrategyMode
+from autotrader.core.enums import SignalType
 from autotrader.decision.unified.mode_monitor import ModeSignal
+from autotrader.decision.unified.mode_selector import UNIVERSAL_MODE
 
 if TYPE_CHECKING:
     pass
@@ -35,7 +36,7 @@ class ModePosition:
         unrealized_pnl: 未実現損益
     """
 
-    mode: TradingStrategyMode
+    mode: str
     position_id: str
     direction: SignalType
     entry_price: float
@@ -84,10 +85,10 @@ class AggregatorState:
 
     positions: list[ModePosition] = field(default_factory=list)
     total_risk_pct: float = 0.0
-    mode_risk_pct: dict[TradingStrategyMode, float] = field(
+    mode_risk_pct: dict[str, float] = field(
         default_factory=dict
     )
-    mode_position_count: dict[TradingStrategyMode, int] = field(
+    mode_position_count: dict[str, int] = field(
         default_factory=dict
     )
     daily_trades: int = 0
@@ -144,7 +145,7 @@ class PositionAggregator:
         # モード別ポジション数チェック
         mode_count = self._state.mode_position_count.get(mode, 0)
         if mode_count >= self._config.max_per_mode:
-            return False, f"{mode.value}ポジション上限({self._config.max_per_mode})"
+            return False, f"{mode}ポジション上限({self._config.max_per_mode})"
 
         # 逆方向チェック
         if not self._config.allow_opposite_directions:
@@ -164,7 +165,7 @@ class PositionAggregator:
         # モード別リスクチェック
         mode_risk = self._state.mode_risk_pct.get(mode, 0.0)
         if mode_risk + position_risk_pct > self._config.max_per_mode_risk_pct:
-            return False, f"{mode.value}リスク上限({self._config.max_per_mode_risk_pct}%)"
+            return False, f"{mode}リスク上限({self._config.max_per_mode_risk_pct}%)"
 
         return True, "OK"
 
@@ -191,7 +192,7 @@ class PositionAggregator:
             return None
 
         self._position_counter += 1
-        position_id = f"{signal.mode.value}_{self._position_counter}"
+        position_id = f"{signal.mode}_{self._position_counter}"
 
         position = ModePosition(
             mode=signal.mode,
@@ -329,7 +330,7 @@ class PositionAggregator:
 
     def get_positions_by_mode(
         self,
-        mode: TradingStrategyMode,
+        mode: str,
     ) -> list[ModePosition]:
         """モード別ポジションを取得
 
@@ -364,16 +365,16 @@ class PositionAggregator:
             dict: サマリー辞書
         """
         mode_summaries = {}
-        for mode in TradingStrategyMode:
-            positions = self.get_positions_by_mode(mode)
-            mode_summaries[mode.value] = {
-                "position_count": len(positions),
-                "total_volume": sum(p.volume for p in positions),
-                "total_unrealized_pnl": sum(
-                    p.unrealized_pnl for p in positions
-                ),
-                "risk_pct": self._state.mode_risk_pct.get(mode, 0.0),
-            }
+        mode = UNIVERSAL_MODE
+        positions = self.get_positions_by_mode(mode)
+        mode_summaries[mode] = {
+            "position_count": len(positions),
+            "total_volume": sum(p.volume for p in positions),
+            "total_unrealized_pnl": sum(
+                p.unrealized_pnl for p in positions
+            ),
+            "risk_pct": self._state.mode_risk_pct.get(mode, 0.0),
+        }
 
         return {
             "total_positions": len(self._state.positions),

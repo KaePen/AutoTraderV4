@@ -36,7 +36,6 @@ def run_unified_year(
     year: int,
     market_data: "dict[str, pd.DataFrame]",
     use_m1: bool = False,
-    multi_mode_controller: Any = None,
     fundamental_provider: Any = None,
     period_start: datetime | None = None,
     period_end: datetime | None = None,
@@ -56,7 +55,6 @@ def run_unified_year(
         year: 対象年
         market_data: 全時間足データ
         use_m1: M1データを基準タイムフレームとして使用
-        multi_mode_controller: マルチモードコントローラー
         fundamental_provider: ファンダメンタルプロバイダー
         period_start: 日単位の開始日時（Noneで年始）
         period_end: 日単位の終了日時・exclusive（Noneで年末）

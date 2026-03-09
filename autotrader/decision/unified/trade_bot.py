@@ -908,7 +908,7 @@ class UnifiedTradeBot:
                 )
 
         # 分析用に最後のモード/レジームを保持
-        self._last_mode = plan.mode.value
+        self._last_mode = plan.mode
         self._last_regime = regime_result.regime.value
 
         # 8. TFルーティング（動的plan使用）
@@ -1065,7 +1065,7 @@ class UnifiedTradeBot:
                         timestamp=str(current_time),
                         regime=regime_result.regime.value,
                         volatility=regime_result.volatility_level,
-                        mode=plan.mode.value,
+                        mode=plan.mode,
                         primary_tf=plan.primary_tf,
                         risk_passed=True,
                         tf_details=tf_detail,
@@ -1265,7 +1265,7 @@ class UnifiedTradeBot:
                             timestamp=str(current_time),
                             regime=regime_result.regime.value,
                             volatility=regime_result.volatility_level,
-                            mode=plan.mode.value,
+                            mode=plan.mode,
                             primary_tf=plan.primary_tf,
                             risk_passed=True,
                             consensus_direction=consensus.direction.value,
@@ -1481,7 +1481,7 @@ class UnifiedTradeBot:
                         timestamp=str(current_time),
                         regime=regime_result.regime.value,
                         volatility=regime_result.volatility_level,
-                        mode=plan.mode.value,
+                        mode=plan.mode,
                         primary_tf=plan.primary_tf,
                         risk_passed=True,
                         consensus_direction=consensus.direction.value,
@@ -1658,7 +1658,7 @@ class UnifiedTradeBot:
             lot = sizing_result.lot
 
         rationale = (
-            f"{consensus.reasoning}, mode={plan.mode.value}, lot={lot:.2f}"
+            f"{consensus.reasoning}, mode={plan.mode}, lot={lot:.2f}"
         )
 
         # フロー分析: シグナル発生記録
@@ -1672,7 +1672,7 @@ class UnifiedTradeBot:
                     timestamp=str(current_time),
                     regime=regime_result.regime.value,
                     volatility=regime_result.volatility_level,
-                    mode=plan.mode.value,
+                    mode=plan.mode,
                     primary_tf=plan.primary_tf,
                     risk_passed=True,
                     consensus_direction=consensus.direction.value,
@@ -1706,9 +1706,9 @@ class UnifiedTradeBot:
 
         # strategy_id構築（モード_選択理由）
         _strategy_id = (
-            f"{plan.mode.value}_{plan.selection_reason}"
+            f"{plan.mode}_{plan.selection_reason}"
             if plan.selection_reason
-            else plan.mode.value
+            else plan.mode
         )
 
         return ConsolidatedSignal(
@@ -1721,7 +1721,7 @@ class UnifiedTradeBot:
             rationale=rationale,
             scores={tf: sig.confidence for tf, sig in tf_signals.items()},
             regime=regime_result.regime.value,
-            mode=plan.mode.value,
+            mode=plan.mode,
             consensus_score=consensus.score,
             tf_score_breakdowns=tf_breakdowns,
             tf_directions=tf_directions,
@@ -2246,7 +2246,7 @@ class UnifiedTradeBot:
             rationale=reason,
             scores={tf: sig.confidence for tf, sig in tf_signals.items()},
             regime=regime_result.regime.value,
-            mode=plan.mode.value,
+            mode=plan.mode,
             consensus_score=consensus.score,
             tf_score_breakdowns=tf_breakdowns,
             tf_directions=tf_directions,

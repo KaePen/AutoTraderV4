@@ -1194,14 +1194,6 @@ class BacktestRunner:
                 enable_scalping=enable_scalping,
             )
 
-        # マルチモードコントローラー（オプション）
-        multi_mode_controller = None
-        if use_multi_mode:
-            from autotrader.decision.unified import MultiModeController
-
-            multi_mode_controller = MultiModeController()
-            multi_mode_controller.set_market_data(market_data)
-
         # シミュレーター設定
         _pip_unit = get_pip_unit(self.config.symbol)
         _quote_ccy_rate = get_quote_ccy_rate(self.config.symbol)
@@ -1277,7 +1269,6 @@ class BacktestRunner:
                         year,
                         market_data,
                         use_m1=use_m1,
-                        multi_mode_controller=multi_mode_controller,
                         fundamental_provider=fundamental_provider,
                         period_start=period_start,
                         period_end=period_end,
@@ -1461,7 +1452,6 @@ class BacktestRunner:
                     year,
                     market_data,
                     use_m1=use_m1,
-                    multi_mode_controller=multi_mode_controller,
                     fundamental_provider=fundamental_provider,
                     period_start=period_start,
                     period_end=period_end,
@@ -1842,7 +1832,6 @@ class BacktestRunner:
         year: int,
         market_data: "dict[str, pd.DataFrame]",
         use_m1: bool = False,
-        multi_mode_controller: Any = None,
         fundamental_provider: Any = None,
         period_start: datetime | None = None,
         period_end: datetime | None = None,
@@ -1861,7 +1850,6 @@ class BacktestRunner:
             year=year,
             market_data=market_data,
             use_m1=use_m1,
-            multi_mode_controller=multi_mode_controller,
             fundamental_provider=fundamental_provider,
             period_start=period_start,
             period_end=period_end,

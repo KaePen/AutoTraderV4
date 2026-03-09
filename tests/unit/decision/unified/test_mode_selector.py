@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 
-from autotrader.core.enums import MarketRegime, TradingStrategyMode
+from autotrader.core.enums import MarketRegime
 from autotrader.decision.unified.mode_selector import (
     ModeSelectorConfig,
     TradingModeSelector,
@@ -31,7 +31,7 @@ class TestTradingModeSelector:
                 volatility_level=1.0,
                 htf_alignment=0.5,
             )
-            assert plan.mode == TradingStrategyMode.UNIVERSAL
+            assert plan.mode == "UNIVERSAL"
 
     def test_universal_plan_includes_all_tfs(self) -> None:
         """UNIVERSALプランは全TFをconfirm_tfsに含む"""
@@ -39,7 +39,7 @@ class TestTradingModeSelector:
             regime=MarketRegime.RANGE,
             volatility_level=1.0,
         )
-        assert plan.mode == TradingStrategyMode.UNIVERSAL
+        assert plan.mode == "UNIVERSAL"
         assert len(plan.confirm_tfs) > 3
 
     def test_selection_reason_contains_universal(self) -> None:
@@ -57,7 +57,7 @@ class TestTradingPlan:
     def test_all_tfs_property(self) -> None:
         """all_tfsプロパティ"""
         plan = TradingPlan(
-            mode=TradingStrategyMode.UNIVERSAL,
+            mode="UNIVERSAL",
             primary_tf="M15",
             entry_tf="M5",
             confirm_tfs=["H1", "H4"],
@@ -78,7 +78,7 @@ class TestTradingPlan:
     def test_recommended_tp_sl_ratio(self) -> None:
         """推奨TP/SL比率"""
         plan = TradingPlan(
-            mode=TradingStrategyMode.UNIVERSAL,
+            mode="UNIVERSAL",
             primary_tf="M15",
             entry_tf="M5",
             confirm_tfs=["H1"],
@@ -106,14 +106,14 @@ class TestModeSelectorConfig:
             htf_alignment=0.9,
         )
 
-        assert plan.mode == TradingStrategyMode.UNIVERSAL
+        assert plan.mode == "UNIVERSAL"
 
     def test_get_plan_for_mode(self) -> None:
         """UNIVERSALモード指定でプラン取得"""
         selector = TradingModeSelector()
 
         universal_plan = selector.get_plan_for_mode(
-            TradingStrategyMode.UNIVERSAL,
+            "UNIVERSAL",
         )
 
-        assert universal_plan.mode == TradingStrategyMode.UNIVERSAL
+        assert universal_plan.mode == "UNIVERSAL"

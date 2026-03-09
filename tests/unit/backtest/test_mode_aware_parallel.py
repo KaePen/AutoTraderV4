@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from datetime import datetime
 
 
-from autotrader.core.enums import MarketRegime, TradingStrategyMode, SignalType
+from autotrader.core.enums import MarketRegime, SignalType
 
 
 @dataclass
@@ -29,7 +29,7 @@ class TestEntryTimeframeResolver:
         )
 
         resolver = EntryTimeframeResolver()
-        config = resolver.get_entry_config(TradingStrategyMode.UNIVERSAL)
+        config = resolver.get_entry_config("UNIVERSAL")
 
         assert config.primary_tf is not None
         assert config.entry_tf is not None
@@ -44,11 +44,11 @@ class TestEntryTimeframeResolver:
 
         resolver = EntryTimeframeResolver()
         entry_tf = resolver.get_entry_config(
-            TradingStrategyMode.UNIVERSAL,
+            "UNIVERSAL",
         ).entry_tf
 
         # entry_tf確定 → チェックすべき
-        assert resolver.should_check_entry(TradingStrategyMode.UNIVERSAL, entry_tf)
+        assert resolver.should_check_entry("UNIVERSAL", entry_tf)
 
     def test_resolve_entry_decision(self) -> None:
         """エントリー判定の解決"""
@@ -58,10 +58,10 @@ class TestEntryTimeframeResolver:
 
         resolver = EntryTimeframeResolver()
         entry_tf = resolver.get_entry_config(
-            TradingStrategyMode.UNIVERSAL,
+            "UNIVERSAL",
         ).entry_tf
         primary_tf = resolver.get_entry_config(
-            TradingStrategyMode.UNIVERSAL,
+            "UNIVERSAL",
         ).primary_tf
 
         # スコアを高めに設定（閾値を超えるように）
@@ -75,7 +75,7 @@ class TestEntryTimeframeResolver:
         }
 
         decision = resolver.resolve(
-            mode=TradingStrategyMode.UNIVERSAL,
+            mode="UNIVERSAL",
             completed_tf=entry_tf,
             tf_directions=tf_directions,
             tf_scores=tf_scores,
@@ -91,14 +91,14 @@ class TestEntryTimeframeResolver:
 
         resolver = EntryTimeframeResolver()
         entry_tf = resolver.get_entry_config(
-            TradingStrategyMode.UNIVERSAL,
+            "UNIVERSAL",
         ).entry_tf
         primary_tf = resolver.get_entry_config(
-            TradingStrategyMode.UNIVERSAL,
+            "UNIVERSAL",
         ).primary_tf
 
         decision = resolver.resolve(
-            mode=TradingStrategyMode.UNIVERSAL,
+            mode="UNIVERSAL",
             completed_tf=entry_tf,
             tf_directions={
                 entry_tf: "BUY",
@@ -127,7 +127,7 @@ class TestModeAwareScoreConsensus:
 
         consensus = ModeAwareScoreConsensus()
         selector = TradingModeSelector()
-        plan = selector.get_plan_for_mode(TradingStrategyMode.UNIVERSAL)
+        plan = selector.get_plan_for_mode("UNIVERSAL")
 
         tf_signals = {
             "M5": TimeframeSignal(
@@ -182,7 +182,7 @@ class TestModeAwareScoreConsensus:
 
         consensus = ModeAwareScoreConsensus()
         selector = TradingModeSelector()
-        plan = selector.get_plan_for_mode(TradingStrategyMode.UNIVERSAL)
+        plan = selector.get_plan_for_mode("UNIVERSAL")
 
         tf_signals = {
             "M5": TimeframeSignal(
@@ -230,7 +230,7 @@ class TestModeAwareScoreConsensus:
 
         consensus = ModeAwareScoreConsensus()
         selector = TradingModeSelector()
-        plan = selector.get_plan_for_mode(TradingStrategyMode.UNIVERSAL)
+        plan = selector.get_plan_for_mode("UNIVERSAL")
 
         tf_signals = {
             "M5": TimeframeSignal(
@@ -470,4 +470,4 @@ class TestTradingModeSelector:
                 volatility_level=1.0,
                 htf_alignment=0.5,
             )
-            assert plan.mode == TradingStrategyMode.UNIVERSAL
+            assert plan.mode == "UNIVERSAL"
