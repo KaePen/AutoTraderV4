@@ -18,7 +18,9 @@ import heapq
 import io
 import logging
 import math
+import multiprocessing
 import sys
+import threading
 import time
 from collections.abc import Callable
 from concurrent.futures import (
@@ -918,6 +920,22 @@ def run_multi_pair_year(
 # =============================================================
 # 年並列ワーカー（別プロセスで実行）
 # =============================================================
+# ワーカー→メインの進捗通信用Queue（initializer経由で設定）
+_worker_progress_queue: multiprocessing.Queue | None = None
+
+
+def _init_year_worker(
+    q: multiprocessing.Queue,
+) -> None:
+    """ワーカープロセス初期化（進捗Queue設定）
+
+    Args:
+        q: 進捗送信用Queue
+    """
+    global _worker_progress_queue  # noqa: PLW0603
+    _worker_progress_queue = q
+
+
 def _run_year_worker(args: tuple) -> dict[str, Any] | None:
     """年並列ワーカー（別プロセスで実行）
 
@@ -944,10 +962,6 @@ def _run_year_worker(args: tuple) -> dict[str, Any] | None:
     import sys as _sys
     from pathlib import Path as _Path
 
-    # 子プロセスでも行バッファリング（即時表示）
-    if hasattr(_sys.stdout, "reconfigure"):
-        _sys.stdout.reconfigure(line_buffering=True)
-
     _sr = _Path(__file__).resolve().parent.parent
     if str(_sr) not in _sys.path:
         _sys.path.insert(0, str(_sr))
@@ -958,6 +972,11 @@ def _run_year_worker(args: tuple) -> dict[str, Any] | None:
 
     # MultiPairConfig 復元
     mc = MultiPairConfig(**multi_config_dict)
+
+    # 進捗Queue: データロード開始を通知
+    _q = _worker_progress_queue
+    if _q is not None:
+        _q.put(("load", year, 0, 0, 0))
 
     # 年単位データロード（ワーカーでは出力抑制）
     year_data = load_year_data(
@@ -999,11 +1018,17 @@ def _run_year_worker(args: tuple) -> dict[str, Any] | None:
     if not contexts:
         return None
 
+    # 進捗コールバック: Queue経由でメインプロセスに送信
+    def _send_progress(
+        done: int, total: int, trades: int,
+    ) -> None:
+        if _q is not None:
+            _q.put(("bar", year, done, total, trades))
+
     # インターリーブ実行
-    # 年並列ではワーカーが多数同時にstdoutに書き込むため
-    # 進捗コールバックは使わず、年完了時のみメインプロセスで表示
     pair_trades = run_multi_pair_year(
         year, contexts, mc, portfolio,
+        on_progress=_send_progress,
     )
 
     # 結果をシリアライズ可能なdictに変換
@@ -1393,37 +1418,185 @@ def run_test_case(
 
         year_results: list[dict[str, Any]] = []
         _n_years = len(worker_args)
-        print(
-            f"  年並列実行中 "
-            f"({_n_years}年, {max_year_workers}w)...",
-            flush=True,
+        _years = [
+            wa[0] for wa in worker_args
+        ]
+
+        # 進捗Queue + rich Progress で年別進捗表示
+        _pq: multiprocessing.Queue = multiprocessing.Queue()
+
+        # rich Progress 構築
+        _use_rich_p = False
+        _prog = None
+        _yr_tasks: dict[int, Any] = {}
+        try:
+            from rich.progress import (
+                BarColumn,
+                Progress,
+                SpinnerColumn,
+                TaskProgressColumn,
+                TextColumn,
+                TimeRemainingColumn,
+            )
+
+            if _console is not None:
+                _prog = Progress(
+                    SpinnerColumn(),
+                    TextColumn(
+                        "[bold blue]"
+                        "{task.description}"
+                    ),
+                    BarColumn(bar_width=40),
+                    TaskProgressColumn(),
+                    TimeRemainingColumn(),
+                    console=_console,
+                )
+                _use_rich_p = True
+        except ImportError:
+            pass
+
+        if not _use_rich_p:
+            print(
+                f"  年並列実行中 "
+                f"({_n_years}年, "
+                f"{max_year_workers}w)...",
+                flush=True,
+            )
+
+        # Queue監視スレッド
+        _monitor_stop = threading.Event()
+
+        def _monitor_queue() -> None:
+            """Queueから進捗を読みrichバーを更新"""
+            while not _monitor_stop.is_set():
+                try:
+                    msg = _pq.get(timeout=0.5)
+                except Exception:
+                    continue
+                if msg is None:
+                    break
+                kind = msg[0]
+                yr = msg[1]
+                if kind == "load":
+                    # データロード開始
+                    if (
+                        _use_rich_p
+                        and _prog
+                        and yr not in _yr_tasks
+                    ):
+                        _yr_tasks[yr] = _prog.add_task(
+                            f"[yellow]{yr}年 "
+                            f"読込中[/yellow]",
+                            total=100,
+                        )
+                elif kind == "bar":
+                    done, total, trades = (
+                        msg[2],
+                        msg[3],
+                        msg[4],
+                    )
+                    if _use_rich_p and _prog:
+                        if yr not in _yr_tasks:
+                            _yr_tasks[yr] = (
+                                _prog.add_task(
+                                    f"[cyan]{yr}年"
+                                    f"[/cyan]",
+                                    total=100,
+                                )
+                            )
+                        pct = (
+                            done / total * 100
+                            if total > 0
+                            else 0
+                        )
+                        _prog.update(
+                            _yr_tasks[yr],
+                            completed=pct,
+                            description=(
+                                f"[cyan]{yr}年"
+                                f"[/cyan]"
+                                f" ({trades}件)"
+                            ),
+                        )
+
+        # 監視スレッド開始
+        _mon_t = threading.Thread(
+            target=_monitor_queue, daemon=True,
         )
+
+        def _on_year_done(
+            yr_result: dict[str, Any],
+        ) -> None:
+            """年完了時の表示処理"""
+            yr = yr_result["year"]
+            if _use_rich_p and _prog:
+                if yr in _yr_tasks:
+                    _prog.update(
+                        _yr_tasks[yr], completed=100,
+                    )
+                    _prog.remove_task(_yr_tasks[yr])
+                    del _yr_tasks[yr]
+                _pc = (
+                    "green"
+                    if yr_result["year_pnl"] > 0
+                    else "red"
+                )
+                _console.print(  # type: ignore[union-attr]
+                    f"  [bold]{yr}年[/bold]: "
+                    f"PnL=[{_pc}]"
+                    f"{yr_result['year_pnl']:+,.0f}"
+                    f"[/{_pc}]"
+                    f"  Trades="
+                    f"{yr_result['year_trades']}"
+                    f"  Equity="
+                    f"{yr_result['final_equity']:,.0f}",
+                )
+            else:
+                _done = len(year_results)
+                _eq = yr_result['final_equity']
+                print(
+                    f"  [{_done}/{_n_years}] "
+                    f"{yr_result['year']}年: "
+                    f"PnL="
+                    f"{yr_result['year_pnl']:+,.0f}"
+                    f", Trades="
+                    f"{yr_result['year_trades']}"
+                    f", Equity={_eq:,.0f}",
+                    flush=True,
+                )
+
+        # 実行
+        if _use_rich_p and _prog:
+            _prog.start()
+        _mon_t.start()
+
         with ProcessPoolExecutor(
             max_workers=max_year_workers,
+            initializer=_init_year_worker,
+            initargs=(_pq,),
         ) as executor:
-            # as_completed で完了順に表示
             future_map = {
                 executor.submit(
                     _run_year_worker, wa,
-                ): wa[0]  # wa[0] = year
+                ): wa[0]
                 for wa in worker_args
             }
             for future in as_completed(future_map):
                 yr_result = future.result()
-                _done = len(year_results) + 1
                 if yr_result is not None:
                     year_results.append(yr_result)
-                    print(
-                        f"  [{_done}/{_n_years}] "
-                        f"{yr_result['year']}年: "
-                        f"PnL="
-                        f"{yr_result['year_pnl']:+,.0f}"
-                        f", Trades="
-                        f"{yr_result['year_trades']}"
-                        f", Equity="
-                        f"{yr_result['final_equity']:,.0f}",
-                        flush=True,
-                    )
+                    _on_year_done(yr_result)
+
+        # 監視スレッド停止
+        _monitor_stop.set()
+        _pq.put(None)  # 監視スレッドを起こす
+        _mon_t.join(timeout=2)
+        if _use_rich_p and _prog:
+            # 残存タスクを削除
+            for tid in list(_yr_tasks.values()):
+                _prog.remove_task(tid)
+            _yr_tasks.clear()
+            _prog.stop()
 
         if not year_results:
             # データなし時のフォールバック
