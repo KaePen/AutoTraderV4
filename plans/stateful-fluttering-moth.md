@@ -1,271 +1,145 @@
-# マルチ通貨ペア同時実行バックテスト（時系列インターリーブ方式）
+# 10ペア マルチ通貨ペアバックテスト パラメータ最適化計画
 
 ## Context
 
-現行バックテストは「1通貨ペア × 複数年並列」で各ペアが独立資金プール（1M円）を持つ。
-ライブでは1口座で6ペアが資金を共有するため、構造的乖離がある。
+マルチ通貨ペアBTの実装（PR #545）とベースTF/年間収益率修正（PR #546）が完了。
+次のステップとして、10ペアでのリスク最小化・WR最大化パラメータを探索する。
 
-**目的**: 6 JPYペアを時系列インターリーブで同時実行し、共有資金プール＋グローバルポジション制限で
-ライブに近い条件を再現。品質フィルタ（CT）＋リスク調整で最適設定を特定する。
+**目標**: 年間収益率 +80% 以上を維持しつつ、リスク（DD）を極力下げ、WRを最大化する。
+**対象**: 10ペア（JPY 6 + USD 4）
+**制約**: 全てキューランナー経由で実行
 
-## 設計
+## 対象ペア（10ペア）
 
-### アーキテクチャ: 時系列インターリーブ方式
+| グループ | ペア |
+|---------|------|
+| JPY (6) | USDJPY, EURJPY, GBPJPY, AUDJPY, CADJPY, CHFJPY |
+| USD (4) | EURUSD, GBPUSD, AUDUSD, NZDUSD |
 
-```
-Year 2020:
-  6ペアの基準TFバーを時系列順にマージ
-  → bar(USDJPY, 09:00) → bar(EURJPY, 09:00) → bar(GBPJPY, 09:00) → ...
-  → bar(USDJPY, 09:05) → bar(EURJPY, 09:05) → ...
+USDCAD/USDCHF は信号生成問題（6年で72-86トレード）のため除外。
 
-  共有状態:
-    portfolio.equity: 1,000,000（全ペア共通）
-    portfolio.global_open_positions: 合計ポジション数
-    portfolio.global_exposure_lot: 合計ロット
-```
+## 検証フェーズ
 
-### なぜ run_unified_year() を再利用しないか
+### Phase 1: ベースライン確立（2テスト）
 
-`run_unified_year()` は1ペア完結型でペア間共有stateを持てない。
-グローバルポジション制限（「全ペア合計6ポジションまで」等）の実装には、
-バーループを再実装してペア間の状態を共有する必要がある。
+10ペア・global_max=8 で現行推奨設定（R1ベース）と安全設定を比較。
 
-### コア構造
+| テスト | global | per_pair | exposure | risk% | CT | 目的 |
+|--------|--------|----------|----------|-------|-----|------|
+| B1 | 8 | 1 | 12.0 | 0.015 | 9.5 | R1を10ペア/8posに拡張 |
+| B2 | 8 | 1 | 12.0 | 0.01 | 9.5 | リスク低減ベースライン |
 
-```python
-# ペアごとに独立した Bot + Simulator を保持
-pair_contexts: dict[str, PairContext]  # {symbol: (bot, simulator, arrays, ...)}
+**判定基準**: 年間収益率、DD、WR、PF、Sharpe、月間勝率を記録。
+B1の収益率が+80%超なら、リスク低減の余地あり → Phase 2へ。
 
-# 共有状態（全ペアで1つ）
-@dataclass
-class PortfolioState:
-    equity: float                    # 共有資金
-    initial_equity: float
-    peak_equity: float
-    global_open_positions: int       # 全ペア合計ポジション数
-    global_exposure_lot: float       # 全ペア合計ロット
-    per_pair_positions: dict[str, int]
-    per_pair_exposure: dict[str, float]
-    blocked_global: int              # グローバル制限発動回数
-    blocked_per_pair: int            # ペア別制限発動回数
-```
+### Phase 2: 品質フィルタ（CT）スイープ（4テスト）
 
-### 処理フロー（1年分）
+CTを上げることでWRを上げつつ、収益率+80%を維持できる閾値を特定。
+Phase 1の良い方のrisk%をベースに使用。
 
-```
-1. 6ペアのデータをロード（BacktestRunner.load_data() 利用）
-2. 各ペアの基準TFタイムスタンプをマージ・ソート
-3. 各タイムスタンプで全ペアを順次処理:
-   a. simulator.state.balance = portfolio.equity  （共有equity同期）
-   b. bot.state に global exposure を反映
-   c. signal = bot.generate_signal()
-   d. グローバル制限チェック → 制限超過なら signal = None
-   e. balance_before = simulator.state.balance
-   f. simulator.process_candle(candle, signal)
-   g. pnl_delta = simulator.state.balance - balance_before
-   h. portfolio.equity += pnl_delta, ポジション数/ロット更新
-4. 月変わりで月次PnL記録
-5. 年末に全ポジション強制決済
-```
+| テスト | global | per_pair | exposure | risk% | CT | 目的 |
+|--------|--------|----------|----------|-------|-----|------|
+| C1 | 8 | 1 | 12.0 | ※ | 10.0 | 軽い品質UP |
+| C2 | 8 | 1 | 12.0 | ※ | 10.5 | 中程度品質UP |
+| C3 | 8 | 1 | 12.0 | ※ | 11.0 | 強い品質UP |
+| C4 | 8 | 1 | 12.0 | ※ | 11.5 | 最大品質フィルタ |
 
-### シグナルゲーティング（グローバル制限）
+※ Phase 1結果に基づき決定（0.015 or 0.01）
 
-`process_candle()` は exit と entry を1回で処理する。グローバル制限は
-**process_candle の前に signal を None 化**することで実現:
+**判定基準**: WR最大かつ年間収益率 ≥ +80% の CT を特定。
 
-```python
-if signal and not portfolio.can_open_position(sym, config):
-    signal = None  # エントリーブロック
-    portfolio.blocked_global += 1
-```
+### Phase 3: リスク/ポジション微調整（3-4テスト）
 
-これにより既存コードを変更せず、exit 処理は常に実行しつつ entry のみブロックできる。
+Phase 2で最適CTが決まった後、リスク率とポジション制限を微調整。
 
-### Equity 同期戦略
+| テスト | global | per_pair | exposure | risk% | CT | 目的 |
+|--------|--------|----------|----------|-------|-----|------|
+| D1 | 8 | 1 | 12.0 | 0.012 | ※CT | リスク中間値 |
+| D2 | 6 | 1 | 10.0 | ※risk | ※CT | global制限強化 |
+| D3 | 10 | 1 | 15.0 | ※risk | ※CT | global制限緩和 |
+| D4 | 8 | 2 | 12.0 | 0.01 | ※CT | 2pos/pair低リスク |
 
-```python
-# 各ペアの candle 処理前に共有 equity を同期
-ctx.simulator.state.balance = portfolio.equity
-ctx.simulator.state.equity = portfolio.equity
-bot.state = dataclasses.replace(bot.state, equity=portfolio.equity)
+※ Phase 2結果に基づき決定
 
-# 処理後の PnL 差分をキャプチャ
-pnl_delta = ctx.simulator.state.balance - balance_before
-portfolio.equity += pnl_delta
-```
+**判定基準**: DD最小 かつ 年間収益率 ≥ +80% かつ WR ≥ 70%
 
-### ロット計算
+### Phase 4: 個別ペア深掘り（必要に応じて）
 
-- `portfolio.equity × config.base_risk_pct` で全ペア統一リスクのロットを算出
-- per-pair の `max_lot_per_trade` は各ペアの preset 値を使用
+Phase 3までの結果でWRが低い or DDが高いペアが特定された場合:
 
-## テストマトリクス
+- 該当ペアのCTを個別に調整（per-pair CT override）
+- BCA min_edge を調整（プリセット値変更 → コード変更 → worktree PR）
+- 特定ペアの除外検討（10ペア → 9ペア等）
 
-| テスト | global_max_pos | per_pair_max | max_exposure | risk% | CT | 狙い |
-|--------|---------------|-------------|--------------|-------|-----|------|
-| M0 | 6 | 1 | 10.0 | 0.02 | 9.0 | ベースライン |
-| M1 | 6 | 1 | 10.0 | 0.02 | 10.0 | 軽い品質UP |
-| M2 | 6 | 1 | 10.0 | 0.02 | 11.0 | 中程度品質UP |
-| M3 | 6 | 1 | 10.0 | 0.02 | 12.0 | 強い品質UP |
-| M4 | 6 | 2 | 10.0 | 0.015 | 11.0 | 2pos/pair |
-| M5 | 8 | 2 | 12.0 | 0.015 | 10.0 | 8pos合計 |
-| M6 | 4 | 1 | 6.0 | 0.03 | 12.0 | 少数精鋭 |
+**注**: 個別ペアのパラメータ変更はコード変更を伴うため、worktree + PR が必要。
+その後の検証はキューランナーで実施。
 
-## 実装計画
+### Phase 5: 最終確認（1テスト）
 
-### 新規ファイル: `scripts/run_multi_pair_backtest.py`
+全Phase結果を踏まえた最終推奨設定で、6年フルバックテストを実行。
 
-#### 関数構成
+| テスト | 内容 |
+|--------|------|
+| F1 | 最終推奨パラメータでの確認実行 |
 
-1. **データクラス**
-   - `MultiPairConfig` — テストケースのパラメータ
-   - `PortfolioState` — 共有state + 制限チェック + 月次追跡
-   - `PairContext` — ペアごとの bot/simulator/arrays
+## 実行方法
 
-2. **`load_pair_data(symbol, data_dir)`**
-   - `BacktestServiceConfig.from_preset()` → `BacktestService.create_runner()` → `runner.load_data()`
-   - 既存パターンを `run_portfolio_backtest.py` から再利用
+全テストはキューランナー経由（`backtest_queue.json`）で実行。
 
-3. **`build_bot_config(symbol, multi_config)`**
-   - `run_portfolio_backtest.py:build_bot_config()` のロジックを再利用
-   - `consensus_threshold`, `base_risk_pct` をテストケースから注入
-   - signal設定は YAML から読み込み
+### キュージョブ形式
 
-4. **`setup_pair_context(symbol, runner, year, bot_config)`**
-   - `year_runner.py:77-155` を参考に bot + simulator + CandleArrays を初期化
-   - 基準TF選択: M5 > M15 > H1 優先（M1は不使用 — マルチペアでは重すぎる）
-
-5. **`run_multi_pair_year(year, contexts, multi_config, portfolio)`** — 核心
-   - タイムスタンプマージ → インターリーブループ
-   - `year_runner.py:155-700` を参考にバーイテレーション再実装
-   - equity同期 → signal生成 → グローバル制限 → process_candle → state更新
-
-6. **`run_test_case(test_case, runners, symbols)`**
-   - 2020-2025 の6年を逐次実行（年ごとにfresh bot/simulator）
-   - データは `runners` からキャッシュ再利用
-
-7. **`aggregate_results(test_name, portfolio, all_trades)`**
-   - 月次PnL → DD/Sharpe/WR/PF 計算
-   - `run_portfolio_backtest.py:aggregate_portfolio()` のロジックを再利用
-
-8. **`generate_report(results)`**
-   - `reports/multi_pair_backtest.md` に出力
-   - テストマトリクスサマリー + ペア別内訳 + 制限発動統計
-
-9. **`main()`**
-   - CLI: `--data-dir`, `--tests`（M0,M1,...）, `--symbols`
-   - データロード（6ペア、1回のみ）→ テストマトリクス実行 → レポート
-
-### 参照ファイル（変更なし）
-
-| ファイル | 参照内容 |
-|---------|---------|
-| `autotrader/backtest/year_runner.py` | バー処理ループ (L155-700)、月次集計 |
-| `autotrader/backtest/simulator.py` | TradeSimulator API、SimulatorState |
-| `autotrader/backtest/runner.py` | BacktestRunner データロード |
-| `autotrader/backtest/service.py` | BacktestService.create_runner() |
-| `autotrader/decision/unified/trade_bot.py` | BotState, generate_signal() |
-| `scripts/run_portfolio_backtest.py` | build_bot_config(), 集約ロジック |
-| `config/symbol_presets.yaml` | プリセット値 |
-
-## データ・ログ出力設計
-
-### データ入力
-
-既存の `data/{SYMBOL}/` 構造をそのまま利用。各ペアの BacktestRunner が独立してデータをロード。
-
-```
-{data_dir}/
-├── USDJPY/chart/    # TFごとのCSV/Parquet
-├── EURJPY/chart/
-├── GBPJPY/chart/
-├── AUDJPY/chart/
-├── CADJPY/chart/
-└── CHFJPY/chart/
+```json
+{
+  "jobs": [
+    {
+      "id": "10p-B1",
+      "type": "multi_pair",
+      "name": "B1: Baseline 10pairs",
+      "multi_pair_config": {
+        "pairs": ["USDJPY","EURJPY","GBPJPY","AUDJPY","CADJPY","CHFJPY",
+                  "EURUSD","GBPUSD","AUDUSD","NZDUSD"],
+        "global_max_positions": 8,
+        "per_pair_max_positions": 1,
+        "global_max_exposure_lot": 12.0,
+        "base_risk_pct": 0.015,
+        "consensus_threshold": 9.5,
+        "tests": ["B1"]
+      }
+    }
+  ]
+}
 ```
 
-- チャートデータ: `{data_dir}/{SYMBOL}/chart/`
-- インジケータキャッシュ: `{data_dir}/{SYMBOL}/.indicator_cache/`（既存キャッシュを再利用）
+### 実行順序
 
-### ログ出力先
+1. Phase 1: B1, B2 を同時投入（並列可能）
+2. Phase 2: Phase 1結果を分析 → C1-C4 を投入
+3. Phase 3: Phase 2結果を分析 → D1-D4 を投入
+4. Phase 4: 必要に応じてコード変更 + 再検証
+5. Phase 5: 最終確認 F1
 
-マルチ通貨ペア用の専用フォルダを作成:
-
-```
-{log_dir}/
-├── USDJPY/              # 既存（単一ペアバックテスト用）
-├── EURJPY/
-├── ...
-└── multi_pair/          # 新規: マルチ通貨ペア専用
-    ├── summary_{YYYYMMDD_HHMMSS}.log     # ポートフォリオ全体サマリー
-    ├── trades_{YYYYMMDD_HHMMSS}.csv      # 全ペアのトレードを1ファイルに統合
-    └── monthly_{YYYYMMDD_HHMMSS}.csv     # 月次PnL推移
-```
-
-**ログパス解決**: `autotrader/config/paths.py` の `get_log_dir()` に従い、
-`D:/Projects/AutoTraderV4_data/logs/multi_pair/` に出力。
-
-### トレードCSVフォーマット
-
-既存カラム（58列）をそのまま利用（symbolカラムでペア識別）。
-マルチペア固有の情報を3列追加:
-
-```
-追加カラム:
-  global_positions_at_entry    # エントリー時の全ペア合計ポジション数
-  global_exposure_at_entry     # エントリー時の全ペア合計ロット
-  portfolio_equity_at_entry    # エントリー時のポートフォリオ残高
-```
-
-### サマリーログ内容
-
-```
-=== マルチ通貨ペアバックテスト サマリー ===
-テスト名: M2_CT11
-期間: 2020-2025
-初期残高: 1,000,000
-
---- ポートフォリオ全体 ---
-総利益: +X,XXX,XXX
-年間収益率: XX.X%
-最大DD: X.XX%
-Sharpe: X.XX
-WR: XX.X% (XXXX wins / XXXX trades)
-PF: X.XX
-月間勝率: XXX.X%
-
---- 通貨ペア別内訳 ---
-| ペア     | 利益     | WR    | PF   | Trades | 寄与率 |
-|----------|----------|-------|------|--------|--------|
-| USDJPY   | +XXX,XXX | XX.X% | X.XX | XXX    | XX.X%  |
-| EURJPY   | +XXX,XXX | XX.X% | X.XX | XXX    | XX.X%  |
-| ...
-
---- グローバル制限発動統計 ---
-| 制限種別              | 発動回数 | スキップされたシグナル数 |
-|-----------------------|----------|-------------------------|
-| global_max_positions  | XXX      | XXX                     |
-| per_pair_max_positions| XXX      | XXX                     |
-| global_max_exposure   | XXX      | XXX                     |
-```
+各Phase間で結果を分析し、次Phaseのパラメータを決定する。
 
 ## パフォーマンス見積もり
 
-- M5基準: ~75K bars/year/pair × 6 pairs = ~450K iterations/year
-- 6年 = ~2.7M iterations/test case
-- 7テストケース = ~19M iterations
-- 推定: 1テスト15-30分、全体2-3.5時間
-- 最適化: データロードは1回のみ（テスト間でキャッシュ）
+- M1基準: ~525K bars/year/pair × 10 pairs = ~5.25M iterations/year
+- 6年 = ~31.5M iterations/test
+- Phase 1-3 合計: ~10テスト = ~315M iterations
+- 推定: 1テスト30-60分、Phase 1-3 合計 5-10時間
 
-## 検証方法
+## 成功基準
 
-1. M0テスト単体が完走し、月次・年次メトリクスが生成されること
-2. `global_max_positions=6` で7個目のエントリーがブロックされること
-3. 制限発動統計がレポートに出力されること
-4. 共有equity でDD計算が正しいこと（全ペアのPnLが1つのequity curveに反映）
-5. 独立プール方式（S0-S6）と比較して妥当な数値であること（利益は低下、DDも低下想定）
-6. テストマトリクス全体で WR>65%, DD<5% の設定を特定
+最終推奨設定が以下を全て満たすこと:
+
+| 指標 | 基準 |
+|------|------|
+| 年間収益率 | ≥ +80% |
+| 最大DD | ≤ 5% |
+| WR | ≥ 70% |
+| PF | ≥ 2.5 |
+| 月間勝率 | ≥ 90% |
+| Sharpe | ≥ 4.0 |
 
 ## レポート出力
 
-最終結果を `reports/multi_pair_backtest.md` に出力
+`reports/multi_pair_10p_optimization.md` に全Phase結果を集約。
