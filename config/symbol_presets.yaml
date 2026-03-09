@@ -91,8 +91,8 @@ defaults:
   min_lot: 0.01
   max_lot: 10.0
   commission_per_lot: 0.0
-  max_positions: 2
-  bonus_max_positions: 1
+  max_positions: 1              # マルチペア運用: per_pair=1 に統一
+  bonus_max_positions: 0        # 1ペア1ポジションなのでボーナス不要
   bonus_score_threshold: 7.0
   base_risk_pct: 0.015        # pip_value修正後DD対策: 0.025 → 0.015
   max_lot_per_trade: 1.5      # pip_value修正後DD対策: 2.5 → 1.5
@@ -118,7 +118,7 @@ symbols:
     default_tp_pips: 30.0
     # EURUSD最適化結果 (2026-03-09, 2023-2025検証, pip_value修正後)
     # +18.6M, WR 75.5%, MaxDD 9.21%, Trades 3,844
-    max_positions: 2
+    max_positions: 1              # マルチペア運用: per_pair=1 に統一
     bonus_score_threshold: 7.0
     base_risk_pct: 0.01
     max_lot_per_trade: 1.5
@@ -155,7 +155,7 @@ symbols:
     default_tp_pips: 30.0
     # AUDUSD最適化結果 (2026-03-09, 2023-2025検証, pip_value修正後)
     # +9.7M, WR 72.8%, MaxDD 7.98%, Trades 3,214
-    max_positions: 2
+    max_positions: 1              # マルチペア運用: per_pair=1 に統一
     bonus_score_threshold: 7.0
     base_risk_pct: 0.01
     max_lot_per_trade: 1.5
@@ -185,7 +185,7 @@ symbols:
     slippage_pips: 0.3
     default_sl_pips: 15.0
     default_tp_pips: 30.0
-    max_positions: 2
+    max_positions: 1              # マルチペア運用: per_pair=1 に統一
     bonus_score_threshold: 7.0
     base_risk_pct: 0.02
     max_lot_per_trade: 2.0
@@ -198,7 +198,7 @@ symbols:
     slippage_pips: 0.5
     default_sl_pips: 15.0
     default_tp_pips: 30.0
-    max_positions: 2
+    max_positions: 1              # マルチペア運用: per_pair=1 に統一
     bonus_score_threshold: 7.0
     base_risk_pct: 0.02
     max_lot_per_trade: 2.0
@@ -215,7 +215,7 @@ symbols:
     default_tp_pips: 40.0
     # USDJPY最適化結果 (2026-03-09, 2023-2025検証, pip_value修正後)
     # +31.3M, WR 74.1%, MaxDD 9.13%, Trades 5,734
-    max_positions: 3
+    max_positions: 1              # マルチペア運用: per_pair=1 に統一
     bonus_max_positions: 0
     bonus_score_threshold: 7.0
     base_risk_pct: 0.02
@@ -231,7 +231,7 @@ symbols:
     default_tp_pips: 50.0
     # EURJPY最適化結果 (2026-03-09, 2023-2025検証, pip_value修正後)
     # +33.6M, WR 74.8%, MaxDD 5.61%, Trades 5,609
-    max_positions: 2
+    max_positions: 1              # マルチペア運用: per_pair=1 に統一
     bonus_score_threshold: 7.5
     base_risk_pct: 0.02
     max_lot_per_trade: 2.0
@@ -247,7 +247,7 @@ symbols:
     default_tp_pips: 60.0
     # GBPJPY最適化結果 (2026-03-09, 2023-2025検証, pip_value修正後)
     # +20.2M, WR 73.1%, MaxDD 9.79%, Trades 6,315
-    max_positions: 2
+    max_positions: 1              # マルチペア運用: per_pair=1 に統一
     bonus_max_positions: 0
     bonus_score_threshold: 8.0
     base_risk_pct: 0.015
@@ -264,7 +264,7 @@ symbols:
     default_tp_pips: 40.0
     # AUDJPY最適化結果 (2026-03-09, 2023-2025検証, pip_value修正後)
     # +9.5M, WR 70.9%, MaxDD 9.22%, Trades 5,164
-    max_positions: 2
+    max_positions: 1              # マルチペア運用: per_pair=1 に統一
     bonus_score_threshold: 7.0
     base_risk_pct: 0.012
     max_lot_per_trade: 1.5
@@ -280,7 +280,7 @@ symbols:
     default_tp_pips: 40.0
     # CADJPY最適化結果 (2026-03-09, 2023-2025検証, pip_value修正後)
     # +8.0M, WR 70.0%, MaxDD 9.66%, Trades 4,721
-    max_positions: 2
+    max_positions: 1              # マルチペア運用: per_pair=1 に統一
     bonus_score_threshold: 7.0
     base_risk_pct: 0.012
     max_lot_per_trade: 1.0
@@ -296,7 +296,7 @@ symbols:
     default_tp_pips: 50.0
     # CHFJPY最適化結果 (2026-03-09, 2023-2025検証, pip_value修正後)
     # +18.4M, WR 72.9%, MaxDD 9.68%, Trades 6,029
-    max_positions: 2
+    max_positions: 1              # マルチペア運用: per_pair=1 に統一
     bonus_score_threshold: 7.5
     base_risk_pct: 0.015
     max_lot_per_trade: 1.5
