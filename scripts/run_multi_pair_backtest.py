@@ -322,6 +322,9 @@ def load_pair_data(
         runner.load_data()
         if runner._d1_df is not None:
             market_data["D1"] = runner._d1_df
+    # メモリ最適化: _tf_data は market_data に移管済み
+    if hasattr(runner, "_tf_data"):
+        runner._tf_data.clear()
     return runner, market_data
 
 
@@ -1134,6 +1137,16 @@ def run_test_case(
             f"{max_year_workers} → 1)"
         )
         max_year_workers = 1
+
+    # 年並列→順次に切り替わった場合、データロードが必要
+    if max_year_workers <= 1 and not runners:
+        if not data_dir:
+            data_dir = str(get_data_dir())
+        runners = load_all_pair_data(
+            symbols,
+            data_dir,
+            max_workers=min(6, len(symbols)),
+        )
 
     print(f"\n{'=' * 60}")
     print(f"  テスト: {test_config.name}")
