@@ -44,7 +44,14 @@
           <span id="cpu-usage" class="mono text-slate-400"></span>
         </div>
       </div>
-      <div class="flex gap-2">
+      <div class="flex items-center gap-3">
+        <div class="flex items-center gap-1 mr-2">
+          <label class="text-xs text-slate-400">CPU:</label>
+          <input id="cpu-input" type="number" min="1" max="32" value="12"
+            class="w-14 px-2 py-1.5 bg-slate-800 border border-slate-600 rounded text-sm mono text-white text-center">
+          <button onclick="changeCpu()"
+            class="btn px-3 py-1.5 bg-slate-600 text-white rounded text-sm">変更</button>
+        </div>
         <button onclick="sendCmd('pause')"
           class="btn px-4 py-2 bg-yellow-600 text-white rounded-lg text-sm font-medium">
           一時停止
@@ -160,6 +167,13 @@ async function sendCmd(cmd) {
   }
 }
 
+function changeCpu() {
+  const v = document.getElementById('cpu-input').value;
+  const n = parseInt(v, 10);
+  if (isNaN(n) || n < 1) { alert('1以上の数値を入力してください'); return; }
+  sendCmd('cpu ' + n);
+}
+
 // ===================================================================
 // 表示更新
 // ===================================================================
@@ -180,6 +194,16 @@ function _createJobCard(j) {
         <span class="text-xs px-2 py-0.5 bg-blue-900 text-blue-300 rounded">${typeLabel}</span>
       </div>
       <span class="mono text-sm text-slate-400" data-field="elapsed"></span>
+    </div>
+    <div class="mt-2 mb-2">
+      <div class="flex items-center gap-2 mb-1">
+        <span class="text-xs text-slate-400" data-field="progress-label">待機中...</span>
+      </div>
+      <div class="w-full bg-slate-700 rounded-full h-2.5 overflow-hidden">
+        <div data-field="progress-bar"
+          class="h-full bg-gradient-to-r from-blue-500 to-cyan-400 rounded-full transition-all duration-500"
+          style="width: 0%"></div>
+      </div>
     </div>
     <div class="grid grid-cols-3 gap-4 text-sm text-slate-300">
       <div>
@@ -207,6 +231,26 @@ function _updateJobCard(card, j) {
   if (elapsedEl) elapsedEl.textContent = fmtLiveElapsed(j.started_at);
   const cpuEl = card.querySelector('[data-field="cpu"]');
   if (cpuEl) cpuEl.textContent = fmtNum(j.cpu_cost, 1) + ' threads';
+
+  // プログレスバー更新
+  const pg = j.progress || {};
+  const done = pg.done || 0;
+  const total = pg.total || 0;
+  const pct = total > 0 ? Math.round(done / total * 100) : 0;
+
+  const barEl = card.querySelector('[data-field="progress-bar"]');
+  if (barEl) barEl.style.width = pct + '%';
+
+  const labelEl = card.querySelector('[data-field="progress-label"]');
+  if (labelEl) {
+    if (total > 0) {
+      labelEl.textContent = `${done}/${total}年完了 (${pct}%)`;
+      labelEl.className = 'text-xs mono text-cyan-400';
+    } else {
+      labelEl.textContent = 'データ準備中...';
+      labelEl.className = 'text-xs text-slate-400';
+    }
+  }
 }
 
 function renderRunningJobs(jobs) {
@@ -423,6 +467,12 @@ function updateHeader(status) {
 
   const used = (status.running_jobs || []).reduce((s, j) => s + (j.cpu_cost || 0), 0);
   cpuEl.textContent = `CPU: ${used.toFixed(1)} / ${status.cpu_threads || '?'} threads`;
+
+  // CPU入力の初期値を同期（ユーザーが変更中でなければ）
+  const cpuInput = document.getElementById('cpu-input');
+  if (cpuInput && document.activeElement !== cpuInput && status.cpu_threads) {
+    cpuInput.value = status.cpu_threads;
+  }
 }
 
 // ===================================================================
