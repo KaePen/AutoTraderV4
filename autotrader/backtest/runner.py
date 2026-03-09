@@ -1581,6 +1581,38 @@ class BacktestRunner:
                     if tf_files:
                         tf_path = sorted(tf_files)[0]
 
+            # D1 → Daily フォールバック（ファイル名が Daily の場合）
+            if (
+                not _use_chart_parquet
+                and tf_path is None
+                and tf == "D1"
+            ):
+                _daily_pq = (
+                    _chart_cache_dir / f"{symbol}_Daily.parquet"
+                )
+                if _daily_pq.exists():
+                    _chart_pq = _daily_pq
+                    _use_chart_parquet = True
+                else:
+                    for _pat in [
+                        f"{symbol}_Daily_*.csv",
+                        f"{symbol}_Daily.csv",
+                    ]:
+                        _csv_sub = self.chart_dir / "csv"
+                        if _csv_sub.exists():
+                            _found = sorted(
+                                _csv_sub.glob(_pat),
+                            )
+                            if _found:
+                                tf_path = _found[0]
+                                break
+                        _found = sorted(
+                            self.chart_dir.glob(_pat),
+                        )
+                        if _found:
+                            tf_path = _found[0]
+                            break
+
             # データソースが何もない
             if not _use_chart_parquet and tf_path is None:
                 return tf, None
