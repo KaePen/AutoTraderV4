@@ -691,7 +691,23 @@ async def switch_account(
                 "MT5_TERMINAL_PATH", ""
             ),
         )
-        new_mgr = EngineManager(mt5_config)
+        # グローバル制限を既存EngineManagerから引き継ぎ
+        _old_mgr = getattr(
+            request.app.state, "engine_manager", None,
+        )
+        _g_pos = (
+            _old_mgr._global_max_positions
+            if _old_mgr else 6
+        )
+        _g_lot = (
+            _old_mgr._global_max_exposure_lot
+            if _old_mgr else 10.0
+        )
+        new_mgr = EngineManager(
+            mt5_config,
+            global_max_positions=_g_pos,
+            global_max_exposure_lot=_g_lot,
+        )
         request.app.state.engine_manager = new_mgr
 
         # 接続+デフォルトシンボル追加

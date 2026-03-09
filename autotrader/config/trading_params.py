@@ -325,6 +325,28 @@ def get_pip_unit(symbol: str) -> float:
     return 0.01 if "JPY" in symbol.upper() else 0.0001
 
 
+def get_pip_value(symbol: str) -> float:
+    """シンボルから1lot/1pipあたりのJPY価値を取得.
+
+    公式: 100,000 × pip_unit × quote_ccy_rate
+
+    プリセット登録済みならプリセット値、未登録なら通貨名から推定。
+
+    Args:
+        symbol: 通貨ペア名（例: "USDJPY", "EURUSD"）
+
+    Returns:
+        float: 1lot/1pipあたりのJPY価値
+    """
+    if _presets_loaded and symbol in _preset_cache:
+        p = _preset_cache[symbol]
+        return 100_000 * p.pip_unit * p.quote_ccy_rate
+    # プリセット未ロード時のフォールバック
+    pip_unit = 0.01 if "JPY" in symbol.upper() else 0.0001
+    rate = 1.0 if "JPY" in symbol.upper() else 150.0
+    return 100_000 * pip_unit * rate
+
+
 def get_quote_ccy_rate(symbol: str) -> float:
     """クォート通貨→口座通貨(JPY)変換レート概算を取得.
 
