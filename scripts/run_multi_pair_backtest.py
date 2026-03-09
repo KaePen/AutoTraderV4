@@ -265,7 +265,7 @@ def load_pair_data(
     )
     # 全期間データをロード
     # load_data()はDaily→D1フォールバック等を処理する
-    market_data = runner._load_all_timeframes(include_m1=False)
+    market_data = runner._load_all_timeframes(include_m1=True)
     # _load_all_timeframes でD1がロードされない場合
     # load_data() の Daily→D1 フォールバックを利用
     if "D1" not in market_data:
@@ -347,9 +347,9 @@ def setup_pair_context(
     if full_market_data is None:
         return None
 
-    # 基準TF選択（M5 > M15 > H1）
+    # 基準TF選択（M1 > M5 > M15 > H1）
     base_tf_name = None
-    for tf_name in ["M5", "M15", "H1"]:
+    for tf_name in ["M1", "M5", "M15", "H1"]:
         if tf_name in full_market_data:
             base_tf_name = tf_name
             break
@@ -937,10 +937,14 @@ def aggregate_year_results(
         else 0.0
     )
 
-    # 年間収益率
+    # 年間収益率（各年の収益率の平均）
+    year_return_pcts = [
+        yr["year_pnl"] / INITIAL_EQUITY * 100
+        for yr in year_results
+    ]
     annual_return = (
-        (total_profit / INITIAL_EQUITY) / num_years * 100
-        if num_years > 0
+        sum(year_return_pcts) / len(year_return_pcts)
+        if year_return_pcts
         else 0.0
     )
 
@@ -962,6 +966,9 @@ def aggregate_year_results(
             "pnl": yr["year_pnl"],
             "trades": yr["year_trades"],
             "equity": yr["final_equity"],
+            "return_pct": (
+                yr["year_pnl"] / INITIAL_EQUITY * 100
+            ),
         }
         for yr in sorted(year_results, key=lambda x: x["year"])
     ]
@@ -1101,20 +1108,25 @@ def run_test_case(
         _print_result_summary(result)
         return result
 
-    # --- 順次実行（既存ロジック） ---
-    portfolio = PortfolioState(
-        equity=INITIAL_EQUITY,
-        initial_equity=INITIAL_EQUITY,
-        peak_equity=INITIAL_EQUITY,
-    )
-
+    # --- 順次実行（年独立エクイティリセット） ---
     all_pair_trades: dict[str, list[Any]] = {
         sym: [] for sym in symbols
     }
     yearly_results_seq: list[dict[str, Any]] = []
+    all_monthly_pnl: dict[tuple[int, int], float] = {}
+    year_return_pcts: list[float] = []
+    max_dd_across_years = 0.0
+    total_blocked_global = 0
+    total_blocked_per_pair = 0
+    total_blocked_exposure = 0
 
     for year in range(start_year, end_year + 1):
-        year_start_equity = portfolio.equity
+        # 毎年エクイティを初期残高にリセット
+        portfolio = PortfolioState(
+            equity=INITIAL_EQUITY,
+            initial_equity=INITIAL_EQUITY,
+            peak_equity=INITIAL_EQUITY,
+        )
 
         # ペアコンテキスト構築
         contexts: dict[str, PairContext] = {}
@@ -1134,7 +1146,7 @@ def run_test_case(
 
             ctx = setup_pair_context(
                 sym, runner, year, bot_config,
-                portfolio.equity,
+                INITIAL_EQUITY,
                 full_market_data=full_md,
             )
             if ctx is not None:
@@ -1153,34 +1165,73 @@ def run_test_case(
             all_pair_trades[sym].extend(trades)
 
         # 年次サマリー
-        year_pnl = portfolio.equity - year_start_equity
+        year_pnl = portfolio.equity - INITIAL_EQUITY
+        year_return_pct = year_pnl / INITIAL_EQUITY * 100
+        year_return_pcts.append(year_return_pct)
         year_trades = sum(
             len(t) for t in pair_trades.values()
         )
+
+        # 月次PnL蓄積
+        for key, pnl in portfolio.monthly_pnl.items():
+            all_monthly_pnl[key] = (
+                all_monthly_pnl.get(key, 0.0) + pnl
+            )
+
+        # DD/blocked蓄積
+        if portfolio.max_dd_pct > max_dd_across_years:
+            max_dd_across_years = portfolio.max_dd_pct
+        total_blocked_global += portfolio.blocked_global
+        total_blocked_per_pair += portfolio.blocked_per_pair
+        total_blocked_exposure += portfolio.blocked_exposure
+
         yearly_results_seq.append(
             {
                 "year": year,
                 "pnl": year_pnl,
                 "trades": year_trades,
                 "equity": portfolio.equity,
+                "return_pct": year_return_pct,
             }
         )
         print(
             f"  {year}年: "
             f"PnL={year_pnl:+,.0f}, "
+            f"Return={year_return_pct:+.1f}%, "
             f"Trades={year_trades}, "
             f"Equity={portfolio.equity:,.0f}"
         )
 
-    # 結果集約
+    # 結果集約（年独立モード）
+    total_profit = sum(yr["pnl"] for yr in yearly_results_seq)
+    avg_annual_return = (
+        sum(year_return_pcts) / len(year_return_pcts)
+        if year_return_pcts
+        else 0.0
+    )
+
+    # 合成PortfolioState（集約用）
+    agg_portfolio = PortfolioState(
+        equity=INITIAL_EQUITY + total_profit,
+        initial_equity=INITIAL_EQUITY,
+        peak_equity=INITIAL_EQUITY + total_profit,
+        max_dd_pct=max_dd_across_years,
+        blocked_global=total_blocked_global,
+        blocked_per_pair=total_blocked_per_pair,
+        blocked_exposure=total_blocked_exposure,
+    )
+    agg_portfolio.monthly_pnl = all_monthly_pnl
+
     result = aggregate_results(
         test_config.name,
-        portfolio,
+        agg_portfolio,
         all_pair_trades,
         yearly_results_seq,
         symbols,
         num_years,
     )
+    # 年間収益率を平均値で上書き
+    result["annual_return_pct"] = avg_annual_return
     _print_result_summary(result)
     return result
 
@@ -1565,12 +1616,18 @@ def generate_report(
     first = next(iter(results.values()), None)
     if first and first.get("yearly_results"):
         lines.append("## 年次推移（最初のテスト）\n")
-        lines.append("| 年 | PnL | Trades | Equity |")
-        lines.append("|----|-----|--------|--------|")
+        lines.append(
+            "| 年 | PnL | Return | Trades | Equity |"
+        )
+        lines.append(
+            "|----|-----|--------|--------|--------|"
+        )
         for yr in first["yearly_results"]:
+            ret = yr.get("return_pct", 0.0)
             lines.append(
                 f"| {yr['year']} | "
                 f"{yr['pnl']:+,.0f} | "
+                f"{ret:+.1f}% | "
                 f"{yr['trades']} | "
                 f"{yr['equity']:,.0f} |"
             )
