@@ -19,7 +19,11 @@ import logging
 import math
 import sys
 import time
-from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures import (
+    ProcessPoolExecutor,
+    ThreadPoolExecutor,
+    as_completed,
+)
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -28,6 +32,10 @@ from typing import Any
 import numpy as np
 import pandas as pd
 import yaml
+
+# stdout を行バッファリングに設定（サブプロセスでも即時表示）
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(line_buffering=True)
 
 # プロジェクトルートをパスに追加
 _SCRIPT_DIR = Path(__file__).resolve().parent
@@ -453,24 +461,20 @@ def load_year_data(
     n_syms = len(symbols)
     result: dict[str, dict[str, pd.DataFrame]] = {}
     _t0 = time.time()
-    print(
-        f"  {_PHASE_ICONS['load']} "
-        f"{year}年データロード ({n_syms}ペア, "
-        f"キャッシュ読込)",
-    )
 
-    for i, sym in enumerate(symbols, 1):
+    def _load_one_pair(
+        sym: str,
+    ) -> tuple[str, dict[str, pd.DataFrame]]:
+        """1ペアの年データをキャッシュからロード"""
         runner = _create_runner(sym, data_dir)
-        # needed_years=[year] でキャッシュから対象年のみ読み込み
-        market_data = runner._load_all_timeframes(
+        md = runner._load_all_timeframes(
             include_m1=True,
             needed_years=[year],
         )
         # D1フォールバック
-        if "D1" not in market_data:
+        if "D1" not in md:
             runner.load_data()
             if runner._d1_df is not None:
-                # D1は年フィルタが必要
                 d1_df = runner._d1_df
                 start_date = datetime(year, 1, 1)
                 end_date = datetime(year + 1, 1, 1)
@@ -479,23 +483,38 @@ def load_year_data(
                     & (d1_df["time"] < end_date)
                 ].reset_index(drop=True)
                 if not year_d1.empty:
-                    market_data["D1"] = year_d1
-        result[sym] = market_data
-        # Runner内部データを解放
+                    md["D1"] = year_d1
         if hasattr(runner, "_tf_data"):
             runner._tf_data.clear()
-        del runner
-        # インラインプログレス
-        print(
-            f"    {_progress_bar(i, n_syms, 20)} "
-            f"{i}/{n_syms} {sym}",
-            end="\r",
-            flush=True,
-        )
+        return sym, md
+
+    # キャッシュ読込は軽量(~100MB/ペア)なので並列で高速化
+    workers = min(6, n_syms)
+    print(
+        f"  {_PHASE_ICONS['load']} "
+        f"{year}年データロード "
+        f"({n_syms}ペア, {workers}並列)",
+    )
+
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        futures = {
+            executor.submit(_load_one_pair, sym): sym
+            for sym in symbols
+        }
+        done = 0
+        for future in as_completed(futures):
+            sym, md = future.result()
+            result[sym] = md
+            done += 1
+            print(
+                f"    {_progress_bar(done, n_syms, 20)} "
+                f"{done}/{n_syms} {sym}",
+                end="\r",
+                flush=True,
+            )
 
     gc.collect()
     total = time.time() - _t0
-    # 行クリア後に完了メッセージ
     print(
         f"    {_progress_bar(n_syms, n_syms, 20)} "
         f"{n_syms}/{n_syms} 完了 "
