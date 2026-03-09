@@ -1285,6 +1285,9 @@ def run_test_case(
     test_index: int = 0,
     total_tests: int = 0,
     job_prefix: str = "",
+    progress_callback: Callable[
+        [int, int], None
+    ] | None = None,
 ) -> dict[str, Any]:
     """テストケースを実行（順次 or 年並列）
 
@@ -1522,6 +1525,10 @@ def run_test_case(
         ) -> None:
             """年完了時の表示処理"""
             yr = yr_result["year"]
+            # 外部進捗コールバック
+            if progress_callback is not None:
+                _done_n = len(year_results) + 1
+                progress_callback(_done_n, _n_years)
             if _use_rich_p and _prog:
                 if yr in _yr_tasks:
                     _prog.update(
@@ -1835,6 +1842,12 @@ def run_test_case(
                     "return_pct": year_return_pct,
                 }
             )
+
+            # 外部進捗コールバック
+            if progress_callback is not None:
+                progress_callback(
+                    len(yearly_results_seq), num_years,
+                )
 
             # メモリ解放
             del contexts

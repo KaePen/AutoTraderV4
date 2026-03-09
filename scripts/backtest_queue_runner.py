@@ -37,6 +37,7 @@ import time
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
+from collections.abc import Callable
 from typing import Any
 
 # Windows cp932エンコーディング回避
@@ -207,6 +208,9 @@ class RunningJob:
     max_year_workers: int
     started_at: float  # time.time()
     result_id: str = ""  # 連番付きID
+    progress: dict[str, Any] = field(
+        default_factory=dict,
+    )  # {"done": N, "total": M}
 
     @property
     def cpu_cost(self) -> float:
@@ -580,6 +584,9 @@ def execute_multi_pair_job(
     cancel_event: threading.Event,
     max_year_workers: int = 1,
     result_id: str = "",
+    progress_callback: Callable[
+        [int, int], None
+    ] | None = None,
 ) -> JobResult:
     """マルチ通貨ペアインターリーブジョブを実行
 
@@ -592,6 +599,7 @@ def execute_multi_pair_job(
         cancel_event: キャンセルイベント
         max_year_workers: 年並列ワーカー数（1=順次）
         result_id: 連番付き結果ID
+        progress_callback: 年完了時の進捗通知
 
     Returns:
         JobResult: インターリーブ実行結果
@@ -695,6 +703,7 @@ def execute_multi_pair_job(
             data_dir=data_dir,
             bot_extra_overrides=bot_extra,
             job_prefix=job.id,
+            progress_callback=progress_callback,
         )
 
         if cancel_event.is_set():
@@ -1033,6 +1042,7 @@ def _write_runner_state(
             "started_at": datetime.fromtimestamp(
                 rj.started_at,
             ).isoformat(),
+            "progress": rj.progress,
         })
 
     try:
@@ -1309,8 +1319,17 @@ def main() -> None:
         holder: list[JobResult | None],
         workers: int,
         rid: str = "",
+        progress: dict[str, Any] | None = None,
     ) -> None:
         """ジョブ実行スレッド（typeとcode_dirに応じて振り分け）"""
+        # 進捗コールバック
+        _pg = progress
+
+        def _on_progress(done: int, total: int) -> None:
+            if _pg is not None:
+                _pg["done"] = done
+                _pg["total"] = total
+
         # code_dir指定時はサブプロセスで実行
         if job.code_dir:
             holder[0] = execute_job_subprocess(
@@ -1325,6 +1344,7 @@ def main() -> None:
                 cancel_ev,
                 max_year_workers=workers,
                 result_id=rid,
+                progress_callback=_on_progress,
             )
         else:
             holder[0] = execute_job(
@@ -1638,6 +1658,7 @@ def main() -> None:
                 )
                 cancel_ev = threading.Event()
                 holder: list[JobResult | None] = [None]
+                _prog: dict[str, Any] = {}
                 t = threading.Thread(
                     target=_run_job_wrapper,
                     args=(
@@ -1646,6 +1667,7 @@ def main() -> None:
                         holder,
                         workers,
                         _rid,
+                        _prog,
                     ),
                     daemon=True,
                 )
@@ -1657,6 +1679,7 @@ def main() -> None:
                     max_year_workers=workers,
                     started_at=time.time(),
                     result_id=_rid,
+                    progress=_prog,
                 )
                 running_jobs.append(rj_new)
                 running_ids.add(job.id)
