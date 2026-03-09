@@ -412,11 +412,6 @@ def warm_indicator_cache(
         market_data = runner._load_all_timeframes(
             include_m1=True,
         )
-        # D1フォールバック
-        if "D1" not in market_data:
-            runner.load_data()
-            if runner._d1_df is not None:
-                market_data["D1"] = runner._d1_df
         # フルデータを即時解放
         del market_data
         if hasattr(runner, "_tf_data"):
@@ -471,19 +466,6 @@ def load_year_data(
             include_m1=True,
             needed_years=[year],
         )
-        # D1フォールバック
-        if "D1" not in md:
-            runner.load_data()
-            if runner._d1_df is not None:
-                d1_df = runner._d1_df
-                start_date = datetime(year, 1, 1)
-                end_date = datetime(year + 1, 1, 1)
-                year_d1 = d1_df[
-                    (d1_df["time"] >= start_date)
-                    & (d1_df["time"] < end_date)
-                ].reset_index(drop=True)
-                if not year_d1.empty:
-                    md["D1"] = year_d1
         if hasattr(runner, "_tf_data"):
             runner._tf_data.clear()
         return sym, md
