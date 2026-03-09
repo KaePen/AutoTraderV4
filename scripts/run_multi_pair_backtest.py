@@ -1471,6 +1471,10 @@ def run_test_case(
 
         # Queue監視スレッド
         _monitor_stop = threading.Event()
+        # バーレベル進捗の年別トラッキング
+        _yr_bar_progress: dict[
+            int, tuple[int, int]
+        ] = {}  # year -> (done, total)
 
         def _monitor_queue() -> None:
             """Queueから進捗を読みrichバーを更新"""
@@ -1489,6 +1493,40 @@ def run_test_case(
                     msg[3],
                     msg[4],
                 )
+                # 年別バー進捗を記録
+                _yr_bar_progress[yr] = (done, total)
+
+                # 全年の合計進捗を百分率で通知
+                if progress_callback is not None:
+                    _total_b = sum(
+                        t for _, t in
+                        _yr_bar_progress.values()
+                    )
+                    _done_b = sum(
+                        d for d, _ in
+                        _yr_bar_progress.values()
+                    )
+                    _completed = len(year_results)
+                    if _total_b > 0 and _n_years > 0:
+                        _bar_frac = (
+                            _done_b / _total_b
+                        )
+                        _active = len(
+                            _yr_bar_progress,
+                        )
+                        _pct = int(
+                            (
+                                _completed
+                                + _bar_frac
+                                * _active
+                            )
+                            / _n_years
+                            * 100
+                        )
+                        progress_callback(
+                            _pct, 100,
+                        )
+
                 if _use_rich_p and _prog:
                     if yr not in _yr_tasks:
                         _yr_tasks[yr] = (
@@ -1525,10 +1563,13 @@ def run_test_case(
         ) -> None:
             """年完了時の表示処理"""
             yr = yr_result["year"]
-            # 外部進捗コールバック
+            # 完了年をバートラッキングから除去
+            _yr_bar_progress.pop(yr, None)
+            # 外部進捗コールバック（完了年数ベース）
             if progress_callback is not None:
                 _done_n = len(year_results) + 1
-                progress_callback(_done_n, _n_years)
+                _pct = int(_done_n / _n_years * 100)
+                progress_callback(_pct, 100)
             if _use_rich_p and _prog:
                 if yr in _yr_tasks:
                     _prog.update(
