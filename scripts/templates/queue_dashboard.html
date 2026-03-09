@@ -1,0 +1,440 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>バックテストキューランナー</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<style>
+  body { background: #0f172a; color: #e2e8f0; font-family: 'Segoe UI', system-ui, sans-serif; }
+  .mono { font-family: 'Cascadia Code', 'Consolas', monospace; }
+  .card { background: #1e293b; border: 1px solid #334155; border-radius: 0.75rem; }
+  .btn { transition: all 0.15s; }
+  .btn:hover { filter: brightness(1.15); }
+  .btn:active { transform: scale(0.97); }
+  .profit { color: #4ade80; }
+  .loss { color: #f87171; }
+  .pulse { animation: pulse 2s infinite; }
+  @keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+  }
+  .fade-in { animation: fadeIn 0.3s ease-in; }
+  @keyframes fadeIn {
+    from { opacity: 0; transform: translateY(4px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  /* スクロールバー */
+  ::-webkit-scrollbar { width: 6px; }
+  ::-webkit-scrollbar-track { background: #1e293b; }
+  ::-webkit-scrollbar-thumb { background: #475569; border-radius: 3px; }
+</style>
+</head>
+<body class="min-h-screen">
+
+<div class="max-w-6xl mx-auto px-4 py-6">
+
+  <!-- ヘッダー -->
+  <div class="card px-6 py-4 mb-4">
+    <div class="flex items-center justify-between">
+      <div>
+        <h1 class="text-xl font-bold text-white">バックテストキューランナー</h1>
+        <div class="flex items-center gap-4 mt-1 text-sm">
+          <span id="runner-status" class="text-slate-400">接続中...</span>
+          <span id="cpu-usage" class="mono text-slate-400"></span>
+        </div>
+      </div>
+      <div class="flex gap-2">
+        <button onclick="sendCmd('pause')"
+          class="btn px-4 py-2 bg-yellow-600 text-white rounded-lg text-sm font-medium">
+          一時停止
+        </button>
+        <button onclick="sendCmd('resume')"
+          class="btn px-4 py-2 bg-green-600 text-white rounded-lg text-sm font-medium">
+          再開
+        </button>
+        <button onclick="if(confirm('全ジョブを停止しますか？')) sendCmd('stop')"
+          class="btn px-4 py-2 bg-red-600 text-white rounded-lg text-sm font-medium">
+          全停止
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 実行中ジョブ -->
+  <div class="mb-4">
+    <h2 class="text-sm font-semibold text-slate-400 uppercase tracking-wider mb-2 px-1">
+      実行中ジョブ
+    </h2>
+    <div id="running-jobs" class="space-y-3">
+      <div class="card px-5 py-4 text-slate-500 text-sm">ジョブなし</div>
+    </div>
+  </div>
+
+  <!-- 完了済みジョブ -->
+  <div class="mb-4">
+    <h2 class="text-sm font-semibold text-slate-400 uppercase tracking-wider mb-2 px-1">
+      完了済みジョブ
+    </h2>
+    <div id="completed-jobs">
+      <div class="card px-5 py-4 text-slate-500 text-sm">結果なし</div>
+    </div>
+  </div>
+
+  <!-- キュー -->
+  <div class="mb-4">
+    <h2 class="text-sm font-semibold text-slate-400 uppercase tracking-wider mb-2 px-1">
+      キュー
+    </h2>
+    <div id="queue-list">
+      <div class="card px-5 py-4 text-slate-500 text-sm">キューなし</div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+const API = '';
+let lastStatus = null;
+let lastResults = null;
+
+// ===================================================================
+// ユーティリティ
+// ===================================================================
+
+function fmtNum(n, decimals=0) {
+  if (n == null) return '-';
+  return Number(n).toLocaleString('ja-JP', {
+    minimumFractionDigits: decimals,
+    maximumFractionDigits: decimals
+  });
+}
+
+function fmtPct(n, decimals=1) {
+  if (n == null) return '-';
+  return Number(n).toFixed(decimals) + '%';
+}
+
+function fmtProfit(n) {
+  if (n == null) return '-';
+  const cls = n >= 0 ? 'profit' : 'loss';
+  const sign = n >= 0 ? '+' : '';
+  return `<span class="${cls} mono">${sign}${fmtNum(n)}</span>`;
+}
+
+function fmtElapsed(seconds) {
+  if (!seconds) return '-';
+  const h = Math.floor(seconds / 3600);
+  const m = Math.floor((seconds % 3600) / 60);
+  const s = Math.floor(seconds % 60);
+  if (h > 0) return `${h}h ${m}m ${s}s`;
+  if (m > 0) return `${m}m ${s}s`;
+  return `${s}s`;
+}
+
+function fmtLiveElapsed(startedAt) {
+  if (!startedAt) return '-';
+  const start = new Date(startedAt).getTime();
+  const now = Date.now();
+  const diff = Math.max(0, (now - start) / 1000);
+  return fmtElapsed(diff);
+}
+
+// ===================================================================
+// コマンド送信
+// ===================================================================
+
+async function sendCmd(cmd) {
+  try {
+    const res = await fetch(API + '/api/command', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({command: cmd})
+    });
+    const data = await res.json();
+    if (!res.ok) {
+      alert('エラー: ' + (data.error || 'unknown'));
+    }
+  } catch(e) {
+    alert('通信エラー: ' + e.message);
+  }
+}
+
+// ===================================================================
+// 表示更新
+// ===================================================================
+
+function renderRunningJobs(jobs) {
+  const el = document.getElementById('running-jobs');
+  if (!jobs || jobs.length === 0) {
+    el.innerHTML = '<div class="card px-5 py-4 text-slate-500 text-sm">ジョブなし</div>';
+    return;
+  }
+
+  el.innerHTML = jobs.map(j => {
+    const symbols = (j.symbols || []).join(', ') || j.symbol || '-';
+    const typeLabel = j.type === 'multi_pair' ? 'マルチペア' : 'シングル';
+    const elapsed = fmtLiveElapsed(j.started_at);
+
+    return `
+      <div class="card px-5 py-4 fade-in">
+        <div class="flex items-center justify-between mb-2">
+          <div class="flex items-center gap-3">
+            <span class="pulse inline-block w-2 h-2 bg-green-400 rounded-full"></span>
+            <span class="font-semibold text-white">${j.job_id || j.result_id || '-'}</span>
+            <span class="text-xs px-2 py-0.5 bg-blue-900 text-blue-300 rounded">${typeLabel}</span>
+          </div>
+          <span class="mono text-sm text-slate-400">${elapsed}</span>
+        </div>
+        <div class="grid grid-cols-3 gap-4 text-sm text-slate-300">
+          <div>
+            <span class="text-slate-500">シンボル:</span>
+            <span class="mono">${symbols}</span>
+          </div>
+          <div>
+            <span class="text-slate-500">期間:</span>
+            <span class="mono">${j.years || '-'}</span>
+          </div>
+          <div>
+            <span class="text-slate-500">CPU:</span>
+            <span class="mono">${fmtNum(j.cpu_cost, 1)} threads</span>
+            <span class="text-slate-500 ml-2">workers:</span>
+            <span class="mono">${j.workers || '-'}</span>
+          </div>
+        </div>
+        ${j.description ? `<div class="mt-2 text-xs text-slate-500">${j.description}</div>` : ''}
+      </div>
+    `;
+  }).join('');
+}
+
+function renderCompletedJobs(results) {
+  const el = document.getElementById('completed-jobs');
+  if (!results || results.length === 0) {
+    el.innerHTML = '<div class="card px-5 py-4 text-slate-500 text-sm">結果なし</div>';
+    return;
+  }
+
+  // completed のみ表示（running は除外）
+  const completed = results.filter(r => r.status === 'completed' || r.status === 'failed' || r.status === 'cancelled');
+  if (completed.length === 0) {
+    el.innerHTML = '<div class="card px-5 py-4 text-slate-500 text-sm">結果なし</div>';
+    return;
+  }
+
+  el.innerHTML = `
+    <div class="card overflow-hidden">
+      <table class="w-full text-sm">
+        <thead>
+          <tr class="border-b border-slate-700 text-slate-400 text-xs uppercase">
+            <th class="px-4 py-3 text-left">ジョブID</th>
+            <th class="px-4 py-3 text-left">タイプ</th>
+            <th class="px-4 py-3 text-right">損益</th>
+            <th class="px-4 py-3 text-right">WR</th>
+            <th class="px-4 py-3 text-right">PF</th>
+            <th class="px-4 py-3 text-right">DD</th>
+            <th class="px-4 py-3 text-right">Sharpe</th>
+            <th class="px-4 py-3 text-right">月間+</th>
+            <th class="px-4 py-3 text-right">トレード</th>
+            <th class="px-4 py-3 text-right">時間</th>
+            <th class="px-4 py-3 text-right">状態</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${completed.map(r => renderResultRow(r)).join('')}
+        </tbody>
+      </table>
+    </div>
+  `;
+
+  // ペア詳細展開イベント
+  document.querySelectorAll('.expand-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const target = document.getElementById(btn.dataset.target);
+      if (target) {
+        target.classList.toggle('hidden');
+        btn.textContent = target.classList.contains('hidden') ? '▶' : '▼';
+      }
+    });
+  });
+}
+
+function renderResultRow(r) {
+  const statusCls = r.status === 'completed' ? 'text-green-400'
+    : r.status === 'failed' ? 'text-red-400' : 'text-yellow-400';
+  const statusLabel = r.status === 'completed' ? '完了'
+    : r.status === 'failed' ? '失敗' : 'キャンセル';
+
+  const hasPairs = r.pair_details && r.pair_details.length > 0;
+  const pairId = 'pairs-' + (r.job_id || '').replace(/[^a-zA-Z0-9]/g, '_');
+
+  // 年間収益率
+  const annualReturn = r.portfolio_metrics?.annual_return_pct;
+
+  let row = `
+    <tr class="border-b border-slate-800 hover:bg-slate-800/50">
+      <td class="px-4 py-3 font-medium text-white">
+        ${hasPairs ? `<button class="expand-btn mr-1 text-slate-500 hover:text-white" data-target="${pairId}">▶</button>` : ''}
+        ${r.job_id || '-'}
+      </td>
+      <td class="px-4 py-3 text-slate-400">${r.job_type === 'multi_pair' ? 'マルチ' : 'シングル'}</td>
+      <td class="px-4 py-3 text-right">${fmtProfit(r.net_profit)}</td>
+      <td class="px-4 py-3 text-right mono">${fmtPct(r.win_rate)}</td>
+      <td class="px-4 py-3 text-right mono">${fmtNum(r.profit_factor, 2)}</td>
+      <td class="px-4 py-3 text-right mono">${fmtPct(r.max_drawdown)}</td>
+      <td class="px-4 py-3 text-right mono">${fmtNum(r.sharpe_ratio, 2)}</td>
+      <td class="px-4 py-3 text-right mono">${fmtPct(r.monthly_plus_rate)}</td>
+      <td class="px-4 py-3 text-right mono">${fmtNum(r.trades)}</td>
+      <td class="px-4 py-3 text-right mono text-slate-400">${fmtElapsed(r.elapsed_seconds)}</td>
+      <td class="px-4 py-3 text-right"><span class="${statusCls} text-xs font-medium">${statusLabel}</span></td>
+    </tr>
+  `;
+
+  // ペア別詳細行
+  if (hasPairs) {
+    row += `
+      <tr id="${pairId}" class="hidden">
+        <td colspan="11" class="px-4 py-2 bg-slate-900/50">
+          <table class="w-full text-xs">
+            <thead>
+              <tr class="text-slate-500">
+                <th class="px-3 py-1 text-left">ペア</th>
+                <th class="px-3 py-1 text-right">損益</th>
+                <th class="px-3 py-1 text-right">WR</th>
+                <th class="px-3 py-1 text-right">PF</th>
+                <th class="px-3 py-1 text-right">トレード</th>
+                <th class="px-3 py-1 text-right">寄与%</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${r.pair_details.map(p => `
+                <tr class="border-b border-slate-800/50">
+                  <td class="px-3 py-1 mono text-slate-300">${p.symbol || '-'}</td>
+                  <td class="px-3 py-1 text-right">${fmtProfit(p.net_profit)}</td>
+                  <td class="px-3 py-1 text-right mono">${fmtPct(p.win_rate)}</td>
+                  <td class="px-3 py-1 text-right mono">${fmtNum(p.profit_factor, 2)}</td>
+                  <td class="px-3 py-1 text-right mono">${fmtNum(p.trades)}</td>
+                  <td class="px-3 py-1 text-right mono">${fmtPct(p.contribution_pct)}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        </td>
+      </tr>
+    `;
+  }
+
+  // 年次詳細があれば表示
+  if (r.yearly_details && r.yearly_details.length > 0 && hasPairs) {
+    // 年次はペア詳細の下に含める（同じ展開ブロック内）
+  }
+
+  return row;
+}
+
+function renderQueue(queueData, completedIds) {
+  const el = document.getElementById('queue-list');
+  const jobs = queueData?.jobs || [];
+  if (jobs.length === 0) {
+    el.innerHTML = '<div class="card px-5 py-4 text-slate-500 text-sm">キューなし</div>';
+    return;
+  }
+
+  const doneSet = new Set(completedIds || []);
+
+  el.innerHTML = `
+    <div class="card px-5 py-3">
+      <div class="space-y-1">
+        ${jobs.map(j => {
+          const done = doneSet.has(j.id);
+          const icon = done ? '✓' : '○';
+          const cls = done ? 'text-green-500' : 'text-slate-500';
+          const textCls = done ? 'text-slate-500 line-through' : 'text-slate-300';
+          return `
+            <div class="flex items-center gap-3 py-1 text-sm">
+              <span class="${cls} text-base">${icon}</span>
+              <span class="mono font-medium ${textCls}">${j.id}</span>
+              <span class="text-slate-500">${j.description || ''}</span>
+            </div>
+          `;
+        }).join('')}
+      </div>
+    </div>
+  `;
+}
+
+function updateHeader(status) {
+  const statusEl = document.getElementById('runner-status');
+  const cpuEl = document.getElementById('cpu-usage');
+
+  if (!status || !status.updated_at) {
+    statusEl.innerHTML = '<span class="text-yellow-400">未接続（ランナー起動待ち）</span>';
+    cpuEl.textContent = '';
+    return;
+  }
+
+  // 最終更新からの経過チェック
+  const lastUpdate = new Date(status.updated_at).getTime();
+  const stale = (Date.now() - lastUpdate) > 15000;
+
+  if (stale) {
+    statusEl.innerHTML = '<span class="text-yellow-400">応答なし（最終更新: ' +
+      new Date(status.updated_at).toLocaleTimeString('ja-JP') + '）</span>';
+  } else if (status.paused) {
+    statusEl.innerHTML = '<span class="text-yellow-400">⏸ 一時停止</span>';
+  } else {
+    statusEl.innerHTML = '<span class="text-green-400">● 稼働中</span>';
+  }
+
+  const used = (status.running_jobs || []).reduce((s, j) => s + (j.cpu_cost || 0), 0);
+  cpuEl.textContent = `CPU: ${used.toFixed(1)} / ${status.cpu_threads || '?'} threads`;
+}
+
+// ===================================================================
+// ポーリング
+// ===================================================================
+
+async function pollStatus() {
+  try {
+    const res = await fetch(API + '/api/status');
+    lastStatus = await res.json();
+    updateHeader(lastStatus);
+    renderRunningJobs(lastStatus.running_jobs || []);
+  } catch(e) {
+    updateHeader(null);
+  }
+}
+
+async function pollResults() {
+  try {
+    const [resResults, resQueue] = await Promise.all([
+      fetch(API + '/api/results'),
+      fetch(API + '/api/queue'),
+    ]);
+    lastResults = await resResults.json();
+    const queueData = await resQueue.json();
+    renderCompletedJobs(lastResults);
+    renderQueue(queueData, lastStatus?.completed_ids || []);
+  } catch(e) {
+    // 無視
+  }
+}
+
+// 初回ロード
+pollStatus();
+pollResults();
+
+// ポーリング
+setInterval(pollStatus, 2000);
+setInterval(pollResults, 5000);
+
+// 経過時間リアルタイム更新
+setInterval(() => {
+  if (lastStatus?.running_jobs?.length > 0) {
+    renderRunningJobs(lastStatus.running_jobs);
+  }
+}, 1000);
+</script>
+
+</body>
+</html>
