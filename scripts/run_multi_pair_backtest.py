@@ -846,12 +846,6 @@ def _run_year_worker(args: tuple) -> dict[str, Any] | None:
     # MultiPairConfig 復元
     mc = MultiPairConfig(**multi_config_dict)
 
-    if len(symbols) >= 8:
-        print(
-            f"  警告: {len(symbols)}ペア×年並列 = "
-            f"高メモリ使用。max_year_workers=1 を推奨"
-        )
-
     # 年単位データロード（全期間→年フィルタ→即時解放）
     year_data = load_year_data(
         symbols, data_dir,
@@ -1176,15 +1170,6 @@ def run_test_case(
     # データディレクトリ解決
     if not data_dir:
         data_dir = str(get_data_dir())
-
-    # 8ペア以上では年並列を無効化（メモリ不足防止）
-    if len(symbols) >= 8 and max_year_workers > 1:
-        print(
-            f"  注意: {len(symbols)}ペアのため "
-            f"年並列を無効化 (max_year_workers: "
-            f"{max_year_workers} → 1)"
-        )
-        max_year_workers = 1
 
     print(f"\n{'=' * 60}")
     print(f"  テスト: {test_config.name}")
