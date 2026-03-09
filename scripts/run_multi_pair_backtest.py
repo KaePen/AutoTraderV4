@@ -551,12 +551,21 @@ def run_multi_pair_year(
                     if consolidated.entry_price is not None
                     else candle.close
                 )
+                _pu = get_pip_unit(sym)
                 if consolidated.direction == SignalType.BUY:
-                    sl_price = _base - consolidated.sl_pips / 100
-                    tp_price = _base + consolidated.tp_pips / 100
+                    sl_price = (
+                        _base - consolidated.sl_pips * _pu
+                    )
+                    tp_price = (
+                        _base + consolidated.tp_pips * _pu
+                    )
                 else:
-                    sl_price = _base + consolidated.sl_pips / 100
-                    tp_price = _base - consolidated.tp_pips / 100
+                    sl_price = (
+                        _base + consolidated.sl_pips * _pu
+                    )
+                    tp_price = (
+                        _base - consolidated.tp_pips * _pu
+                    )
 
             signal = Signal(
                 symbol=sym,
