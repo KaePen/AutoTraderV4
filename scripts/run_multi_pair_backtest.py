@@ -461,6 +461,7 @@ def load_year_data(
     symbols: list[str],
     data_dir: str,
     year: int,
+    quiet: bool = False,
 ) -> dict[str, dict[str, pd.DataFrame]]:
     """1年分の全ペアデータをキャッシュから高速ロード
 
@@ -472,6 +473,7 @@ def load_year_data(
         symbols: シンボルリスト
         data_dir: データディレクトリ
         year: 対象年
+        quiet: 進捗出力を抑制（年並列ワーカー用）
 
     Returns:
         dict[str, dict[str, pd.DataFrame]]:
@@ -479,7 +481,6 @@ def load_year_data(
     """
     n_syms = len(symbols)
     result: dict[str, dict[str, pd.DataFrame]] = {}
-    _t0 = time.time()
 
     def _load_one_pair(
         sym: str,
@@ -496,12 +497,13 @@ def load_year_data(
 
     # キャッシュ読込は軽量(~100MB/ペア)なので並列で高速化
     workers = min(6, n_syms)
-    print(
-        f"  {_PHASE_ICONS['load']} "
-        f"{year}年データロード "
-        f"({n_syms}ペア, {workers}並列)",
-        flush=True,
-    )
+    if not quiet:
+        print(
+            f"  {_PHASE_ICONS['load']} "
+            f"{year}年データロード "
+            f"({n_syms}ペア, {workers}並列)",
+            flush=True,
+        )
 
     with ThreadPoolExecutor(max_workers=workers) as executor:
         futures = {
@@ -513,21 +515,21 @@ def load_year_data(
             sym, md = future.result()
             result[sym] = md
             done += 1
-            print(
-                f"    {_progress_bar(done, n_syms, 20)} "
-                f"{done}/{n_syms} {sym}",
-                end="\r",
-                flush=True,
-            )
+            if not quiet:
+                print(
+                    f"    {_progress_bar(done, n_syms, 20)}"
+                    f" {done}/{n_syms} {sym}",
+                    end="\r",
+                    flush=True,
+                )
 
     gc.collect()
-    total = time.time() - _t0
-    print(
-        f"    {_progress_bar(n_syms, n_syms, 20)} "
-        f"{n_syms}/{n_syms} 完了 "
-        f"({_format_elapsed(total)})          ",
-        flush=True,
-    )
+    if not quiet:
+        print(
+            f"    {_progress_bar(n_syms, n_syms, 20)} "
+            f"{n_syms}/{n_syms} 完了          ",
+            flush=True,
+        )
     return result
 
 
@@ -957,8 +959,10 @@ def _run_year_worker(args: tuple) -> dict[str, Any] | None:
     # MultiPairConfig 復元
     mc = MultiPairConfig(**multi_config_dict)
 
-    # 年単位データロード（全期間→年フィルタ→即時解放）
-    year_data = load_year_data(symbols, data_dir, year)
+    # 年単位データロード（ワーカーでは出力抑制）
+    year_data = load_year_data(
+        symbols, data_dir, year, quiet=True,
+    )
 
     # ポートフォリオ初期化（年独立: 毎年100万リセット）
     portfolio = PortfolioState(
@@ -1388,17 +1392,30 @@ def run_test_case(
         ]
 
         year_results: list[dict[str, Any]] = []
+        _n_years = len(worker_args)
+        print(
+            f"  年並列実行中 "
+            f"({_n_years}年, {max_year_workers}w)...",
+            flush=True,
+        )
         with ProcessPoolExecutor(
             max_workers=max_year_workers,
         ) as executor:
-            futures = executor.map(
-                _run_year_worker, worker_args,
-            )
-            for yr_result in futures:
+            # as_completed で完了順に表示
+            future_map = {
+                executor.submit(
+                    _run_year_worker, wa,
+                ): wa[0]  # wa[0] = year
+                for wa in worker_args
+            }
+            for future in as_completed(future_map):
+                yr_result = future.result()
+                _done = len(year_results) + 1
                 if yr_result is not None:
                     year_results.append(yr_result)
                     print(
-                        f"  {yr_result['year']}年: "
+                        f"  [{_done}/{_n_years}] "
+                        f"{yr_result['year']}年: "
                         f"PnL="
                         f"{yr_result['year_pnl']:+,.0f}"
                         f", Trades="
