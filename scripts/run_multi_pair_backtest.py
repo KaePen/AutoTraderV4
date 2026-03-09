@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import csv
 import dataclasses
+import heapq
 import logging
 import math
 import sys
@@ -62,6 +63,9 @@ from autotrader.core.enums import (  # noqa: E402
 from autotrader.decision.unified import (  # noqa: E402
     UnifiedBotConfig,
     UnifiedTradeBot,
+)
+from autotrader.decision.unified.adaptive import (  # noqa: E402
+    TradeRecord,
 )
 
 
@@ -486,38 +490,46 @@ def run_multi_pair_year(
     Returns:
         dict: ペア別トレードリスト
     """
-    # 全ペアのタイムスタンプをマージ
-    # 各ペアの基準TFタイムスタンプを取得
-    timestamp_pairs: list[tuple[datetime, str]] = []
-    for sym, ctx in contexts.items():
-        for idx in range(ctx.arrays.n_rows):
-            t = ctx.arrays.get_time(idx)
-            timestamp_pairs.append((t, sym))
+    # 全ペアのタイムスタンプをストリーミングマージ
+    # 各ペアのタイムスタンプは既にソート済み → heapq.merge
+    def _pair_time_gen(
+        sym: str,
+        arrays: CandleArrays,
+    ):  # type: ignore[return]
+        """ペア別ソート済みタイムスタンプジェネレータ"""
+        for idx in range(arrays.n_rows):
+            yield (arrays.get_time(idx), sym, idx)
 
-    # 時系列順にソート（同時刻はシンボル順）
-    timestamp_pairs.sort(key=lambda x: (x[0], x[1]))
-
-    # 各ペアの現在インデックス
-    pair_idx: dict[str, int] = {sym: 0 for sym in contexts}
+    total_bars = sum(
+        ctx.arrays.n_rows for ctx in contexts.values()
+    )
+    merged = heapq.merge(
+        *(
+            _pair_time_gen(sym, ctx.arrays)
+            for sym, ctx in contexts.items()
+        ),
+        key=lambda x: (x[0], x[1]),
+    )
 
     # 月次トラッキング
     current_month: tuple[int, int] | None = None
     month_start_equity = portfolio.equity
 
+    # Opt 2: ポジション情報キャッシュ初期化
+    # (exposure, buy_lot, sell_lot, buy_count, sell_count)
+    _cached_exposure: dict[
+        str, tuple[float, float, float, int, int]
+    ] = {}
+    for sym in contexts:
+        _cached_exposure[sym] = (0.0, 0.0, 0.0, 0, 0)
+        portfolio.per_pair_positions[sym] = 0
+        portfolio.per_pair_exposure[sym] = 0.0
+
     # 進捗表示
-    total_bars = len(timestamp_pairs)
     _t0 = time.time()
 
-    for bar_num, (bar_time, sym) in enumerate(timestamp_pairs):
+    for bar_num, (bar_time, sym, idx) in enumerate(merged):
         ctx = contexts[sym]
-        idx = pair_idx[sym]
-
-        # インデックス整合チェック
-        expected_time = ctx.arrays.get_time(idx)
-        if expected_time != bar_time:
-            # スキップ（タイムスタンプ不一致）
-            continue
-        pair_idx[sym] = idx + 1
 
         # 月変わり検出
         candle_month = (bar_time.year, bar_time.month)
@@ -547,34 +559,13 @@ def run_multi_pair_year(
             equity=portfolio.equity,
         )
 
-        # ポジション情報をbot stateに同期
-        open_positions = ctx.simulator.get_open_positions()
-        exposure_lot = sum(p.volume for p in open_positions)
-        buy_lot = sum(
-            p.volume
-            for p in open_positions
-            if p.signal_type == SignalType.BUY
-        )
-        sell_lot = sum(
-            p.volume
-            for p in open_positions
-            if p.signal_type == SignalType.SELL
-        )
-        buy_count = sum(
-            1
-            for p in open_positions
-            if p.signal_type == SignalType.BUY
-        )
-        sell_count = sum(
-            1
-            for p in open_positions
-            if p.signal_type == SignalType.SELL
-        )
+        # ポジション情報をbot stateに同期（キャッシュ参照）
+        exp, b_lot, s_lot, b_cnt, s_cnt = _cached_exposure[sym]
         ctx.bot.state = ctx.bot.state.with_exposure(
-            open_exposure_lot=exposure_lot,
-            open_same_direction_lot=max(buy_lot, sell_lot),
-            open_buy_count=buy_count,
-            open_sell_count=sell_count,
+            open_exposure_lot=exp,
+            open_same_direction_lot=max(b_lot, s_lot),
+            open_buy_count=b_cnt,
+            open_sell_count=s_cnt,
         )
 
         # シグナル生成
@@ -633,9 +624,10 @@ def run_multi_pair_year(
             if not portfolio.can_open_position(sym, multi_config):
                 signal = None  # エントリーブロック
 
-        # balance記録
+        # balance記録・ポジション数スナップショット
         balance_before = ctx.simulator.state.balance
-        prev_trade_count = len(ctx.simulator.get_closed_trades())
+        prev_n = len(ctx.simulator.state.open_positions)
+        prev_trade_count = len(ctx.simulator.state.closed_trades)
 
         # process_candle実行
         _consensus_scores = None
@@ -655,24 +647,62 @@ def run_multi_pair_year(
         portfolio.equity += pnl_delta
         portfolio.update_peak()
 
+        # Opt 2: ポジション変化検出 → キャッシュ差分更新
+        curr_n = len(ctx.simulator.state.open_positions)
+        balance_changed = (
+            ctx.simulator.state.balance != balance_before
+        )
+        if curr_n != prev_n or balance_changed:
+            positions = ctx.simulator.state.open_positions
+            new_exp = sum(p.volume for p in positions)
+            new_b_lot = sum(
+                p.volume
+                for p in positions
+                if p.signal_type == SignalType.BUY
+            )
+            new_s_lot = sum(
+                p.volume
+                for p in positions
+                if p.signal_type == SignalType.SELL
+            )
+            new_b_cnt = sum(
+                1
+                for p in positions
+                if p.signal_type == SignalType.BUY
+            )
+            new_s_cnt = sum(
+                1
+                for p in positions
+                if p.signal_type == SignalType.SELL
+            )
+            _cached_exposure[sym] = (
+                new_exp,
+                new_b_lot,
+                new_s_lot,
+                new_b_cnt,
+                new_s_cnt,
+            )
+            # portfolio 差分更新
+            portfolio.per_pair_positions[sym] = curr_n
+            portfolio.per_pair_exposure[sym] = new_exp
+            portfolio.global_open_positions = sum(
+                portfolio.per_pair_positions.values(),
+            )
+            portfolio.global_exposure_lot = sum(
+                portfolio.per_pair_exposure.values(),
+            )
+
         # 決済時: bot.on_trade_executed呼び出し
-        closed_trades = ctx.simulator.get_closed_trades()
+        closed_trades = ctx.simulator.state.closed_trades
         if len(closed_trades) > prev_trade_count:
             new_trade = closed_trades[-1]
             pnl = new_trade.profit_loss or 0
-            from autotrader.decision.unified.adaptive import (
-                TradeRecord,
-            )
-
             _trade_record = TradeRecord.from_trade(new_trade)
             ctx.bot.on_trade_executed(
                 bar_time,
                 pnl=pnl,
                 trade_record=_trade_record,
             )
-
-        # ポジション情報更新
-        portfolio.update_positions(contexts)
 
         # 進捗表示（5000バーごと）
         if bar_num % 5000 == 0 and bar_num > 0:
@@ -707,8 +737,19 @@ def run_multi_pair_year(
             portfolio.monthly_pnl.get(current_month, 0.0) + month_pnl
         )
 
-    # ポジション更新
-    portfolio.update_positions(contexts)
+    # ポジション更新（年末強制決済後）
+    for sym, ctx in contexts.items():
+        positions = ctx.simulator.state.open_positions
+        n = len(positions)
+        lot = sum(p.volume for p in positions)
+        portfolio.per_pair_positions[sym] = n
+        portfolio.per_pair_exposure[sym] = lot
+    portfolio.global_open_positions = sum(
+        portfolio.per_pair_positions.values(),
+    )
+    portfolio.global_exposure_lot = sum(
+        portfolio.per_pair_exposure.values(),
+    )
 
     elapsed = time.time() - _t0
     print(
@@ -720,7 +761,7 @@ def run_multi_pair_year(
     # ペア別トレード返却
     pair_trades: dict[str, list[Any]] = {}
     for sym, ctx in contexts.items():
-        pair_trades[sym] = ctx.simulator.get_closed_trades()
+        pair_trades[sym] = list(ctx.simulator.state.closed_trades)
 
     return pair_trades
 
