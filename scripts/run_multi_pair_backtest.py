@@ -12,7 +12,6 @@ JPY/USDペアを時系列インターリーブで同時実行し、共有資金�
 from __future__ import annotations
 
 import argparse
-import csv
 import dataclasses
 import gc
 import heapq
@@ -20,11 +19,7 @@ import logging
 import math
 import sys
 import time
-from concurrent.futures import (
-    ProcessPoolExecutor,
-    ThreadPoolExecutor,
-    as_completed,
-)
+from concurrent.futures import ProcessPoolExecutor
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -282,18 +277,18 @@ class PairContext:
 # =============================================================
 # データロード
 # =============================================================
-def load_pair_data(
+def _create_runner(
     symbol: str,
     data_dir: str,
-) -> tuple[BacktestRunner, dict[str, pd.DataFrame]]:
-    """ペアデータをロードしてBacktestRunnerとmarket_dataを返す
+) -> BacktestRunner:
+    """ペア用BacktestRunnerを生成（データロードなし）
 
     Args:
         symbol: 通貨ペア名
         data_dir: データディレクトリ
 
     Returns:
-        tuple: (BacktestRunner, market_data辞書)
+        BacktestRunner: 未ロード状態のRunner
     """
     preset = get_preset(symbol)
     config = BacktestConfig(
@@ -305,70 +300,58 @@ def load_pair_data(
         bonus_max_positions=preset.bonus_max_positions,
         bonus_score_threshold=preset.bonus_score_threshold,
     )
-    runner = BacktestRunner(
+    return BacktestRunner(
         data_dir=data_dir,
         config=config,
         verbose=False,
         log_to_file=False,
     )
-    # 全期間データをロード
-    # load_data()はDaily→D1フォールバック等を処理する
-    market_data = runner._load_all_timeframes(include_m1=True)
-    # _load_all_timeframes でD1がロードされない場合
-    # load_data() の Daily→D1 フォールバックを利用
-    if "D1" not in market_data:
-        runner.load_data()
-        if runner._d1_df is not None:
-            market_data["D1"] = runner._d1_df
-    # メモリ最適化: _tf_data は market_data に移管済み
-    if hasattr(runner, "_tf_data"):
-        runner._tf_data.clear()
-    return runner, market_data
 
 
-def load_all_pair_data(
+def warm_indicator_cache(
     symbols: list[str],
     data_dir: str,
-    max_workers: int = 6,
-) -> dict[str, tuple[BacktestRunner, dict[str, pd.DataFrame]]]:
-    """全ペアのデータをスレッド並列でロード
+) -> None:
+    """全ペア×全TFのインジケータキャッシュを事前生成
 
-    I/Oバウンド（CSV/Parquet読み込み）のためスレッド並列が最適。
-    各呼び出しが独立したオブジェクトを返すためスレッドセーフ。
+    初回のみフルデータをロード→インジケータ計算→年別parquet保存。
+    2回目以降はキャッシュが存在するためスキップされる。
+    1ペアずつ順次処理し、フルデータは即時解放する。
 
     Args:
         symbols: シンボルリスト
         data_dir: データディレクトリ
-        max_workers: 並列ワーカー数
-
-    Returns:
-        dict[str, tuple[BacktestRunner, dict[str, pd.DataFrame]]]:
-            シンボル→(BacktestRunner, market_data)
     """
-    runners: dict[
-        str, tuple[BacktestRunner, dict[str, pd.DataFrame]]
-    ] = {}
-    workers = min(max_workers, len(symbols))
     _t0 = time.time()
     print(
-        f"\nデータロード中... "
-        f"({len(symbols)}ペア, workers={workers})"
+        f"\nインジケータキャッシュ確認中... "
+        f"({len(symbols)}ペア)"
     )
 
-    with ThreadPoolExecutor(max_workers=workers) as executor:
-        futures = {
-            executor.submit(load_pair_data, sym, data_dir): sym
-            for sym in symbols
-        }
-        for future in as_completed(futures):
-            sym = futures[future]
-            _elapsed = time.time() - _t0
-            runners[sym] = future.result()
-            print(f"  {sym}: ロード完了 ({_elapsed:.1f}s)")
+    for sym in symbols:
+        _st = time.time()
+        runner = _create_runner(sym, data_dir)
+        # needed_years=None → キャッシュ未生成なら全期間計算→保存
+        # キャッシュ済みならロードせずスキップ
+        market_data = runner._load_all_timeframes(
+            include_m1=True,
+        )
+        # D1フォールバック
+        if "D1" not in market_data:
+            runner.load_data()
+            if runner._d1_df is not None:
+                market_data["D1"] = runner._d1_df
+        # フルデータを即時解放
+        del market_data
+        if hasattr(runner, "_tf_data"):
+            runner._tf_data.clear()
+        del runner
+        gc.collect()
+        _elapsed = time.time() - _st
+        print(f"  {sym}: キャッシュ準備完了 ({_elapsed:.1f}s)")
 
     total = time.time() - _t0
-    print(f"  全ペアロード完了: {total:.1f}s")
-    return runners
+    print(f"  全ペアキャッシュ完了: {total:.1f}s")
 
 
 def load_year_data(
@@ -376,10 +359,11 @@ def load_year_data(
     data_dir: str,
     year: int,
 ) -> dict[str, dict[str, pd.DataFrame]]:
-    """1年分の全ペアデータを順次ロード（年フィルタ済み）
+    """1年分の全ペアデータをキャッシュから高速ロード
 
-    ペアごとに全期間ロード→年フィルタ→全期間データ即時解放。
-    順次ロードにより、ピークメモリを1ペア分(~600MB)に抑制。
+    事前に warm_indicator_cache() で年別parquetが生成済みの場合、
+    対象年のキャッシュのみ読み込む（~100MB/ペア vs 600MB）。
+    キャッシュ未生成の場合はフォールバックでフルロード→年フィルタ。
 
     Args:
         symbols: シンボルリスト
@@ -390,30 +374,39 @@ def load_year_data(
         dict[str, dict[str, pd.DataFrame]]:
             シンボル→TF名→年フィルタ済みDataFrame
     """
-    start_date = datetime(year, 1, 1)
-    end_date = datetime(year + 1, 1, 1)
-
     result: dict[str, dict[str, pd.DataFrame]] = {}
     _t0 = time.time()
     print(
         f"\n  {year}年データロード中... "
-        f"({len(symbols)}ペア, 順次ロード)"
+        f"({len(symbols)}ペア)"
     )
 
     for sym in symbols:
-        _runner, full_md = load_pair_data(sym, data_dir)
-        # 年フィルタ
-        year_md: dict[str, pd.DataFrame] = {}
-        for tf_key, tf_df in full_md.items():
-            year_df = tf_df[
-                (tf_df["time"] >= start_date)
-                & (tf_df["time"] < end_date)
-            ].reset_index(drop=True)
-            if not year_df.empty:
-                year_md[tf_key] = year_df
-        result[sym] = year_md
-        # 全期間データを即時解放
-        del full_md, _runner
+        runner = _create_runner(sym, data_dir)
+        # needed_years=[year] でキャッシュから対象年のみ読み込み
+        market_data = runner._load_all_timeframes(
+            include_m1=True,
+            needed_years=[year],
+        )
+        # D1フォールバック
+        if "D1" not in market_data:
+            runner.load_data()
+            if runner._d1_df is not None:
+                # D1は年フィルタが必要
+                d1_df = runner._d1_df
+                start_date = datetime(year, 1, 1)
+                end_date = datetime(year + 1, 1, 1)
+                year_d1 = d1_df[
+                    (d1_df["time"] >= start_date)
+                    & (d1_df["time"] < end_date)
+                ].reset_index(drop=True)
+                if not year_d1.empty:
+                    market_data["D1"] = year_d1
+        result[sym] = market_data
+        # Runner内部データを解放
+        if hasattr(runner, "_tf_data"):
+            runner._tf_data.clear()
+        del runner
         _elapsed = time.time() - _t0
         print(f"    {sym}: ロード完了 ({_elapsed:.1f}s)")
 
@@ -1171,6 +1164,9 @@ def run_test_case(
     if max_year_workers > 1:
         print(f"  年並列: {max_year_workers}ワーカー")
     print(f"{'=' * 60}")
+
+    # インジケータキャッシュを事前生成（初回のみ実行）
+    warm_indicator_cache(symbols, data_dir)
 
     # --- 年並列実行 ---
     if max_year_workers > 1:
