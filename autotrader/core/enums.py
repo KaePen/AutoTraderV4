@@ -184,14 +184,6 @@ class MarketRegime(str, Enum):
     LOW_VOL = "LOW_VOL"
 
 
-class TradingStrategyMode(str, Enum):
-    """取引戦略モード
-
-    全TFを動的に評価して最強TFを自動選択するUNIVERSALモードのみ。
-    """
-
-    UNIVERSAL = "UNIVERSAL"  # 動的：全TFを評価して最強TFを自動選択
-
 
 class TradingMode(str, Enum):
     """トレーディングモード"""

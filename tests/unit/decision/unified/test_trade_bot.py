@@ -15,8 +15,7 @@ from autotrader.constraint.soft_guard import SoftGuardResult
 from autotrader.core.enums import (
     MarketRegime,
     SignalType,
-    TradingStrategyMode,
-)
+    )
 from autotrader.decision.unified import (
     BotState,
     RiskManager,
@@ -283,7 +282,7 @@ def _make_sg(
 def _make_plan() -> TradingPlan:
     """テスト用TradingPlan生成"""
     return TradingPlan(
-        mode=TradingStrategyMode.UNIVERSAL,
+        mode="UNIVERSAL",
         primary_tf="M15",
         entry_tf="M5",
         confirm_tfs=["H1"],

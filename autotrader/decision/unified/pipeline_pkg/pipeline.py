@@ -274,7 +274,7 @@ class TimeframeEvalStep:
         )
 
         # 分析用に最後のモード/レジームを保持
-        bot._last_mode = plan.mode.value
+        bot._last_mode = plan.mode
         bot._last_regime = regime_result.regime.value
 
         # 8. TFルーティング
@@ -498,7 +498,7 @@ class ConsensusStep:
                         volatility=(
                             regime_result.volatility_level
                         ),
-                        mode=plan.mode.value,
+                        mode=plan.mode,
                         primary_tf=plan.primary_tf,
                         risk_passed=True,
                         tf_details=tf_detail,
@@ -729,7 +729,7 @@ class FilterStep:
                             volatility=(
                                 regime_result.volatility_level
                             ),
-                            mode=plan.mode.value,
+                            mode=plan.mode,
                             primary_tf=plan.primary_tf,
                             risk_passed=True,
                             consensus_direction=(
@@ -1036,7 +1036,7 @@ class SizingStep:
                         volatility=(
                             regime_result.volatility_level
                         ),
-                        mode=plan.mode.value,
+                        mode=plan.mode,
                         primary_tf=plan.primary_tf,
                         risk_passed=True,
                         consensus_direction=(
@@ -1148,7 +1148,7 @@ class SizingStep:
 
         rationale = (
             f"{consensus.reasoning}, "
-            f"mode={plan.mode.value}, "
+            f"mode={plan.mode}, "
             f"lot={lot:.2f}"
         )
 
@@ -1164,7 +1164,7 @@ class SizingStep:
                     volatility=(
                         regime_result.volatility_level
                     ),
-                    mode=plan.mode.value,
+                    mode=plan.mode,
                     primary_tf=plan.primary_tf,
                     risk_passed=True,
                     consensus_direction=(
@@ -1207,9 +1207,9 @@ class SizingStep:
 
         # strategy_id構築
         _strategy_id = (
-            f"{plan.mode.value}_{plan.selection_reason}"
+            f"{plan.mode}_{plan.selection_reason}"
             if plan.selection_reason
-            else plan.mode.value
+            else plan.mode
         )
 
         # 最終シグナル構築
@@ -1227,7 +1227,7 @@ class SizingStep:
                 for tf, sig in tf_signals.items()
             },
             regime=regime_result.regime.value,
-            mode=plan.mode.value,
+            mode=plan.mode,
             consensus_score=consensus.score,
             tf_score_breakdowns=tf_breakdowns,
             tf_directions=tf_directions,

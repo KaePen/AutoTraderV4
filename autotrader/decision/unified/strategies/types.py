@@ -130,7 +130,7 @@ class InStrategyConsensusResult:
 class ProposedTrade:
     """戦略からの提案トレード
 
-    各戦略がevaluate()で返す提案。StrategySelectorがedge_scoreで選択。
+    各戦略がevaluate()で返す提案。edge_scoreで選択される。
 
     Attributes:
         strategy_id: 戦略識別子
@@ -190,7 +190,7 @@ class StrategyContext:
 
 @dataclass
 class PoolEvaluationResult:
-    """StrategyPoolの評価結果
+    """戦略プールの評価結果
 
     Attributes:
         proposals: 各戦略からの提案リスト
@@ -218,7 +218,7 @@ class PoolEvaluationResult:
 
 @dataclass(frozen=True)
 class SelectionResult:
-    """StrategySelector選択結果
+    """戦略選択結果
 
     Attributes:
         chosen: 選択された提案（なければNone）

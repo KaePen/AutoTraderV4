@@ -7,7 +7,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from autotrader.core.enums import SignalType, TradingStrategyMode
+from autotrader.core.enums import SignalType
 from autotrader.decision.unified.mode_selector import TradingPlan
 from autotrader.decision.unified.scoring.timeframe_evaluator import (
     TimeframeSignal,
@@ -168,7 +168,7 @@ class ModeAwareScoreConsensus:
         if final_score < threshold:
             reasoning = (
                 f"スコア不足: {final_score:.2f} < 閾値{threshold:.2f} "
-                f"({plan.mode.value})"
+                f"({plan.mode})"
             )
             return ConsensusResult(
                 direction=SignalType.HOLD,
@@ -196,7 +196,7 @@ class ModeAwareScoreConsensus:
                     reasoning=(
                         f"TF整合率不足: {aligned_count}/{total_tfs}="
                         f"{alignment_ratio:.0%} < 50%"
-                        f"({plan.mode.value})"
+                        f"({plan.mode})"
                     ),
                     buy_score=buy_score,
                     sell_score=sell_score,
@@ -233,7 +233,7 @@ class ModeAwareScoreConsensus:
                                 f"多面分析: 競合{conflict_ratio:.0%}超 → "
                                 f"{counter_direction.value}"
                                 f"({competing_score:.2f}>={threshold:.2f})"
-                                f"({plan.mode.value})"
+                                f"({plan.mode})"
                             ),
                             buy_score=buy_score,
                             sell_score=sell_score,
@@ -245,7 +245,7 @@ class ModeAwareScoreConsensus:
                     aligned_tfs=aligned_tfs,
                     reasoning=(
                         f"競合シグナル強度過大: {conflict_ratio:.0%}"
-                        f" > 60%({plan.mode.value})"
+                        f" > 60%({plan.mode})"
                     ),
                     buy_score=buy_score,
                     sell_score=sell_score,
@@ -277,7 +277,7 @@ class ModeAwareScoreConsensus:
                         aligned_tfs=aligned_tfs,
                         reasoning=(
                             f"スコア偏り過大(CV={_cv:.2f}>1.0)"
-                            f"({plan.mode.value})"
+                            f"({plan.mode})"
                         ),
                         buy_score=buy_score,
                         sell_score=sell_score,
@@ -302,7 +302,7 @@ class ModeAwareScoreConsensus:
         self,
         tf: str,
         tf_set: TimeframeSet,
-        mode: TradingStrategyMode | None = None,
+        mode: str | None = None,
     ) -> float:
         """時間足の重みを取得
 
@@ -334,7 +334,7 @@ class ModeAwareScoreConsensus:
 
     def get_threshold_for_mode(
         self,
-        mode: TradingStrategyMode | None = None,
+        mode: str | None = None,
     ) -> float:
         """閾値を取得
 

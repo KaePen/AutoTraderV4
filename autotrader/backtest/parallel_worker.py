@@ -105,16 +105,6 @@ def _run_year_worker(
     runner._h8_df = year_market_data.get("H8")
     runner._d1_df = year_market_data.get("D1")
 
-    # マルチモードコントローラーをサブプロセスで再構築
-    multi_mode_controller = None
-    if use_multi_mode:
-        try:
-            from autotrader.decision.unified import MultiModeController
-            multi_mode_controller = MultiModeController()
-            multi_mode_controller.set_market_data(year_market_data)
-        except Exception:
-            pass
-
     # 進捗コールバック → グローバルキューに送信
     def _progress_cb(done: int, total: int) -> None:
         if _WORKER_PROGRESS_QUEUE is not None:
@@ -141,7 +131,6 @@ def _run_year_worker(
         year=year,
         market_data=year_market_data,
         use_m1=use_m1,
-        multi_mode_controller=multi_mode_controller,
         fundamental_provider=fundamental_provider,
         period_start=period_start,
         period_end=period_end,

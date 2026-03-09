@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 
-from autotrader.core.enums import SignalType, TradingStrategyMode
+from autotrader.core.enums import SignalType
 from autotrader.decision.unified.mode_aware_consensus import (
     ConsensusConfig,
     ModeAwareScoreConsensus,
@@ -58,7 +58,7 @@ class TestModeAwareScoreConsensus:
         """テストセットアップ"""
         self.consensus = ModeAwareScoreConsensus()
         self.universal_plan = TradingPlan(
-            mode=TradingStrategyMode.UNIVERSAL,
+            mode="UNIVERSAL",
             primary_tf="M15",
             entry_tf="M5",
             confirm_tfs=["H1", "H4"],
@@ -143,7 +143,7 @@ class TestUniversalModeConsensus:
         """テストセットアップ"""
         self.consensus = ModeAwareScoreConsensus()
         self.universal_plan = TradingPlan(
-            mode=TradingStrategyMode.UNIVERSAL,
+            mode="UNIVERSAL",
             primary_tf="M15",
             entry_tf="M5",
             confirm_tfs=["M1", "H1", "H4", "H8", "D1"],
@@ -155,7 +155,7 @@ class TestUniversalModeConsensus:
     def test_universal_threshold_is_4_5(self) -> None:
         """UNIVERSALモードの閾値は4.5"""
         threshold = self.consensus.get_threshold_for_mode(
-            TradingStrategyMode.UNIVERSAL
+            "UNIVERSAL"
         )
         assert threshold == 4.5
 
@@ -172,7 +172,7 @@ class TestUniversalModeConsensus:
         config = ConsensusConfig(threshold=3.0)
         consensus = ModeAwareScoreConsensus(config)
         threshold = consensus.get_threshold_for_mode(
-            TradingStrategyMode.UNIVERSAL
+            "UNIVERSAL"
         )
         assert threshold == 3.0
 
@@ -190,7 +190,7 @@ class TestConsensusConfig:
         consensus = ModeAwareScoreConsensus(config)
 
         plan = TradingPlan(
-            mode=TradingStrategyMode.UNIVERSAL,
+            mode="UNIVERSAL",
             primary_tf="M15",
             entry_tf="M5",
             confirm_tfs=["H1"],
@@ -218,7 +218,7 @@ class TestConsensusConfig:
         consensus = ModeAwareScoreConsensus(config)
 
         threshold = consensus.get_threshold_for_mode(
-            TradingStrategyMode.UNIVERSAL,
+            "UNIVERSAL",
         )
 
         assert threshold == 2.0

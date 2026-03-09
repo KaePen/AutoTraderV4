@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 
-from autotrader.core.enums import TradingStrategyMode
 from autotrader.decision.unified.config import UnifiedBotConfig
 from autotrader.decision.unified.mode_selector import TradingPlan
 
@@ -14,7 +13,7 @@ class TestCreateUniversal:
     def test_default_config(self) -> None:
         """デフォルトconfigでUNIVERSALプラン生成"""
         plan = TradingPlan.create_universal()
-        assert plan.mode == TradingStrategyMode.UNIVERSAL
+        assert plan.mode == "UNIVERSAL"
         assert plan.primary_tf == "M15"
         assert plan.entry_tf == "M5"
         assert plan.manage_tf == "M15"
@@ -59,7 +58,7 @@ class TestCreateUniversal:
     def test_none_config_uses_defaults(self) -> None:
         """config=NoneでデフォルトUnifiedBotConfigを使用"""
         plan = TradingPlan.create_universal(None)
-        assert plan.mode == TradingStrategyMode.UNIVERSAL
+        assert plan.mode == "UNIVERSAL"
         assert plan.primary_tf == "M15"
 
 

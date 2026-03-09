@@ -19,7 +19,6 @@ from autotrader.core.enums import (
     MarketSession,
     SignalType,
     Timeframe,
-    TradingStrategyMode,
     TrendDirection,
 )
 from autotrader.core.exceptions import (
@@ -48,7 +47,6 @@ __all__ = [
     "TrendDirection",
     "MarketSession",
     "MarketRegime",
-    "TradingStrategyMode",
     # Exceptions
     "AutoTraderError",
     "DataError",

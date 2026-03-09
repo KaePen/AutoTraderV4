@@ -8,8 +8,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from autotrader.core.enums import TradingStrategyMode
-
 if TYPE_CHECKING:
     from autotrader.decision.unified.config import UnifiedBotConfig
 
@@ -86,7 +84,7 @@ class EntryTimeframeResolver:
 
     def get_entry_config(
         self,
-        mode: TradingStrategyMode | None = None,
+        mode: str | None = None,
     ) -> EntryConfig:
         """エントリー設定を取得
 
@@ -100,7 +98,7 @@ class EntryTimeframeResolver:
 
     def should_check_entry(
         self,
-        mode: TradingStrategyMode | None = None,
+        mode: str | None = None,
         completed_tf: str = "",
     ) -> bool:
         """エントリーチェックすべきかを判定
@@ -118,7 +116,7 @@ class EntryTimeframeResolver:
 
     def resolve(
         self,
-        mode: TradingStrategyMode | None = None,
+        mode: str | None = None,
         completed_tf: str = "",
         tf_directions: dict[str, str] | None = None,
         tf_scores: dict[str, float] | None = None,
@@ -176,7 +174,7 @@ class EntryTimeframeResolver:
 
     def get_all_required_tfs(
         self,
-        mode: TradingStrategyMode | None = None,
+        mode: str | None = None,
     ) -> list[str]:
         """UNIVERSALモードで必要な全時間足を取得
 

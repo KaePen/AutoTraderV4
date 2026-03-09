@@ -1437,8 +1437,8 @@ class LiveTradingEngine:
             volume: ロット数
             entry_tick: エントリー時のtick情報（ask/bid）
         """
-        from autotrader.core.enums import TradingStrategyMode
         from autotrader.decision.unified.mode_selector import (
+            UNIVERSAL_MODE,
             TradingModeSelector,
         )
 
@@ -1478,20 +1478,12 @@ class LiveTradingEngine:
             tp_price,
         )
 
-        # signal.modeから実際のモードを解決（デフォルト: UNIVERSAL）
-        mode = TradingStrategyMode.UNIVERSAL
-        if signal.mode:
-            try:
-                mode = TradingStrategyMode(signal.mode.upper())
-            except ValueError:
-                logger.warning(
-                    "不明なモード: %s、UNIVERSALを使用",
-                    signal.mode,
-                )
+        # モードは常にUNIVERSAL
+        mode = UNIVERSAL_MODE
 
-        # ModeSelector経由でモード別プランパラメータを取得し
+        # ModeSelector経由でプランパラメータを取得し
         # regimeとselection_reasonを付与
-        _base_plan = TradingModeSelector().get_plan_for_mode(mode)
+        _base_plan = TradingModeSelector().get_plan_for_mode()
         plan = dataclasses.replace(
             _base_plan,
             selection_reason="live",

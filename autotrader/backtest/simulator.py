@@ -21,7 +21,7 @@ from autotrader.config.trading_params import (
     get_quote_ccy_rate,
 )
 from autotrader.core.entities import Candle, Position, Signal, Trade
-from autotrader.core.enums import ExitReason, SignalType, TradingStrategyMode
+from autotrader.core.enums import ExitReason, SignalType
 from autotrader.core.exceptions import BacktestError
 from autotrader.decision.unified.position_manager import (
     ManagementActionType,
