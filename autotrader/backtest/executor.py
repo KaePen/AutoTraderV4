@@ -34,7 +34,6 @@ class ExecutorConfig:
         symbol: 通貨ペア
         data_dir: データディレクトリ
         use_short_timeframe: 短い時間足（M5）を基準として使用
-        use_multi_mode: マルチモードトレード有効化
         parallel_years: 年並列処理有効化
         max_workers: 並列ワーカー数（Noneで自動）
         max_positions: 最大ポジション数
@@ -52,7 +51,6 @@ class ExecutorConfig:
     symbol: str = "USDJPY"
     data_dir: str = "data/csv"
     use_short_timeframe: bool = True
-    use_multi_mode: bool = False
     parallel_years: bool = True
     max_workers: int | None = None
     max_positions: int = 1

@@ -41,9 +41,6 @@ class CLIAdapter:
         parallel_years = not getattr(args, "no_parallel", False)
         max_workers = getattr(args, "workers", None)
 
-        # マルチモードオプション
-        use_multi_mode = getattr(args, "multi_mode", False)
-
         # ファンダメンタルオプション
         fundamental_enabled = getattr(args, "fundamental", False)
         fundamental_csv = getattr(args, "fundamental_csv", None)
@@ -58,7 +55,6 @@ class CLIAdapter:
             symbol=args.symbol,
             data_dir=args.data_dir,
             use_short_timeframe=use_short_tf,
-            use_multi_mode=use_multi_mode,
             parallel_years=parallel_years,
             max_workers=max_workers,
             max_positions=args.max_positions,
@@ -145,11 +141,6 @@ class CLIAdapter:
             help="UNIVERSALモードを有効化（M1〜D1全TFを動的評価）",
         )
         parser.add_argument(
-            "--multi-mode",
-            action="store_true",
-            help="マルチモードトレードを有効化",
-        )
-        parser.add_argument(
             "--parallel",
             action="store_true",
             default=True,
@@ -208,8 +199,6 @@ class CLIAdapter:
         """
         base_tf = "M5（5分毎判断）" if config.use_short_timeframe else "M15（15分毎判断）"
         parallel_status = "有効" if config.parallel_years else "無効"
-        multi_mode_status = "有効" if config.use_multi_mode else "無効"
-
         print("=" * 80)
         print("AutoTraderV4 バックテスト")
         print("=" * 80)
@@ -220,7 +209,6 @@ class CLIAdapter:
         print(f"初期残高: ¥{config.initial_balance:,.0f}")
         print(f"ボリューム: {config.volume}")
         print(f"年並列処理: {parallel_status}")
-        print(f"マルチモードトレード: {multi_mode_status}")
         print("=" * 80)
 
     @classmethod

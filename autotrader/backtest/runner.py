@@ -965,7 +965,6 @@ class BacktestRunner:
         end_year: int,
         config: "UnifiedBotConfig | None" = None,
         use_m1: bool = False,
-        use_multi_mode: bool = False,
         use_parallel_tf: bool = False,
         enable_scalping: bool = False,
         pm_config: "PositionManagerConfig | None" = None,
@@ -994,7 +993,6 @@ class BacktestRunner:
             end_year: 終了年
             config: 統合ボット設定
             use_m1: M1データを基準タイムフレームとして使用
-            use_multi_mode: マルチモードトレード有効化
             use_parallel_tf: 並列マルチTFモード（全TFでエントリー可能）
             enable_scalping: スキャルピングモード有効化（M1/M5からエントリー可能）
             pm_config: PositionManager設定（外部注入）
@@ -1166,7 +1164,6 @@ class BacktestRunner:
                     "min_alignment": bot_config.consolidator.min_alignment,
                     "timeframes": bot_config.timeframes,
                     "use_m1": use_m1,
-                    "use_multi_mode": use_multi_mode,
                     "use_parallel_tf": use_parallel_tf,
                 },
             )
@@ -1353,7 +1350,6 @@ class BacktestRunner:
                                     year,
                                     _year_md[year],
                                     use_m1,
-                                    use_multi_mode,
                                     (
                                         fundamental_provider
                                         if _fp_picklable

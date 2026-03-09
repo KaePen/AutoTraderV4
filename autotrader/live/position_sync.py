@@ -18,6 +18,7 @@ from autotrader.core.entities import Signal
 from autotrader.core.enums import ExitReason, SignalType, Timeframe
 from autotrader.core.event_bus import event_bus
 from autotrader.core.exceptions import TradingError
+from autotrader.decision.unified.mode_selector import TradingPlan
 from autotrader.decision.unified.position_manager import (
     PositionManager,
 )
@@ -561,10 +562,6 @@ class PositionSyncService:
             pos_id = str(pos.ticket)
             if self._pm.get_position(pos_id) is None:
                 import dataclasses as _dc
-
-                from autotrader.decision.unified.mode_selector import (
-                    TradingPlan,
-                )
 
                 plan = TradingPlan.create_universal(
                     bot.config,

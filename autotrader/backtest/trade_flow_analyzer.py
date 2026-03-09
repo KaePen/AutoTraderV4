@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from collections import defaultdict
 
+from autotrader.decision.unified.mode_selector import UNIVERSAL_MODE
+
 __all__ = ["TradeFlowAnalyzer"]
 
 
@@ -262,7 +264,7 @@ class TradeFlowAnalyzer:
                 if r.final_direction not in ("HOLD", ""):
                     mode_signals[r.mode] += 1
 
-        for mode in ["UNIVERSAL"]:
+        for mode in [UNIVERSAL_MODE]:
             mc = mode_counts.get(mode, 0)
             ms = mode_signals.get(mode, 0)
             pct = mc / total * 100 if total else 0
@@ -292,7 +294,7 @@ class TradeFlowAnalyzer:
             m = modes[i] if i < len(modes) else "UNKNOWN"
             mode_trades[m].append(t)
 
-        for mode in ["UNIVERSAL", "UNKNOWN"]:
+        for mode in [UNIVERSAL_MODE, "UNKNOWN"]:
             tlist = mode_trades.get(mode, [])
             if not tlist:
                 continue
@@ -533,7 +535,7 @@ class TradeFlowAnalyzer:
                 if r.final_direction not in ("HOLD", ""):
                     mode_signals[r.mode] += 1
 
-        for mode in ["UNIVERSAL"]:
+        for mode in [UNIVERSAL_MODE]:
             mc = mode_counts.get(mode, 0)
             ms = mode_signals.get(mode, 0)
             if mc > 0 and ms == 0:
