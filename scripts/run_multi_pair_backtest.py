@@ -18,7 +18,6 @@ import heapq
 import io
 import logging
 import math
-import os
 import sys
 import time
 from collections.abc import Callable
@@ -32,19 +31,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-# Windows cp932エンコーディング問題の回避
-if sys.platform == "win32":
-    sys.stdout = io.TextIOWrapper(
-        sys.stdout.buffer,
-        encoding="utf-8",
-        errors="replace",
-    )
-    sys.stderr = io.TextIOWrapper(
-        sys.stderr.buffer,
-        encoding="utf-8",
-        errors="replace",
-    )
-    os.environ.setdefault("PYTHONIOENCODING", "utf-8")
 
 import numpy as np
 import pandas as pd
@@ -1302,11 +1288,28 @@ def run_test_case(
     )
 
     # rich Console（ヘッダー・結果表示用）
+    # スレッドからの呼び出し時にstdout閉鎖エラーを回避する
+    _console = None
     try:
         from rich.console import Console as _RichConsole
 
-        _console: _RichConsole | None = _RichConsole()
-    except ImportError:
+        # Windows cp932対策: UTF-8ファイルオブジェクトを作成
+        _safe_file = None
+        if sys.platform == "win32" and hasattr(
+            sys.stdout, "buffer"
+        ):
+            _safe_file = io.TextIOWrapper(
+                sys.stdout.buffer,
+                encoding="utf-8",
+                errors="replace",
+                write_through=True,
+            )
+            # 閉じないようにする（bufferはstdoutが所有）
+            _safe_file.close = lambda: None  # type: ignore[assignment]
+        _console = _RichConsole(
+            file=_safe_file or sys.stdout,
+        )
+    except (ImportError, ValueError):
         _console = None
 
     if _console is not None:
