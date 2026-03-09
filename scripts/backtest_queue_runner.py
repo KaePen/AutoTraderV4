@@ -77,6 +77,10 @@ DEFAULT_DATA_DIR = str(_DATA_ROOT / "data")
 POLL_INTERVAL = 2.0  # キューポーリング間隔（秒）
 THREADS_PER_YEAR = 1.5  # 1年あたりの必要CPUスレッド数
 
+# Web UI連携用ファイル
+RUNNER_STATE_FILE = _DATA_ROOT / "runner_state.json"
+RUNNER_CMD_FILE = _DATA_ROOT / "runner_commands.json"
+
 
 # ===================================================================
 # データモデル
@@ -997,6 +1001,88 @@ def _execute_job_from_file(job_file: str) -> None:
 
 
 # ===================================================================
+# Web UI連携: 状態書き出し・コマンド読み取り
+# ===================================================================
+
+
+def _write_runner_state(
+    running_jobs: list[RunningJob],
+    state: QueueState,
+    paused: bool,
+    cpu_threads: int,
+) -> None:
+    """キューランナー状態をJSONファイルに書き出し
+
+    Web UIがこのファイルを読み取って表示する。
+    """
+    now = datetime.now().isoformat()
+    jobs_data: list[dict[str, Any]] = []
+    for rj in running_jobs:
+        elapsed = time.time() - rj.started_at
+        jobs_data.append({
+            "job_id": rj.job.id,
+            "result_id": rj.result_id,
+            "type": rj.job.type,
+            "symbol": rj.job.symbol,
+            "symbols": rj.job.symbols,
+            "years": rj.job.years,
+            "description": rj.job.description,
+            "workers": rj.max_year_workers,
+            "cpu_cost": rj.cpu_cost,
+            "elapsed_seconds": elapsed,
+            "started_at": datetime.fromtimestamp(
+                rj.started_at,
+            ).isoformat(),
+        })
+
+    try:
+        total_jobs = len(load_queue())
+    except Exception:
+        total_jobs = 0
+
+    data = {
+        "paused": paused,
+        "cpu_threads": cpu_threads,
+        "running_jobs": jobs_data,
+        "completed_ids": state.completed_ids,
+        "total_jobs": total_jobs,
+        "updated_at": now,
+    }
+    try:
+        tmp = RUNNER_STATE_FILE.with_suffix(".tmp")
+        tmp.write_text(
+            json.dumps(
+                data, ensure_ascii=False, indent=2,
+            ),
+            encoding="utf-8",
+        )
+        tmp.replace(RUNNER_STATE_FILE)
+    except OSError:
+        pass
+
+
+def _read_runner_commands(
+    cmd_queue: Any,
+) -> None:
+    """Web UIからのコマンドファイルを読み取り
+
+    コマンドがあればcmd_queueに投入し、ファイル削除。
+    """
+    if not RUNNER_CMD_FILE.exists():
+        return
+    try:
+        data = json.loads(
+            RUNNER_CMD_FILE.read_text(encoding="utf-8"),
+        )
+        commands = data.get("commands", [])
+        for cmd in commands:
+            cmd_queue.put(str(cmd).strip())
+        RUNNER_CMD_FILE.unlink(missing_ok=True)
+    except (json.JSONDecodeError, OSError):
+        pass
+
+
+# ===================================================================
 # 対話コマンドリーダー
 # ===================================================================
 
@@ -1575,6 +1661,12 @@ def main() -> None:
                 running_jobs.append(rj_new)
                 running_ids.add(job.id)
                 t.start()
+
+        # Web UI連携: 状態書き出し＋コマンド読み取り
+        _write_runner_state(
+            running_jobs, state, paused, cpu_threads,
+        )
+        _read_runner_commands(cmd_queue)
 
         time.sleep(POLL_INTERVAL)
 
