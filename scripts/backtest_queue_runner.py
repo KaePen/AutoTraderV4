@@ -595,7 +595,6 @@ def execute_multi_pair_job(
     from scripts.run_multi_pair_backtest import (
         TEST_MATRIX,
         MultiPairConfig,
-        load_pair_data,
         run_test_case,
     )
 
@@ -673,8 +672,6 @@ def execute_multi_pair_job(
     if bot_ovr_cfg:
         bot_extra.update(bot_ovr_cfg)
 
-    is_parallel = max_year_workers > 1
-
     try:
         logger.info(
             "[%s] マルチペア実行開始 (%s, %s, workers=%d)",
@@ -684,21 +681,9 @@ def execute_multi_pair_job(
             max_year_workers,
         )
 
-        # データロード（順次実行時のみ事前ロード）
-        runners: dict[str, Any] = {}
-        if not is_parallel:
-            for sym in symbols:
-                runners[sym] = load_pair_data(
-                    sym, data_dir,
-                )
-                logger.info(
-                    "[%s] %s ロード完了", _rid, sym,
-                )
-
-        # run_test_caseに委譲（順次/並列を統一処理）
+        # run_test_caseに委譲（年単位ロード）
         agg = run_test_case(
             test_config=multi_config,
-            runners=runners,
             symbols=symbols,
             start_year=start_year,
             end_year=end_year,
