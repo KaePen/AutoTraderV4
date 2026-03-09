@@ -79,7 +79,7 @@ class SimulatorConfig:
     # PositionManagerConfig（外部から注入）
     pm_config: PositionManagerConfig | None = None
     # 動的ロットサイズ（signal.lotを使用、OFFならdefault_volume固定）
-    use_dynamic_lot: bool = False
+    use_dynamic_lot: bool = True
     # セッション別スプレッド（デフォルトOFF=固定スプレッド）
     use_session_spread: bool = False
     session_spreads: dict[str, float] = field(
@@ -95,6 +95,8 @@ class SimulatorConfig:
     bot_config: Any = None
     # 実スプレッドデータを使用（CSVの<SPREAD>列、デフォルトOFF）
     use_actual_spread_data: bool = False
+    # SL/TPがpips値で渡される（True=ライブ統一形式、False=従来の価格値）
+    sl_tp_in_pips: bool = False
 
     @classmethod
     def from_preset(
@@ -821,14 +823,36 @@ class TradeSimulator:
         if required_margin > self.state.balance * 0.8:
             return None
 
+        # SL/TP: pips値→価格変換（sl_tp_in_pips=Trueの場合）
+        sl_price = signal.stop_loss
+        tp_price = signal.take_profit
+        if (
+            self.config.sl_tp_in_pips
+            and signal.stop_loss is not None
+            and signal.stop_loss > 0
+        ):
+            _pu = self._pip_unit
+            if signal.signal_type == SignalType.BUY:
+                sl_price = entry_price - signal.stop_loss * _pu
+                if signal.take_profit and signal.take_profit > 0:
+                    tp_price = (
+                        entry_price + signal.take_profit * _pu
+                    )
+            else:
+                sl_price = entry_price + signal.stop_loss * _pu
+                if signal.take_profit and signal.take_profit > 0:
+                    tp_price = (
+                        entry_price - signal.take_profit * _pu
+                    )
+
         position = Position(
             position_id=str(uuid4()),
             symbol=signal.symbol,
             signal_type=signal.signal_type,
             volume=volume,
             entry_price=entry_price,
-            stop_loss=signal.stop_loss,
-            take_profit=signal.take_profit,
+            stop_loss=sl_price,
+            take_profit=tp_price,
             opened_at=candle.time,
             signal_id=signal.signal_id,
             regime=signal.regime,
@@ -848,11 +872,11 @@ class TradeSimulator:
 
         # エントリー時メトリクス保存
         entry_spread = self._get_spread_for_candle(candle)
-        # リスク率計算
+        # リスク率計算（sl_priceは変換済み価格値）
         _risk_pct = 0.0
-        if signal.stop_loss and entry_price > 0:
+        if sl_price and entry_price > 0:
             _sl_pips = abs(
-                entry_price - signal.stop_loss
+                entry_price - sl_price
             ) / self._pip_unit
             _risk = (
                 _sl_pips * self._pip_value * volume
