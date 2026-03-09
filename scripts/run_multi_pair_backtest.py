@@ -30,6 +30,7 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
+import yaml
 
 # プロジェクトルートをパスに追加
 _SCRIPT_DIR = Path(__file__).resolve().parent
@@ -63,11 +64,57 @@ from autotrader.decision.unified import (  # noqa: E402
     UnifiedTradeBot,
 )
 
-# run_portfolio_backtest.py のヘルパーを再利用
-from scripts.run_portfolio_backtest import (  # noqa: E402
-    build_bot_config,
-    load_signal_overrides,
-)
+
+def load_signal_overrides(
+    symbol: str,
+    preset_path: Path | None = None,
+) -> dict[str, Any]:
+    """symbol_presets.yaml からsignal設定を読み込み"""
+    path = preset_path or (_PROJECT_ROOT / "config" / "symbol_presets.yaml")
+    if not path.exists():
+        return {}
+    with open(path, encoding="utf-8") as f:
+        raw: dict[str, Any] = yaml.safe_load(f) or {}
+    defaults = dict(raw.get("signal", {}))
+    symbols = raw.get("symbols", {})
+    sym_data = symbols.get(symbol, {})
+    if isinstance(sym_data, dict):
+        sym_signal = sym_data.get("signal", {})
+        if sym_signal:
+            defaults.update(sym_signal)
+    return defaults
+
+
+def build_bot_config(
+    symbol: str,
+    extra_overrides: dict[str, Any] | None = None,
+) -> UnifiedBotConfig:
+    """プリセット + signal設定からUnifiedBotConfigを構築"""
+    preset = get_preset(symbol)
+    signal = load_signal_overrides(symbol)
+    valid_fields = {f.name for f in dataclasses.fields(UnifiedBotConfig)}
+    overrides: dict[str, Any] = {}
+    _pip_unit = get_pip_unit(symbol)
+    _qcr = get_quote_ccy_rate(symbol)
+    overrides.update(
+        {
+            "max_positions": preset.max_positions,
+            "bonus_max_positions": preset.bonus_max_positions,
+            "bonus_score_threshold": preset.bonus_score_threshold,
+            "base_risk_pct": preset.base_risk_pct,
+            "max_lot_per_trade": preset.max_lot_per_trade,
+            "max_total_exposure_lot": preset.max_total_exposure_lot,
+            "equity_floor_pct": preset.equity_floor_pct,
+            "pip_unit": _pip_unit,
+            "quote_ccy_rate": _qcr,
+        }
+    )
+    for k, v in signal.items():
+        if k in valid_fields:
+            overrides[k] = v
+    if extra_overrides:
+        overrides.update(extra_overrides)
+    return UnifiedBotConfig(**overrides)
 
 # --- 定数 ---
 JPY_SYMBOLS = [
@@ -711,7 +758,7 @@ def _run_year_worker(args: tuple) -> dict[str, Any] | None:
     if str(_sr) not in _sys.path:
         _sys.path.insert(0, str(_sr))
 
-    from scripts.run_portfolio_backtest import (
+    from scripts.run_multi_pair_backtest import (
         build_bot_config as _build_bot_config,
     )
 
