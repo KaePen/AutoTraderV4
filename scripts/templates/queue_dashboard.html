@@ -164,48 +164,83 @@ async function sendCmd(cmd) {
 // 表示更新
 // ===================================================================
 
+function _createJobCard(j) {
+  const id = j.job_id || j.result_id || '-';
+  const symbols = (j.symbols || []).join(', ') || j.symbol || '-';
+  const typeLabel = j.type === 'multi_pair' ? 'マルチペア' : 'シングル';
+
+  const card = document.createElement('div');
+  card.className = 'card px-5 py-4 fade-in';
+  card.dataset.jobId = id;
+  card.innerHTML = `
+    <div class="flex items-center justify-between mb-2">
+      <div class="flex items-center gap-3">
+        <span class="pulse inline-block w-2 h-2 bg-green-400 rounded-full"></span>
+        <span class="font-semibold text-white">${id}</span>
+        <span class="text-xs px-2 py-0.5 bg-blue-900 text-blue-300 rounded">${typeLabel}</span>
+      </div>
+      <span class="mono text-sm text-slate-400" data-field="elapsed"></span>
+    </div>
+    <div class="grid grid-cols-3 gap-4 text-sm text-slate-300">
+      <div>
+        <span class="text-slate-500">シンボル:</span>
+        <span class="mono">${symbols}</span>
+      </div>
+      <div>
+        <span class="text-slate-500">期間:</span>
+        <span class="mono">${j.years || '-'}</span>
+      </div>
+      <div>
+        <span class="text-slate-500">CPU:</span>
+        <span class="mono" data-field="cpu">${fmtNum(j.cpu_cost, 1)} threads</span>
+        <span class="text-slate-500 ml-2">workers:</span>
+        <span class="mono">${j.workers || '-'}</span>
+      </div>
+    </div>
+    ${j.description ? `<div class="mt-2 text-xs text-slate-500">${j.description}</div>` : ''}
+  `;
+  return card;
+}
+
+function _updateJobCard(card, j) {
+  const elapsedEl = card.querySelector('[data-field="elapsed"]');
+  if (elapsedEl) elapsedEl.textContent = fmtLiveElapsed(j.started_at);
+  const cpuEl = card.querySelector('[data-field="cpu"]');
+  if (cpuEl) cpuEl.textContent = fmtNum(j.cpu_cost, 1) + ' threads';
+}
+
 function renderRunningJobs(jobs) {
   const el = document.getElementById('running-jobs');
   if (!jobs || jobs.length === 0) {
-    el.innerHTML = '<div class="card px-5 py-4 text-slate-500 text-sm">ジョブなし</div>';
+    if (!el.querySelector('.empty-msg')) {
+      el.innerHTML = '<div class="card px-5 py-4 text-slate-500 text-sm empty-msg">ジョブなし</div>';
+    }
     return;
   }
 
-  el.innerHTML = jobs.map(j => {
-    const symbols = (j.symbols || []).join(', ') || j.symbol || '-';
-    const typeLabel = j.type === 'multi_pair' ? 'マルチペア' : 'シングル';
-    const elapsed = fmtLiveElapsed(j.started_at);
+  // 空メッセージ除去
+  const emptyMsg = el.querySelector('.empty-msg');
+  if (emptyMsg) emptyMsg.remove();
 
-    return `
-      <div class="card px-5 py-4 fade-in">
-        <div class="flex items-center justify-between mb-2">
-          <div class="flex items-center gap-3">
-            <span class="pulse inline-block w-2 h-2 bg-green-400 rounded-full"></span>
-            <span class="font-semibold text-white">${j.job_id || j.result_id || '-'}</span>
-            <span class="text-xs px-2 py-0.5 bg-blue-900 text-blue-300 rounded">${typeLabel}</span>
-          </div>
-          <span class="mono text-sm text-slate-400">${elapsed}</span>
-        </div>
-        <div class="grid grid-cols-3 gap-4 text-sm text-slate-300">
-          <div>
-            <span class="text-slate-500">シンボル:</span>
-            <span class="mono">${symbols}</span>
-          </div>
-          <div>
-            <span class="text-slate-500">期間:</span>
-            <span class="mono">${j.years || '-'}</span>
-          </div>
-          <div>
-            <span class="text-slate-500">CPU:</span>
-            <span class="mono">${fmtNum(j.cpu_cost, 1)} threads</span>
-            <span class="text-slate-500 ml-2">workers:</span>
-            <span class="mono">${j.workers || '-'}</span>
-          </div>
-        </div>
-        ${j.description ? `<div class="mt-2 text-xs text-slate-500">${j.description}</div>` : ''}
-      </div>
-    `;
-  }).join('');
+  const currentIds = new Set(jobs.map(j => j.job_id || j.result_id || '-'));
+
+  // 不要なカード削除
+  el.querySelectorAll('[data-job-id]').forEach(card => {
+    if (!currentIds.has(card.dataset.jobId)) card.remove();
+  });
+
+  // 既存カード更新 or 新規追加
+  jobs.forEach(j => {
+    const id = j.job_id || j.result_id || '-';
+    let card = el.querySelector(`[data-job-id="${id}"]`);
+    if (card) {
+      _updateJobCard(card, j);
+    } else {
+      card = _createJobCard(j);
+      _updateJobCard(card, j);
+      el.appendChild(card);
+    }
+  });
 }
 
 function renderCompletedJobs(results) {
