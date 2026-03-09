@@ -14,6 +14,7 @@ from __future__ import annotations
 import argparse
 import csv
 import dataclasses
+import gc
 import heapq
 import logging
 import math
@@ -268,7 +269,6 @@ class PairContext:
         bot: トレードボット
         simulator: シミュレーター
         arrays: CandleArrays（基準TF）
-        period_df: 基準TFデータフレーム
         base_tf: 基準タイムフレーム
         runner: BacktestRunner（データ保持用）
     """
@@ -277,7 +277,6 @@ class PairContext:
     bot: UnifiedTradeBot
     simulator: TradeSimulator
     arrays: CandleArrays
-    period_df: pd.DataFrame
     base_tf: Timeframe
     runner: BacktestRunner
 
@@ -458,13 +457,13 @@ def setup_pair_context(
     simulator = TradeSimulator(config=sim_config)
 
     arrays = CandleArrays.from_dataframe(period_df)
+    del period_df  # DataFrame のメモリ解放（CandleArrays に変換済み）
 
     return PairContext(
         symbol=symbol,
         bot=bot,
         simulator=simulator,
         arrays=arrays,
-        period_df=period_df,
         base_tf=tf,
         runner=runner,
     )
@@ -806,6 +805,12 @@ def _run_year_worker(args: tuple) -> dict[str, Any] | None:
     # MultiPairConfig 復元
     mc = MultiPairConfig(**multi_config_dict)
 
+    if len(symbols) >= 8:
+        print(
+            f"  警告: {len(symbols)}ペア×年並列 = "
+            f"高メモリ使用。max_year_workers=1 を推奨"
+        )
+
     # データロード（各ワーカーが独自にスレッド並列ロード）
     runners = load_all_pair_data(
         symbols, data_dir, max_workers=min(6, len(symbols)),
@@ -1121,6 +1126,15 @@ def run_test_case(
     num_years = end_year - start_year + 1
     _extra = bot_extra_overrides or {}
 
+    # 8ペア以上では年並列を無効化（メモリ不足防止）
+    if len(symbols) >= 8 and max_year_workers > 1:
+        print(
+            f"  注意: {len(symbols)}ペアのため "
+            f"年並列を無効化 (max_year_workers: "
+            f"{max_year_workers} → 1)"
+        )
+        max_year_workers = 1
+
     print(f"\n{'=' * 60}")
     print(f"  テスト: {test_config.name}")
     print(
@@ -1289,6 +1303,10 @@ def run_test_case(
             f"Trades={year_trades}, "
             f"Equity={portfolio.equity:,.0f}"
         )
+
+        # メモリ解放（年間コンテキストは次年で再構築）
+        del contexts
+        gc.collect()
 
     # 結果集約（年独立モード）
     total_profit = sum(yr["pnl"] for yr in yearly_results_seq)
