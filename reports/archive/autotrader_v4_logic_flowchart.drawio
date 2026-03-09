@@ -1,0 +1,634 @@
+<mxfile host="app.diagrams.net" modified="2026-03-07" agent="Claude" version="1.0">
+  <!-- ================================================================== -->
+  <!-- Page 1: System Overview                                             -->
+  <!-- ================================================================== -->
+  <diagram id="overview" name="1. システム全体概要">
+    <mxGraphModel dx="2000" dy="1400" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="2400" pageHeight="1600" math="0" shadow="0">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+
+        <!-- Title -->
+        <mxCell id="t1" value="&lt;b&gt;AutoTraderV4 トレードロジック全体フロー&lt;/b&gt;" style="text;html=1;fontSize=24;align=center;" vertex="1" parent="1">
+          <mxGeometry x="600" y="20" width="800" height="40" as="geometry"/>
+        </mxCell>
+
+        <!-- ========== Market Data Input ========== -->
+        <mxCell id="md1" value="&lt;b&gt;市場データ入力&lt;/b&gt;&lt;br&gt;M1, M5, M15, M30,&lt;br&gt;H1, H4, H8, D1&lt;br&gt;(8時間足)" style="shape=parallelogram;perimeter=parallelogramPerimeter;whiteSpace=wrap;html=1;fixedSize=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="160" y="100" width="220" height="80" as="geometry"/>
+        </mxCell>
+
+        <!-- ========== Phase 1: Constraints ========== -->
+        <mxCell id="cg1" value="&lt;b&gt;Phase 1: 制約チェック&lt;/b&gt;&lt;hr&gt;&lt;font size='1'&gt;HardGuard (8条件)&lt;br&gt;・証拠金維持率 &gt; 150%&lt;br&gt;・日次損失 &lt; 5%&lt;br&gt;・ポジション数上限&lt;br&gt;・取引時間（週末禁止）&lt;br&gt;・データ品質&lt;br&gt;・高インパクトニュース&lt;br&gt;・セッション切替待機&lt;br&gt;・ファンダメンタル注意度&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=11;align=left;spacingLeft=10;" vertex="1" parent="1">
+          <mxGeometry x="140" y="240" width="260" height="200" as="geometry"/>
+        </mxCell>
+
+        <!-- ========== Phase 2: Signal Generation ========== -->
+        <mxCell id="sg1" value="&lt;b&gt;Phase 2: シグナル生成パイプライン&lt;/b&gt;&lt;hr&gt;&lt;font size='1'&gt;Step 1: リトレース待機チェック&lt;br&gt;Step 2: リスク管理チェック&lt;br&gt;Step 3: 全TF評価 + レジーム検出&lt;br&gt;Step 4: コンセンサス統合&lt;br&gt;Step 5: BCA + フィルタ + SL/TP&lt;br&gt;Step 6: ポジションサイジング&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;align=left;spacingLeft=10;" vertex="1" parent="1">
+          <mxGeometry x="500" y="240" width="260" height="200" as="geometry"/>
+        </mxCell>
+
+        <!-- ========== Phase 3: Entry Execution ========== -->
+        <mxCell id="ee1" value="&lt;b&gt;Phase 3: エントリー実行&lt;/b&gt;&lt;hr&gt;&lt;font size='1'&gt;・エントリー価格計算&lt;br&gt;　(close ± spread/2 ± slippage)&lt;br&gt;・ロット数決定&lt;br&gt;・証拠金チェック&lt;br&gt;・SL/TP価格設定&lt;br&gt;・PositionManager登録&lt;br&gt;&lt;br&gt;[ライブ] M1ティック最適化&lt;br&gt;　スプレッド + モメンタム評価&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;align=left;spacingLeft=10;" vertex="1" parent="1">
+          <mxGeometry x="860" y="240" width="260" height="200" as="geometry"/>
+        </mxCell>
+
+        <!-- ========== Phase 4: Position Management ========== -->
+        <mxCell id="pm1" value="&lt;b&gt;Phase 4: ポジション管理&lt;/b&gt;&lt;hr&gt;&lt;font size='1'&gt;10段階の評価（優先度順）:&lt;br&gt;1. SL到達チェック&lt;br&gt;2. 部分利確 (1R/2R/0.5R)&lt;br&gt;3. TP到達チェック&lt;br&gt;4. 利益反転ガード&lt;br&gt;5. 早期利益ガード (EPG)&lt;br&gt;6. 停滞Exit + SL引き締め&lt;br&gt;7. 時間決済&lt;br&gt;8. シグナル反転&lt;br&gt;9. コンセンサス逆転Exit&lt;br&gt;10. トレーリング更新&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=11;align=left;spacingLeft=10;" vertex="1" parent="1">
+          <mxGeometry x="1220" y="240" width="260" height="220" as="geometry"/>
+        </mxCell>
+
+        <!-- ========== Phase 5: Risk Management ========== -->
+        <mxCell id="rm1" value="&lt;b&gt;Phase 5: 資金管理&lt;/b&gt;&lt;hr&gt;&lt;font size='1'&gt;・ロット計算 (equity × risk% / SL)&lt;br&gt;・レジーム調整 (TREND 1.0x / RANGE 0.7x)&lt;br&gt;・DD調整 (0.8%警告 / 1.5%減額)&lt;br&gt;・連敗調整 (2連敗から減額)&lt;br&gt;・資金フロア (30%で停止)&lt;br&gt;・エクスポージャー3重制限&lt;br&gt;・サーキットブレーカー&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=11;align=left;spacingLeft=10;" vertex="1" parent="1">
+          <mxGeometry x="1580" y="240" width="260" height="200" as="geometry"/>
+        </mxCell>
+
+        <!-- Arrows -->
+        <mxCell id="a1" style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="md1" target="cg1" parent="1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="a2" value="PASS" style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="cg1" target="sg1" parent="1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="a3" value="BUY/SELL" style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="sg1" target="ee1" parent="1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="a4" value="ポジション&lt;br&gt;オープン" style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="ee1" target="pm1" parent="1">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        <mxCell id="a5" style="edgeStyle=orthogonalEdgeStyle;dashed=1;" edge="1" source="rm1" target="sg1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points"><mxPoint x="1710" y="180"/><mxPoint x="630" y="180"/></Array>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="a5l" value="ロット・DD制御" style="edgeLabel;html=1;" vertex="1" connectable="0" parent="a5">
+          <mxGeometry x="-0.3" relative="1" as="geometry"><mxPoint as="offset"/></mxGeometry>
+        </mxCell>
+
+        <!-- BLOCK arrow from HardGuard -->
+        <mxCell id="a6" value="&lt;font color='#CC0000'&gt;&lt;b&gt;BLOCK&lt;/b&gt;&lt;/font&gt;" style="edgeStyle=orthogonalEdgeStyle;strokeColor=#CC0000;dashed=1;" edge="1" source="cg1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="270" y="500" as="targetPoint"/>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="hold1" value="HOLD&lt;br&gt;(エントリー見送り)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="1">
+          <mxGeometry x="190" y="500" width="160" height="40" as="geometry"/>
+        </mxCell>
+
+        <!-- HOLD from Signal -->
+        <mxCell id="a7" value="&lt;font color='#CC0000'&gt;&lt;b&gt;HOLD&lt;/b&gt;&lt;/font&gt;" style="edgeStyle=orthogonalEdgeStyle;strokeColor=#CC0000;dashed=1;" edge="1" source="sg1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <mxPoint x="630" y="500" as="targetPoint"/>
+          </mxGeometry>
+        </mxCell>
+        <mxCell id="hold2" value="HOLD&lt;br&gt;(閾値未達/フィルタ)" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="1">
+          <mxGeometry x="550" y="500" width="160" height="40" as="geometry"/>
+        </mxCell>
+
+        <!-- ========== Legend ========== -->
+        <mxCell id="leg" value="&lt;b&gt;凡例&lt;/b&gt;&lt;hr&gt;&lt;font size='1'&gt;🔴 制約・ガード (Phase 1)&lt;br&gt;🟢 シグナル生成 (Phase 2)&lt;br&gt;🟡 エントリー実行 (Phase 3)&lt;br&gt;🟣 ポジション管理 (Phase 4)&lt;br&gt;⚪ 資金管理 (Phase 5)&lt;br&gt;--- 破線: BLOCK/HOLD&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#333333;fontSize=11;align=left;spacingLeft=10;" vertex="1" parent="1">
+          <mxGeometry x="1600" y="500" width="200" height="140" as="geometry"/>
+        </mxCell>
+
+        <!-- ========== 1足ループ ========== -->
+        <mxCell id="loop" value="&lt;b&gt;メインループ（1足ごと）&lt;/b&gt;" style="text;html=1;fontSize=14;align=center;fontStyle=1;fontColor=#333333;" vertex="1" parent="1">
+          <mxGeometry x="600" y="630" width="400" height="30" as="geometry"/>
+        </mxCell>
+
+        <!-- Main Loop Steps -->
+        <mxCell id="ml1" value="① 月変わり検出&lt;br&gt;月末PnL計算" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="80" y="690" width="140" height="50" as="geometry"/>
+        </mxCell>
+        <mxCell id="ml2" value="② エクスポージャー&lt;br&gt;同期" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="250" y="690" width="140" height="50" as="geometry"/>
+        </mxCell>
+        <mxCell id="ml3" value="③ エクイティ記録&lt;br&gt;急速DD検知" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="420" y="690" width="140" height="50" as="geometry"/>
+        </mxCell>
+        <mxCell id="ml4" value="④ サーキット&lt;br&gt;ブレーカー" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="590" y="690" width="140" height="50" as="geometry"/>
+        </mxCell>
+        <mxCell id="ml5" value="⑤ ファンダメンタル&lt;br&gt;指標前スキップ" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="760" y="690" width="140" height="50" as="geometry"/>
+        </mxCell>
+        <mxCell id="ml6" value="⑥ シグナル生成&lt;br&gt;generate_signal()" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="930" y="690" width="140" height="50" as="geometry"/>
+        </mxCell>
+        <mxCell id="ml7" value="⑦ エントリー判定&lt;br&gt;process_candle()" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="1100" y="690" width="140" height="50" as="geometry"/>
+        </mxCell>
+        <mxCell id="ml8" value="⑧ PM: Exit評価&lt;br&gt;SL/TP/Trail更新" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="1270" y="690" width="140" height="50" as="geometry"/>
+        </mxCell>
+        <mxCell id="ml9" value="⑨ DD/PnL&lt;br&gt;記録" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="1440" y="690" width="140" height="50" as="geometry"/>
+        </mxCell>
+
+        <!-- Loop arrows -->
+        <mxCell id="la1" style="edgeStyle=orthogonalEdgeStyle;fontSize=9;" edge="1" source="ml1" target="ml2" parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="la2" style="edgeStyle=orthogonalEdgeStyle;fontSize=9;" edge="1" source="ml2" target="ml3" parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="la3" style="edgeStyle=orthogonalEdgeStyle;fontSize=9;" edge="1" source="ml3" target="ml4" parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="la4" style="edgeStyle=orthogonalEdgeStyle;fontSize=9;" edge="1" source="ml4" target="ml5" parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="la5" style="edgeStyle=orthogonalEdgeStyle;fontSize=9;" edge="1" source="ml5" target="ml6" parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="la6" style="edgeStyle=orthogonalEdgeStyle;fontSize=9;" edge="1" source="ml6" target="ml7" parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="la7" style="edgeStyle=orthogonalEdgeStyle;fontSize=9;" edge="1" source="ml7" target="ml8" parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="la8" style="edgeStyle=orthogonalEdgeStyle;fontSize=9;" edge="1" source="ml8" target="ml9" parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>
+
+        <!-- Loop back -->
+        <mxCell id="la9" value="次の足へ" style="edgeStyle=orthogonalEdgeStyle;fontSize=9;curved=1;" edge="1" source="ml9" target="ml1" parent="1">
+          <mxGeometry relative="1" as="geometry">
+            <Array as="points"><mxPoint x="1560" y="770"/><mxPoint x="150" y="770"/></Array>
+          </mxGeometry>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+
+  <!-- ================================================================== -->
+  <!-- Page 2: Signal Generation Pipeline                                  -->
+  <!-- ================================================================== -->
+  <diagram id="signal" name="2. シグナル生成パイプライン">
+    <mxGraphModel dx="2200" dy="2600" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="2400" pageHeight="3200" math="0" shadow="0">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+
+        <mxCell id="st" value="&lt;b&gt;シグナル生成パイプライン (_generate_signal_new)&lt;/b&gt;" style="text;html=1;fontSize=20;align=center;" vertex="1" parent="1">
+          <mxGeometry x="500" y="20" width="600" height="30" as="geometry"/>
+        </mxCell>
+
+        <!-- START -->
+        <mxCell id="s0" value="START&lt;br&gt;generate_signal()" style="ellipse;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="700" y="70" width="160" height="60" as="geometry"/>
+        </mxCell>
+
+        <!-- Step 1: Retrace -->
+        <mxCell id="s1" value="&lt;b&gt;Step 1: リトレース待機チェック&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=12;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="660" y="160" width="240" height="40" as="geometry"/>
+        </mxCell>
+        <mxCell id="s1d" value="_pending_entry&lt;br&gt;が存在？" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="710" y="230" width="140" height="80" as="geometry"/>
+        </mxCell>
+        <mxCell id="s1y" value="M1で対象価格&lt;br&gt;到達確認" style="rounded=1;whiteSpace=wrap;html=1;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="400" y="240" width="140" height="50" as="geometry"/>
+        </mxCell>
+        <mxCell id="s1t" value="タイムアウト？&lt;br&gt;(max_wait_bars=5)" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=9;" vertex="1" parent="1">
+          <mxGeometry x="200" y="240" width="140" height="70" as="geometry"/>
+        </mxCell>
+
+        <!-- Step 2: Risk Check -->
+        <mxCell id="s2" value="&lt;b&gt;Step 2: リスク管理チェック&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=12;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="660" y="350" width="240" height="40" as="geometry"/>
+        </mxCell>
+        <mxCell id="s2d" value="can_trade()？&lt;br&gt;ポジション数 / DD / 日次損失" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="680" y="410" width="200" height="80" as="geometry"/>
+        </mxCell>
+        <mxCell id="s2h" value="HOLD" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="950" y="430" width="80" height="35" as="geometry"/>
+        </mxCell>
+
+        <!-- Step 3: TF Evaluation -->
+        <mxCell id="s3" value="&lt;b&gt;Step 3: 時間足評価 + レジーム検出&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="660" y="530" width="240" height="40" as="geometry"/>
+        </mxCell>
+
+        <!-- TF eval details -->
+        <mxCell id="s3a" value="3a. モード選択&lt;br&gt;mode_selector.select()" style="rounded=1;whiteSpace=wrap;html=1;fontSize=10;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+          <mxGeometry x="320" y="590" width="160" height="40" as="geometry"/>
+        </mxCell>
+        <mxCell id="s3b" value="3b. 全TF評価 (8TF)&lt;br&gt;各TFで12指標スコア計算&lt;br&gt;&lt;font size='1'&gt;トレンド(5.0) / ADX(2.0) / RSI(1.0)&lt;br&gt;MACDスロープ(±2.5) / ダイバージェンス(±2.0)&lt;br&gt;EMAクロス(±2.5) / ストキャス(±1.5)&lt;br&gt;HTF整合性(2.0) / BB%B&lt;br&gt;MAX_SCORE = 15.0&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fontSize=10;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+          <mxGeometry x="520" y="590" width="230" height="130" as="geometry"/>
+        </mxCell>
+        <mxCell id="s3c" value="3c. 動的TF選択&lt;br&gt;&lt;font size='1'&gt;primary / entry /&lt;br&gt;confirm / manage&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fontSize=10;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+          <mxGeometry x="790" y="590" width="150" height="55" as="geometry"/>
+        </mxCell>
+        <mxCell id="s3d" value="3d. レジーム検出&lt;br&gt;&lt;font size='1'&gt;ADX≥20+MA整列 → TREND&lt;br&gt;ATR&gt;1.5+ADX&lt;20 → HIGH_VOL&lt;br&gt;ATR&lt;0.7 → LOW_VOL&lt;br&gt;その他 → RANGE&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fontSize=10;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+          <mxGeometry x="980" y="590" width="200" height="90" as="geometry"/>
+        </mxCell>
+        <mxCell id="s3e" value="3e. HTF整合度&lt;br&gt;&lt;font size='1'&gt;H4, D1 方向一致&lt;br&gt;(-1 ~ +1)&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fontSize=10;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+          <mxGeometry x="1220" y="590" width="140" height="55" as="geometry"/>
+        </mxCell>
+
+        <!-- Step 4: Consensus -->
+        <mxCell id="s4" value="&lt;b&gt;Step 4: コンセンサス統合&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="660" y="760" width="240" height="40" as="geometry"/>
+        </mxCell>
+        <mxCell id="s4det" value="&lt;b&gt;TF役割と重み&lt;/b&gt;&lt;br&gt;&lt;font size='1'&gt;PRIMARY (M15): 2.0&lt;br&gt;ENTRY (M5): 1.5&lt;br&gt;CONFIRM (H1): 3.0 ← 最高&lt;br&gt;MANAGE (M30): 0.5&lt;br&gt;OTHER: 1.0&lt;/font&gt;&lt;hr&gt;&lt;font size='1'&gt;&lt;b&gt;計算式:&lt;/b&gt;&lt;br&gt;buy_score = Σ(weight × strength)&lt;br&gt;sell_score = Σ(weight × strength)&lt;br&gt;final = max(buy, sell)&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fontSize=10;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+          <mxGeometry x="350" y="820" width="220" height="180" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="s4chk" value="score ≥ threshold (9.0)？&lt;br&gt;TF整合率 ≥ 50%？&lt;br&gt;競合比率 ≤ 60%？" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="680" y="850" width="200" height="100" as="geometry"/>
+        </mxCell>
+        <mxCell id="s4adj" value="&lt;b&gt;閾値調整&lt;/b&gt;&lt;br&gt;&lt;font size='1'&gt;+ TREND時: +1.5&lt;br&gt;+ 同方向ポジ: +0.5/pos&lt;br&gt;+ HTF不一致: +1.0&lt;br&gt;+ BB_WIDTH: +0.5&lt;br&gt;+ TOKYOセッション: +1.0&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fontSize=10;fillColor=#fff2cc;strokeColor=#d6b656;" vertex="1" parent="1">
+          <mxGeometry x="950" y="830" width="180" height="120" as="geometry"/>
+        </mxCell>
+        <mxCell id="s4h" value="HOLD" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="950" y="970" width="80" height="35" as="geometry"/>
+        </mxCell>
+
+        <!-- Step 5: BCA + Filters -->
+        <mxCell id="s5" value="&lt;b&gt;Step 5: BCA + フィルタ群 + SL/TP&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="660" y="1050" width="240" height="40" as="geometry"/>
+        </mxCell>
+        <mxCell id="s5bca" value="&lt;b&gt;5a. BCA (方向性エッジ)&lt;/b&gt;&lt;br&gt;&lt;font size='1'&gt;edge = (winner - loser) / total&lt;br&gt;edge ≥ bca_min_edge (0.60)？&lt;br&gt;&lt;br&gt;HTF逆方向ペナルティ計算&lt;br&gt;opposition_ratio &gt; 0.3 → 減点&lt;/font&gt;" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="350" y="1120" width="250" height="140" as="geometry"/>
+        </mxCell>
+        <mxCell id="s5sg" value="&lt;b&gt;5e. SoftGuard&lt;/b&gt;&lt;br&gt;&lt;font size='1'&gt;スプレッド: 0-0.5&lt;br&gt;オフアワー: 0/0.15/1.0&lt;br&gt;ボラティリティ: 0/0.1&lt;br&gt;連敗: 0/0.2&lt;br&gt;MTF不整合: 0/0.15&lt;br&gt;トレンド弱: 0/0.1&lt;br&gt;&lt;b&gt;合計 ≥ 0.3 → BLOCK&lt;/b&gt;&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fontSize=10;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="1">
+          <mxGeometry x="660" y="1120" width="180" height="150" as="geometry"/>
+        </mxCell>
+        <mxCell id="s5flt" value="&lt;b&gt;5f-g. フィルタ群&lt;/b&gt;&lt;br&gt;&lt;font size='1'&gt;・HTFトレンド整合チェック&lt;br&gt;・トレンド強度上限 (≥0.7)&lt;br&gt;・MACDスロープ逆方向&lt;br&gt;・M1マイクロ反転 (3指標合議)&lt;br&gt;・低ATR+TRENDフィルタ&lt;br&gt;・セッション別フィルタ&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fontSize=10;fillColor=#f8cecc;strokeColor=#b85450;" vertex="1" parent="1">
+          <mxGeometry x="890" y="1120" width="200" height="130" as="geometry"/>
+        </mxCell>
+        <mxCell id="s5sl" value="&lt;b&gt;5h. SL/TP計算&lt;/b&gt;&lt;br&gt;&lt;font size='1'&gt;SL = ATR × TF別倍率&lt;br&gt;　制限: 20-50 pips&lt;br&gt;TP = SL × TP/SL比率&lt;br&gt;M1構造SL (optional)&lt;br&gt;統合: 主要70% + 平均30%&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fontSize=10;fillColor=#d5e8d4;strokeColor=#82b366;" vertex="1" parent="1">
+          <mxGeometry x="1140" y="1120" width="180" height="110" as="geometry"/>
+        </mxCell>
+
+        <!-- Step 6: Sizing -->
+        <mxCell id="s6" value="&lt;b&gt;Step 6: ポジションサイジング&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=12;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="660" y="1330" width="240" height="40" as="geometry"/>
+        </mxCell>
+        <mxCell id="s6det" value="&lt;font size='1'&gt;&lt;b&gt;ロット計算:&lt;/b&gt;&lt;br&gt;lot = (equity × risk% × adjust) / (SL × pip_value)&lt;br&gt;&lt;br&gt;&lt;b&gt;adjust = 確度 × レジーム × min(DD, 連敗)&lt;/b&gt;&lt;br&gt;確度: confidence &lt; 1.0 → 0.3-1.0x&lt;br&gt;レジーム: TREND=1.0 / RANGE=0.7 / HIGH_VOL=0.5&lt;br&gt;DD: 0.8%警告→1.5%本格→最小0.5x&lt;br&gt;連敗: 2連敗→5連敗→最小0.2x&lt;br&gt;&lt;br&gt;&lt;b&gt;制限:&lt;/b&gt; max_lot_per_trade / エクスポージャー / 資金フロア30%&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fontSize=10;fillColor=#f5f5f5;strokeColor=#666666;" vertex="1" parent="1">
+          <mxGeometry x="580" y="1400" width="400" height="170" as="geometry"/>
+        </mxCell>
+
+        <!-- END -->
+        <mxCell id="send" value="ConsolidatedSignal&lt;br&gt;(BUY/SELL + SL/TP + lot)" style="ellipse;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="680" y="1610" width="200" height="60" as="geometry"/>
+        </mxCell>
+
+        <!-- Arrows -->
+        <mxCell id="sa0" style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="s0" target="s1" parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="sa1" style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="s1" target="s1d" parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="sa1y" value="Yes" style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="s1d" target="s1y" parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="sa1n" value="No" style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="s1d" target="s2" parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="sa2" style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="s2" target="s2d" parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="sa2n" value="No" style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="s2d" target="s2h" parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="sa2y" value="Yes" style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="s2d" target="s3" parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="sa3" style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="s3" target="s4" parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="sa4" style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="s4" target="s4chk" parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="sa4n" value="No" style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="s4chk" target="s4h" parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="sa4y" value="Yes" style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="s4chk" target="s5" parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="sa5" style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="s5" target="s6" parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="sa6" style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="s6" target="send" parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+
+  <!-- ================================================================== -->
+  <!-- Page 3: Position Management                                         -->
+  <!-- ================================================================== -->
+  <diagram id="posm" name="3. ポジション管理 (Exit機構)">
+    <mxGraphModel dx="2200" dy="2400" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="2400" pageHeight="3000" math="0" shadow="0">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+
+        <mxCell id="pt" value="&lt;b&gt;PositionManager.evaluate() — Exit判定フロー&lt;/b&gt;&lt;br&gt;各足ごとに全オープンポジションに対して実行" style="text;html=1;fontSize=18;align=center;" vertex="1" parent="1">
+          <mxGeometry x="400" y="20" width="600" height="50" as="geometry"/>
+        </mxCell>
+
+        <!-- Start -->
+        <mxCell id="p0" value="evaluate()&lt;br&gt;価格更新 + bars_held++" style="ellipse;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="620" y="90" width="200" height="60" as="geometry"/>
+        </mxCell>
+
+        <!-- Step 1: SL -->
+        <mxCell id="p1" value="&lt;b&gt;①  SL到達チェック&lt;/b&gt;&lt;br&gt;&lt;font size='1'&gt;BUY: price ≤ current_sl&lt;br&gt;SELL: price ≥ current_sl&lt;br&gt;→ BREAKEVEN / TRAILING / STOP_LOSS&lt;/font&gt;" style="rhombus;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="590" y="180" width="260" height="100" as="geometry"/>
+        </mxCell>
+        <mxCell id="p1y" value="FULL_CLOSE" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="950" y="200" width="120" height="40" as="geometry"/>
+        </mxCell>
+
+        <!-- Step 2: Partial Close -->
+        <mxCell id="p2" value="&lt;b&gt;② 部分利確チェック&lt;/b&gt;&lt;br&gt;&lt;font size='1'&gt;優先度: 2R &gt; 1R &gt; RANGE0.5R &gt; Universal0.5R &gt; 保険 &gt; 早期BE&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="570" y="320" width="300" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="p2d" value="&lt;b&gt;2R到達？&lt;/b&gt;&lt;br&gt;current_r ≥ 2.0" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=9;" vertex="1" parent="1">
+          <mxGeometry x="280" y="410" width="140" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="p2a" value="PARTIAL 5%&lt;br&gt;SL→1R価格" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=9;" vertex="1" parent="1">
+          <mxGeometry x="120" y="420" width="110" height="40" as="geometry"/>
+        </mxCell>
+        <mxCell id="p2e" value="&lt;b&gt;1R到達？&lt;/b&gt;&lt;br&gt;current_r ≥ 1.0" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=9;" vertex="1" parent="1">
+          <mxGeometry x="480" y="410" width="140" height="70" as="geometry"/>
+        </mxCell>
+        <mxCell id="p2b" value="PARTIAL 5%&lt;br&gt;BE移動 + TP無効化" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=9;" vertex="1" parent="1">
+          <mxGeometry x="480" y="510" width="140" height="40" as="geometry"/>
+        </mxCell>
+
+        <!-- Step 3: TP -->
+        <mxCell id="p3" value="&lt;b&gt;③ TP到達チェック&lt;/b&gt;&lt;br&gt;&lt;font size='1'&gt;BUY: price ≥ original_tp&lt;br&gt;(1R部分利確後は無効化可能)&lt;/font&gt;" style="rhombus;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="600" y="590" width="240" height="80" as="geometry"/>
+        </mxCell>
+        <mxCell id="p3y" value="FULL_CLOSE&lt;br&gt;TAKE_PROFIT" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="950" y="600" width="120" height="40" as="geometry"/>
+        </mxCell>
+
+        <!-- Step 5: EPG -->
+        <mxCell id="p5" value="&lt;b&gt;⑤ 早期利益ガード (EPG)&lt;/b&gt; ✅ON&lt;br&gt;&lt;font size='1'&gt;MFE 0.05-0.30R帯 (小利益圏)&lt;br&gt;AND 逆方向スコア ≥ 4.0&lt;br&gt;AND score_diff ≥ 1.0&lt;br&gt;AND 保有 ≥ 5分&lt;br&gt;→ 「雲行き怪しい → 即利確」&lt;/font&gt;" style="rhombus;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="570" y="710" width="300" height="120" as="geometry"/>
+        </mxCell>
+        <mxCell id="p5y" value="FULL_CLOSE&lt;br&gt;TAKE_PROFIT_EARLY" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="950" y="740" width="140" height="40" as="geometry"/>
+        </mxCell>
+
+        <!-- Step 6: Stagnation -->
+        <mxCell id="p6" value="&lt;b&gt;⑥ 停滞Exit + SL引き締め&lt;/b&gt;&lt;br&gt;&lt;font size='1'&gt;&lt;b&gt;stag_pretighten&lt;/b&gt; ✅ON:&lt;br&gt;TREND: 80%時点でMFE&lt;0.1R → SL=-0.05R&lt;br&gt;&lt;br&gt;&lt;b&gt;レジーム別停滞Exit:&lt;/b&gt;&lt;br&gt;TREND: 90分 + MFE&lt;0.1R → EXIT&lt;br&gt;RANGE: 120分 + MFE&lt;0.1R → EXIT&lt;br&gt;CHOPPY: 120分 + MFE&lt;0.1R → EXIT&lt;/font&gt;" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="540" y="870" width="360" height="140" as="geometry"/>
+        </mxCell>
+        <mxCell id="p6y" value="FULL_CLOSE&lt;br&gt;STAGNATION&lt;br&gt;or UPDATE_SL" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="950" y="900" width="140" height="50" as="geometry"/>
+        </mxCell>
+
+        <!-- Step 7: Time Exit -->
+        <mxCell id="p7" value="&lt;b&gt;⑦ 時間決済&lt;/b&gt;&lt;br&gt;&lt;font size='1'&gt;entry_tf別の最大保有時間超過&lt;br&gt;例: H1 → 480分(8時間)&lt;/font&gt;" style="rhombus;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="600" y="1050" width="240" height="80" as="geometry"/>
+        </mxCell>
+        <mxCell id="p7y" value="FULL_CLOSE&lt;br&gt;TIME_EXIT" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="950" y="1060" width="120" height="40" as="geometry"/>
+        </mxCell>
+
+        <!-- Step 8: Signal Reversal -->
+        <mxCell id="p8" value="&lt;b&gt;⑧ シグナル反転&lt;/b&gt;&lt;br&gt;&lt;font size='1'&gt;反転シグナル + 含み益 &gt; 0&lt;br&gt;→ partial(ratio=0.0) + BE移動&lt;br&gt;(ratio=0.0: 実質BE移動のみ)&lt;/font&gt;" style="rhombus;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="580" y="1170" width="280" height="80" as="geometry"/>
+        </mxCell>
+
+        <!-- Step 9: Consensus Exit -->
+        <mxCell id="p9" value="&lt;b&gt;⑨ コンセンサス逆転Exit&lt;/b&gt; ✅ON&lt;br&gt;&lt;font size='1'&gt;逆方向スコア ≥ 6.0&lt;br&gt;AND 自方向スコア ≤ 3.0&lt;br&gt;→ 市場がポジションと完全逆転&lt;/font&gt;" style="rhombus;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="580" y="1290" width="280" height="80" as="geometry"/>
+        </mxCell>
+        <mxCell id="p9y" value="FULL_CLOSE&lt;br&gt;SIGNAL_REVERSAL" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="950" y="1300" width="140" height="40" as="geometry"/>
+        </mxCell>
+
+        <!-- Step 10: Trailing -->
+        <mxCell id="p10" value="&lt;b&gt;⑩ トレーリング更新&lt;/b&gt; ✅ON&lt;br&gt;&lt;font size='1'&gt;current_r ≥ 0.5R (trailing_start_r)&lt;br&gt;trail = ATR × 2.0 (trailing_atr_multiplier)&lt;br&gt;BUY: new_sl = highest - trail&lt;br&gt;SELL: new_sl = lowest + trail&lt;br&gt;既存SLより有利な場合のみ更新&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="570" y="1410" width="300" height="100" as="geometry"/>
+        </mxCell>
+
+        <!-- HOLD -->
+        <mxCell id="phold" value="HOLD&lt;br&gt;(条件未達)" style="ellipse;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="650" y="1550" width="140" height="50" as="geometry"/>
+        </mxCell>
+
+        <!-- Arrows -->
+        <mxCell id="pa0" style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="p0" target="p1" parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="pa1y" value="HIT" style="" edge="1" source="p1" target="p1y" parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="pa1n" value="No" style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="p1" target="p2" parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="pa2" style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="p2" target="p3" parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="pa3y" value="HIT" style="" edge="1" source="p3" target="p3y" parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="pa3n" value="No" style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="p3" target="p5" parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="pa5y" value="Yes" style="" edge="1" source="p5" target="p5y" parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="pa5n" value="No" style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="p5" target="p6" parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="pa6y" value="Yes" style="" edge="1" source="p6" target="p6y" parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="pa6n" value="No" style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="p6" target="p7" parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="pa7y" value="Yes" style="" edge="1" source="p7" target="p7y" parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="pa7n" value="No" style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="p7" target="p8" parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="pa8" value="No" style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="p8" target="p9" parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="pa9y" value="Yes" style="" edge="1" source="p9" target="p9y" parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="pa9n" value="No" style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="p9" target="p10" parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="pa10" style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="p10" target="phold" parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>
+
+        <!-- Disabled features note -->
+        <mxCell id="pnote" value="&lt;b&gt;無効化済みExit機構 (デフォルトOFF)&lt;/b&gt;&lt;hr&gt;&lt;font size='1'&gt;・early_breakeven (早期BE)&lt;br&gt;・very_early_exit (30分MFE&lt;0.2R)&lt;br&gt;・profit_reversal (利益反転ガード)&lt;br&gt;・range_day_insurance (RANGE保険)&lt;br&gt;・range_day_half_r_partial (RANGE 0.5R)&lt;br&gt;・universal_half_r (全レジーム0.5R)&lt;br&gt;・progressive_stagnation (段階的停滞)&lt;br&gt;・range_day_stagnation (RANGE段階化)&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#999999;fontSize=10;align=left;spacingLeft=10;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="1150" y="1150" width="260" height="180" as="geometry"/>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+
+  <!-- ================================================================== -->
+  <!-- Page 4: Risk Management & Lot Sizing                                -->
+  <!-- ================================================================== -->
+  <diagram id="risk" name="4. 資金管理・ロット計算">
+    <mxGraphModel dx="1800" dy="1400" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="2000" pageHeight="1600" math="0" shadow="0">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+
+        <mxCell id="rt" value="&lt;b&gt;資金管理・ロット計算フロー&lt;/b&gt;" style="text;html=1;fontSize=20;align=center;" vertex="1" parent="1">
+          <mxGeometry x="500" y="20" width="400" height="30" as="geometry"/>
+        </mxCell>
+
+        <!-- Entry -->
+        <mxCell id="r0" value="PositionSizer.calculate()" style="ellipse;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="600" y="70" width="200" height="50" as="geometry"/>
+        </mxCell>
+
+        <!-- Step 1: Equity Floor -->
+        <mxCell id="r1" value="equity_ratio&lt;br&gt;= equity / initial&lt;br&gt;&lt;b&gt;≤ 30%?&lt;/b&gt;" style="rhombus;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="630" y="150" width="140" height="100" as="geometry"/>
+        </mxCell>
+        <mxCell id="r1y" value="&lt;b&gt;取引停止&lt;/b&gt;&lt;br&gt;lot = 0" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="880" y="170" width="120" height="40" as="geometry"/>
+        </mxCell>
+
+        <!-- Step 2: Exposure -->
+        <mxCell id="r2" value="合計エクスポージャー&lt;br&gt;&lt;b&gt;≥ max_total (4.0)?&lt;/b&gt;" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="610" y="290" width="180" height="80" as="geometry"/>
+        </mxCell>
+        <mxCell id="r2y" value="&lt;b&gt;BLOCKED&lt;/b&gt;&lt;br&gt;lot = 0" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="880" y="300" width="120" height="40" as="geometry"/>
+        </mxCell>
+
+        <!-- Step 3: Same Direction -->
+        <mxCell id="r3" value="同方向エクスポージャー&lt;br&gt;&lt;b&gt;≥ 60% of max?&lt;/b&gt;" style="rhombus;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="610" y="410" width="180" height="80" as="geometry"/>
+        </mxCell>
+
+        <!-- Step 4: Risk Adjust Calculation -->
+        <mxCell id="r4" value="&lt;b&gt;リスク調整係数計算&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=13;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="610" y="530" width="180" height="40" as="geometry"/>
+        </mxCell>
+
+        <!-- Sub-adjustments -->
+        <mxCell id="r4a" value="&lt;b&gt;確度調整&lt;/b&gt;&lt;br&gt;&lt;font size='1'&gt;conf &lt; 1.0: 0.3 + conf × 0.7&lt;br&gt;conf ≥ 1.0: 1.0 + (conf-1)×0.5&lt;br&gt;範囲: 0.3x - 1.5x&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="100" y="600" width="180" height="80" as="geometry"/>
+        </mxCell>
+        <mxCell id="r4b" value="&lt;b&gt;レジーム調整&lt;/b&gt;&lt;br&gt;&lt;font size='1'&gt;TREND: 1.0x&lt;br&gt;RANGE: 0.7x&lt;br&gt;HIGH_VOL: 0.5x&lt;br&gt;LOW_VOL: 0.8x&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="330" y="600" width="150" height="80" as="geometry"/>
+        </mxCell>
+        <mxCell id="r4c" value="&lt;b&gt;DD調整&lt;/b&gt;&lt;br&gt;&lt;font size='1'&gt;DD &lt; 0.8%: 1.0x&lt;br&gt;0.8-1.5%: 1.0→0.7 線形&lt;br&gt;&gt;1.5%: 0.7→0.5 減額&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="530" y="600" width="170" height="80" as="geometry"/>
+        </mxCell>
+        <mxCell id="r4d" value="&lt;b&gt;連敗調整&lt;/b&gt;&lt;br&gt;&lt;font size='1'&gt;&lt;2連敗: 1.0x&lt;br&gt;2-5連敗: 1.0→0.2 線形&lt;br&gt;≥5連敗: 0.2x (最大)&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="750" y="600" width="160" height="80" as="geometry"/>
+        </mxCell>
+        <mxCell id="r4e" value="&lt;b&gt;資金注意域&lt;/b&gt;&lt;br&gt;&lt;font size='1'&gt;&gt;50%: 1.0x&lt;br&gt;50-30%: 1.0→0.25 線形&lt;br&gt;≤30%: 停止&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="960" y="600" width="150" height="80" as="geometry"/>
+        </mxCell>
+
+        <!-- Merge -->
+        <mxCell id="r4m" value="&lt;b&gt;adjust = 確度 × レジーム × min(DD, 連敗) × 注意域&lt;/b&gt;&lt;br&gt;&lt;font size='1'&gt;DD と連敗は「最も厳しい方のみ」適用（二重適用排除）&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="380" y="720" width="440" height="50" as="geometry"/>
+        </mxCell>
+
+        <!-- Lot Calculation -->
+        <mxCell id="r5" value="&lt;b&gt;ロット計算&lt;/b&gt;&lt;br&gt;&lt;font size='2'&gt;lot = (equity × base_risk_pct × adjust) / ((sl_pips + slippage_buffer) × pip_value)&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=12;" vertex="1" parent="1">
+          <mxGeometry x="360" y="810" width="480" height="60" as="geometry"/>
+        </mxCell>
+
+        <!-- Limits -->
+        <mxCell id="r6" value="&lt;b&gt;制限適用&lt;/b&gt;&lt;br&gt;&lt;font size='1'&gt;min(lot, max_lot_per_trade)&lt;br&gt;min(lot, remaining_exposure)&lt;br&gt;min(lot, remaining_same_dir)&lt;br&gt;max(lot, min_lot=0.01)&lt;br&gt;round(lot, 2)&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="500" y="910" width="200" height="100" as="geometry"/>
+        </mxCell>
+
+        <!-- Result -->
+        <mxCell id="r7" value="SizingResult&lt;br&gt;(lot, risk_budget, adjust)" style="ellipse;whiteSpace=wrap;html=1;fillColor=#f5f5f5;strokeColor=#666666;fontSize=11;" vertex="1" parent="1">
+          <mxGeometry x="530" y="1050" width="200" height="50" as="geometry"/>
+        </mxCell>
+
+        <!-- Circuit Breaker box -->
+        <mxCell id="rcb" value="&lt;b&gt;サーキットブレーカー&lt;/b&gt;&lt;hr&gt;&lt;font size='1'&gt;含み損 ≥ circuit_breaker_loss_pct&lt;br&gt;→ 全ポジション即時決済&lt;br&gt;→ 一定時間トレード禁止&lt;br&gt;&lt;br&gt;急速DD検知: 短期間の急激な資産減少&lt;br&gt;→ ロット減額 or 一時停止&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=10;align=left;spacingLeft=10;" vertex="1" parent="1">
+          <mxGeometry x="1100" y="100" width="240" height="140" as="geometry"/>
+        </mxCell>
+
+        <!-- Preset box -->
+        <mxCell id="rpr" value="&lt;b&gt;通貨ペア別プリセット例&lt;/b&gt;&lt;hr&gt;&lt;font size='1'&gt;USDJPY: risk=8%, pos=8, lot=5.0, exp=16.0&lt;br&gt;EURJPY: risk=4%, pos=4, lot=3.0, exp=8.0&lt;br&gt;GBPJPY: risk=3%, pos=3, lot=2.0, exp=6.0&lt;br&gt;AUDJPY: risk=3%, pos=3, lot=2.0, exp=6.0&lt;br&gt;CADJPY: risk=2.5%, pos=2, lot=1.5, exp=4.0&lt;br&gt;CHFJPY: risk=2.5%, pos=3, lot=2.0, exp=5.0&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=10;align=left;spacingLeft=10;" vertex="1" parent="1">
+          <mxGeometry x="1100" y="280" width="280" height="140" as="geometry"/>
+        </mxCell>
+
+        <!-- Arrows -->
+        <mxCell id="ra0" style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="r0" target="r1" parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="ra1y" value="Yes" style="" edge="1" source="r1" target="r1y" parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="ra1n" value="No" style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="r1" target="r2" parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="ra2y" value="Yes" style="" edge="1" source="r2" target="r2y" parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="ra2n" value="No" style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="r2" target="r3" parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="ra3n" value="No" style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="r3" target="r4" parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="ra4m" style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="r4" target="r4m" parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="ra5" style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="r4m" target="r5" parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="ra6" style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="r5" target="r6" parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>
+        <mxCell id="ra7" style="edgeStyle=orthogonalEdgeStyle;" edge="1" source="r6" target="r7" parent="1"><mxGeometry relative="1" as="geometry"/></mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+
+  <!-- ================================================================== -->
+  <!-- Page 5: Constraints & Guards                                        -->
+  <!-- ================================================================== -->
+  <diagram id="guards" name="5. 制約・ガード・フィルタ">
+    <mxGraphModel dx="1800" dy="1400" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1" page="1" pageScale="1" pageWidth="2000" pageHeight="1600" math="0" shadow="0">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+
+        <mxCell id="gt" value="&lt;b&gt;制約・ガード・フィルタ体系&lt;/b&gt;" style="text;html=1;fontSize=20;align=center;" vertex="1" parent="1">
+          <mxGeometry x="500" y="20" width="400" height="30" as="geometry"/>
+        </mxCell>
+
+        <!-- Layer 1: HardGuard -->
+        <mxCell id="hg" value="&lt;b&gt;Layer 1: HardGuard（絶対禁止 — 1つでもNGでBLOCK）&lt;/b&gt;" style="text;html=1;fontSize=14;align=left;fontColor=#b85450;" vertex="1" parent="1">
+          <mxGeometry x="80" y="70" width="500" height="25" as="geometry"/>
+        </mxCell>
+        <mxCell id="hg1" value="証拠金維持率&lt;br&gt;&lt;b&gt;&gt; 150%&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="80" y="100" width="120" height="50" as="geometry"/>
+        </mxCell>
+        <mxCell id="hg2" value="日次損失&lt;br&gt;&lt;b&gt;&lt; 5%&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="220" y="100" width="120" height="50" as="geometry"/>
+        </mxCell>
+        <mxCell id="hg3" value="ポジション数&lt;br&gt;&lt;b&gt;&lt; max_positions&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="360" y="100" width="130" height="50" as="geometry"/>
+        </mxCell>
+        <mxCell id="hg4" value="取引時間&lt;br&gt;&lt;b&gt;週末禁止&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="510" y="100" width="120" height="50" as="geometry"/>
+        </mxCell>
+        <mxCell id="hg5" value="データ品質&lt;br&gt;&lt;b&gt;error時禁止&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="650" y="100" width="120" height="50" as="geometry"/>
+        </mxCell>
+        <mxCell id="hg6" value="高インパクト&lt;br&gt;&lt;b&gt;ニュース15分前&lt;/b&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="790" y="100" width="130" height="50" as="geometry"/>
+        </mxCell>
+        <mxCell id="hg7" value="セッション切替&lt;br&gt;&lt;b&gt;30分待機&lt;/b&gt;&lt;br&gt;&lt;font size='1'&gt;TK→LDN/LDN→NY/NY→TK&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="940" y="100" width="150" height="50" as="geometry"/>
+        </mxCell>
+        <mxCell id="hg8" value="ファンダメンタル&lt;br&gt;&lt;b&gt;caution ≥ 2&lt;/b&gt;&lt;br&gt;&lt;font size='1'&gt;NFP等超重要指標&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#f8cecc;strokeColor=#b85450;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="1110" y="100" width="140" height="50" as="geometry"/>
+        </mxCell>
+
+        <!-- Layer 2: SoftGuard -->
+        <mxCell id="sg" value="&lt;b&gt;Layer 2: SoftGuard（ペナルティ減点 — 合計 ≥ 0.3 でBLOCK）&lt;/b&gt;" style="text;html=1;fontSize=14;align=left;fontColor=#d6b656;" vertex="1" parent="1">
+          <mxGeometry x="80" y="190" width="500" height="25" as="geometry"/>
+        </mxCell>
+        <mxCell id="sg1" value="&lt;b&gt;スプレッド&lt;/b&gt;&lt;br&gt;&lt;font size='1'&gt;&gt;2.0pips → 0-0.5&lt;br&gt;低流動性: ×1.5&lt;br&gt;高ボラ: ×2.0&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="80" y="220" width="140" height="80" as="geometry"/>
+        </mxCell>
+        <mxCell id="sg2" value="&lt;b&gt;セッション時間&lt;/b&gt;&lt;br&gt;&lt;font size='1'&gt;8-18時: 0.0&lt;br&gt;18-22/3-8時: 0.15&lt;br&gt;22-3時: 1.0 (拒否)&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="250" y="220" width="150" height="80" as="geometry"/>
+        </mxCell>
+        <mxCell id="sg3" value="&lt;b&gt;ボラティリティ&lt;/b&gt;&lt;br&gt;&lt;font size='1'&gt;ATR比 &lt;0.5: 0.1&lt;br&gt;ATR比 &gt;2.0: 0.1&lt;br&gt;正常: 0.0&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="430" y="220" width="140" height="80" as="geometry"/>
+        </mxCell>
+        <mxCell id="sg4" value="&lt;b&gt;直近成績&lt;/b&gt;&lt;br&gt;&lt;font size='1'&gt;3連敗以上: 0.2&lt;br&gt;正常: 0.0&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="600" y="220" width="130" height="80" as="geometry"/>
+        </mxCell>
+        <mxCell id="sg5" value="&lt;b&gt;MTF不整合&lt;/b&gt;&lt;br&gt;&lt;font size='1'&gt;conflicting: 0.15&lt;br&gt;mixed: 0.15&lt;br&gt;正常: 0.0&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="760" y="220" width="130" height="80" as="geometry"/>
+        </mxCell>
+        <mxCell id="sg6" value="&lt;b&gt;トレンド弱&lt;/b&gt;&lt;br&gt;&lt;font size='1'&gt;strength &lt;0.3: 0.1&lt;br&gt;正常: 0.0&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="920" y="220" width="120" height="80" as="geometry"/>
+        </mxCell>
+        <mxCell id="sg7" value="&lt;b&gt;ファンダメンタル&lt;/b&gt;&lt;br&gt;&lt;font size='1'&gt;BLOCK: 0.5&lt;br&gt;HIGH: 0.3&lt;br&gt;CAUTION: 0.1&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#fff2cc;strokeColor=#d6b656;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="1070" y="220" width="130" height="80" as="geometry"/>
+        </mxCell>
+
+        <!-- Layer 3: Filters -->
+        <mxCell id="fl" value="&lt;b&gt;Layer 3: フィルタ群（シグナル品質チェック）&lt;/b&gt;" style="text;html=1;fontSize=14;align=left;fontColor=#82b366;" vertex="1" parent="1">
+          <mxGeometry x="80" y="340" width="500" height="25" as="geometry"/>
+        </mxCell>
+        <mxCell id="fl1" value="&lt;b&gt;BCA方向性エッジ&lt;/b&gt;&lt;br&gt;&lt;font size='1'&gt;edge = (win-lose)/total&lt;br&gt;&lt;b&gt;≥ 0.60&lt;/b&gt; (bca_min_edge)&lt;br&gt;HTF逆方向ペナルティ&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="80" y="370" width="170" height="80" as="geometry"/>
+        </mxCell>
+        <mxCell id="fl2" value="&lt;b&gt;HTFトレンド整合&lt;/b&gt;&lt;br&gt;&lt;font size='1'&gt;H4/D1方向一致判定&lt;br&gt;不一致 → HOLD&lt;br&gt;整合度 ≤ 0.1 → 閾値+1.0&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="280" y="370" width="170" height="80" as="geometry"/>
+        </mxCell>
+        <mxCell id="fl3" value="&lt;b&gt;コンセンサス品質&lt;/b&gt;&lt;br&gt;&lt;font size='1'&gt;score ≥ threshold (9.0)&lt;br&gt;TF整合率 ≥ 50%&lt;br&gt;競合比率 ≤ 60%&lt;br&gt;CV ≤ 1.0（均一性）&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="480" y="370" width="170" height="80" as="geometry"/>
+        </mxCell>
+        <mxCell id="fl4" value="&lt;b&gt;セッション別&lt;/b&gt;&lt;br&gt;&lt;font size='1'&gt;Kill Zones:&lt;br&gt;LDN Open 7-10 UTC&lt;br&gt;NY Open 13-16 UTC&lt;br&gt;低流動性 21-7: スキップ&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="680" y="370" width="160" height="80" as="geometry"/>
+        </mxCell>
+        <mxCell id="fl5" value="&lt;b&gt;M1マイクロ反転&lt;/b&gt;&lt;br&gt;&lt;font size='1'&gt;3指標合議制:&lt;br&gt;BB%B / Stoch K / ROC/ATR&lt;br&gt;2/3一致 → 抑制&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="870" y="370" width="150" height="80" as="geometry"/>
+        </mxCell>
+        <mxCell id="fl6" value="&lt;b&gt;ボラティリティ&lt;/b&gt;&lt;br&gt;&lt;font size='1'&gt;ATR P95超: 高すぎ→スキップ&lt;br&gt;ATR P10未満: 低すぎ→スキップ&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#d5e8d4;strokeColor=#82b366;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="1050" y="370" width="170" height="80" as="geometry"/>
+        </mxCell>
+
+        <!-- Layer 4: Regime -->
+        <mxCell id="rg" value="&lt;b&gt;Layer 4: レジーム判定（市場状態分類）&lt;/b&gt;" style="text;html=1;fontSize=14;align=left;fontColor=#9673a6;" vertex="1" parent="1">
+          <mxGeometry x="80" y="500" width="500" height="25" as="geometry"/>
+        </mxCell>
+
+        <mxCell id="rg1" value="&lt;b&gt;TREND&lt;/b&gt;&lt;br&gt;&lt;font size='1'&gt;ADX ≥ 20 + MA整列 &gt; 0.3&lt;br&gt;→ 閾値+1.5, ロット1.0x&lt;br&gt;→ stag 90分, pretighten ON&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="80" y="530" width="200" height="80" as="geometry"/>
+        </mxCell>
+        <mxCell id="rg2" value="&lt;b&gt;RANGE&lt;/b&gt;&lt;br&gt;&lt;font size='1'&gt;ADX ≤ 20 + MA乱雑&lt;br&gt;→ ロット0.7x&lt;br&gt;→ stag 120分&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="320" y="530" width="200" height="80" as="geometry"/>
+        </mxCell>
+        <mxCell id="rg3" value="&lt;b&gt;HIGH_VOL&lt;/b&gt;&lt;br&gt;&lt;font size='1'&gt;ATR &gt; 1.5 + ADX &lt; 20&lt;br&gt;→ ロット0.5x&lt;br&gt;→ 方向性なし高ボラ&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="560" y="530" width="200" height="80" as="geometry"/>
+        </mxCell>
+        <mxCell id="rg4" value="&lt;b&gt;LOW_VOL&lt;/b&gt;&lt;br&gt;&lt;font size='1'&gt;ATR &lt; 0.7&lt;br&gt;→ ロット0.8x&lt;br&gt;→ 利益機会少&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#e1d5e7;strokeColor=#9673a6;fontSize=10;" vertex="1" parent="1">
+          <mxGeometry x="800" y="530" width="200" height="80" as="geometry"/>
+        </mxCell>
+
+        <!-- Flow summary -->
+        <mxCell id="fsum" value="&lt;b&gt;制約チェック実行順序&lt;/b&gt;&lt;hr&gt;&lt;font size='1'&gt;1. ファンダメンタル指標前スキップ (year_runner)&lt;br&gt;2. HardGuard全条件 (1つでもNG→BLOCK)&lt;br&gt;3. can_trade(): ポジション数/DD/日次損失&lt;br&gt;4. レジーム判定 → 閾値調整&lt;br&gt;5. コンセンサス閾値判定&lt;br&gt;6. BCA方向性エッジ判定&lt;br&gt;7. SoftGuardペナルティ合算&lt;br&gt;8. HTFトレンド整合チェック&lt;br&gt;9. 各種フィルタ群&lt;br&gt;10. ポジションサイジング&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#FFFFFF;strokeColor=#333333;fontSize=11;align=left;spacingLeft=10;" vertex="1" parent="1">
+          <mxGeometry x="80" y="660" width="350" height="210" as="geometry"/>
+        </mxCell>
+
+        <!-- Score breakdown -->
+        <mxCell id="scb" value="&lt;b&gt;TFスコア構成 (MAX=15.0)&lt;/b&gt;&lt;hr&gt;&lt;font size='1'&gt;トレンド判定: 0-5.0&lt;br&gt;ADX強度: 0/+2.0&lt;br&gt;RSI: 0/+1.0 (極端値で-∞)&lt;br&gt;MACDスロープ: ±2.5&lt;br&gt;ダイバージェンス: ±2.0&lt;br&gt;EMAクロス: ±2.5&lt;br&gt;ストキャスティクス: ±1.5&lt;br&gt;HTF整合ボーナス: +2.0&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;align=left;spacingLeft=10;" vertex="1" parent="1">
+          <mxGeometry x="500" y="660" width="250" height="190" as="geometry"/>
+        </mxCell>
+
+        <!-- TF weights -->
+        <mxCell id="tfw" value="&lt;b&gt;TF重み構造&lt;/b&gt;&lt;hr&gt;&lt;font size='1'&gt;CONFIRM (H1): &lt;b&gt;3.0&lt;/b&gt; ← 最高&lt;br&gt;PRIMARY (M15): &lt;b&gt;2.0&lt;/b&gt;&lt;br&gt;ENTRY (M5): &lt;b&gt;1.5&lt;/b&gt;&lt;br&gt;OTHER: &lt;b&gt;1.0&lt;/b&gt;&lt;br&gt;MANAGE (M30): &lt;b&gt;0.5&lt;/b&gt;&lt;br&gt;&lt;hr&gt;consensus = Σ(weight × strength)&lt;br&gt;threshold = 9.0 + 調整値&lt;/font&gt;" style="rounded=1;whiteSpace=wrap;html=1;fillColor=#dae8fc;strokeColor=#6c8ebf;fontSize=11;align=left;spacingLeft=10;" vertex="1" parent="1">
+          <mxGeometry x="820" y="660" width="220" height="190" as="geometry"/>
+        </mxCell>
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
