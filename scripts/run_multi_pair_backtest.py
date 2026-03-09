@@ -275,6 +275,75 @@ class PairContext:
 
 
 # =============================================================
+# 進捗表示ユーティリティ
+# =============================================================
+def _progress_bar(
+    current: int,
+    total: int,
+    width: int = 30,
+) -> str:
+    """ASCII プログレスバーを生成
+
+    Args:
+        current: 現在値
+        total: 合計値
+        width: バーの幅（文字数）
+
+    Returns:
+        str: [████████░░░░░░░░] 形式のプログレスバー
+    """
+    if total <= 0:
+        return f"[{'░' * width}]"
+    ratio = min(current / total, 1.0)
+    filled = int(width * ratio)
+    return f"[{'█' * filled}{'░' * (width - filled)}]"
+
+
+def _format_eta(elapsed: float, current: int, total: int) -> str:
+    """残り時間を推定してフォーマット
+
+    Args:
+        elapsed: 経過秒数
+        current: 処理済み数
+        total: 合計数
+
+    Returns:
+        str: "ETA 1m23s" 形式の文字列
+    """
+    if current <= 0 or elapsed <= 0:
+        return "ETA --:--"
+    rate = current / elapsed
+    remaining = (total - current) / rate
+    m, s = divmod(int(remaining), 60)
+    if m > 0:
+        return f"ETA {m}m{s:02d}s"
+    return f"ETA {s}s"
+
+
+def _format_elapsed(seconds: float) -> str:
+    """経過時間をフォーマット
+
+    Args:
+        seconds: 秒数
+
+    Returns:
+        str: "1m23s" or "45s" 形式
+    """
+    m, s = divmod(int(seconds), 60)
+    if m > 0:
+        return f"{m}m{s:02d}s"
+    return f"{s}s"
+
+
+_PHASE_ICONS = {
+    "cache": "[CACHE]",
+    "load": "[LOAD]",
+    "test": "[TEST]",
+    "done": "[DONE]",
+}
+
+
+# =============================================================
 # データロード
 # =============================================================
 def _create_runner(
@@ -322,17 +391,16 @@ def warm_indicator_cache(
         symbols: シンボルリスト
         data_dir: データディレクトリ
     """
+    n_syms = len(symbols)
     _t0 = time.time()
     print(
-        f"\nインジケータキャッシュ確認中... "
-        f"({len(symbols)}ペア)"
+        f"\n{_PHASE_ICONS['cache']} "
+        f"インジケータキャッシュ確認 ({n_syms}ペア)"
     )
 
-    for sym in symbols:
+    for i, sym in enumerate(symbols, 1):
         _st = time.time()
         runner = _create_runner(sym, data_dir)
-        # needed_years=None → キャッシュ未生成なら全期間計算→保存
-        # キャッシュ済みならロードせずスキップ
         market_data = runner._load_all_timeframes(
             include_m1=True,
         )
@@ -348,10 +416,18 @@ def warm_indicator_cache(
         del runner
         gc.collect()
         _elapsed = time.time() - _st
-        print(f"  {sym}: キャッシュ準備完了 ({_elapsed:.1f}s)")
+        _total_elapsed = time.time() - _t0
+        eta = _format_eta(_total_elapsed, i, n_syms)
+        print(
+            f"  ({i}/{n_syms}) {sym:8s} "
+            f"{_format_elapsed(_elapsed):>6s}  {eta}",
+        )
 
     total = time.time() - _t0
-    print(f"  全ペアキャッシュ完了: {total:.1f}s")
+    print(
+        f"  {_PHASE_ICONS['done']} "
+        f"キャッシュ準備完了 ({_format_elapsed(total)})"
+    )
 
 
 def load_year_data(
@@ -374,14 +450,16 @@ def load_year_data(
         dict[str, dict[str, pd.DataFrame]]:
             シンボル→TF名→年フィルタ済みDataFrame
     """
+    n_syms = len(symbols)
     result: dict[str, dict[str, pd.DataFrame]] = {}
     _t0 = time.time()
     print(
-        f"\n  {year}年データロード中... "
-        f"({len(symbols)}ペア)"
+        f"  {_PHASE_ICONS['load']} "
+        f"{year}年データロード ({n_syms}ペア, "
+        f"キャッシュ読込)",
     )
 
-    for sym in symbols:
+    for i, sym in enumerate(symbols, 1):
         runner = _create_runner(sym, data_dir)
         # needed_years=[year] でキャッシュから対象年のみ読み込み
         market_data = runner._load_all_timeframes(
@@ -407,12 +485,21 @@ def load_year_data(
         if hasattr(runner, "_tf_data"):
             runner._tf_data.clear()
         del runner
-        _elapsed = time.time() - _t0
-        print(f"    {sym}: ロード完了 ({_elapsed:.1f}s)")
+        # インラインプログレス
+        print(
+            f"    {_progress_bar(i, n_syms, 20)} "
+            f"{i}/{n_syms} {sym}",
+            end="\r",
+        )
 
     gc.collect()
     total = time.time() - _t0
-    print(f"    全ペアロード完了: {total:.1f}s")
+    # 行クリア後に完了メッセージ
+    print(
+        f"    {_progress_bar(n_syms, n_syms, 20)} "
+        f"{n_syms}/{n_syms} 完了 "
+        f"({_format_elapsed(total)})          "
+    )
     return result
 
 
@@ -728,14 +815,21 @@ def run_multi_pair_year(
                 trade_record=_trade_record,
             )
 
-        # 進捗表示（5000バーごと）
-        if bar_num % 5000 == 0 and bar_num > 0:
+        # 進捗表示（10000バーごと）
+        if bar_num % 10000 == 0 and bar_num > 0:
             elapsed = time.time() - _t0
             pct = bar_num / total_bars * 100
+            eta = _format_eta(elapsed, bar_num, total_bars)
+            n_trades = sum(
+                len(c.simulator.state.closed_trades)
+                for c in contexts.values()
+            )
             print(
-                f"    {year}年: {pct:.0f}% "
-                f"({bar_num}/{total_bars}) "
-                f"{elapsed:.0f}s",
+                f"    {year}年 "
+                f"{_progress_bar(bar_num, total_bars, 25)} "
+                f"{pct:5.1f}%  "
+                f"trades={n_trades}  "
+                f"{_format_elapsed(elapsed)}  {eta}     ",
                 end="\r",
             )
 
@@ -776,10 +870,16 @@ def run_multi_pair_year(
     )
 
     elapsed = time.time() - _t0
+    n_trades = sum(
+        len(c.simulator.state.closed_trades)
+        for c in contexts.values()
+    )
     print(
-        f"    {year}年: 100% "
-        f"({total_bars}/{total_bars}) "
-        f"{elapsed:.0f}s          ",
+        f"    {year}年 "
+        f"{_progress_bar(total_bars, total_bars, 25)} "
+        f"100.0%  "
+        f"trades={n_trades}  "
+        f"{_format_elapsed(elapsed)}             ",
     )
 
     # ペア別トレード返却
@@ -1128,6 +1228,8 @@ def run_test_case(
     year_data_cache: dict[
         int, dict[str, dict[str, pd.DataFrame]]
     ] | None = None,
+    test_index: int = 0,
+    total_tests: int = 0,
 ) -> dict[str, Any]:
     """テストケースを実行（順次 or 年並列）
 
@@ -1141,6 +1243,8 @@ def run_test_case(
         bot_extra_overrides: 追加botオーバーライド
         year_data_cache: 年→ペア→TF→DataFrame の
             事前ロード済みキャッシュ（複数テスト共有用）
+        test_index: テスト番号（1始まり、表示用）
+        total_tests: テスト総数（表示用）
 
     Returns:
         dict: テスト結果
@@ -1152,17 +1256,32 @@ def run_test_case(
     if not data_dir:
         data_dir = str(get_data_dir())
 
+    # テストヘッダー
+    _test_label = ""
+    if test_index > 0 and total_tests > 0:
+        _test_label = f" [{test_index}/{total_tests}]"
+    _mode = (
+        f"年並列{max_year_workers}w"
+        if max_year_workers > 1
+        else "順次"
+    )
     print(f"\n{'=' * 60}")
-    print(f"  テスト: {test_config.name}")
     print(
-        f"  global_max={test_config.global_max_positions}, "
+        f"  {_PHASE_ICONS['test']}{_test_label} "
+        f"{test_config.name}"
+    )
+    print(
+        f"  {len(symbols)}ペア | "
+        f"{start_year}-{end_year} | "
+        f"{_mode}"
+    )
+    print(
+        f"  global={test_config.global_max_positions}, "
         f"per_pair={test_config.per_pair_max_positions}, "
         f"exposure={test_config.global_max_exposure_lot}, "
         f"risk={test_config.base_risk_pct}, "
         f"CT={test_config.consensus_threshold}"
     )
-    if max_year_workers > 1:
-        print(f"  年並列: {max_year_workers}ワーカー")
     print(f"{'=' * 60}")
 
     # インジケータキャッシュを事前生成（初回のみ実行）
@@ -1242,7 +1361,14 @@ def run_test_case(
     total_blocked_per_pair = 0
     total_blocked_exposure = 0
 
-    for year in range(start_year, end_year + 1):
+    _test_t0 = time.time()
+    for yr_idx, year in enumerate(
+        range(start_year, end_year + 1), 1,
+    ):
+        print(
+            f"\n  --- {year}年 "
+            f"({yr_idx}/{num_years}) ---"
+        )
         # 毎年エクイティを初期残高にリセット
         portfolio = PortfolioState(
             equity=INITIAL_EQUITY,
@@ -1325,11 +1451,11 @@ def run_test_case(
             }
         )
         print(
-            f"  {year}年: "
-            f"PnL={year_pnl:+,.0f}, "
-            f"Return={year_return_pct:+.1f}%, "
-            f"Trades={year_trades}, "
-            f"Equity={portfolio.equity:,.0f}"
+            f"  {_PHASE_ICONS['done']} {year}年: "
+            f"PnL={year_pnl:+,.0f}  "
+            f"Return={year_return_pct:+.1f}%  "
+            f"Trades={year_trades}  "
+            f"DD={portfolio.max_dd_pct:.2f}%"
         )
 
         # メモリ解放（年間コンテキストは次年で再構築）
@@ -1517,31 +1643,43 @@ def aggregate_results(
 
 def _print_result_summary(result: dict[str, Any]) -> None:
     """テスト結果サマリー出力"""
-    print(f"\n  --- {result['test_name']} サマリー ---")
-    print(f"  総利益:     {result['total_profit']:>+12,.0f}")
-    print(f"  年間収益率: {result['annual_return_pct']:>8.1f}%")
-    print(f"  最大DD:     {result['max_dd_pct']:>8.2f}%")
-    print(f"  Sharpe:     {result['sharpe']:>8.2f}")
-    print(f"  WR:         {result['wr']:>8.1f}%")
-    print(f"  PF:         {result['pf']:>8.2f}")
-    print(f"  月間勝率:   {result['monthly_wr']:>8.1f}%")
-    print(f"  トレード数: {result['total_trades']}")
+    print(f"\n  {_PHASE_ICONS['done']} {result['test_name']} 結果")
+    print(f"  {'─' * 40}")
     print(
-        f"  制限発動: global={result['blocked_global']}, "
+        f"  総利益:     {result['total_profit']:>+12,.0f}  "
+        f"  年間収益率: {result['annual_return_pct']:>+.1f}%"
+    )
+    print(
+        f"  最大DD:     {result['max_dd_pct']:>8.2f}%  "
+        f"  Sharpe:     {result['sharpe']:>8.2f}"
+    )
+    print(
+        f"  WR:         {result['wr']:>8.1f}%  "
+        f"  PF:         {result['pf']:>8.2f}"
+    )
+    print(
+        f"  月間勝率:   {result['monthly_wr']:>8.1f}%  "
+        f"  トレード数: {result['total_trades']}"
+    )
+    print(
+        f"  制限: global={result['blocked_global']}, "
         f"per_pair={result['blocked_per_pair']}, "
         f"exposure={result['blocked_exposure']}"
     )
 
-    print("\n  ペア別:")
+    print("\n  ペア別実績:")
+    print(
+        f"    {'ペア':8s}  {'Profit':>10s}  "
+        f"{'WR':>6s}  {'PF':>6s}  "
+        f"{'Trades':>6s}  {'寄与':>6s}"
+    )
+    print(f"    {'─' * 50}")
     for sym, pm in result["pair_metrics"].items():
         if pm["trades"] > 0:
             print(
-                f"    {sym:8s} | "
-                f"Profit: {pm['profit']:>+10,.0f} | "
-                f"WR: {pm['wr']:5.1f}% | "
-                f"PF: {pm['pf']:5.2f} | "
-                f"Trades: {pm['trades']:4d} | "
-                f"寄与: {pm['contribution']:5.1f}%"
+                f"    {sym:8s}  {pm['profit']:>+10,.0f}  "
+                f"{pm['wr']:>5.1f}%  {pm['pf']:>5.2f}  "
+                f"{pm['trades']:>6d}  {pm['contribution']:>5.1f}%"
             )
 
 
@@ -1958,7 +2096,9 @@ def main() -> None:
             continue
         selected_tests.append(TEST_MATRIX[test_name])
 
-    for test_config in selected_tests:
+    n_tests = len(selected_tests)
+    _main_t0 = time.time()
+    for t_idx, test_config in enumerate(selected_tests, 1):
         result = run_test_case(
             test_config,
             available,
@@ -1966,6 +2106,8 @@ def main() -> None:
             end_year=args.end_year,
             max_year_workers=max_year_workers,
             data_dir=data_dir,
+            test_index=t_idx,
+            total_tests=n_tests,
         )
         results[test_config.name] = result
 
@@ -1982,8 +2124,12 @@ def main() -> None:
     save_trades_csv(results, log_dir)
 
     # 最終サマリー
+    _total_elapsed = time.time() - _main_t0
     print(f"\n{'=' * 80}")
-    print("  最終サマリー")
+    print(
+        f"  {_PHASE_ICONS['done']} 最終サマリー "
+        f"({_format_elapsed(_total_elapsed)})"
+    )
     print(f"{'=' * 80}")
     print(
         f"{'テスト':8s} | {'年間収益率':>10s} | {'DD':>6s} | "
