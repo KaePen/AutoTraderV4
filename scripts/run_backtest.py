@@ -737,10 +737,9 @@ def parse_args() -> argparse.Namespace:
     _bot_exclude = {
         # 複雑型（list, dict, tuple, dataclass）
         "consolidator", "risk", "timeframes",
-        "evaluator_configs", "timeframe_configs",
+        "evaluator_configs",
         "htf_alignment_tfs", "default_tp_sl_ratio_range",
         # レガシー / CLI不要
-        "min_adx", "require_htf_trend",
         "demo_mode", "demo_max_positions",
         "demo_cooldown_minutes", "demo_max_daily_trades",
         "demo_consensus_threshold",

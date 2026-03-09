@@ -2,25 +2,7 @@
 
 from __future__ import annotations
 
-import warnings
 from dataclasses import dataclass, field
-
-
-@dataclass(frozen=True)
-class TimeframeConfig:
-    """時間足ごとの設定
-
-    Attributes:
-        timeframe: 時間足
-        max_positions: 最大ポジション数
-        enabled: 有効フラグ
-        volume_multiplier: ボリューム倍率
-    """
-
-    timeframe: str = "M15"
-    max_positions: int = 1
-    enabled: bool = True
-    volume_multiplier: float = 1.0
 
 
 @dataclass(frozen=True)
@@ -287,8 +269,6 @@ class UnifiedBotConfig:
         risk: リスク管理設定
         timeframes: 評価対象時間足リスト
         evaluator_configs: 時間足別評価器設定
-        min_adx: 最小ADX閾値（レガシー、RegimeDetectorへ移行）
-        require_htf_trend: 上位足トレンド一致を要求（レガシー）
         tp_sl_ratio: TP/SL比率（レガシー、TradingPlanへ移行）
         enable_position_sizing: ポジションサイジングを有効にするか
         enable_position_manager: ポジション管理を有効にするか
@@ -311,10 +291,7 @@ class UnifiedBotConfig:
         ]
     )
     evaluator_configs: dict[str, EvaluatorConfig] = field(default_factory=dict)
-    min_adx: float = 20.0
-    require_htf_trend: bool = True
     tp_sl_ratio: float = 1.2
-    timeframe_configs: dict[str, TimeframeConfig] = field(default_factory=dict)
     enable_position_sizing: bool = True
     enable_position_manager: bool = True
     use_position_manager: bool = True
@@ -539,19 +516,6 @@ class UnifiedBotConfig:
             timeframe=timeframe,
             pip_unit=self.pip_unit,
         )
-
-    def get_timeframe_config(self, timeframe: str) -> TimeframeConfig:
-        """時間足別設定を取得
-
-        Args:
-            timeframe: 時間足
-
-        Returns:
-            TimeframeConfig: 時間足設定
-        """
-        if timeframe in self.timeframe_configs:
-            return self.timeframe_configs[timeframe]
-        return TimeframeConfig(timeframe=timeframe)
 
     def to_signal_config(self) -> SignalConfig:
         """シグナル関連設定を抽出
