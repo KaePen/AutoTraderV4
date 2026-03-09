@@ -424,7 +424,8 @@ def warm_indicator_cache(
     _t0 = time.time()
     print(
         f"\n{_PHASE_ICONS['cache']} "
-        f"インジケータキャッシュ確認 ({n_syms}ペア)"
+        f"インジケータキャッシュ確認 ({n_syms}ペア)",
+        flush=True,
     )
 
     for i, sym in enumerate(symbols, 1):
@@ -445,12 +446,14 @@ def warm_indicator_cache(
         print(
             f"  ({i}/{n_syms}) {sym:8s} "
             f"{_format_elapsed(_elapsed):>6s}  {eta}",
+            flush=True,
         )
 
     total = time.time() - _t0
     print(
         f"  {_PHASE_ICONS['done']} "
-        f"キャッシュ準備完了 ({_format_elapsed(total)})"
+        f"キャッシュ準備完了 ({_format_elapsed(total)})",
+        flush=True,
     )
 
 
@@ -497,6 +500,7 @@ def load_year_data(
         f"  {_PHASE_ICONS['load']} "
         f"{year}年データロード "
         f"({n_syms}ペア, {workers}並列)",
+        flush=True,
     )
 
     with ThreadPoolExecutor(max_workers=workers) as executor:
@@ -521,7 +525,8 @@ def load_year_data(
     print(
         f"    {_progress_bar(n_syms, n_syms, 20)} "
         f"{n_syms}/{n_syms} 完了 "
-        f"({_format_elapsed(total)})          "
+        f"({_format_elapsed(total)})          ",
+        flush=True,
     )
     return result
 
@@ -937,6 +942,10 @@ def _run_year_worker(args: tuple) -> dict[str, Any] | None:
     import sys as _sys
     from pathlib import Path as _Path
 
+    # 子プロセスでも行バッファリング（即時表示）
+    if hasattr(_sys.stdout, "reconfigure"):
+        _sys.stdout.reconfigure(line_buffering=True)
+
     _sr = _Path(__file__).resolve().parent.parent
     if str(_sr) not in _sys.path:
         _sys.path.insert(0, str(_sr))
@@ -1347,15 +1356,17 @@ def run_test_case(
             f"CT={test_config.consensus_threshold}"
         )
     else:
-        print(f"\n{'=' * 60}")
+        print(f"\n{'=' * 60}", flush=True)
         print(
             f"  {_pfx}{_test_label} "
-            f"{test_config.name}"
+            f"{test_config.name}",
+            flush=True,
         )
         print(
             f"  {len(symbols)}ペア | "
             f"{start_year}-{end_year} | "
-            f"{_mode}"
+            f"{_mode}",
+            flush=True,
         )
         print(
             f"  global="
@@ -1365,9 +1376,10 @@ def run_test_case(
             f"exposure="
             f"{test_config.global_max_exposure_lot}, "
             f"risk={test_config.base_risk_pct}, "
-            f"CT={test_config.consensus_threshold}"
+            f"CT={test_config.consensus_threshold}",
+            flush=True,
         )
-        print(f"{'=' * 60}")
+        print(f"{'=' * 60}", flush=True)
 
     # インジケータキャッシュを事前生成（初回のみ実行）
     warm_indicator_cache(symbols, data_dir)
