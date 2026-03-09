@@ -375,18 +375,16 @@ def load_year_data(
     symbols: list[str],
     data_dir: str,
     year: int,
-    max_workers: int = 6,
 ) -> dict[str, dict[str, pd.DataFrame]]:
-    """1年分の全ペアデータをロード（年フィルタ済み）
+    """1年分の全ペアデータを順次ロード（年フィルタ済み）
 
-    全期間データをペアごとにロード→年フィルタ→全期間データ即時解放。
-    ピークメモリ: 1ペア全期間(~600MB) + 既処理ペア年データ(~100MB/ペア)
+    ペアごとに全期間ロード→年フィルタ→全期間データ即時解放。
+    順次ロードにより、ピークメモリを1ペア分(~600MB)に抑制。
 
     Args:
         symbols: シンボルリスト
         data_dir: データディレクトリ
         year: 対象年
-        max_workers: 並列ワーカー数
 
     Returns:
         dict[str, dict[str, pd.DataFrame]]:
@@ -396,35 +394,28 @@ def load_year_data(
     end_date = datetime(year + 1, 1, 1)
 
     result: dict[str, dict[str, pd.DataFrame]] = {}
-    workers = min(max_workers, len(symbols))
     _t0 = time.time()
     print(
         f"\n  {year}年データロード中... "
-        f"({len(symbols)}ペア, workers={workers})"
+        f"({len(symbols)}ペア, 順次ロード)"
     )
 
-    with ThreadPoolExecutor(max_workers=workers) as executor:
-        futures = {
-            executor.submit(
-                load_pair_data, sym, data_dir,
-            ): sym
-            for sym in symbols
-        }
-        for future in as_completed(futures):
-            sym = futures[future]
-            _runner, full_md = future.result()
-            # 年フィルタ
-            year_md: dict[str, pd.DataFrame] = {}
-            for tf_key, tf_df in full_md.items():
-                year_df = tf_df[
-                    (tf_df["time"] >= start_date)
-                    & (tf_df["time"] < end_date)
-                ].reset_index(drop=True)
-                if not year_df.empty:
-                    year_md[tf_key] = year_df
-            result[sym] = year_md
-            # 全期間データを即時解放
-            del full_md, _runner
+    for sym in symbols:
+        _runner, full_md = load_pair_data(sym, data_dir)
+        # 年フィルタ
+        year_md: dict[str, pd.DataFrame] = {}
+        for tf_key, tf_df in full_md.items():
+            year_df = tf_df[
+                (tf_df["time"] >= start_date)
+                & (tf_df["time"] < end_date)
+            ].reset_index(drop=True)
+            if not year_df.empty:
+                year_md[tf_key] = year_df
+        result[sym] = year_md
+        # 全期間データを即時解放
+        del full_md, _runner
+        _elapsed = time.time() - _t0
+        print(f"    {sym}: ロード完了 ({_elapsed:.1f}s)")
 
     gc.collect()
     total = time.time() - _t0
@@ -847,10 +838,7 @@ def _run_year_worker(args: tuple) -> dict[str, Any] | None:
     mc = MultiPairConfig(**multi_config_dict)
 
     # 年単位データロード（全期間→年フィルタ→即時解放）
-    year_data = load_year_data(
-        symbols, data_dir,
-        year, max_workers=min(6, len(symbols)),
-    )
+    year_data = load_year_data(symbols, data_dir, year)
 
     # ポートフォリオ初期化（年独立: 毎年100万リセット）
     portfolio = PortfolioState(
@@ -1272,7 +1260,6 @@ def run_test_case(
         else:
             year_data = load_year_data(
                 symbols, data_dir, year,
-                max_workers=min(6, len(symbols)),
             )
 
         # ペアコンテキスト構築
