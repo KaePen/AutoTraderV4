@@ -21,6 +21,7 @@ from autotrader.adapters.mt5.data_provider import MT5DataProvider
 from autotrader.adapters.mt5.exceptions import MT5DataError, MT5Error
 from autotrader.adapters.mt5.trade_executor import MT5TradeExecutor
 from autotrader.calculator.technical.batch import TechnicalIndicatorBatch
+from autotrader.config.trading_params import get_pip_unit, get_pip_value
 from autotrader.core.entities import AccountInfo, Signal
 from autotrader.core.enums import (
     ExitReason,
@@ -31,7 +32,6 @@ from autotrader.core.enums import (
 from autotrader.core.event_bus import get_event_bus
 from autotrader.core.exceptions import TradingError, ValidationError
 from autotrader.core.interfaces.position_sizing import SizingContext
-from autotrader.config.trading_params import get_pip_unit
 from autotrader.decision.unified.config import UnifiedBotConfig
 from autotrader.decision.unified.position_manager import (
     ManagementActionType,
@@ -178,6 +178,13 @@ class LiveTradingEngine:
         else:
             # カレンダー＋RSS軽量初期化（DB不要・LLM不要）
             self._init_calendar_only()
+
+        # グローバルポジション/エクスポージャー制限
+        # EngineManager.set_global_limit_callbacks() で注入
+        self._get_global_position_count = None
+        self._get_global_exposure_lot = None
+        self._global_max_positions: int = 0
+        self._global_max_exposure_lot: float = 0.0
 
         # ホットリロード関連
         self._entry_blocked: bool = False
@@ -414,6 +421,41 @@ class LiveTradingEngine:
         self._pm.config = new_config
         logger.info("PositionManagerConfig更新完了")
 
+    def set_global_limit_callbacks(
+        self,
+        get_global_position_count,
+        get_global_exposure_lot,
+        global_max_positions: int = 0,
+        global_max_exposure_lot: float = 0.0,
+    ) -> None:
+        """グローバルポジション/エクスポージャー制限を設定
+
+        EngineManagerがエンジン追加時にコールバックを注入する。
+
+        Args:
+            get_global_position_count: 全ペア合計ポジション数
+                取得コールバック
+            get_global_exposure_lot: 全ペア合計ロット数
+                取得コールバック
+            global_max_positions: 最大ポジション数（0=無制限）
+            global_max_exposure_lot: 最大ロット数（0.0=無制限）
+        """
+        self._get_global_position_count = (
+            get_global_position_count
+        )
+        self._get_global_exposure_lot = (
+            get_global_exposure_lot
+        )
+        self._global_max_positions = global_max_positions
+        self._global_max_exposure_lot = global_max_exposure_lot
+        logger.info(
+            "[%s] グローバル制限設定: "
+            "max_pos=%d, max_lot=%.1f",
+            self._active_symbol,
+            global_max_positions,
+            global_max_exposure_lot,
+        )
+
     @staticmethod
     def _build_sizer_config(
         bot_config: UnifiedBotConfig,
@@ -456,7 +498,10 @@ class LiveTradingEngine:
 
     @staticmethod
     def _get_pip_value(symbol: str) -> float:
-        """通貨ペアの1lot/1pipあたりの価値を返す（JPY系=1000、その他=10）
+        """通貨ペアの1lot/1pipあたりの価値を返す
+
+        公式: 100,000 × pip_unit × quote_ccy_rate
+        プリセット登録済みなら正確値、未登録なら通貨名から推定。
 
         Args:
             symbol: 通貨ペアシンボル
@@ -464,7 +509,7 @@ class LiveTradingEngine:
         Returns:
             float: pip価値（円）
         """
-        return 1000.0 if "JPY" in symbol.upper() else 10.0
+        return get_pip_value(symbol)
 
     @property
     def signal_history(self) -> list[Signal]:
@@ -1173,6 +1218,38 @@ class LiveTradingEngine:
             )
             return
 
+        # グローバルポジション制限チェック
+        if (
+            self._global_max_positions > 0
+            and self._get_global_position_count is not None
+        ):
+            _g_count = self._get_global_position_count()
+            if _g_count >= self._global_max_positions:
+                logger.info(
+                    "[%s] グローバルポジション上限"
+                    "(%d/%d)、エントリースキップ",
+                    self._active_symbol,
+                    _g_count,
+                    self._global_max_positions,
+                )
+                return
+
+        # グローバルエクスポージャー制限チェック
+        if (
+            self._global_max_exposure_lot > 0
+            and self._get_global_exposure_lot is not None
+        ):
+            _g_lot = self._get_global_exposure_lot()
+            if _g_lot >= self._global_max_exposure_lot:
+                logger.info(
+                    "[%s] グローバルロット上限"
+                    "(%.2f/%.1f)、エントリースキップ",
+                    self._active_symbol,
+                    _g_lot,
+                    self._global_max_exposure_lot,
+                )
+                return
+
         # ロット計算
         if self._account_info is None:
             logger.warning(
@@ -1205,7 +1282,12 @@ class LiveTradingEngine:
             p.volume for p in positions
             if p.signal_type == SignalType.SELL
         )
-        _exposure_lot = _buy_lot + _sell_lot
+        _local_exposure = _buy_lot + _sell_lot
+        # グローバルエクスポージャーが取得可能なら使用
+        if self._get_global_exposure_lot is not None:
+            _exposure_lot = self._get_global_exposure_lot()
+        else:
+            _exposure_lot = _local_exposure
         _same_dir_lot = (
             _buy_lot
             if signal.signal_type == SignalType.BUY

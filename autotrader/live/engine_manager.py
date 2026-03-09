@@ -36,16 +36,28 @@ class EngineManager:
         _engines: シンボル→エンジンの辞書
     """
 
-    def __init__(self, mt5_config: MT5Config) -> None:
+    def __init__(
+        self,
+        mt5_config: MT5Config,
+        global_max_positions: int = 0,
+        global_max_exposure_lot: float = 0.0,
+    ) -> None:
         """初期化
 
         Args:
             mt5_config: MT5接続設定
+            global_max_positions: 全ペア合計の最大ポジション数
+                （0=無制限）
+            global_max_exposure_lot: 全ペア合計の最大ロット数
+                （0.0=無制限）
         """
         self._mt5_config = mt5_config
         self._conn = MT5ConnectionManager(mt5_config)
         self._data_provider = MT5DataProvider(self._conn)
         self._engines: dict[str, LiveTradingEngine] = {}
+        # グローバルポジション/エクスポージャー制限
+        self._global_max_positions = global_max_positions
+        self._global_max_exposure_lot = global_max_exposure_lot
         # 共有コレクター（最初のエンジン起動時に初期化）
         self._shared_fundamental_collector = None
         self._shared_rss_collector = None
@@ -139,6 +151,21 @@ class EngineManager:
                 self._shared_rss_collector
             ),
         )
+        # グローバル制限コールバックを注入
+        engine.set_global_limit_callbacks(
+            get_global_position_count=(
+                self.get_global_position_count
+            ),
+            get_global_exposure_lot=(
+                self.get_global_exposure_lot
+            ),
+            global_max_positions=(
+                self._global_max_positions
+            ),
+            global_max_exposure_lot=(
+                self._global_max_exposure_lot
+            ),
+        )
         self._engines[symbol] = engine
         logger.info("エンジン追加: %s", symbol)
 
@@ -195,6 +222,29 @@ class EngineManager:
         # 共有コレクター参照をクリア
         self._shared_fundamental_collector = None
         self._shared_rss_collector = None
+
+    def get_global_position_count(self) -> int:
+        """全エンジンの合計オープンポジション数を取得
+
+        Returns:
+            int: 合計ポジション数
+        """
+        return sum(
+            len(e.cached_positions)
+            for e in self._engines.values()
+        )
+
+    def get_global_exposure_lot(self) -> float:
+        """全エンジンの合計エクスポージャー（ロット）を取得
+
+        Returns:
+            float: 合計ロット数
+        """
+        total = 0.0
+        for engine in self._engines.values():
+            for pos in engine.cached_positions:
+                total += pos.get("volume", 0.0)
+        return total
 
     @property
     def all_cached_positions(self) -> list[dict]:

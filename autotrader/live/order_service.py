@@ -10,9 +10,9 @@ import logging
 from datetime import UTC, datetime
 
 from autotrader.adapters.mt5.data_provider import MT5DataProvider
-from autotrader.config.trading_params import get_pip_unit
 from autotrader.adapters.mt5.exceptions import MT5DataError
 from autotrader.adapters.mt5.trade_executor import MT5TradeExecutor
+from autotrader.config.trading_params import get_pip_unit, get_pip_value
 from autotrader.core.entities import Signal
 from autotrader.core.enums import (
     MarketRegime,
@@ -87,13 +87,15 @@ class OrderService:
     def get_pip_value(symbol: str) -> float:
         """通貨ペアの1lot/1pipあたりの価値を返す
 
+        公式: 100,000 × pip_unit × quote_ccy_rate
+
         Args:
             symbol: 通貨ペアシンボル
 
         Returns:
             float: pip価値（円）
         """
-        return 1000.0 if "JPY" in symbol.upper() else 10.0
+        return get_pip_value(symbol)
 
     def should_use_tick_optimizer(
         self,
