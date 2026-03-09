@@ -690,6 +690,7 @@ def execute_multi_pair_job(
             max_year_workers=max_year_workers,
             data_dir=data_dir,
             bot_extra_overrides=bot_extra,
+            job_prefix=job.id,
         )
 
         if cancel_event.is_set():

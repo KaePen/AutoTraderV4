@@ -15,10 +15,13 @@ import argparse
 import dataclasses
 import gc
 import heapq
+import io
 import logging
 import math
+import os
 import sys
 import time
+from collections.abc import Callable
 from concurrent.futures import (
     ProcessPoolExecutor,
     ThreadPoolExecutor,
@@ -29,13 +32,23 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
+# Windows cp932エンコーディング問題の回避
+if sys.platform == "win32":
+    sys.stdout = io.TextIOWrapper(
+        sys.stdout.buffer,
+        encoding="utf-8",
+        errors="replace",
+    )
+    sys.stderr = io.TextIOWrapper(
+        sys.stderr.buffer,
+        encoding="utf-8",
+        errors="replace",
+    )
+    os.environ.setdefault("PYTHONIOENCODING", "utf-8")
+
 import numpy as np
 import pandas as pd
 import yaml
-
-# stdout を行バッファリングに設定（サブプロセスでも即時表示）
-if hasattr(sys.stdout, "reconfigure"):
-    sys.stdout.reconfigure(line_buffering=True)
 
 # プロジェクトルートをパスに追加
 _SCRIPT_DIR = Path(__file__).resolve().parent
@@ -351,6 +364,28 @@ _PHASE_ICONS = {
 }
 
 
+def _log(
+    msg: str,
+    prefix: str = "",
+    end: str = "\n",
+) -> None:
+    """プレフィックス付き出力
+
+    Args:
+        msg: メッセージ
+        prefix: ジョブ識別プレフィックス
+        end: 行末文字（"\\r"でインライン更新）
+    """
+    if prefix:
+        # 並列実行時は \r を使わない（出力が混ざるため）
+        if end == "\r":
+            print(f"{prefix} {msg}", flush=True)
+        else:
+            print(f"{prefix} {msg}", end=end, flush=True)
+    else:
+        print(msg, end=end, flush=True)
+
+
 # =============================================================
 # データロード
 # =============================================================
@@ -591,6 +626,10 @@ def run_multi_pair_year(
     contexts: dict[str, PairContext],
     multi_config: MultiPairConfig,
     portfolio: PortfolioState,
+    on_progress: Callable[
+        [int, int, int], None
+    ]
+    | None = None,
 ) -> dict[str, list[Any]]:
     """1年分のマルチペアインターリーブ実行
 
@@ -599,6 +638,8 @@ def run_multi_pair_year(
         contexts: ペアコンテキスト辞書
         multi_config: テスト設定
         portfolio: 共有ポートフォリオ状態
+        on_progress: 進捗コールバック
+            (bar_num, total_bars, trade_count)
 
     Returns:
         dict: ペア別トレードリスト
@@ -817,24 +858,17 @@ def run_multi_pair_year(
                 trade_record=_trade_record,
             )
 
-        # 進捗表示（10000バーごと）
-        if bar_num % 10000 == 0 and bar_num > 0:
-            elapsed = time.time() - _t0
-            pct = bar_num / total_bars * 100
-            eta = _format_eta(elapsed, bar_num, total_bars)
-            n_trades = sum(
+        # 進捗コールバック（2000バーごと）
+        if (
+            bar_num % 2000 == 0
+            and bar_num > 0
+            and on_progress is not None
+        ):
+            _n_trades = sum(
                 len(c.simulator.state.closed_trades)
                 for c in contexts.values()
             )
-            print(
-                f"    {year}年 "
-                f"{_progress_bar(bar_num, total_bars, 25)} "
-                f"{pct:5.1f}%  "
-                f"trades={n_trades}  "
-                f"{_format_elapsed(elapsed)}  {eta}     ",
-                end="\r",
-                flush=True,
-            )
+            on_progress(bar_num, total_bars, _n_trades)
 
     # 年末: 全ペア強制決済
     for sym, ctx in contexts.items():
@@ -872,18 +906,13 @@ def run_multi_pair_year(
         portfolio.per_pair_exposure.values(),
     )
 
-    elapsed = time.time() - _t0
-    n_trades = sum(
-        len(c.simulator.state.closed_trades)
-        for c in contexts.values()
-    )
-    print(
-        f"    {year}年 "
-        f"{_progress_bar(total_bars, total_bars, 25)} "
-        f"100.0%  "
-        f"trades={n_trades}  "
-        f"{_format_elapsed(elapsed)}             ",
-    )
+    # 完了コールバック
+    if on_progress is not None:
+        _n_trades = sum(
+            len(c.simulator.state.closed_trades)
+            for c in contexts.values()
+        )
+        on_progress(total_bars, total_bars, _n_trades)
 
     # ペア別トレード返却
     pair_trades: dict[str, list[Any]] = {}
@@ -1233,6 +1262,7 @@ def run_test_case(
     ] | None = None,
     test_index: int = 0,
     total_tests: int = 0,
+    job_prefix: str = "",
 ) -> dict[str, Any]:
     """テストケースを実行（順次 or 年並列）
 
@@ -1248,6 +1278,7 @@ def run_test_case(
             事前ロード済みキャッシュ（複数テスト共有用）
         test_index: テスト番号（1始まり、表示用）
         total_tests: テスト総数（表示用）
+        job_prefix: 出力プレフィックス（並列実行時のジョブ識別用）
 
     Returns:
         dict: テスト結果
@@ -1260,6 +1291,7 @@ def run_test_case(
         data_dir = str(get_data_dir())
 
     # テストヘッダー
+    _pfx = f"[{job_prefix}] " if job_prefix else ""
     _test_label = ""
     if test_index > 0 and total_tests > 0:
         _test_label = f" [{test_index}/{total_tests}]"
@@ -1268,24 +1300,58 @@ def run_test_case(
         if max_year_workers > 1
         else "順次"
     )
-    print(f"\n{'=' * 60}")
-    print(
-        f"  {_PHASE_ICONS['test']}{_test_label} "
-        f"{test_config.name}"
-    )
-    print(
-        f"  {len(symbols)}ペア | "
-        f"{start_year}-{end_year} | "
-        f"{_mode}"
-    )
-    print(
-        f"  global={test_config.global_max_positions}, "
-        f"per_pair={test_config.per_pair_max_positions}, "
-        f"exposure={test_config.global_max_exposure_lot}, "
-        f"risk={test_config.base_risk_pct}, "
-        f"CT={test_config.consensus_threshold}"
-    )
-    print(f"{'=' * 60}")
+
+    # rich Console（ヘッダー・結果表示用）
+    try:
+        from rich.console import Console as _RichConsole
+
+        _console: _RichConsole | None = _RichConsole()
+    except ImportError:
+        _console = None
+
+    if _console is not None:
+        _console.print()
+        _console.rule(
+            f"[bold green]{_pfx}{_test_label} "
+            f"{test_config.name}[/bold green]",
+            style="green",
+        )
+        _console.print(
+            f"  {len(symbols)}ペア | "
+            f"{start_year}-{end_year} | "
+            f"{_mode}"
+        )
+        _console.print(
+            f"  global={test_config.global_max_positions}, "
+            f"per_pair="
+            f"{test_config.per_pair_max_positions}, "
+            f"exposure="
+            f"{test_config.global_max_exposure_lot}, "
+            f"risk={test_config.base_risk_pct}, "
+            f"CT={test_config.consensus_threshold}"
+        )
+    else:
+        print(f"\n{'=' * 60}")
+        print(
+            f"  {_pfx}{_test_label} "
+            f"{test_config.name}"
+        )
+        print(
+            f"  {len(symbols)}ペア | "
+            f"{start_year}-{end_year} | "
+            f"{_mode}"
+        )
+        print(
+            f"  global="
+            f"{test_config.global_max_positions}, "
+            f"per_pair="
+            f"{test_config.per_pair_max_positions}, "
+            f"exposure="
+            f"{test_config.global_max_exposure_lot}, "
+            f"risk={test_config.base_risk_pct}, "
+            f"CT={test_config.consensus_threshold}"
+        )
+        print(f"{'=' * 60}")
 
     # インジケータキャッシュを事前生成（初回のみ実行）
     warm_indicator_cache(symbols, data_dir)
@@ -1364,106 +1430,213 @@ def run_test_case(
     total_blocked_per_pair = 0
     total_blocked_exposure = 0
 
-    _test_t0 = time.time()
-    for yr_idx, year in enumerate(
-        range(start_year, end_year + 1), 1,
-    ):
-        print(
-            f"\n  --- {year}年 "
-            f"({yr_idx}/{num_years}) ---"
-        )
-        # 毎年エクイティを初期残高にリセット
-        portfolio = PortfolioState(
-            equity=INITIAL_EQUITY,
-            initial_equity=INITIAL_EQUITY,
-            peak_equity=INITIAL_EQUITY,
+    # rich Progress バー構築
+    _use_rich = False
+    _progress = None
+    try:
+        from rich.progress import (
+            BarColumn,
+            Progress,
+            SpinnerColumn,
+            TaskProgressColumn,
+            TextColumn,
+            TimeRemainingColumn,
         )
 
-        # 年データ取得（キャッシュ or 年単位ロード）
-        if year_data_cache is not None and year in year_data_cache:
-            year_data = year_data_cache[year]
-        else:
-            year_data = load_year_data(
-                symbols, data_dir, year,
-            )
-
-        # ペアコンテキスト構築
-        contexts: dict[str, PairContext] = {}
-        for sym in symbols:
-            # ペア別bot_config構築
-            extra_overrides: dict[str, Any] = {
-                "base_risk_pct": test_config.base_risk_pct,
-                "consensus_threshold": (
-                    test_config.consensus_threshold
+        if _console is not None:
+            _progress = Progress(
+                SpinnerColumn(),
+                TextColumn(
+                    "[bold blue]{task.description}"
                 ),
-            }
-            extra_overrides.update(_extra)
-            bot_config = build_bot_config(
-                sym, extra_overrides,
+                BarColumn(bar_width=40),
+                TaskProgressColumn(),
+                TimeRemainingColumn(),
+                console=_console,
+            )
+            _use_rich = True
+    except ImportError:
+        pass
+
+    def _run_years() -> None:
+        """年ループ本体（rich有無で共通）"""
+        nonlocal max_dd_across_years
+        nonlocal total_blocked_global
+        nonlocal total_blocked_per_pair
+        nonlocal total_blocked_exposure
+
+        for yr_idx, year in enumerate(
+            range(start_year, end_year + 1), 1,
+        ):
+            # rich: 年タスク追加
+            _year_task = None
+            if _use_rich and _progress is not None:
+                _year_task = _progress.add_task(
+                    f"[cyan]{year}年[/cyan]",
+                    total=100,
+                )
+
+            # 毎年エクイティを初期残高にリセット
+            portfolio = PortfolioState(
+                equity=INITIAL_EQUITY,
+                initial_equity=INITIAL_EQUITY,
+                peak_equity=INITIAL_EQUITY,
             )
 
-            sym_year_md = year_data.get(sym)
-            ctx = setup_pair_context(
-                sym, year, bot_config,
-                INITIAL_EQUITY,
-                year_market_data=sym_year_md,
+            # 年データ取得（キャッシュ or 年単位ロード）
+            if (
+                year_data_cache is not None
+                and year in year_data_cache
+            ):
+                year_data = year_data_cache[year]
+            else:
+                year_data = load_year_data(
+                    symbols, data_dir, year,
+                )
+
+            # ペアコンテキスト構築
+            contexts: dict[str, PairContext] = {}
+            for sym in symbols:
+                extra_overrides: dict[str, Any] = {
+                    "base_risk_pct": (
+                        test_config.base_risk_pct
+                    ),
+                    "consensus_threshold": (
+                        test_config.consensus_threshold
+                    ),
+                }
+                extra_overrides.update(_extra)
+                bot_config = build_bot_config(
+                    sym, extra_overrides,
+                )
+
+                sym_year_md = year_data.get(sym)
+                ctx = setup_pair_context(
+                    sym,
+                    year,
+                    bot_config,
+                    INITIAL_EQUITY,
+                    year_market_data=sym_year_md,
+                )
+                if ctx is not None:
+                    contexts[sym] = ctx
+
+            if not contexts:
+                if _year_task is not None and _progress:
+                    _progress.remove_task(_year_task)
+                continue
+
+            # 進捗コールバック
+            def _on_progress(
+                done: int,
+                total: int,
+                trades: int,
+                _yt: Any = _year_task,
+            ) -> None:
+                if _use_rich and _progress and _yt:
+                    pct = (
+                        done / total * 100
+                        if total > 0
+                        else 0
+                    )
+                    _progress.update(
+                        _yt,
+                        completed=pct,
+                        description=(
+                            f"[cyan]{year}年[/cyan]"
+                            f" ({trades}件)"
+                        ),
+                    )
+
+            # インターリーブ実行
+            pair_trades = run_multi_pair_year(
+                year,
+                contexts,
+                test_config,
+                portfolio,
+                on_progress=_on_progress,
             )
-            if ctx is not None:
-                contexts[sym] = ctx
 
-        if not contexts:
-            continue
-
-        # インターリーブ実行
-        pair_trades = run_multi_pair_year(
-            year, contexts, test_config, portfolio,
-        )
-
-        # トレード蓄積
-        for sym, trades in pair_trades.items():
-            all_pair_trades[sym].extend(trades)
-
-        # 年次サマリー
-        year_pnl = portfolio.equity - INITIAL_EQUITY
-        year_return_pct = year_pnl / INITIAL_EQUITY * 100
-        year_return_pcts.append(year_return_pct)
-        year_trades = sum(
-            len(t) for t in pair_trades.values()
-        )
-
-        # 月次PnL蓄積
-        for key, pnl in portfolio.monthly_pnl.items():
-            all_monthly_pnl[key] = (
-                all_monthly_pnl.get(key, 0.0) + pnl
+            # rich: 年完了 → タスク削除 + 結果表示
+            year_pnl = portfolio.equity - INITIAL_EQUITY
+            year_return_pct = (
+                year_pnl / INITIAL_EQUITY * 100
+            )
+            year_trades = sum(
+                len(t) for t in pair_trades.values()
             )
 
-        # DD/blocked蓄積
-        if portfolio.max_dd_pct > max_dd_across_years:
-            max_dd_across_years = portfolio.max_dd_pct
-        total_blocked_global += portfolio.blocked_global
-        total_blocked_per_pair += portfolio.blocked_per_pair
-        total_blocked_exposure += portfolio.blocked_exposure
+            if _year_task is not None and _progress:
+                _progress.update(
+                    _year_task, completed=100,
+                )
+                _progress.remove_task(_year_task)
 
-        yearly_results_seq.append(
-            {
-                "year": year,
-                "pnl": year_pnl,
-                "trades": year_trades,
-                "equity": portfolio.equity,
-                "return_pct": year_return_pct,
-            }
-        )
-        print(
-            f"  {_PHASE_ICONS['done']} {year}年: "
-            f"PnL={year_pnl:+,.0f}  "
-            f"Return={year_return_pct:+.1f}%  "
-            f"Trades={year_trades}  "
-            f"DD={portfolio.max_dd_pct:.2f}%"
-        )
+            if _console is not None:
+                _pc = (
+                    "green" if year_pnl > 0 else "red"
+                )
+                _console.print(
+                    f"  [bold]{year}年[/bold]: "
+                    f"PnL=[{_pc}]"
+                    f"{year_pnl:+,.0f}"
+                    f"[/{_pc}]  "
+                    f"Return={year_return_pct:+.1f}%"
+                    f"  Trades={year_trades}"
+                    f"  DD={portfolio.max_dd_pct:.2f}%"
+                )
+            else:
+                print(
+                    f"  {year}年: "
+                    f"PnL={year_pnl:+,.0f}  "
+                    f"Return={year_return_pct:+.1f}%"
+                    f"  Trades={year_trades}  "
+                    f"DD={portfolio.max_dd_pct:.2f}%"
+                )
 
-        # メモリ解放（年間コンテキストは次年で再構築）
-        del contexts
-        gc.collect()
+            # トレード蓄積
+            for sym, trades in pair_trades.items():
+                all_pair_trades[sym].extend(trades)
+
+            year_return_pcts.append(year_return_pct)
+
+            # 月次PnL蓄積
+            for key, pnl in portfolio.monthly_pnl.items():
+                all_monthly_pnl[key] = (
+                    all_monthly_pnl.get(key, 0.0) + pnl
+                )
+
+            # DD/blocked蓄積
+            if portfolio.max_dd_pct > max_dd_across_years:
+                max_dd_across_years = portfolio.max_dd_pct
+            total_blocked_global += portfolio.blocked_global
+            total_blocked_per_pair += (
+                portfolio.blocked_per_pair
+            )
+            total_blocked_exposure += (
+                portfolio.blocked_exposure
+            )
+
+            yearly_results_seq.append(
+                {
+                    "year": year,
+                    "pnl": year_pnl,
+                    "trades": year_trades,
+                    "equity": portfolio.equity,
+                    "return_pct": year_return_pct,
+                }
+            )
+
+            # メモリ解放
+            del contexts
+            gc.collect()
+
+    # rich Progress でラップ or 直接実行
+    if _use_rich and _progress is not None:
+        with _progress:
+            _run_years()
+    else:
+        _run_years()
 
     # 結果集約（年独立モード）
     total_profit = sum(yr["pnl"] for yr in yearly_results_seq)
