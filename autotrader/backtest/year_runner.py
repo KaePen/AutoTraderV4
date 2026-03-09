@@ -304,37 +304,38 @@ def run_unified_year(
         signal = None
         if consolidated.direction != SignalType.HOLD:
             if consolidated.confidence >= 0.5:
-                # SL/TPを価格に変換
-                sl_price = None
-                tp_price = None
-                if consolidated.sl_pips > 0:
-                    sl_pips = consolidated.sl_pips
-                    tp_pips = consolidated.tp_pips
-                    _base_price = (
-                        consolidated.entry_price
-                        if consolidated.entry_price is not None
-                        else candle.close
-                    )
-                    _pu = sim_config.pip_unit
-                    if consolidated.direction == SignalType.BUY:
-                        sl_price = _base_price - sl_pips * _pu
-                        tp_price = _base_price + tp_pips * _pu
-                    else:
-                        sl_price = _base_price + sl_pips * _pu
-                        tp_price = _base_price - tp_pips * _pu
+                # SL/TPをpips値で格納（ライブと統一）
+                _sl_pips = (
+                    consolidated.sl_pips
+                    if consolidated.sl_pips > 0
+                    else None
+                )
+                _tp_pips = (
+                    consolidated.tp_pips
+                    if consolidated.tp_pips > 0
+                    else None
+                )
+
+                # ATR実測値をスナップショットに格納（PM用）
+                _row = period_df.iloc[idx]
+                _atr_val = float(_row.get("atr_14", 0) or 0)
+                _indicators: dict[str, Any] = {}
+                if _atr_val > 0:
+                    _indicators["atr_14"] = _atr_val
 
                 signal = Signal(
                     symbol=runner.config.symbol,
                     timeframe=tf,
                     signal_type=consolidated.direction,
                     confidence=min(consolidated.confidence, 1.0),
-                    stop_loss=sl_price,
-                    take_profit=tp_price,
+                    stop_loss=_sl_pips,
+                    take_profit=_tp_pips,
                     reasoning=consolidated.rationale,
                     regime=consolidated.regime,
                     mode=consolidated.mode,
                     consensus_score=consolidated.consensus_score,
                     lot=consolidated.lot,
+                    indicators_snapshot=_indicators,
                 )
 
         prev_position_ids = {

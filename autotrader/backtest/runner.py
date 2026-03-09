@@ -1210,6 +1210,7 @@ class BacktestRunner:
             quote_ccy_rate=_quote_ccy_rate,
             commission_per_lot=self.config.commission_per_lot,
             use_session_spread=self.config.use_session_spread,
+            sl_tp_in_pips=True,
         )
 
         if len(years) > 1 and not sequential:
