@@ -853,11 +853,10 @@ def run_multi_pair_year(
                 trade_record=_trade_record,
             )
 
-        # 進捗コールバック（2000バーごと）
+        # 進捗コールバック（初回+2000バーごと）
         if (
-            bar_num % 2000 == 0
-            and bar_num > 0
-            and on_progress is not None
+            on_progress is not None
+            and (bar_num == 0 or bar_num % 2000 == 0)
         ):
             _n_trades = sum(
                 len(c.simulator.state.closed_trades)
@@ -973,10 +972,7 @@ def _run_year_worker(args: tuple) -> dict[str, Any] | None:
     # MultiPairConfig 復元
     mc = MultiPairConfig(**multi_config_dict)
 
-    # 進捗Queue: データロード開始を通知
     _q = _worker_progress_queue
-    if _q is not None:
-        _q.put(("load", year, 0, 0, 0))
 
     # 年単位データロード（ワーカーでは出力抑制）
     year_data = load_year_data(
@@ -1463,6 +1459,13 @@ def run_test_case(
                 flush=True,
             )
 
+        # ジョブ識別ラベル
+        _jlabel = (
+            f"[dim]{job_prefix}[/dim] "
+            if job_prefix
+            else ""
+        )
+
         # Queue監視スレッド
         _monitor_stop = threading.Event()
 
@@ -1475,49 +1478,39 @@ def run_test_case(
                     continue
                 if msg is None:
                     break
-                kind = msg[0]
+                if msg[0] != "bar":
+                    continue
                 yr = msg[1]
-                if kind == "load":
-                    # データロード開始
-                    if (
-                        _use_rich_p
-                        and _prog
-                        and yr not in _yr_tasks
-                    ):
-                        _yr_tasks[yr] = _prog.add_task(
-                            f"[yellow]{yr}年 "
-                            f"読込中[/yellow]",
-                            total=100,
-                        )
-                elif kind == "bar":
-                    done, total, trades = (
-                        msg[2],
-                        msg[3],
-                        msg[4],
-                    )
-                    if _use_rich_p and _prog:
-                        if yr not in _yr_tasks:
-                            _yr_tasks[yr] = (
-                                _prog.add_task(
-                                    f"[cyan]{yr}年"
-                                    f"[/cyan]",
-                                    total=100,
-                                )
-                            )
-                        pct = (
-                            done / total * 100
-                            if total > 0
-                            else 0
-                        )
-                        _prog.update(
-                            _yr_tasks[yr],
-                            completed=pct,
-                            description=(
+                done, total, trades = (
+                    msg[2],
+                    msg[3],
+                    msg[4],
+                )
+                if _use_rich_p and _prog:
+                    if yr not in _yr_tasks:
+                        _yr_tasks[yr] = (
+                            _prog.add_task(
+                                f"{_jlabel}"
                                 f"[cyan]{yr}年"
-                                f"[/cyan]"
-                                f" ({trades}件)"
-                            ),
+                                f"[/cyan]",
+                                total=100,
+                            )
                         )
+                    pct = (
+                        done / total * 100
+                        if total > 0
+                        else 0
+                    )
+                    _prog.update(
+                        _yr_tasks[yr],
+                        completed=pct,
+                        description=(
+                            f"{_jlabel}"
+                            f"[cyan]{yr}年"
+                            f"[/cyan]"
+                            f" ({trades}件)"
+                        ),
+                    )
 
         # 監視スレッド開始
         _mon_t = threading.Thread(
@@ -1541,8 +1534,14 @@ def run_test_case(
                     if yr_result["year_pnl"] > 0
                     else "red"
                 )
+                _jpfx = (
+                    f"[dim]{job_prefix}[/dim] "
+                    if job_prefix
+                    else ""
+                )
                 _console.print(  # type: ignore[union-attr]
-                    f"  [bold]{yr}年[/bold]: "
+                    f"  {_jpfx}"
+                    f"[bold]{yr}年[/bold]: "
                     f"PnL=[{_pc}]"
                     f"{yr_result['year_pnl']:+,.0f}"
                     f"[/{_pc}]"
