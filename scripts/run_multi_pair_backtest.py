@@ -490,6 +490,7 @@ def load_year_data(
             f"    {_progress_bar(i, n_syms, 20)} "
             f"{i}/{n_syms} {sym}",
             end="\r",
+            flush=True,
         )
 
     gc.collect()
@@ -831,6 +832,7 @@ def run_multi_pair_year(
                 f"trades={n_trades}  "
                 f"{_format_elapsed(elapsed)}  {eta}     ",
                 end="\r",
+                flush=True,
             )
 
     # 年末: 全ペア強制決済
