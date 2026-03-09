@@ -995,22 +995,11 @@ def _run_year_worker(args: tuple) -> dict[str, Any] | None:
     if not contexts:
         return None
 
-    # ワーカープロセス用の進捗表示コールバック
-    def _worker_progress(
-        done: int, total: int, trades: int,
-    ) -> None:
-        if total > 0:
-            pct = done / total * 100
-            print(
-                f"    {year}年: {pct:5.1f}%  "
-                f"trades={trades}",
-                flush=True,
-            )
-
     # インターリーブ実行
+    # 年並列ではワーカーが多数同時にstdoutに書き込むため
+    # 進捗コールバックは使わず、年完了時のみメインプロセスで表示
     pair_trades = run_multi_pair_year(
         year, contexts, mc, portfolio,
-        on_progress=_worker_progress,
     )
 
     # 結果をシリアライズ可能なdictに変換
