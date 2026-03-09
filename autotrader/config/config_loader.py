@@ -17,13 +17,12 @@ from autotrader.decision.unified.position_manager import (
 logger = logging.getLogger(__name__)
 
 # プロジェクトルートの config/ ディレクトリ
-_DEFAULT_CONFIG_DIR = (
-    Path(__file__).resolve().parent.parent.parent / "config"
-)
+_DEFAULT_CONFIG_DIR = Path(__file__).resolve().parent.parent.parent / "config"
 
 
 def _filter_fields(
-    data: dict, cls: type,
+    data: dict,
+    cls: type,
 ) -> dict:
     """dataclassの有効フィールドのみ抽出
 
@@ -42,13 +41,15 @@ def _filter_fields(
         else:
             logger.warning(
                 "不明な設定キー無視: %s (対象: %s)",
-                k, cls.__name__,
+                k,
+                cls.__name__,
             )
     return filtered
 
 
 def _convert_tuple_fields(
-    data: dict, cls: type,
+    data: dict,
+    cls: type,
 ) -> dict:
     """list→tuple変換（tuple型フィールド対応）
 
@@ -80,7 +81,8 @@ class ConfigLoader:
     """
 
     def __init__(
-        self, config_dir: Path | None = None,
+        self,
+        config_dir: Path | None = None,
     ) -> None:
         """初期化
 
@@ -98,14 +100,17 @@ class ConfigLoader:
         path = self._config_dir / "symbol_presets.yaml"
         if not path.exists():
             logger.warning(
-                "symbol_presets.yaml なし: %s", path,
+                "symbol_presets.yaml なし: %s",
+                path,
             )
             return {}
         with open(path, encoding="utf-8") as f:
             return yaml.safe_load(f) or {}
 
     def load_preset_config(
-        self, symbol: str = "USDJPY",
+        self,
+        symbol: str = "USDJPY",
+        multi_mode: bool = False,
     ) -> tuple[UnifiedBotConfig, PositionManagerConfig]:
         """symbol_presets.yaml から統合設定を構築
 
@@ -114,6 +119,9 @@ class ConfigLoader:
 
         Args:
             symbol: 通貨ペアシンボル
+            multi_mode: マルチペア/ライブモード。
+                Trueの場合 multi_consensus_threshold を
+                consensus_threshold として適用する。
 
         Returns:
             tuple: (UnifiedBotConfig, PositionManagerConfig)
@@ -138,10 +146,31 @@ class ConfigLoader:
         # --- マージ: トップレベル ← 通貨ペア別 ---
         signal_merged = {**signal_defaults, **sym_signal}
         risk_mgmt_merged = {
-            **risk_mgmt_defaults, **sym_risk_mgmt,
+            **risk_mgmt_defaults,
+            **sym_risk_mgmt,
         }
         filter_merged = {**filter_defaults, **sym_filter}
         pm_merged = {**pm_defaults, **sym_pm}
+
+        # multi_mode: multi_consensus_threshold → consensus_threshold
+        if multi_mode:
+            mct = signal_merged.pop(
+                "multi_consensus_threshold",
+                None,
+            )
+            if mct is not None:
+                signal_merged["consensus_threshold"] = mct
+                logger.info(
+                    "%s: multi_mode=True, consensus_threshold=%.1f",
+                    symbol,
+                    mct,
+                )
+        else:
+            # 単独BT: multi_consensus_threshold は不要
+            signal_merged.pop(
+                "multi_consensus_threshold",
+                None,
+            )
 
         # --- プリセット値（SymbolPreset）---
         preset_bot_defaults = {
@@ -150,9 +179,7 @@ class ConfigLoader:
             "bonus_score_threshold": preset.bonus_score_threshold,
             "base_risk_pct": preset.base_risk_pct,
             "max_lot_per_trade": preset.max_lot_per_trade,
-            "max_total_exposure_lot": (
-                preset.max_total_exposure_lot
-            ),
+            "max_total_exposure_lot": (preset.max_total_exposure_lot),
             "equity_floor_pct": preset.equity_floor_pct,
         }
         preset_pm_defaults = {
@@ -185,7 +212,8 @@ class ConfigLoader:
         )
 
     def load_live_config(
-        self, filename: str = "live_trading.yaml",
+        self,
+        filename: str = "live_trading.yaml",
     ) -> tuple[UnifiedBotConfig, PositionManagerConfig]:
         """ライブ設定をYAMLから読み込み
 
@@ -203,8 +231,7 @@ class ConfigLoader:
         if not path.exists():
             if presets_path.exists():
                 logger.info(
-                    "live_trading.yaml なし、"
-                    "symbol_presets.yaml のみ使用: %s",
+                    "live_trading.yaml なし、symbol_presets.yaml のみ使用: %s",
                     path,
                 )
                 return self.load_preset_config()
@@ -216,6 +243,7 @@ class ConfigLoader:
 
         # live_trading.yaml が存在する場合は廃止警告
         import warnings
+
         warnings.warn(
             "live_trading.yaml は廃止予定です。"
             "symbol_presets.yaml に設定を移行してください。",
@@ -248,7 +276,8 @@ class ConfigLoader:
             _filter_fields(live_bot_data, UnifiedBotConfig),
         )
         bot_kwargs = _convert_tuple_fields(
-            bot_dict, UnifiedBotConfig,
+            bot_dict,
+            UnifiedBotConfig,
         )
 
         pm_dict = {
@@ -259,7 +288,8 @@ class ConfigLoader:
             _filter_fields(live_pm_data, PositionManagerConfig),
         )
         pm_kwargs = _convert_tuple_fields(
-            pm_dict, PositionManagerConfig,
+            pm_dict,
+            PositionManagerConfig,
         )
 
         return (
@@ -268,7 +298,8 @@ class ConfigLoader:
         )
 
     def load_demo_config(
-        self, filename: str = "demo_trading.yaml",
+        self,
+        filename: str = "demo_trading.yaml",
     ) -> tuple[UnifiedBotConfig, PositionManagerConfig]:
         """デモトレード設定をYAMLから読み込み
 
@@ -333,7 +364,9 @@ class ConfigLoader:
             filename: 設定ファイル名
         """
         self._save_section(
-            "pm_config", pm_config, filename,
+            "pm_config",
+            pm_config,
+            filename,
         )
 
     def save_bot_config(
@@ -350,7 +383,9 @@ class ConfigLoader:
             filename: 設定ファイル名
         """
         self._save_section(
-            "bot_config", bot_config, filename,
+            "bot_config",
+            bot_config,
+            filename,
         )
 
     def _save_section(
@@ -382,14 +417,12 @@ class ConfigLoader:
         for k, v in data.items():
             if isinstance(v, tuple):
                 serializable[k] = [
-                    item.value if hasattr(item, "value")
-                    else item
+                    item.value if hasattr(item, "value") else item
                     for item in v
                 ]
             elif isinstance(v, list):
                 serializable[k] = [
-                    item.value if hasattr(item, "value")
-                    else item
+                    item.value if hasattr(item, "value") else item
                     for item in v
                 ]
             elif hasattr(v, "value"):
@@ -408,5 +441,7 @@ class ConfigLoader:
                 sort_keys=False,
             )
         logger.info(
-            "設定保存: %s → %s", section, path,
+            "設定保存: %s → %s",
+            section,
+            path,
         )

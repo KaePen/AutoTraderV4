@@ -61,9 +61,11 @@ def _get_mt5_config():
     """
     from autotrader.adapters.mt5.config import MT5Config
 
-    hide_window = os.environ.get(
-        "MT5_SHOW_WINDOW", ""
-    ).lower() not in ("1", "true", "yes")
+    hide_window = os.environ.get("MT5_SHOW_WINDOW", "").lower() not in (
+        "1",
+        "true",
+        "yes",
+    )
 
     return MT5Config(
         login=int(os.environ.get("MT5_LOGIN", "0")),
@@ -77,7 +79,8 @@ def _get_mt5_config():
 def build_engine_config(symbol: str) -> object:
     """シンボル用のLiveTradingConfigを構築
 
-    ルーターからも呼べるモジュールレベル関数。
+    ペア別プリセットから設定を構築する。
+    ライブは常にmulti_mode=True（マルチペア運用前提）。
 
     Args:
         symbol: 通貨ペアシンボル
@@ -91,8 +94,7 @@ def build_engine_config(symbol: str) -> object:
     )
 
     svc = get_settings_service()
-    bot_config = svc.bot_config
-    pm_config = svc.pm_config
+    bot_config, pm_config = svc.get_config_for_symbol(symbol)
     mt5_config = _get_mt5_config()
 
     return LiveTradingConfig(
@@ -100,16 +102,16 @@ def build_engine_config(symbol: str) -> object:
         bot_config=bot_config,
         mt5_config=mt5_config,
         pm_config=pm_config,
-        enable_auto_trade=os.environ.get("AUTOTRADER_AUTO_TRADE", "").lower()
+        enable_auto_trade=os.environ.get(
+            "AUTOTRADER_AUTO_TRADE",
+            "",
+        ).lower()
         in ("1", "true", "yes"),
     )
 
 
 def _create_engine_manager():
     """EngineManagerを環境変数+YAML設定から生成
-
-    symbol_presets.yaml の multi_pair セクションから
-    グローバルポジション/エクスポージャー制限を読み込む。
 
     Returns:
         EngineManager: エンジンマネージャー
@@ -119,44 +121,7 @@ def _create_engine_manager():
     )
 
     mt5_config = _get_mt5_config()
-
-    # YAMLからグローバル制限を取得
-    _global_max_pos = int(
-        os.environ.get("AUTOTRADER_GLOBAL_MAX_POS", "0")
-    )
-    _global_max_lot = float(
-        os.environ.get("AUTOTRADER_GLOBAL_MAX_LOT", "0.0")
-    )
-    if _global_max_pos == 0 or _global_max_lot == 0.0:
-        # 環境変数未設定時はYAMLから読み込み
-        try:
-            import yaml
-
-            from autotrader.config.trading_params import (
-                _DEFAULT_PRESET_PATH,
-            )
-            if _DEFAULT_PRESET_PATH.exists():
-                with open(
-                    _DEFAULT_PRESET_PATH, encoding="utf-8",
-                ) as f:
-                    _raw = yaml.safe_load(f) or {}
-                _mp = _raw.get("multi_pair", {})
-                if _global_max_pos == 0:
-                    _global_max_pos = _mp.get(
-                        "global_max_positions", 6,
-                    )
-                if _global_max_lot == 0.0:
-                    _global_max_lot = _mp.get(
-                        "global_max_exposure_lot", 10.0,
-                    )
-        except Exception:
-            pass
-
-    return EngineManager(
-        mt5_config,
-        global_max_positions=_global_max_pos,
-        global_max_exposure_lot=_global_max_lot,
-    )
+    return EngineManager(mt5_config)
 
 
 def _create_live_engine():
@@ -222,14 +187,20 @@ async def lifespan(app: FastAPI):
 
             # 全通貨ペアのエンジンを起動時に追加
             all_symbols = [
-                "EURUSD", "GBPUSD", "AUDUSD",
-                "NZDUSD", "USDCHF", "USDCAD",
-                "USDJPY", "EURJPY", "GBPJPY",
-                "AUDJPY", "CADJPY", "CHFJPY",
+                "EURUSD",
+                "GBPUSD",
+                "AUDUSD",
+                "NZDUSD",
+                "USDCHF",
+                "USDCAD",
+                "USDJPY",
+                "EURJPY",
+                "GBPJPY",
+                "AUDJPY",
+                "CADJPY",
+                "CHFJPY",
             ]
-            default_symbol = os.environ.get(
-                "AUTOTRADER_SYMBOL", "USDJPY"
-            )
+            default_symbol = os.environ.get("AUTOTRADER_SYMBOL", "USDJPY")
             for sym in all_symbols:
                 try:
                     cfg = build_engine_config(sym)
@@ -238,7 +209,9 @@ async def lifespan(app: FastAPI):
                         engine = eng
                 except Exception as e:
                     logger.warning(
-                        "エンジン追加失敗 %s: %s", sym, e,
+                        "エンジン追加失敗 %s: %s",
+                        sym,
+                        e,
                     )
 
             # 後方互換: app.state.live_engine も設定
@@ -271,6 +244,7 @@ async def lifespan(app: FastAPI):
     from autotrader.web.websocket.event_bridge import (
         setup_event_bridge,
     )
+
     setup_event_bridge()
     logger.info("EventBus → WebSocketブリッジ登録完了")
 

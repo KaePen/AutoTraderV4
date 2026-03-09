@@ -12,17 +12,13 @@ JPY/USDペアを時系列インターリーブで同時実行し、共有資金�
 from __future__ import annotations
 
 import argparse
+import csv
 import dataclasses
-import gc
 import heapq
-import io
 import logging
 import math
-import multiprocessing
 import sys
-import threading
 import time
-from collections.abc import Callable
 from concurrent.futures import (
     ProcessPoolExecutor,
     ThreadPoolExecutor,
@@ -32,7 +28,6 @@ from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import Any
-
 
 import numpy as np
 import pandas as pd
@@ -77,8 +72,17 @@ from autotrader.decision.unified.adaptive import (  # noqa: E402
 def load_signal_overrides(
     symbol: str,
     preset_path: Path | None = None,
+    multi_mode: bool = False,
 ) -> dict[str, Any]:
-    """symbol_presets.yaml からsignal設定を読み込み"""
+    """symbol_presets.yaml からsignal設定を読み込み
+
+    Args:
+        symbol: 通貨ペアシンボル
+        preset_path: プリセットファイルパス
+        multi_mode: マルチBT/ライブモード。Trueの場合
+            multi_consensus_threshold を consensus_threshold
+            として返す。
+    """
     path = preset_path or (_PROJECT_ROOT / "config" / "symbol_presets.yaml")
     if not path.exists():
         return {}
@@ -91,16 +95,36 @@ def load_signal_overrides(
         sym_signal = sym_data.get("signal", {})
         if sym_signal:
             defaults.update(sym_signal)
+    # multi_mode: multi_consensus_threshold → consensus_threshold
+    if multi_mode:
+        mct = defaults.pop(
+            "multi_consensus_threshold",
+            None,
+        )
+        if mct is not None:
+            defaults["consensus_threshold"] = mct
+    else:
+        defaults.pop("multi_consensus_threshold", None)
     return defaults
 
 
 def build_bot_config(
     symbol: str,
     extra_overrides: dict[str, Any] | None = None,
+    multi_mode: bool = False,
 ) -> UnifiedBotConfig:
-    """プリセット + signal設定からUnifiedBotConfigを構築"""
+    """プリセット + signal設定からUnifiedBotConfigを構築
+
+    Args:
+        symbol: 通貨ペアシンボル
+        extra_overrides: 追加上書き設定
+        multi_mode: マルチBT/ライブモード
+    """
     preset = get_preset(symbol)
-    signal = load_signal_overrides(symbol)
+    signal = load_signal_overrides(
+        symbol,
+        multi_mode=multi_mode,
+    )
     valid_fields = {f.name for f in dataclasses.fields(UnifiedBotConfig)}
     overrides: dict[str, Any] = {}
     _pip_unit = get_pip_unit(symbol)
@@ -125,14 +149,23 @@ def build_bot_config(
         overrides.update(extra_overrides)
     return UnifiedBotConfig(**overrides)
 
+
 # --- 定数 ---
 JPY_SYMBOLS = [
-    "USDJPY", "EURJPY", "GBPJPY",
-    "AUDJPY", "CADJPY", "CHFJPY",
+    "USDJPY",
+    "EURJPY",
+    "GBPJPY",
+    "AUDJPY",
+    "CADJPY",
+    "CHFJPY",
 ]
 USD_SYMBOLS = [
-    "EURUSD", "GBPUSD", "AUDUSD",
-    "NZDUSD", "USDCAD", "USDCHF",
+    "EURUSD",
+    "GBPUSD",
+    "AUDUSD",
+    "NZDUSD",
+    "USDCAD",
+    "USDCHF",
 ]
 SYMBOLS = JPY_SYMBOLS + USD_SYMBOLS
 START_YEAR = 2020
@@ -147,23 +180,23 @@ logger = logging.getLogger(__name__)
 # =============================================================
 @dataclass
 class MultiPairConfig:
-    """テストケースのパラメータ
+    """テストケースのパラメータ（ポートフォリオ制約のみ）
+
+    個別ペアのbase_risk_pct/consensus_thresholdは
+    symbol_presets.yaml の個別プリセットから読み込む。
+    multi_consensus_threshold はsignal設定から自動適用。
 
     Attributes:
         name: テスト名
         global_max_positions: 全ペア合計の最大ポジション数
         per_pair_max_positions: ペア当たりの最大ポジション数
         global_max_exposure_lot: 全ペア合計の最大ロット
-        base_risk_pct: リスク率（ポートフォリオ全体）
-        consensus_threshold: コンセンサス閾値
     """
 
     name: str = "M0"
     global_max_positions: int = 6
     per_pair_max_positions: int = 1
     global_max_exposure_lot: float = 10.0
-    base_risk_pct: float = 0.02
-    consensus_threshold: float = 9.0
 
 
 @dataclass
@@ -255,11 +288,7 @@ class PortfolioState:
         if self.equity > self.peak_equity:
             self.peak_equity = self.equity
         if self.peak_equity > 0:
-            dd = (
-                (self.peak_equity - self.equity)
-                / self.peak_equity
-                * 100
-            )
+            dd = (self.peak_equity - self.equity) / self.peak_equity * 100
             if dd > self.max_dd_pct:
                 self.max_dd_pct = dd
 
@@ -273,122 +302,35 @@ class PairContext:
         bot: トレードボット
         simulator: シミュレーター
         arrays: CandleArrays（基準TF）
+        period_df: 基準TFデータフレーム
         base_tf: 基準タイムフレーム
+        runner: BacktestRunner（データ保持用）
     """
 
     symbol: str
     bot: UnifiedTradeBot
     simulator: TradeSimulator
     arrays: CandleArrays
+    period_df: pd.DataFrame
     base_tf: Timeframe
-
-
-# =============================================================
-# 進捗表示ユーティリティ
-# =============================================================
-def _progress_bar(
-    current: int,
-    total: int,
-    width: int = 30,
-) -> str:
-    """ASCII プログレスバーを生成
-
-    Args:
-        current: 現在値
-        total: 合計値
-        width: バーの幅（文字数）
-
-    Returns:
-        str: [████████░░░░░░░░] 形式のプログレスバー
-    """
-    if total <= 0:
-        return f"[{'░' * width}]"
-    ratio = min(current / total, 1.0)
-    filled = int(width * ratio)
-    return f"[{'█' * filled}{'░' * (width - filled)}]"
-
-
-def _format_eta(elapsed: float, current: int, total: int) -> str:
-    """残り時間を推定してフォーマット
-
-    Args:
-        elapsed: 経過秒数
-        current: 処理済み数
-        total: 合計数
-
-    Returns:
-        str: "ETA 1m23s" 形式の文字列
-    """
-    if current <= 0 or elapsed <= 0:
-        return "ETA --:--"
-    rate = current / elapsed
-    remaining = (total - current) / rate
-    m, s = divmod(int(remaining), 60)
-    if m > 0:
-        return f"ETA {m}m{s:02d}s"
-    return f"ETA {s}s"
-
-
-def _format_elapsed(seconds: float) -> str:
-    """経過時間をフォーマット
-
-    Args:
-        seconds: 秒数
-
-    Returns:
-        str: "1m23s" or "45s" 形式
-    """
-    m, s = divmod(int(seconds), 60)
-    if m > 0:
-        return f"{m}m{s:02d}s"
-    return f"{s}s"
-
-
-_PHASE_ICONS = {
-    "cache": "[CACHE]",
-    "load": "[LOAD]",
-    "test": "[TEST]",
-    "done": "[DONE]",
-}
-
-
-def _log(
-    msg: str,
-    prefix: str = "",
-    end: str = "\n",
-) -> None:
-    """プレフィックス付き出力
-
-    Args:
-        msg: メッセージ
-        prefix: ジョブ識別プレフィックス
-        end: 行末文字（"\\r"でインライン更新）
-    """
-    if prefix:
-        # 並列実行時は \r を使わない（出力が混ざるため）
-        if end == "\r":
-            print(f"{prefix} {msg}", flush=True)
-        else:
-            print(f"{prefix} {msg}", end=end, flush=True)
-    else:
-        print(msg, end=end, flush=True)
+    runner: BacktestRunner
 
 
 # =============================================================
 # データロード
 # =============================================================
-def _create_runner(
+def load_pair_data(
     symbol: str,
     data_dir: str,
-) -> BacktestRunner:
-    """ペア用BacktestRunnerを生成（データロードなし）
+) -> tuple[BacktestRunner, dict[str, pd.DataFrame]]:
+    """ペアデータをロードしてBacktestRunnerとmarket_dataを返す
 
     Args:
         symbol: 通貨ペア名
         data_dir: データディレクトリ
 
     Returns:
-        BacktestRunner: 未ロード状態のRunner
+        tuple: (BacktestRunner, market_data辞書)
     """
     preset = get_preset(symbol)
     config = BacktestConfig(
@@ -400,139 +342,62 @@ def _create_runner(
         bonus_max_positions=preset.bonus_max_positions,
         bonus_score_threshold=preset.bonus_score_threshold,
     )
-    return BacktestRunner(
+    runner = BacktestRunner(
         data_dir=data_dir,
         config=config,
         verbose=False,
         log_to_file=False,
     )
+    # 全期間データをロード
+    # load_data()はDaily→D1フォールバック等を処理する
+    market_data = runner._load_all_timeframes(include_m1=True)
+    # _load_all_timeframes でD1がロードされない場合
+    # load_data() の Daily→D1 フォールバックを利用
+    if "D1" not in market_data:
+        runner.load_data()
+        if runner._d1_df is not None:
+            market_data["D1"] = runner._d1_df
+    return runner, market_data
 
 
-def warm_indicator_cache(
+def load_all_pair_data(
     symbols: list[str],
     data_dir: str,
-) -> None:
-    """全ペア×全TFのインジケータキャッシュを事前生成
+    max_workers: int = 6,
+) -> dict[str, tuple[BacktestRunner, dict[str, pd.DataFrame]]]:
+    """全ペアのデータをスレッド並列でロード
 
-    初回のみフルデータをロード→インジケータ計算→年別parquet保存。
-    2回目以降はキャッシュが存在するためスキップされる。
-    1ペアずつ順次処理し、フルデータは即時解放する。
+    I/Oバウンド（CSV/Parquet読み込み）のためスレッド並列が最適。
+    各呼び出しが独立したオブジェクトを返すためスレッドセーフ。
 
     Args:
         symbols: シンボルリスト
         data_dir: データディレクトリ
-    """
-    n_syms = len(symbols)
-    _t0 = time.time()
-    print(
-        f"\n{_PHASE_ICONS['cache']} "
-        f"インジケータキャッシュ確認 ({n_syms}ペア)",
-        flush=True,
-    )
-
-    for i, sym in enumerate(symbols, 1):
-        _st = time.time()
-        runner = _create_runner(sym, data_dir)
-        market_data = runner._load_all_timeframes(
-            include_m1=True,
-        )
-        # フルデータを即時解放
-        del market_data
-        if hasattr(runner, "_tf_data"):
-            runner._tf_data.clear()
-        del runner
-        gc.collect()
-        _elapsed = time.time() - _st
-        _total_elapsed = time.time() - _t0
-        eta = _format_eta(_total_elapsed, i, n_syms)
-        print(
-            f"  ({i}/{n_syms}) {sym:8s} "
-            f"{_format_elapsed(_elapsed):>6s}  {eta}",
-            flush=True,
-        )
-
-    total = time.time() - _t0
-    print(
-        f"  {_PHASE_ICONS['done']} "
-        f"キャッシュ準備完了 ({_format_elapsed(total)})",
-        flush=True,
-    )
-
-
-def load_year_data(
-    symbols: list[str],
-    data_dir: str,
-    year: int,
-    quiet: bool = False,
-) -> dict[str, dict[str, pd.DataFrame]]:
-    """1年分の全ペアデータをキャッシュから高速ロード
-
-    事前に warm_indicator_cache() で年別parquetが生成済みの場合、
-    対象年のキャッシュのみ読み込む（~100MB/ペア vs 600MB）。
-    キャッシュ未生成の場合はフォールバックでフルロード→年フィルタ。
-
-    Args:
-        symbols: シンボルリスト
-        data_dir: データディレクトリ
-        year: 対象年
-        quiet: 進捗出力を抑制（年並列ワーカー用）
+        max_workers: 並列ワーカー数
 
     Returns:
-        dict[str, dict[str, pd.DataFrame]]:
-            シンボル→TF名→年フィルタ済みDataFrame
+        dict[str, tuple[BacktestRunner, dict[str, pd.DataFrame]]]:
+            シンボル→(BacktestRunner, market_data)
     """
-    n_syms = len(symbols)
-    result: dict[str, dict[str, pd.DataFrame]] = {}
-
-    def _load_one_pair(
-        sym: str,
-    ) -> tuple[str, dict[str, pd.DataFrame]]:
-        """1ペアの年データをキャッシュからロード"""
-        runner = _create_runner(sym, data_dir)
-        md = runner._load_all_timeframes(
-            include_m1=True,
-            needed_years=[year],
-        )
-        if hasattr(runner, "_tf_data"):
-            runner._tf_data.clear()
-        return sym, md
-
-    # キャッシュ読込は軽量(~100MB/ペア)なので並列で高速化
-    workers = min(6, n_syms)
-    if not quiet:
-        print(
-            f"  {_PHASE_ICONS['load']} "
-            f"{year}年データロード "
-            f"({n_syms}ペア, {workers}並列)",
-            flush=True,
-        )
+    runners: dict[str, tuple[BacktestRunner, dict[str, pd.DataFrame]]] = {}
+    workers = min(max_workers, len(symbols))
+    _t0 = time.time()
+    print(f"\nデータロード中... ({len(symbols)}ペア, workers={workers})")
 
     with ThreadPoolExecutor(max_workers=workers) as executor:
         futures = {
-            executor.submit(_load_one_pair, sym): sym
+            executor.submit(load_pair_data, sym, data_dir): sym
             for sym in symbols
         }
-        done = 0
         for future in as_completed(futures):
-            sym, md = future.result()
-            result[sym] = md
-            done += 1
-            if not quiet:
-                print(
-                    f"    {_progress_bar(done, n_syms, 20)}"
-                    f" {done}/{n_syms} {sym}",
-                    end="\r",
-                    flush=True,
-                )
+            sym = futures[future]
+            _elapsed = time.time() - _t0
+            runners[sym] = future.result()
+            print(f"  {sym}: ロード完了 ({_elapsed:.1f}s)")
 
-    gc.collect()
-    if not quiet:
-        print(
-            f"    {_progress_bar(n_syms, n_syms, 20)} "
-            f"{n_syms}/{n_syms} 完了          ",
-            flush=True,
-        )
-    return result
+    total = time.time() - _t0
+    print(f"  全ペアロード完了: {total:.1f}s")
+    return runners
 
 
 # =============================================================
@@ -540,45 +405,63 @@ def load_year_data(
 # =============================================================
 def setup_pair_context(
     symbol: str,
+    runner: BacktestRunner,
     year: int,
     bot_config: UnifiedBotConfig,
     initial_balance: float,
-    year_market_data: dict[str, pd.DataFrame] | None = None,
+    full_market_data: dict[str, pd.DataFrame] | None = None,
 ) -> PairContext | None:
     """ペアごとのBot/Simulator/Arraysを初期化
 
     Args:
         symbol: 通貨ペア名
+        runner: データロード済みランナー
         year: 対象年
         bot_config: ボット設定
         initial_balance: 初期残高
-        year_market_data: 年フィルタ済みmarket_data
+        full_market_data: 全期間market_data（年フィルタ前）
 
     Returns:
         PairContext | None: コンテキスト（データなしならNone）
     """
-    if not year_market_data:
+    if full_market_data is None:
         return None
 
     # 基準TF選択（M1 > M5 > M15 > H1）
     base_tf_name = None
     for tf_name in ["M1", "M5", "M15", "H1"]:
-        if tf_name in year_market_data:
+        if tf_name in full_market_data:
             base_tf_name = tf_name
             break
     if base_tf_name is None:
         return None
 
     tf = Timeframe(base_tf_name)
-    base_df = year_market_data[base_tf_name]
+    df = full_market_data[base_tf_name]
 
-    if base_df.empty:
+    # 年フィルタ
+    start_date = datetime(year, 1, 1)
+    end_date = datetime(year + 1, 1, 1)
+    period_df = df[
+        (df["time"] >= start_date) & (df["time"] < end_date)
+    ].reset_index(drop=True)
+
+    if period_df.empty:
         return None
 
-    # Bot初期化（年フィルタ済みデータをそのまま使用）
+    # market_data: 年フィルタ済みデータ
+    market_data: dict[str, pd.DataFrame] = {}
+    for tf_key, tf_df in full_market_data.items():
+        year_df = tf_df[
+            (tf_df["time"] >= start_date) & (tf_df["time"] < end_date)
+        ].reset_index(drop=True)
+        if not year_df.empty:
+            market_data[tf_key] = year_df
+
+    # Bot初期化
     bot = UnifiedTradeBot(bot_config)
     bot.state = bot.state.with_initial_equity(initial_balance)
-    bot.set_market_data(year_market_data)
+    bot.set_market_data(market_data)
 
     # SimulatorConfig
     preset = get_preset(symbol)
@@ -602,14 +485,16 @@ def setup_pair_context(
     )
     simulator = TradeSimulator(config=sim_config)
 
-    arrays = CandleArrays.from_dataframe(base_df)
+    arrays = CandleArrays.from_dataframe(period_df)
 
     return PairContext(
         symbol=symbol,
         bot=bot,
         simulator=simulator,
         arrays=arrays,
+        period_df=period_df,
         base_tf=tf,
+        runner=runner,
     )
 
 
@@ -621,10 +506,6 @@ def run_multi_pair_year(
     contexts: dict[str, PairContext],
     multi_config: MultiPairConfig,
     portfolio: PortfolioState,
-    on_progress: Callable[
-        [int, int, int], None
-    ]
-    | None = None,
 ) -> dict[str, list[Any]]:
     """1年分のマルチペアインターリーブ実行
 
@@ -633,12 +514,11 @@ def run_multi_pair_year(
         contexts: ペアコンテキスト辞書
         multi_config: テスト設定
         portfolio: 共有ポートフォリオ状態
-        on_progress: 進捗コールバック
-            (bar_num, total_bars, trade_count)
 
     Returns:
         dict: ペア別トレードリスト
     """
+
     # 全ペアのタイムスタンプをストリーミングマージ
     # 各ペアのタイムスタンプは既にソート済み → heapq.merge
     def _pair_time_gen(
@@ -649,14 +529,9 @@ def run_multi_pair_year(
         for idx in range(arrays.n_rows):
             yield (arrays.get_time(idx), sym, idx)
 
-    total_bars = sum(
-        ctx.arrays.n_rows for ctx in contexts.values()
-    )
+    total_bars = sum(ctx.arrays.n_rows for ctx in contexts.values())
     merged = heapq.merge(
-        *(
-            _pair_time_gen(sym, ctx.arrays)
-            for sym, ctx in contexts.items()
-        ),
+        *(_pair_time_gen(sym, ctx.arrays) for sym, ctx in contexts.items()),
         key=lambda x: (x[0], x[1]),
     )
 
@@ -666,9 +541,7 @@ def run_multi_pair_year(
 
     # Opt 2: ポジション情報キャッシュ初期化
     # (exposure, buy_lot, sell_lot, buy_count, sell_count)
-    _cached_exposure: dict[
-        str, tuple[float, float, float, int, int]
-    ] = {}
+    _cached_exposure: dict[str, tuple[float, float, float, int, int]] = {}
     for sym in contexts:
         _cached_exposure[sym] = (0.0, 0.0, 0.0, 0, 0)
         portfolio.per_pair_positions[sym] = 0
@@ -740,19 +613,11 @@ def run_multi_pair_year(
                 )
                 _pu = get_pip_unit(sym)
                 if consolidated.direction == SignalType.BUY:
-                    sl_price = (
-                        _base - consolidated.sl_pips * _pu
-                    )
-                    tp_price = (
-                        _base + consolidated.tp_pips * _pu
-                    )
+                    sl_price = _base - consolidated.sl_pips * _pu
+                    tp_price = _base + consolidated.tp_pips * _pu
                 else:
-                    sl_price = (
-                        _base + consolidated.sl_pips * _pu
-                    )
-                    tp_price = (
-                        _base - consolidated.tp_pips * _pu
-                    )
+                    sl_price = _base + consolidated.sl_pips * _pu
+                    tp_price = _base - consolidated.tp_pips * _pu
 
             signal = Signal(
                 symbol=sym,
@@ -798,31 +663,21 @@ def run_multi_pair_year(
 
         # Opt 2: ポジション変化検出 → キャッシュ差分更新
         curr_n = len(ctx.simulator.state.open_positions)
-        balance_changed = (
-            ctx.simulator.state.balance != balance_before
-        )
+        balance_changed = ctx.simulator.state.balance != balance_before
         if curr_n != prev_n or balance_changed:
             positions = ctx.simulator.state.open_positions
             new_exp = sum(p.volume for p in positions)
             new_b_lot = sum(
-                p.volume
-                for p in positions
-                if p.signal_type == SignalType.BUY
+                p.volume for p in positions if p.signal_type == SignalType.BUY
             )
             new_s_lot = sum(
-                p.volume
-                for p in positions
-                if p.signal_type == SignalType.SELL
+                p.volume for p in positions if p.signal_type == SignalType.SELL
             )
             new_b_cnt = sum(
-                1
-                for p in positions
-                if p.signal_type == SignalType.BUY
+                1 for p in positions if p.signal_type == SignalType.BUY
             )
             new_s_cnt = sum(
-                1
-                for p in positions
-                if p.signal_type == SignalType.SELL
+                1 for p in positions if p.signal_type == SignalType.SELL
             )
             _cached_exposure[sym] = (
                 new_exp,
@@ -853,27 +708,30 @@ def run_multi_pair_year(
                 trade_record=_trade_record,
             )
 
-        # 進捗コールバック（初回+2000バーごと）
-        if (
-            on_progress is not None
-            and (bar_num == 0 or bar_num % 2000 == 0)
-        ):
-            _n_trades = sum(
-                len(c.simulator.state.closed_trades)
-                for c in contexts.values()
+        # 進捗表示（5000バーごと）
+        if bar_num % 5000 == 0 and bar_num > 0:
+            elapsed = time.time() - _t0
+            pct = bar_num / total_bars * 100
+            print(
+                f"    {year}年: {pct:.0f}% "
+                f"({bar_num}/{total_bars}) "
+                f"{elapsed:.0f}s",
+                end="\r",
             )
-            on_progress(bar_num, total_bars, _n_trades)
 
     # 年末: 全ペア強制決済
     for sym, ctx in contexts.items():
         last_idx = ctx.arrays.n_rows - 1
         if last_idx >= 0:
             last_candle = ctx.arrays.get_candle(
-                last_idx, sym, ctx.base_tf,
+                last_idx,
+                sym,
+                ctx.base_tf,
             )
             balance_before = ctx.simulator.state.balance
             ctx.simulator.force_close_all(
-                last_candle, ExitReason.FORCE_CLOSE,
+                last_candle,
+                ExitReason.FORCE_CLOSE,
             )
             pnl_delta = ctx.simulator.state.balance - balance_before
             portfolio.equity += pnl_delta
@@ -900,13 +758,12 @@ def run_multi_pair_year(
         portfolio.per_pair_exposure.values(),
     )
 
-    # 完了コールバック
-    if on_progress is not None:
-        _n_trades = sum(
-            len(c.simulator.state.closed_trades)
-            for c in contexts.values()
-        )
-        on_progress(total_bars, total_bars, _n_trades)
+    elapsed = time.time() - _t0
+    print(
+        f"    {year}年: 100% "
+        f"({total_bars}/{total_bars}) "
+        f"{elapsed:.0f}s          ",
+    )
 
     # ペア別トレード返却
     pair_trades: dict[str, list[Any]] = {}
@@ -919,22 +776,6 @@ def run_multi_pair_year(
 # =============================================================
 # 年並列ワーカー（別プロセスで実行）
 # =============================================================
-# ワーカー→メインの進捗通信用Queue（initializer経由で設定）
-_worker_progress_queue: multiprocessing.Queue | None = None
-
-
-def _init_year_worker(
-    q: multiprocessing.Queue,
-) -> None:
-    """ワーカープロセス初期化（進捗Queue設定）
-
-    Args:
-        q: 進捗送信用Queue
-    """
-    global _worker_progress_queue  # noqa: PLW0603
-    _worker_progress_queue = q
-
-
 def _run_year_worker(args: tuple) -> dict[str, Any] | None:
     """年並列ワーカー（別プロセスで実行）
 
@@ -972,11 +813,11 @@ def _run_year_worker(args: tuple) -> dict[str, Any] | None:
     # MultiPairConfig 復元
     mc = MultiPairConfig(**multi_config_dict)
 
-    _q = _worker_progress_queue
-
-    # 年単位データロード（ワーカーでは出力抑制）
-    year_data = load_year_data(
-        symbols, data_dir, year, quiet=True,
+    # データロード（各ワーカーが独自にスレッド並列ロード）
+    runners = load_all_pair_data(
+        symbols,
+        data_dir,
+        max_workers=min(6, len(symbols)),
     )
 
     # ポートフォリオ初期化（年独立: 毎年100万リセット）
@@ -989,42 +830,33 @@ def _run_year_worker(args: tuple) -> dict[str, Any] | None:
     # ペアコンテキスト構築
     contexts: dict[str, PairContext] = {}
     for sym in symbols:
-        extra_overrides: dict[str, Any] = {
-            "base_risk_pct": mc.base_risk_pct,
-            "consensus_threshold": mc.consensus_threshold,
-        }
-        extra_overrides.update(bot_extra_overrides)
-        bot_config = _build_bot_config(sym, extra_overrides)
+        runner, full_md = runners[sym]
+        bot_config = _build_bot_config(
+            sym,
+            extra_overrides=bot_extra_overrides or None,
+            multi_mode=True,
+        )
 
-        sym_year_md = year_data.get(sym)
         ctx = setup_pair_context(
             sym,
+            runner,
             year,
             bot_config,
             portfolio.equity,
-            year_market_data=sym_year_md,
+            full_market_data=full_md,
         )
         if ctx is not None:
             contexts[sym] = ctx
 
-    # 年データはBot内部にコピー済み → 解放
-    del year_data
-    gc.collect()
-
     if not contexts:
         return None
 
-    # 進捗コールバック: Queue経由でメインプロセスに送信
-    def _send_progress(
-        done: int, total: int, trades: int,
-    ) -> None:
-        if _q is not None:
-            _q.put(("bar", year, done, total, trades))
-
     # インターリーブ実行
     pair_trades = run_multi_pair_year(
-        year, contexts, mc, portfolio,
-        on_progress=_send_progress,
+        year,
+        contexts,
+        mc,
+        portfolio,
     )
 
     # 結果をシリアライズ可能なdictに変換
@@ -1042,20 +874,10 @@ def _run_year_worker(args: tuple) -> dict[str, Any] | None:
     for sym in symbols:
         trades = pair_trades.get(sym, [])
         n = len(trades)
-        wins = sum(
-            1 for t in trades if (t.profit_loss or 0) > 0
-        )
-        gp = sum(
-            t.profit_loss
-            for t in trades
-            if (t.profit_loss or 0) > 0
-        )
+        wins = sum(1 for t in trades if (t.profit_loss or 0) > 0)
+        gp = sum(t.profit_loss for t in trades if (t.profit_loss or 0) > 0)
         gl = abs(
-            sum(
-                t.profit_loss
-                for t in trades
-                if (t.profit_loss or 0) <= 0
-            )
+            sum(t.profit_loss for t in trades if (t.profit_loss or 0) <= 0)
         )
         np_ = sum(t.profit_loss or 0 for t in trades)
         pair_summaries[sym] = {
@@ -1107,9 +929,7 @@ def aggregate_year_results(
     all_monthly: dict[str, float] = {}
     for yr in year_results:
         for key, pnl in yr["monthly_pnl"].items():
-            all_monthly[key] = (
-                all_monthly.get(key, 0.0) + pnl
-            )
+            all_monthly[key] = all_monthly.get(key, 0.0) + pnl
 
     sorted_months = sorted(all_monthly.keys())
     monthly_pnl_list = [all_monthly[m] for m in sorted_months]
@@ -1122,11 +942,7 @@ def aggregate_year_results(
         equity += pnl
         if equity > peak:
             peak = equity
-        dd = (
-            (peak - equity) / peak * 100
-            if peak > 0
-            else 0.0
-        )
+        dd = (peak - equity) / peak * 100 if peak > 0 else 0.0
         if dd > max_dd_monthly:
             max_dd_monthly = dd
     # 年独立実行なので各年のバーレベルDDの最大値を使用
@@ -1137,11 +953,7 @@ def aggregate_year_results(
         arr = np.array(monthly_pnl_list)
         mean_m = np.mean(arr)
         std_m = np.std(arr, ddof=1)
-        sharpe = (
-            (mean_m / std_m) * math.sqrt(12)
-            if std_m > 0
-            else 0.0
-        )
+        sharpe = (mean_m / std_m) * math.sqrt(12) if std_m > 0 else 0.0
     else:
         sharpe = 0.0
 
@@ -1184,16 +996,10 @@ def aggregate_year_results(
     for sym in symbols:
         pm = pair_metrics[sym]
         pm["contribution"] = (
-            pm["profit"] / total_profit * 100
-            if total_profit > 0
-            else 0.0
+            pm["profit"] / total_profit * 100 if total_profit > 0 else 0.0
         )
 
-    wr = (
-        total_wins / total_trades * 100
-        if total_trades > 0
-        else 0.0
-    )
+    wr = total_wins / total_trades * 100 if total_trades > 0 else 0.0
     pf = total_gp / total_gl if total_gl > 0 else float("inf")
 
     # 月間勝率
@@ -1206,8 +1012,7 @@ def aggregate_year_results(
 
     # 年間収益率（各年の収益率の平均）
     year_return_pcts = [
-        yr["year_pnl"] / INITIAL_EQUITY * 100
-        for yr in year_results
+        yr["year_pnl"] / INITIAL_EQUITY * 100 for yr in year_results
     ]
     annual_return = (
         sum(year_return_pcts) / len(year_return_pcts)
@@ -1216,15 +1021,9 @@ def aggregate_year_results(
     )
 
     # blocked合計
-    blocked_global = sum(
-        yr["blocked_global"] for yr in year_results
-    )
-    blocked_per_pair = sum(
-        yr["blocked_per_pair"] for yr in year_results
-    )
-    blocked_exposure = sum(
-        yr["blocked_exposure"] for yr in year_results
-    )
+    blocked_global = sum(yr["blocked_global"] for yr in year_results)
+    blocked_per_pair = sum(yr["blocked_per_pair"] for yr in year_results)
+    blocked_exposure = sum(yr["blocked_exposure"] for yr in year_results)
 
     # yearly_results構築
     yearly_results = [
@@ -1233,9 +1032,7 @@ def aggregate_year_results(
             "pnl": yr["year_pnl"],
             "trades": yr["year_trades"],
             "equity": yr["final_equity"],
-            "return_pct": (
-                yr["year_pnl"] / INITIAL_EQUITY * 100
-            ),
+            "return_pct": (yr["year_pnl"] / INITIAL_EQUITY * 100),
         }
         for yr in sorted(year_results, key=lambda x: x["year"])
     ]
@@ -1273,37 +1070,26 @@ def aggregate_year_results(
 # =============================================================
 def run_test_case(
     test_config: MultiPairConfig,
+    runners: dict[str, tuple[BacktestRunner, dict[str, pd.DataFrame]]],
     symbols: list[str],
     start_year: int = START_YEAR,
     end_year: int = END_YEAR,
     max_year_workers: int = 1,
     data_dir: str = "",
     bot_extra_overrides: dict[str, Any] | None = None,
-    year_data_cache: dict[
-        int, dict[str, dict[str, pd.DataFrame]]
-    ] | None = None,
-    test_index: int = 0,
-    total_tests: int = 0,
-    job_prefix: str = "",
-    progress_callback: Callable[
-        [int, int], None
-    ] | None = None,
 ) -> dict[str, Any]:
     """テストケースを実行（順次 or 年並列）
 
     Args:
         test_config: テスト設定
+        runners: ペア別(BacktestRunner, market_data)辞書
+            （順次実行時のみ使用）
         symbols: 対象シンボル
         start_year: 開始年
         end_year: 終了年
         max_year_workers: 年並列数（1=順次, >1=並列）
-        data_dir: データディレクトリ
+        data_dir: データディレクトリ（並列実行時に必須）
         bot_extra_overrides: 追加botオーバーライド
-        year_data_cache: 年→ペア→TF→DataFrame の
-            事前ロード済みキャッシュ（複数テスト共有用）
-        test_index: テスト番号（1始まり、表示用）
-        total_tests: テスト総数（表示用）
-        job_prefix: 出力プレフィックス（並列実行時のジョブ識別用）
 
     Returns:
         dict: テスト結果
@@ -1311,95 +1097,16 @@ def run_test_case(
     num_years = end_year - start_year + 1
     _extra = bot_extra_overrides or {}
 
-    # データディレクトリ解決
-    if not data_dir:
-        data_dir = str(get_data_dir())
-
-    # テストヘッダー
-    _pfx = f"[{job_prefix}] " if job_prefix else ""
-    _test_label = ""
-    if test_index > 0 and total_tests > 0:
-        _test_label = f" [{test_index}/{total_tests}]"
-    _mode = (
-        f"年並列{max_year_workers}w"
-        if max_year_workers > 1
-        else "順次"
+    print(f"\n{'=' * 60}")
+    print(f"  テスト: {test_config.name}")
+    print(
+        f"  global_max={test_config.global_max_positions}, "
+        f"per_pair={test_config.per_pair_max_positions}, "
+        f"exposure={test_config.global_max_exposure_lot}"
     )
-
-    # rich Console（ヘッダー・結果表示用）
-    # スレッドからの呼び出し時にstdout閉鎖エラーを回避する
-    _console = None
-    try:
-        from rich.console import Console as _RichConsole
-
-        # Windows cp932対策: UTF-8ファイルオブジェクトを作成
-        _safe_file = None
-        if sys.platform == "win32" and hasattr(
-            sys.stdout, "buffer"
-        ):
-            _safe_file = io.TextIOWrapper(
-                sys.stdout.buffer,
-                encoding="utf-8",
-                errors="replace",
-                write_through=True,
-            )
-            # 閉じないようにする（bufferはstdoutが所有）
-            _safe_file.close = lambda: None  # type: ignore[assignment]
-        _console = _RichConsole(
-            file=_safe_file or sys.stdout,
-        )
-    except (ImportError, ValueError):
-        _console = None
-
-    if _console is not None:
-        _console.print()
-        _console.rule(
-            f"[bold green]{_pfx}{_test_label} "
-            f"{test_config.name}[/bold green]",
-            style="green",
-        )
-        _console.print(
-            f"  {len(symbols)}ペア | "
-            f"{start_year}-{end_year} | "
-            f"{_mode}"
-        )
-        _console.print(
-            f"  global={test_config.global_max_positions}, "
-            f"per_pair="
-            f"{test_config.per_pair_max_positions}, "
-            f"exposure="
-            f"{test_config.global_max_exposure_lot}, "
-            f"risk={test_config.base_risk_pct}, "
-            f"CT={test_config.consensus_threshold}"
-        )
-    else:
-        print(f"\n{'=' * 60}", flush=True)
-        print(
-            f"  {_pfx}{_test_label} "
-            f"{test_config.name}",
-            flush=True,
-        )
-        print(
-            f"  {len(symbols)}ペア | "
-            f"{start_year}-{end_year} | "
-            f"{_mode}",
-            flush=True,
-        )
-        print(
-            f"  global="
-            f"{test_config.global_max_positions}, "
-            f"per_pair="
-            f"{test_config.per_pair_max_positions}, "
-            f"exposure="
-            f"{test_config.global_max_exposure_lot}, "
-            f"risk={test_config.base_risk_pct}, "
-            f"CT={test_config.consensus_threshold}",
-            flush=True,
-        )
-        print(f"{'=' * 60}", flush=True)
-
-    # インジケータキャッシュを事前生成（初回のみ実行）
-    warm_indicator_cache(symbols, data_dir)
+    if max_year_workers > 1:
+        print(f"  年並列: {max_year_workers}ワーカー")
+    print(f"{'=' * 60}")
 
     # --- 年並列実行 ---
     if max_year_workers > 1:
@@ -1416,234 +1123,23 @@ def run_test_case(
         ]
 
         year_results: list[dict[str, Any]] = []
-        _n_years = len(worker_args)
-        _years = [
-            wa[0] for wa in worker_args
-        ]
-
-        # 進捗Queue + rich Progress で年別進捗表示
-        _pq: multiprocessing.Queue = multiprocessing.Queue()
-
-        # rich Progress 構築
-        _use_rich_p = False
-        _prog = None
-        _yr_tasks: dict[int, Any] = {}
-        try:
-            from rich.progress import (
-                BarColumn,
-                Progress,
-                SpinnerColumn,
-                TaskProgressColumn,
-                TextColumn,
-                TimeRemainingColumn,
-            )
-
-            if _console is not None:
-                _prog = Progress(
-                    SpinnerColumn(),
-                    TextColumn(
-                        "[bold blue]"
-                        "{task.description}"
-                    ),
-                    BarColumn(bar_width=40),
-                    TaskProgressColumn(),
-                    TimeRemainingColumn(),
-                    console=_console,
-                )
-                _use_rich_p = True
-        except ImportError:
-            pass
-
-        if not _use_rich_p:
-            print(
-                f"  年並列実行中 "
-                f"({_n_years}年, "
-                f"{max_year_workers}w)...",
-                flush=True,
-            )
-
-        # ジョブ識別ラベル
-        _jlabel = (
-            f"[dim]{job_prefix}[/dim] "
-            if job_prefix
-            else ""
-        )
-
-        # Queue監視スレッド
-        _monitor_stop = threading.Event()
-        # バーレベル進捗の年別トラッキング
-        _yr_bar_progress: dict[
-            int, tuple[int, int]
-        ] = {}  # year -> (done, total)
-
-        def _monitor_queue() -> None:
-            """Queueから進捗を読みrichバーを更新"""
-            while not _monitor_stop.is_set():
-                try:
-                    msg = _pq.get(timeout=0.5)
-                except Exception:
-                    continue
-                if msg is None:
-                    break
-                if msg[0] != "bar":
-                    continue
-                yr = msg[1]
-                done, total, trades = (
-                    msg[2],
-                    msg[3],
-                    msg[4],
-                )
-                # 年別バー進捗を記録
-                _yr_bar_progress[yr] = (done, total)
-
-                # 全年の合計進捗を百分率で通知
-                if progress_callback is not None:
-                    _total_b = sum(
-                        t for _, t in
-                        _yr_bar_progress.values()
-                    )
-                    _done_b = sum(
-                        d for d, _ in
-                        _yr_bar_progress.values()
-                    )
-                    _completed = len(year_results)
-                    if _total_b > 0 and _n_years > 0:
-                        _bar_frac = (
-                            _done_b / _total_b
-                        )
-                        _active = len(
-                            _yr_bar_progress,
-                        )
-                        _pct = int(
-                            (
-                                _completed
-                                + _bar_frac
-                                * _active
-                            )
-                            / _n_years
-                            * 100
-                        )
-                        progress_callback(
-                            _pct, 100,
-                        )
-
-                if _use_rich_p and _prog:
-                    if yr not in _yr_tasks:
-                        _yr_tasks[yr] = (
-                            _prog.add_task(
-                                f"{_jlabel}"
-                                f"[cyan]{yr}年"
-                                f"[/cyan]",
-                                total=100,
-                            )
-                        )
-                    pct = (
-                        done / total * 100
-                        if total > 0
-                        else 0
-                    )
-                    _prog.update(
-                        _yr_tasks[yr],
-                        completed=pct,
-                        description=(
-                            f"{_jlabel}"
-                            f"[cyan]{yr}年"
-                            f"[/cyan]"
-                            f" ({trades}件)"
-                        ),
-                    )
-
-        # 監視スレッド開始
-        _mon_t = threading.Thread(
-            target=_monitor_queue, daemon=True,
-        )
-
-        def _on_year_done(
-            yr_result: dict[str, Any],
-        ) -> None:
-            """年完了時の表示処理"""
-            yr = yr_result["year"]
-            # 完了年をバートラッキングから除去
-            _yr_bar_progress.pop(yr, None)
-            # 外部進捗コールバック（完了年数ベース）
-            if progress_callback is not None:
-                _done_n = len(year_results) + 1
-                _pct = int(_done_n / _n_years * 100)
-                progress_callback(_pct, 100)
-            if _use_rich_p and _prog:
-                if yr in _yr_tasks:
-                    _prog.update(
-                        _yr_tasks[yr], completed=100,
-                    )
-                    _prog.remove_task(_yr_tasks[yr])
-                    del _yr_tasks[yr]
-                _pc = (
-                    "green"
-                    if yr_result["year_pnl"] > 0
-                    else "red"
-                )
-                _jpfx = (
-                    f"[dim]{job_prefix}[/dim] "
-                    if job_prefix
-                    else ""
-                )
-                _console.print(  # type: ignore[union-attr]
-                    f"  {_jpfx}"
-                    f"[bold]{yr}年[/bold]: "
-                    f"PnL=[{_pc}]"
-                    f"{yr_result['year_pnl']:+,.0f}"
-                    f"[/{_pc}]"
-                    f"  Trades="
-                    f"{yr_result['year_trades']}"
-                    f"  Equity="
-                    f"{yr_result['final_equity']:,.0f}",
-                )
-            else:
-                _done = len(year_results)
-                _eq = yr_result['final_equity']
-                print(
-                    f"  [{_done}/{_n_years}] "
-                    f"{yr_result['year']}年: "
-                    f"PnL="
-                    f"{yr_result['year_pnl']:+,.0f}"
-                    f", Trades="
-                    f"{yr_result['year_trades']}"
-                    f", Equity={_eq:,.0f}",
-                    flush=True,
-                )
-
-        # 実行
-        if _use_rich_p and _prog:
-            _prog.start()
-        _mon_t.start()
-
         with ProcessPoolExecutor(
             max_workers=max_year_workers,
-            initializer=_init_year_worker,
-            initargs=(_pq,),
         ) as executor:
-            future_map = {
-                executor.submit(
-                    _run_year_worker, wa,
-                ): wa[0]
-                for wa in worker_args
-            }
-            for future in as_completed(future_map):
-                yr_result = future.result()
+            futures = executor.map(
+                _run_year_worker,
+                worker_args,
+            )
+            for yr_result in futures:
                 if yr_result is not None:
                     year_results.append(yr_result)
-                    _on_year_done(yr_result)
-
-        # 監視スレッド停止
-        _monitor_stop.set()
-        _pq.put(None)  # 監視スレッドを起こす
-        _mon_t.join(timeout=2)
-        if _use_rich_p and _prog:
-            # 残存タスクを削除
-            for tid in list(_yr_tasks.values()):
-                _prog.remove_task(tid)
-            _yr_tasks.clear()
-            _prog.stop()
+                    print(
+                        f"  {yr_result['year']}年: "
+                        f"PnL={yr_result['year_pnl']:+,.0f}, "
+                        f"Trades={yr_result['year_trades']}, "
+                        f"Equity="
+                        f"{yr_result['final_equity']:,.0f}"
+                    )
 
         if not year_results:
             # データなし時のフォールバック
@@ -1676,9 +1172,7 @@ def run_test_case(
         return result
 
     # --- 順次実行（年独立エクイティリセット） ---
-    all_pair_trades: dict[str, list[Any]] = {
-        sym: [] for sym in symbols
-    }
+    all_pair_trades: dict[str, list[Any]] = {sym: [] for sym in symbols}
     yearly_results_seq: list[dict[str, Any]] = []
     all_monthly_pnl: dict[tuple[int, int], float] = {}
     year_return_pcts: list[float] = []
@@ -1687,219 +1181,84 @@ def run_test_case(
     total_blocked_per_pair = 0
     total_blocked_exposure = 0
 
-    # rich Progress バー構築
-    _use_rich = False
-    _progress = None
-    try:
-        from rich.progress import (
-            BarColumn,
-            Progress,
-            SpinnerColumn,
-            TaskProgressColumn,
-            TextColumn,
-            TimeRemainingColumn,
+    for year in range(start_year, end_year + 1):
+        # 毎年エクイティを初期残高にリセット
+        portfolio = PortfolioState(
+            equity=INITIAL_EQUITY,
+            initial_equity=INITIAL_EQUITY,
+            peak_equity=INITIAL_EQUITY,
         )
 
-        if _console is not None:
-            _progress = Progress(
-                SpinnerColumn(),
-                TextColumn(
-                    "[bold blue]{task.description}"
-                ),
-                BarColumn(bar_width=40),
-                TaskProgressColumn(),
-                TimeRemainingColumn(),
-                console=_console,
-            )
-            _use_rich = True
-    except ImportError:
-        pass
-
-    def _run_years() -> None:
-        """年ループ本体（rich有無で共通）"""
-        nonlocal max_dd_across_years
-        nonlocal total_blocked_global
-        nonlocal total_blocked_per_pair
-        nonlocal total_blocked_exposure
-
-        for yr_idx, year in enumerate(
-            range(start_year, end_year + 1), 1,
-        ):
-            # rich: 年タスク追加
-            _year_task = None
-            if _use_rich and _progress is not None:
-                _year_task = _progress.add_task(
-                    f"[cyan]{year}年[/cyan]",
-                    total=100,
-                )
-
-            # 毎年エクイティを初期残高にリセット
-            portfolio = PortfolioState(
-                equity=INITIAL_EQUITY,
-                initial_equity=INITIAL_EQUITY,
-                peak_equity=INITIAL_EQUITY,
+        # ペアコンテキスト構築
+        contexts: dict[str, PairContext] = {}
+        for sym in symbols:
+            runner, full_md = runners[sym]
+            # ペア別bot_config構築（multi_mode=True）
+            bot_config = build_bot_config(
+                sym,
+                extra_overrides=_extra or None,
+                multi_mode=True,
             )
 
-            # 年データ取得（キャッシュ or 年単位ロード）
-            if (
-                year_data_cache is not None
-                and year in year_data_cache
-            ):
-                year_data = year_data_cache[year]
-            else:
-                year_data = load_year_data(
-                    symbols, data_dir, year,
-                )
-
-            # ペアコンテキスト構築
-            contexts: dict[str, PairContext] = {}
-            for sym in symbols:
-                extra_overrides: dict[str, Any] = {
-                    "base_risk_pct": (
-                        test_config.base_risk_pct
-                    ),
-                    "consensus_threshold": (
-                        test_config.consensus_threshold
-                    ),
-                }
-                extra_overrides.update(_extra)
-                bot_config = build_bot_config(
-                    sym, extra_overrides,
-                )
-
-                sym_year_md = year_data.get(sym)
-                ctx = setup_pair_context(
-                    sym,
-                    year,
-                    bot_config,
-                    INITIAL_EQUITY,
-                    year_market_data=sym_year_md,
-                )
-                if ctx is not None:
-                    contexts[sym] = ctx
-
-            if not contexts:
-                if _year_task is not None and _progress:
-                    _progress.remove_task(_year_task)
-                continue
-
-            # 進捗コールバック
-            def _on_progress(
-                done: int,
-                total: int,
-                trades: int,
-                _yt: Any = _year_task,
-            ) -> None:
-                if _use_rich and _progress and _yt:
-                    pct = (
-                        done / total * 100
-                        if total > 0
-                        else 0
-                    )
-                    _progress.update(
-                        _yt,
-                        completed=pct,
-                        description=(
-                            f"[cyan]{year}年[/cyan]"
-                            f" ({trades}件)"
-                        ),
-                    )
-
-            # インターリーブ実行
-            pair_trades = run_multi_pair_year(
+            ctx = setup_pair_context(
+                sym,
+                runner,
                 year,
-                contexts,
-                test_config,
-                portfolio,
-                on_progress=_on_progress,
+                bot_config,
+                INITIAL_EQUITY,
+                full_market_data=full_md,
             )
+            if ctx is not None:
+                contexts[sym] = ctx
 
-            # rich: 年完了 → タスク削除 + 結果表示
-            year_pnl = portfolio.equity - INITIAL_EQUITY
-            year_return_pct = (
-                year_pnl / INITIAL_EQUITY * 100
-            )
-            year_trades = sum(
-                len(t) for t in pair_trades.values()
-            )
+        if not contexts:
+            continue
 
-            if _year_task is not None and _progress:
-                _progress.update(
-                    _year_task, completed=100,
-                )
-                _progress.remove_task(_year_task)
+        # インターリーブ実行
+        pair_trades = run_multi_pair_year(
+            year,
+            contexts,
+            test_config,
+            portfolio,
+        )
 
-            if _console is not None:
-                _pc = (
-                    "green" if year_pnl > 0 else "red"
-                )
-                _console.print(
-                    f"  [bold]{year}年[/bold]: "
-                    f"PnL=[{_pc}]"
-                    f"{year_pnl:+,.0f}"
-                    f"[/{_pc}]  "
-                    f"Return={year_return_pct:+.1f}%"
-                    f"  Trades={year_trades}"
-                    f"  DD={portfolio.max_dd_pct:.2f}%"
-                )
-            else:
-                print(
-                    f"  {year}年: "
-                    f"PnL={year_pnl:+,.0f}  "
-                    f"Return={year_return_pct:+.1f}%"
-                    f"  Trades={year_trades}  "
-                    f"DD={portfolio.max_dd_pct:.2f}%"
-                )
+        # トレード蓄積
+        for sym, trades in pair_trades.items():
+            all_pair_trades[sym].extend(trades)
 
-            # トレード蓄積
-            for sym, trades in pair_trades.items():
-                all_pair_trades[sym].extend(trades)
+        # 年次サマリー
+        year_pnl = portfolio.equity - INITIAL_EQUITY
+        year_return_pct = year_pnl / INITIAL_EQUITY * 100
+        year_return_pcts.append(year_return_pct)
+        year_trades = sum(len(t) for t in pair_trades.values())
 
-            year_return_pcts.append(year_return_pct)
+        # 月次PnL蓄積
+        for key, pnl in portfolio.monthly_pnl.items():
+            all_monthly_pnl[key] = all_monthly_pnl.get(key, 0.0) + pnl
 
-            # 月次PnL蓄積
-            for key, pnl in portfolio.monthly_pnl.items():
-                all_monthly_pnl[key] = (
-                    all_monthly_pnl.get(key, 0.0) + pnl
-                )
+        # DD/blocked蓄積
+        if portfolio.max_dd_pct > max_dd_across_years:
+            max_dd_across_years = portfolio.max_dd_pct
+        total_blocked_global += portfolio.blocked_global
+        total_blocked_per_pair += portfolio.blocked_per_pair
+        total_blocked_exposure += portfolio.blocked_exposure
 
-            # DD/blocked蓄積
-            if portfolio.max_dd_pct > max_dd_across_years:
-                max_dd_across_years = portfolio.max_dd_pct
-            total_blocked_global += portfolio.blocked_global
-            total_blocked_per_pair += (
-                portfolio.blocked_per_pair
-            )
-            total_blocked_exposure += (
-                portfolio.blocked_exposure
-            )
-
-            yearly_results_seq.append(
-                {
-                    "year": year,
-                    "pnl": year_pnl,
-                    "trades": year_trades,
-                    "equity": portfolio.equity,
-                    "return_pct": year_return_pct,
-                }
-            )
-
-            # 外部進捗コールバック
-            if progress_callback is not None:
-                progress_callback(
-                    len(yearly_results_seq), num_years,
-                )
-
-            # メモリ解放
-            del contexts
-            gc.collect()
-
-    # rich Progress でラップ or 直接実行
-    if _use_rich and _progress is not None:
-        with _progress:
-            _run_years()
-    else:
-        _run_years()
+        yearly_results_seq.append(
+            {
+                "year": year,
+                "pnl": year_pnl,
+                "trades": year_trades,
+                "equity": portfolio.equity,
+                "return_pct": year_return_pct,
+            }
+        )
+        print(
+            f"  {year}年: "
+            f"PnL={year_pnl:+,.0f}, "
+            f"Return={year_return_pct:+.1f}%, "
+            f"Trades={year_trades}, "
+            f"Equity={portfolio.equity:,.0f}"
+        )
 
     # 結果集約（年独立モード）
     total_profit = sum(yr["pnl"] for yr in yearly_results_seq)
@@ -1963,9 +1322,7 @@ def aggregate_results(
 
     # 月次PnL
     sorted_months = sorted(portfolio.monthly_pnl.keys())
-    monthly_pnl_list = [
-        portfolio.monthly_pnl[m] for m in sorted_months
-    ]
+    monthly_pnl_list = [portfolio.monthly_pnl[m] for m in sorted_months]
 
     # DD計算（バーレベルDDと月次DDの大きい方）
     equity = portfolio.initial_equity
@@ -1986,9 +1343,7 @@ def aggregate_results(
         arr = np.array(monthly_pnl_list)
         mean_m = np.mean(arr)
         std_m = np.std(arr, ddof=1)
-        sharpe = (
-            (mean_m / std_m) * math.sqrt(12) if std_m > 0 else 0.0
-        )
+        sharpe = (mean_m / std_m) * math.sqrt(12) if std_m > 0 else 0.0
     else:
         sharpe = 0.0
 
@@ -2003,15 +1358,9 @@ def aggregate_results(
         trades = pair_trades.get(sym, [])
         n_trades = len(trades)
         wins = sum(1 for t in trades if (t.profit_loss or 0) > 0)
-        gp = sum(
-            t.profit_loss for t in trades if (t.profit_loss or 0) > 0
-        )
+        gp = sum(t.profit_loss for t in trades if (t.profit_loss or 0) > 0)
         gl = abs(
-            sum(
-                t.profit_loss
-                for t in trades
-                if (t.profit_loss or 0) <= 0
-            )
+            sum(t.profit_loss for t in trades if (t.profit_loss or 0) <= 0)
         )
         np_ = sum(t.profit_loss or 0 for t in trades)
 
@@ -2035,9 +1384,7 @@ def aggregate_results(
     for sym in symbols:
         pm = pair_metrics[sym]
         pm["contribution"] = (
-            pm["profit"] / total_profit * 100
-            if total_profit > 0
-            else 0.0
+            pm["profit"] / total_profit * 100 if total_profit > 0 else 0.0
         )
 
     wr = total_wins / total_trades * 100 if total_trades > 0 else 0.0
@@ -2053,9 +1400,7 @@ def aggregate_results(
 
     # 年間収益率
     annual_return = (
-        (total_profit / portfolio.initial_equity)
-        / num_years
-        * 100
+        (total_profit / portfolio.initial_equity) / num_years * 100
         if num_years > 0
         else 0.0
     )
@@ -2082,43 +1427,31 @@ def aggregate_results(
 
 def _print_result_summary(result: dict[str, Any]) -> None:
     """テスト結果サマリー出力"""
-    print(f"\n  {_PHASE_ICONS['done']} {result['test_name']} 結果")
-    print(f"  {'─' * 40}")
+    print(f"\n  --- {result['test_name']} サマリー ---")
+    print(f"  総利益:     {result['total_profit']:>+12,.0f}")
+    print(f"  年間収益率: {result['annual_return_pct']:>8.1f}%")
+    print(f"  最大DD:     {result['max_dd_pct']:>8.2f}%")
+    print(f"  Sharpe:     {result['sharpe']:>8.2f}")
+    print(f"  WR:         {result['wr']:>8.1f}%")
+    print(f"  PF:         {result['pf']:>8.2f}")
+    print(f"  月間勝率:   {result['monthly_wr']:>8.1f}%")
+    print(f"  トレード数: {result['total_trades']}")
     print(
-        f"  総利益:     {result['total_profit']:>+12,.0f}  "
-        f"  年間収益率: {result['annual_return_pct']:>+.1f}%"
-    )
-    print(
-        f"  最大DD:     {result['max_dd_pct']:>8.2f}%  "
-        f"  Sharpe:     {result['sharpe']:>8.2f}"
-    )
-    print(
-        f"  WR:         {result['wr']:>8.1f}%  "
-        f"  PF:         {result['pf']:>8.2f}"
-    )
-    print(
-        f"  月間勝率:   {result['monthly_wr']:>8.1f}%  "
-        f"  トレード数: {result['total_trades']}"
-    )
-    print(
-        f"  制限: global={result['blocked_global']}, "
+        f"  制限発動: global={result['blocked_global']}, "
         f"per_pair={result['blocked_per_pair']}, "
         f"exposure={result['blocked_exposure']}"
     )
 
-    print("\n  ペア別実績:")
-    print(
-        f"    {'ペア':8s}  {'Profit':>10s}  "
-        f"{'WR':>6s}  {'PF':>6s}  "
-        f"{'Trades':>6s}  {'寄与':>6s}"
-    )
-    print(f"    {'─' * 50}")
+    print("\n  ペア別:")
     for sym, pm in result["pair_metrics"].items():
         if pm["trades"] > 0:
             print(
-                f"    {sym:8s}  {pm['profit']:>+10,.0f}  "
-                f"{pm['wr']:>5.1f}%  {pm['pf']:>5.2f}  "
-                f"{pm['trades']:>6d}  {pm['contribution']:>5.1f}%"
+                f"    {sym:8s} | "
+                f"Profit: {pm['profit']:>+10,.0f} | "
+                f"WR: {pm['wr']:5.1f}% | "
+                f"PF: {pm['pf']:5.2f} | "
+                f"Trades: {pm['trades']:4d} | "
+                f"寄与: {pm['contribution']:5.1f}%"
             )
 
 
@@ -2127,110 +1460,37 @@ def _print_result_summary(result: dict[str, Any]) -> None:
 # =============================================================
 TEST_MATRIX: dict[str, MultiPairConfig] = {
     # 推奨設定（JPYポートフォリオ検証結果）
+    # base_risk_pct / consensus_threshold は個別プリセットから読む
+    # multi_consensus_threshold は symbol_presets.yaml signal で定義
     "R1": MultiPairConfig(
         name="R1",
         global_max_positions=6,
         per_pair_max_positions=1,
         global_max_exposure_lot=10.0,
-        base_risk_pct=0.015,
-        consensus_threshold=9.5,
     ),
     "M0": MultiPairConfig(
         name="M0",
         global_max_positions=6,
         per_pair_max_positions=1,
         global_max_exposure_lot=10.0,
-        base_risk_pct=0.02,
-        consensus_threshold=9.0,
-    ),
-    "M1": MultiPairConfig(
-        name="M1",
-        global_max_positions=6,
-        per_pair_max_positions=1,
-        global_max_exposure_lot=10.0,
-        base_risk_pct=0.02,
-        consensus_threshold=10.0,
-    ),
-    "M2": MultiPairConfig(
-        name="M2",
-        global_max_positions=6,
-        per_pair_max_positions=1,
-        global_max_exposure_lot=10.0,
-        base_risk_pct=0.02,
-        consensus_threshold=11.0,
-    ),
-    "M3": MultiPairConfig(
-        name="M3",
-        global_max_positions=6,
-        per_pair_max_positions=1,
-        global_max_exposure_lot=10.0,
-        base_risk_pct=0.02,
-        consensus_threshold=12.0,
     ),
     "M4": MultiPairConfig(
         name="M4",
         global_max_positions=6,
         per_pair_max_positions=2,
         global_max_exposure_lot=10.0,
-        base_risk_pct=0.015,
-        consensus_threshold=11.0,
     ),
     "M5": MultiPairConfig(
         name="M5",
         global_max_positions=8,
         per_pair_max_positions=2,
         global_max_exposure_lot=12.0,
-        base_risk_pct=0.015,
-        consensus_threshold=10.0,
     ),
     "M6": MultiPairConfig(
         name="M6",
         global_max_positions=4,
         per_pair_max_positions=1,
         global_max_exposure_lot=6.0,
-        base_risk_pct=0.03,
-        consensus_threshold=12.0,
-    ),
-    # --- CT微調整テスト（年間70%目標）---
-    "T1": MultiPairConfig(
-        name="T1",
-        global_max_positions=6,
-        per_pair_max_positions=1,
-        global_max_exposure_lot=10.0,
-        base_risk_pct=0.02,
-        consensus_threshold=10.0,
-    ),
-    "T2": MultiPairConfig(
-        name="T2",
-        global_max_positions=6,
-        per_pair_max_positions=1,
-        global_max_exposure_lot=10.0,
-        base_risk_pct=0.02,
-        consensus_threshold=10.5,
-    ),
-    "T3": MultiPairConfig(
-        name="T3",
-        global_max_positions=6,
-        per_pair_max_positions=1,
-        global_max_exposure_lot=10.0,
-        base_risk_pct=0.02,
-        consensus_threshold=11.0,
-    ),
-    "T4": MultiPairConfig(
-        name="T4",
-        global_max_positions=6,
-        per_pair_max_positions=1,
-        global_max_exposure_lot=10.0,
-        base_risk_pct=0.015,
-        consensus_threshold=10.0,
-    ),
-    "T5": MultiPairConfig(
-        name="T5",
-        global_max_positions=6,
-        per_pair_max_positions=1,
-        global_max_exposure_lot=10.0,
-        base_risk_pct=0.015,
-        consensus_threshold=10.5,
     ),
 }
 
@@ -2251,12 +1511,9 @@ def generate_report(
         output_path: 出力パス
     """
     lines: list[str] = []
+    lines.append("# マルチ通貨ペアバックテスト（時系列インターリーブ方式）\n")
     lines.append(
-        "# マルチ通貨ペアバックテスト（時系列インターリーブ方式）\n"
-    )
-    lines.append(
-        f"検証期間: {START_YEAR}-{END_YEAR} "
-        f"({END_YEAR - START_YEAR + 1}年)\n"
+        f"検証期間: {START_YEAR}-{END_YEAR} ({END_YEAR - START_YEAR + 1}年)\n"
     )
     lines.append(f"対象ペア: {', '.join(symbols)}\n")
     lines.append(f"初期残高: {INITIAL_EQUITY:,.0f}\n")
@@ -2288,9 +1545,7 @@ def generate_report(
 
     # グローバル制限発動統計
     lines.append("## グローバル制限発動統計\n")
-    lines.append(
-        "| テスト | global制限 | per_pair制限 | exposure制限 |"
-    )
+    lines.append("| テスト | global制限 | per_pair制限 | exposure制限 |")
     lines.append("|--------|-----------|-------------|-------------|")
     for name, r in results.items():
         lines.append(
@@ -2304,12 +1559,8 @@ def generate_report(
     # ペア別内訳（各テスト）
     for name, r in results.items():
         lines.append(f"## {name} ペア別内訳\n")
-        lines.append(
-            "| ペア | 利益 | WR | PF | Trades | 寄与率 |"
-        )
-        lines.append(
-            "|------|------|-----|-----|--------|--------|"
-        )
+        lines.append("| ペア | 利益 | WR | PF | Trades | 寄与率 |")
+        lines.append("|------|------|-----|-----|--------|--------|")
         for sym in symbols:
             pm = r["pair_metrics"].get(sym, {})
             if pm.get("trades", 0) > 0:
@@ -2327,12 +1578,8 @@ def generate_report(
     first = next(iter(results.values()), None)
     if first and first.get("yearly_results"):
         lines.append("## 年次推移（最初のテスト）\n")
-        lines.append(
-            "| 年 | PnL | Return | Trades | Equity |"
-        )
-        lines.append(
-            "|----|-----|--------|--------|--------|"
-        )
+        lines.append("| 年 | PnL | Return | Trades | Equity |")
+        lines.append("|----|-----|--------|--------|--------|")
         for yr in first["yearly_results"]:
             ret = yr.get("return_pct", 0.0)
             lines.append(
@@ -2364,9 +1611,7 @@ def generate_report(
         lines.append(f"- WR: {br['wr']:.1f}%")
         lines.append(f"- PF: {br['pf']:.2f}")
     else:
-        lines.append(
-            "WR>65%かつDD<5%を満たすテストなし。設定調整が必要。\n"
-        )
+        lines.append("WR>65%かつDD<5%を満たすテストなし。設定調整が必要。\n")
 
     lines.append("")
 
@@ -2526,29 +1771,31 @@ def main() -> None:
     if is_parallel:
         print(f"\n年並列モード: {max_year_workers}ワーカー")
 
+    # データロード（順次実行時のみ事前ロード）
+    runners: dict[str, tuple[BacktestRunner, dict[str, pd.DataFrame]]] = {}
+    if not is_parallel:
+        runners = load_all_pair_data(available, data_dir)
+    else:
+        print("\n各ワーカーがデータを独自にロードします。")
+
     # テスト実行
     results: dict[str, dict[str, Any]] = {}
-    selected_tests: list[MultiPairConfig] = []
     for test_name in test_names:
         if test_name not in TEST_MATRIX:
             print(f"警告: 不明なテスト '{test_name}' をスキップ")
             continue
-        selected_tests.append(TEST_MATRIX[test_name])
 
-    n_tests = len(selected_tests)
-    _main_t0 = time.time()
-    for t_idx, test_config in enumerate(selected_tests, 1):
+        test_config = TEST_MATRIX[test_name]
         result = run_test_case(
             test_config,
+            runners,
             available,
             start_year=args.start_year,
             end_year=args.end_year,
             max_year_workers=max_year_workers,
             data_dir=data_dir,
-            test_index=t_idx,
-            total_tests=n_tests,
         )
-        results[test_config.name] = result
+        results[test_name] = result
 
     if not results:
         print("テスト結果なし。")
@@ -2563,12 +1810,8 @@ def main() -> None:
     save_trades_csv(results, log_dir)
 
     # 最終サマリー
-    _total_elapsed = time.time() - _main_t0
     print(f"\n{'=' * 80}")
-    print(
-        f"  {_PHASE_ICONS['done']} 最終サマリー "
-        f"({_format_elapsed(_total_elapsed)})"
-    )
+    print("  最終サマリー")
     print(f"{'=' * 80}")
     print(
         f"{'テスト':8s} | {'年間収益率':>10s} | {'DD':>6s} | "
