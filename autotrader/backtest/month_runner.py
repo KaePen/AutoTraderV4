@@ -369,7 +369,7 @@ def _run_month_worker(
     total_win_amount = 0.0
     total_loss_amount = 0.0
     for row in _collector._trade_rows:
-        _pnl = row.get("profit_loss", 0.0)
+        _pnl = float(row.get("profit_loss", 0.0))
         if _pnl > 0:
             total_win_amount += _pnl
         else:
@@ -394,7 +394,7 @@ def run_monthly_parallel(
     market_data: dict[str, pd.DataFrame],
     use_m1: bool = True,
     fundamental_provider: Any = None,
-    max_workers: int = 12,
+    max_workers: int = 6,
     emitter: BacktestEventEmitter | None = None,
     adaptive_config: TunerConfig | None = None,
 ) -> dict[str, Any] | None:
