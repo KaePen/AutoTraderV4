@@ -10,6 +10,7 @@ import logging
 import multiprocessing
 import pickle as _pickle
 from concurrent.futures import (
+    BrokenExecutor,
     ProcessPoolExecutor,
     as_completed,
 )
@@ -547,13 +548,19 @@ def run_monthly_parallel(
                     m = futures[future]
                     try:
                         result = future.result()
+                    except BrokenExecutor as exc:
+                        _log.error(
+                            "%d年 プロセスプール中断: %s",
+                            year,
+                            exc,
+                        )
+                        break
                     except Exception as exc:
                         _log.error(
                             "%d年%d月 バックテスト失敗: %s",
                             year,
                             m,
                             exc,
-                            exc_info=True,
                         )
                         result = None
                     if result is not None:
