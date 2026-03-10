@@ -15,6 +15,9 @@ from autotrader.calculator.features.trend_features import TrendFeatures
 from autotrader.calculator.features.volatility_features import (
     VolatilityFeatures,
 )
+from autotrader.calculator.features.volume_analyzer import (
+    compute_volume_features,
+)
 
 __all__ = [
     "TrendFeatures",
@@ -23,4 +26,5 @@ __all__ = [
     "MarketRegimeDetector",
     "RegimeDetectorConfig",
     "RegimeResult",
+    "compute_volume_features",
 ]

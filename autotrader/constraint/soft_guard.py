@@ -28,6 +28,8 @@ class SoftGuardReason(Enum):
     WEAK_TREND = "weak_trend"
     # Phase 2b: ファンダメンタル
     FUNDAMENTAL_RISK = "fundamental_risk"
+    # ボリュームフィルタ
+    LOW_VOLUME = "low_volume"
 
 
 @dataclass(frozen=True)
@@ -270,6 +272,39 @@ class SoftGuard:
             return 0.1, f"弱トレンド: 強度{trend_strength:.2f}"
         return 0.0, None
 
+    def check_volume(
+        self,
+        context: dict,
+        threshold: float = 0.8,
+        max_penalty: float = 0.3,
+    ) -> tuple[float, str | None]:
+        """ボリューム確認チェック
+
+        ボリュームが20MA比で閾値未満の場合ペナルティを適用。
+
+        Args:
+            context: コンテキスト
+            threshold: ボリュームMA比率閾値
+            max_penalty: 最大ペナルティ
+
+        Returns:
+            tuple[float, str | None]: (ペナルティ, 理由)
+        """
+        volume_ratio = context.get("volume_ratio")
+        if volume_ratio is None:
+            return 0.0, None
+
+        if volume_ratio < threshold:
+            penalty = min(
+                max_penalty,
+                (threshold - volume_ratio) * 0.5,
+            )
+            return (
+                penalty,
+                f"低ボリューム: MA比{volume_ratio:.2f}",
+            )
+        return 0.0, None
+
     def check(
         self,
         context: dict,
@@ -301,6 +336,7 @@ class SoftGuard:
                 (self.check_recent_performance, SoftGuardReason.RECENT_LOSS),
                 (self.check_mtf_conflict, SoftGuardReason.MTF_CONFLICT),
                 (self.check_trend_strength, SoftGuardReason.WEAK_TREND),
+                (self.check_volume, SoftGuardReason.LOW_VOLUME),
             ])
 
         for check_func, reason_code in checks:

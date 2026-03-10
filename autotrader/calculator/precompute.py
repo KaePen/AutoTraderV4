@@ -246,6 +246,14 @@ class PrecomputeEngine:
         # SMC（Smart Money Concept）指標
         result = self.compute_smc_indicators(result)
 
+        # ボリューム移動平均比率
+        if "volume" in result.columns:
+            _vol_ma = result["volume"].rolling(20).mean()
+            result["volume_ma_20"] = _vol_ma
+            result["volume_ratio"] = result["volume"] / (
+                _vol_ma.replace(0, float("nan"))
+            )
+
         return result
 
     def compute_smc_indicators(self, df: pd.DataFrame) -> pd.DataFrame:
