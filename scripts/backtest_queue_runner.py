@@ -544,14 +544,19 @@ def execute_job(
             1_000_000,
         )
 
+        # スプレッド倍率（ストレステスト用）
+        _sp_mult = bt_ovr.get("spread_multiplier", 1.0)
+        _spread = preset.spread_pips * _sp_mult
+        _slippage = preset.slippage_pips * _sp_mult
+
         svc_config = BacktestServiceConfig(
             start_year=start_year,
             end_year=end_year,
             initial_balance=initial_balance,
             data_dir=data_dir,
             symbol=job.symbol,
-            spread_pips=preset.spread_pips,
-            slippage_pips=preset.slippage_pips,
+            spread_pips=_spread,
+            slippage_pips=_slippage,
             max_positions=preset.max_positions,
             bonus_max_positions=(bot_config.bonus_max_positions),
             bonus_score_threshold=(bot_config.bonus_score_threshold),
@@ -726,6 +731,9 @@ def execute_multi_pair_job(
             ),
         )
 
+    # スプレッド倍率（ストレステスト用）
+    spread_mult = mpc.get("spread_multiplier", 1.0)
+
     # bot追加オーバーライド
     # multi_pair_config の base_risk_pct / consensus_threshold は
     # bot overrides として渡す（MultiPairConfigには含まない）
@@ -768,6 +776,7 @@ def execute_multi_pair_job(
             pm_extra_overrides=pm_extra,
             progress_callback=progress_callback,
             job_id=_rid,
+            spread_multiplier=spread_mult,
         )
 
         if cancel_event.is_set():
