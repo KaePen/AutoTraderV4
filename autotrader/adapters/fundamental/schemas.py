@@ -149,6 +149,29 @@ class FundamentalContext:
     post_event_summary: str = ""
     sentiment_score: float = 0.0
 
+    def minutes_until_next_high_event(
+        self,
+        now: datetime | None = None,
+    ) -> float | None:
+        """次のHIGHインパクトイベントまでの分数
+
+        Args:
+            now: 現在時刻（未使用、upcoming_eventsの
+                 minutes_untilを参照）
+
+        Returns:
+            float | None: 分数（イベントなしならNone）
+        """
+        if not self.upcoming_events:
+            return None
+        for ev in self.upcoming_events:
+            impact = ev.get("impact", "").upper()
+            if impact == "HIGH":
+                mins = ev.get("minutes_until")
+                if mins is not None and mins > 0:
+                    return float(mins)
+        return None
+
     @classmethod
     def neutral(cls) -> FundamentalContext:
         """ニュートラルなコンテキストを生成

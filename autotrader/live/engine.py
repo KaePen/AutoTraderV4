@@ -2028,6 +2028,16 @@ class LiveTradingEngine:
                 continue
 
             try:
+                # ファンダメンタルコンテキスト取得
+                _fund_ctx = None
+                if self._fundamental_memory:
+                    _fund_ctx = (
+                        self._fundamental_memory
+                        .get_context_for_llm(
+                            self._active_symbol,
+                            datetime.now(UTC),
+                        )
+                    )
                 # ポジション評価
                 action = self._pm.evaluate(
                     position_id=pos_id,
@@ -2035,6 +2045,7 @@ class LiveTradingEngine:
                     current_time=datetime.now(UTC),
                     atr=atr,
                     current_signal=current_signal_type,
+                    fundamental_assessment=_fund_ctx,
                 )
 
                 # アクション実行

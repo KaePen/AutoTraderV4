@@ -311,6 +311,12 @@ class PositionManagerConfig:
     early_profit_guard_min_opp_score: float = 4.0
     # 最低保有時間（分、エントリーノイズ排除）
     early_profit_guard_min_hold_minutes: float = 5.0
+    # 指標前ポジション管理
+    pre_event_exit_enabled: bool = False
+    pre_event_minutes: float = 30.0
+    pre_event_profit_close: bool = True
+    pre_event_loss_tighten: bool = True
+    pre_event_tighten_r: float = -0.3
 
 
 class PositionManager:
@@ -574,6 +580,18 @@ class PositionManager:
             action = self._check_early_profit_guard(
                 position, current_price, current_time,
                 buy_score, sell_score,
+            )
+            if action is not None:
+                self._try_state_transition(
+                    position, action,
+                )
+                return action
+
+        # 3.7 指標前ポジション管理
+        if self.config.pre_event_exit_enabled:
+            action = self._check_pre_event_exit(
+                position, current_price,
+                fundamental_assessment,
             )
             if action is not None:
                 self._try_state_transition(
@@ -1196,6 +1214,77 @@ class PositionManager:
             exit_reason=ExitReason.TAKE_PROFIT_EARLY,
             trigger_price=current_price,
         )
+
+    def _check_pre_event_exit(
+        self,
+        position: ManagedPosition,
+        current_price: float,
+        fundamental_assessment: object | None,
+    ) -> ManagementAction | None:
+        """指標前ポジション管理
+
+        HIGHインパクト指標の前に:
+        - 含み益 → 全決済（利益確保）
+        - 含み損 → SL引き締め（損失限定）
+        """
+        if fundamental_assessment is None:
+            return None
+        get_mins = getattr(
+            fundamental_assessment,
+            "minutes_until_next_high_event",
+            None,
+        )
+        if get_mins is None:
+            return None
+        mins = get_mins()
+        if mins is None:
+            return None
+        if mins > self.config.pre_event_minutes:
+            return None
+
+        current_r = position.current_r
+        # 含み益 → 全決済
+        if (
+            current_r > 0
+            and self.config.pre_event_profit_close
+        ):
+            return ManagementAction.full_close(
+                f"指標前利確 ({mins:.0f}分前, "
+                f"R={current_r:.2f})",
+                exit_reason=(
+                    ExitReason.PRE_EVENT_CLOSE
+                ),
+            )
+        # 含み損 → SL引き締め
+        if (
+            current_r <= 0
+            and self.config.pre_event_loss_tighten
+        ):
+            tighten_r = self.config.pre_event_tighten_r
+            r_value = position.r_value
+            if position.direction == SignalType.BUY:
+                new_sl = (
+                    position.entry_price
+                    + tighten_r * r_value
+                )
+                if new_sl > position.current_sl:
+                    return ManagementAction.update_sl(
+                        new_sl,
+                        f"指標前SL引き締め"
+                        f" ({mins:.0f}分前)",
+                    )
+            else:
+                new_sl = (
+                    position.entry_price
+                    - tighten_r * r_value
+                )
+                if new_sl < position.current_sl:
+                    return ManagementAction.update_sl(
+                        new_sl,
+                        f"指標前SL引き締め"
+                        f" ({mins:.0f}分前)",
+                    )
+        return None
 
     def _check_partial_close(
         self,
