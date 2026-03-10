@@ -193,6 +193,9 @@ class PositionManagerConfig:
         breakeven_at_1r: 1Rで建値移動するか
         trailing_start_r: トレーリング開始R値
         trailing_atr_multiplier: ATRトレーリング倍率
+        trailing_stage2_enabled: 2段階トレーリングを有効にするか
+        trailing_stage2_r: Stage2開始R値
+        trailing_stage2_atr_multiplier: Stage2 ATR倍率
         time_exit_enabled: 時間決済を有効にするか
         spread_pips: スプレッド（pips）
         slippage_pips: スリッページ（pips）
@@ -208,6 +211,10 @@ class PositionManagerConfig:
     breakeven_at_1r: bool = True
     trailing_start_r: float = 0.5
     trailing_atr_multiplier: float = 2.0
+    # 2段階トレーリング: 利益が伸びたらATR倍率を引き締め
+    trailing_stage2_enabled: bool = True
+    trailing_stage2_r: float = 1.5
+    trailing_stage2_atr_multiplier: float = 1.2
     time_exit_enabled: bool = True
     spread_pips: float = 1.5
     slippage_pips: float = 0.5
@@ -1681,7 +1688,19 @@ class PositionManager:
         # ATRベースのトレーリング距離（atr=0時は無効化）
         if atr <= 0:
             return None
-        trail_distance = atr * self.config.trailing_atr_multiplier
+        # 2段階トレーリング: highest_rが閾値以上なら引き締め
+        if (
+            self.config.trailing_stage2_enabled
+            and position.highest_r
+            >= self.config.trailing_stage2_r
+        ):
+            trail_distance = (
+                atr * self.config.trailing_stage2_atr_multiplier
+            )
+        else:
+            trail_distance = (
+                atr * self.config.trailing_atr_multiplier
+            )
 
         # Phase 2b: ファンダメンタル評価でSL距離調整
         # 低収束時はSLを引き締め（乗数<1.0）
