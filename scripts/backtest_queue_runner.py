@@ -153,12 +153,26 @@ class Job:
         start, end = parse_years(self.years)
         return max(1, end - start + 1)
 
+    def _is_monthly(self) -> bool:
+        """月並列バックテストが有効か"""
+        bt = self.overrides.get("backtest", {})
+        return bool(bt.get("use_monthly", False))
+
+    def _max_month_workers(self) -> int:
+        """月並列ワーカー数"""
+        bt = self.overrides.get("backtest", {})
+        return int(bt.get("max_month_workers", 6))
+
     def cpu_cost(self) -> float:
         """このジョブが消費するCPUスレッド数
 
-        年並列実行時は max_year_workers * THREADS_PER_YEAR。
+        月並列有効時: year_workers × max_month_workers
+        月並列なし: year_workers × THREADS_PER_YEAR
         """
-        return self.effective_year_workers() * THREADS_PER_YEAR
+        yw = self.effective_year_workers()
+        if self._is_monthly():
+            return yw * self._max_month_workers()
+        return yw * THREADS_PER_YEAR
 
 
 @dataclass
@@ -217,8 +231,8 @@ class RunningJob:
 
     @property
     def cpu_cost(self) -> float:
-        """消費CPUスレッド数"""
-        return self.max_year_workers * THREADS_PER_YEAR
+        """消費CPUスレッド数（Jobの計算に委任）"""
+        return self.job.cpu_cost()
 
 
 def _get_queue_job_ids() -> set[str]:
@@ -1208,6 +1222,12 @@ def _write_runner_state(
             "years": rj.job.years,
             "description": rj.job.description,
             "workers": rj.max_year_workers,
+            "monthly": rj.job._is_monthly(),
+            "month_workers": (
+                rj.job._max_month_workers()
+                if rj.job._is_monthly()
+                else 0
+            ),
             "cpu_cost": rj.cpu_cost,
             "elapsed_seconds": elapsed,
             "started_at": datetime.fromtimestamp(
@@ -1450,7 +1470,9 @@ def main() -> None:
     print(f"  結果ディレクトリ: {RESULTS_DIR}")
     print(f"  ポーリング間隔: {POLL_INTERVAL}s")
     print(
-        f"  CPUスレッド: {cpu_threads} (1年={THREADS_PER_YEAR}スレッド)",
+        f"  CPUスレッド: {cpu_threads}"
+        f" (通常: 1年={THREADS_PER_YEAR}t,"
+        f" 月並列: year_w×month_w)",
     )
     print()
     print("  コマンド:")
@@ -1632,12 +1654,19 @@ def main() -> None:
                             if rj.job.code_dir
                             else ""
                         )
+                        _mw = ""
+                        if rj.job._is_monthly():
+                            _mw = (
+                                f" month_w="
+                                f"{rj.job._max_month_workers()}"
+                            )
                         print(
                             f"    - [{rj.job.id}]"
                             f" {_label}"
                             f" {rj.job.years}"
-                            f" workers="
+                            f" year_w="
                             f"{rj.max_year_workers}"
+                            f"{_mw}"
                             f" cost={rj.cpu_cost:.1f}"
                             f" ({elapsed:.0f}s)"
                             f"{_cd}"
@@ -1809,15 +1838,21 @@ def main() -> None:
                 _code_label = (
                     f" code_dir={job.code_dir}" if job.code_dir else ""
                 )
+                _monthly_label = ""
+                if job._is_monthly():
+                    _monthly_label = (
+                        f" monthly={job._max_month_workers()}"
+                    )
                 logger.info(
                     "[%s] 開始: %s %s %s"
-                    " (workers=%d, cost=%.1f,"
+                    " (year_w=%d%s, cost=%.1f,"
                     " used=%.1f/%.0f)%s",
                     _rid,
                     _sym_label,
                     job.years,
                     job.description,
                     workers,
+                    _monthly_label,
                     cost,
                     used + cost,
                     cpu_threads,
