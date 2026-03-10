@@ -616,15 +616,39 @@ def execute_job(
         runner.load_data()
 
         # バックテスト実行
-        logger.info("[%s] バックテスト実行中...", job.id)
-        bt_result = runner.run_unified(
-            start_year=start_year,
-            end_year=end_year,
-            config=bot_config,
-            pm_config=pm_config,
-            use_m1=True,
-            max_year_workers=max_year_workers,
+        _use_monthly = bt_ovr.get(
+            "use_monthly", False
         )
+        if _use_monthly:
+            logger.info(
+                "[%s] 月単位並列バックテスト実行中...",
+                job.id,
+            )
+            _max_mw = bt_ovr.get(
+                "max_month_workers", 12
+            )
+            bt_result = runner.run_unified_monthly(
+                start_year=start_year,
+                end_year=end_year,
+                config=bot_config,
+                pm_config=pm_config,
+                use_m1=True,
+                max_month_workers=_max_mw,
+                max_year_workers=max_year_workers,
+            )
+        else:
+            logger.info(
+                "[%s] バックテスト実行中...",
+                job.id,
+            )
+            bt_result = runner.run_unified(
+                start_year=start_year,
+                end_year=end_year,
+                config=bot_config,
+                pm_config=pm_config,
+                use_m1=True,
+                max_year_workers=max_year_workers,
+            )
 
         if cancel_event.is_set():
             result.status = "cancelled"
