@@ -531,6 +531,14 @@ class BacktestRunner:
             window=_swing_window, min_periods=1,
         ).max()
 
+        # ボリューム移動平均比率
+        if "volume" in df.columns:
+            _vol_ma = df["volume"].rolling(20).mean()
+            df["volume_ma_20"] = _vol_ma
+            df["volume_ratio"] = df["volume"] / (
+                _vol_ma.replace(0, float("nan"))
+            )
+
         return df
 
     def _calculate_indicators_cached(
