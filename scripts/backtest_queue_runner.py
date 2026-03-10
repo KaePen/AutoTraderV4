@@ -665,6 +665,12 @@ def execute_multi_pair_job(
     if bot_ovr_cfg:
         bot_extra.update(bot_ovr_cfg)
 
+    # PM設定オーバーライド
+    pm_extra: dict[str, Any] = {}
+    pm_ovr_cfg = job.overrides.get("pm", {})
+    if pm_ovr_cfg:
+        pm_extra.update(pm_ovr_cfg)
+
     is_parallel = max_year_workers > 1
 
     try:
@@ -700,6 +706,7 @@ def execute_multi_pair_job(
             max_year_workers=max_year_workers,
             data_dir=data_dir,
             bot_extra_overrides=bot_extra,
+            pm_extra_overrides=pm_extra,
         )
 
         if cancel_event.is_set():
