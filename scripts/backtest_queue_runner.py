@@ -25,19 +25,21 @@ CPUバジェット内で複数ジョブを並行実行する常駐スクリプ�
 from __future__ import annotations
 
 import argparse
+import contextlib
 import hashlib
 import io
 import json
 import logging
 import os
+import queue
 import subprocess
 import sys
 import threading
 import time
+from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
-from collections.abc import Callable
 from typing import Any
 
 # Windows cp932エンコーディング回避
@@ -218,28 +220,39 @@ class RunningJob:
         return self.max_year_workers * THREADS_PER_YEAR
 
 
-def _compute_queue_hash() -> str:
-    """キューファイルのジョブID一覧からハッシュを計算
-
-    キュー内容（ジョブIDリスト）が変わったら
-    completed_ids をリセットするために使用。
+def _get_queue_job_ids() -> set[str]:
+    """キューファイルのジョブID一覧を取得
 
     Returns:
-        str: ハッシュ文字列（空キューは空文字列）
+        set[str]: ジョブIDセット（空キューは空セット）
     """
     if not QUEUE_FILE.exists():
-        return ""
+        return set()
     try:
         data = json.loads(
             QUEUE_FILE.read_text(encoding="utf-8"),
         )
-        ids = [j.get("id", "") for j in data.get("jobs", [])]
-        content = json.dumps(ids, sort_keys=True)
-        return hashlib.sha256(
-            content.encode(),
-        ).hexdigest()[:16]
+        return {
+            j.get("id", "")
+            for j in data.get("jobs", [])
+        }
     except (json.JSONDecodeError, KeyError):
+        return set()
+
+
+def _compute_queue_hash() -> str:
+    """キューファイルのジョブID一覧からハッシュを計算
+
+    Returns:
+        str: ハッシュ文字列（空キューは空文字列）
+    """
+    ids = sorted(_get_queue_job_ids())
+    if not ids:
         return ""
+    content = json.dumps(ids)
+    return hashlib.sha256(
+        content.encode(),
+    ).hexdigest()[:16]
 
 
 @dataclass
@@ -250,8 +263,8 @@ class QueueState:
     completed_ids にあるジョブをスキップする。
     job_counter はグローバル連番で結果ファイル名の
     一意性を保証する。
-    queue_hash でキューファイルの変更を検知し、
-    変更時は completed_ids を自動リセットする。
+    キュー変更時はキューから削除されたジョブの
+    completed_ids のみ除去し、新規追加は影響なし。
     """
 
     completed_ids: list[str] = field(default_factory=list)
@@ -259,19 +272,33 @@ class QueueState:
     queue_hash: str = ""
 
     def sync_with_queue(self) -> None:
-        """キューハッシュを検証し、変更時にリセット"""
+        """キュー変更を検知し、削除されたジョブのみ除去"""
         current_hash = _compute_queue_hash()
         if not current_hash:
             return
         if self.queue_hash and self.queue_hash != current_hash:
-            old_count = len(self.completed_ids)
-            self.completed_ids.clear()
+            # キューから削除されたジョブのみ除去
+            current_ids = _get_queue_job_ids()
+            removed = [
+                cid for cid in self.completed_ids
+                if cid not in current_ids
+            ]
+            if removed:
+                for cid in removed:
+                    self.completed_ids.remove(cid)
+                logger.info(
+                    "キュー変更検知: 削除済み%d件を除去 %s",
+                    len(removed),
+                    removed,
+                )
+            else:
+                logger.info(
+                    "キュー変更検知: ジョブ追加のみ"
+                    "（完了記録%d件を保持）",
+                    len(self.completed_ids),
+                )
             self.queue_hash = current_hash
             self.save()
-            logger.info(
-                "キュー内容変更検知: completed_ids リセット（旧%d件）",
-                old_count,
-            )
         elif not self.queue_hash:
             self.queue_hash = current_hash
             self.save()
@@ -376,6 +403,35 @@ def load_queue() -> list[Job]:
     except (json.JSONDecodeError, KeyError) as e:
         logger.error("キューファイル読み込みエラー: %s", e)
         return []
+
+
+def _remove_job_from_queue(job_id: str) -> None:
+    """完了ジョブをキューファイルから除去"""
+    if not QUEUE_FILE.exists():
+        return
+    try:
+        data = json.loads(
+            QUEUE_FILE.read_text(encoding="utf-8"),
+        )
+        jobs_raw = data.get("jobs", [])
+        before = len(jobs_raw)
+        data["jobs"] = [
+            j for j in jobs_raw
+            if j.get("id", "") != job_id
+        ]
+        if len(data["jobs"]) < before:
+            QUEUE_FILE.write_text(
+                json.dumps(data, indent=2, ensure_ascii=False)
+                + "\n",
+                encoding="utf-8",
+            )
+            logger.info(
+                "キューから完了ジョブ除去: %s", job_id,
+            )
+    except (json.JSONDecodeError, OSError) as e:
+        logger.warning(
+            "キュー更新失敗（無視）: %s", e,
+        )
 
 
 # ===================================================================
@@ -607,7 +663,6 @@ def execute_multi_pair_job(
     from scripts.run_multi_pair_backtest import (
         TEST_MATRIX,
         MultiPairConfig,
-        load_pair_data,
         run_test_case,
     )
 
@@ -669,18 +724,18 @@ def execute_multi_pair_job(
                 "global_max_exposure_lot",
                 10.0,
             ),
-            base_risk_pct=mpc.get(
-                "base_risk_pct",
-                0.02,
-            ),
-            consensus_threshold=mpc.get(
-                "consensus_threshold",
-                9.0,
-            ),
         )
 
     # bot追加オーバーライド
+    # multi_pair_config の base_risk_pct / consensus_threshold は
+    # bot overrides として渡す（MultiPairConfigには含まない）
     bot_extra: dict[str, Any] = {}
+    if "base_risk_pct" in mpc:
+        bot_extra["base_risk_pct"] = mpc["base_risk_pct"]
+    if "consensus_threshold" in mpc:
+        bot_extra["consensus_threshold"] = mpc[
+            "consensus_threshold"
+        ]
     bot_ovr_cfg = job.overrides.get("bot", {})
     if bot_ovr_cfg:
         bot_extra.update(bot_ovr_cfg)
@@ -691,8 +746,6 @@ def execute_multi_pair_job(
     if pm_ovr_cfg:
         pm_extra.update(pm_ovr_cfg)
 
-    is_parallel = max_year_workers > 1
-
     try:
         logger.info(
             "[%s] マルチペア実行開始 (%s, %s, workers=%d)",
@@ -702,24 +755,10 @@ def execute_multi_pair_job(
             max_year_workers,
         )
 
-        # データロード（順次実行時のみ事前ロード）
-        runners: dict[str, Any] = {}
-        if not is_parallel:
-            for sym in symbols:
-                runners[sym] = load_pair_data(
-                    sym,
-                    data_dir,
-                )
-                logger.info(
-                    "[%s] %s ロード完了",
-                    _rid,
-                    sym,
-                )
-
-        # run_test_caseに委譲（順次/並列を統一処理）
+        # run_test_caseに委譲（年ごとにデータロード）
         agg = run_test_case(
             test_config=multi_config,
-            runners=runners,
+            runners={},
             symbols=symbols,
             start_year=start_year,
             end_year=end_year,
@@ -727,6 +766,8 @@ def execute_multi_pair_job(
             data_dir=data_dir,
             bot_extra_overrides=bot_extra,
             pm_extra_overrides=pm_extra,
+            progress_callback=progress_callback,
+            job_id=_rid,
         )
 
         if cancel_event.is_set():
@@ -790,6 +831,14 @@ def execute_multi_pair_job(
     )
     result.finished_at = datetime.now().isoformat()
     _save_result(result)
+
+    # ワーカー進捗ファイル掃除
+    for pg_f in _DATA_ROOT.glob(
+        f".worker_progress_{_rid}_*.json",
+    ):
+        with contextlib.suppress(OSError):
+            pg_f.unlink()
+
     return result
 
 
@@ -837,7 +886,7 @@ def execute_job_subprocess(
     import tempfile  # noqa: PLC0415
 
     _rid = result_id or job.id
-    code_dir = job.code_dir
+    code_dir = job.code_dir or str(_project_root)
 
     # ジョブ情報をJSONファイルに書き出し
     job_data = {
@@ -848,10 +897,14 @@ def execute_job_subprocess(
         "data_dir": DEFAULT_DATA_DIR,
     }
 
+    _sym_label = (
+        ",".join(job.symbols) if job.symbols else job.symbol
+    )
     result = JobResult(
         job_id=_rid,
         status="running",
-        symbol=job.symbol,
+        job_type=job.type,
+        symbol=_sym_label,
         years=job.years,
         description=job.description,
         started_at=datetime.now().isoformat(),
@@ -881,10 +934,11 @@ def execute_job_subprocess(
             job_file,
         ]
 
+        _is_custom = job.code_dir and code_dir != str(_project_root)
         logger.info(
-            "[%s] サブプロセス実行: code_dir=%s",
+            "[%s] サブプロセス実行%s",
             _rid,
-            code_dir,
+            f": code_dir={code_dir}" if _is_custom else "",
         )
 
         proc = subprocess.Popen(
@@ -895,6 +949,7 @@ def execute_job_subprocess(
             text=True,
             encoding="utf-8",
             errors="replace",
+            env={**os.environ, "PYTHONUNBUFFERED": "1"},
         )
 
         # キャンセル監視しつつ出力を読み取り
@@ -1039,6 +1094,44 @@ def _write_runner_state(
     jobs_data: list[dict[str, Any]] = []
     for rj in running_jobs:
         elapsed = time.time() - rj.started_at
+
+        # ワーカー進捗ファイルから細粒度進捗を集約
+        _progress = dict(rj.progress)
+        try:
+            sy, ey = parse_years(rj.job.years)
+            _year_progresses: list[dict[str, Any]] = []
+            _total_bars = 0
+            _done_bars = 0
+            for yr in range(sy, ey + 1):
+                _pg_path = (
+                    _DATA_ROOT
+                    / f".worker_progress_{rj.result_id}"
+                    f"_{yr}.json"
+                )
+                if _pg_path.exists():
+                    _wp = json.loads(
+                        _pg_path.read_text(encoding="utf-8"),
+                    )
+                    _year_progresses.append(_wp)
+                    _total_bars += _wp.get("total_bars", 0)
+                    _done_bars += _wp.get("bars", 0)
+            if _total_bars > 0:
+                _overall_pct = round(
+                    _done_bars / _total_bars * 100, 1,
+                )
+                _progress["pct"] = _overall_pct
+                _progress["done_bars"] = _done_bars
+                _progress["total_bars"] = _total_bars
+                _progress["years"] = _year_progresses
+                # 全年がsavingフェーズなら集計中
+                if _year_progresses and all(
+                    yp.get("phase") == "saving"
+                    for yp in _year_progresses
+                ):
+                    _progress["phase"] = "saving"
+        except Exception:
+            pass
+
         jobs_data.append({
             "job_id": rj.job.id,
             "result_id": rj.result_id,
@@ -1053,7 +1146,7 @@ def _write_runner_state(
             "started_at": datetime.fromtimestamp(
                 rj.started_at,
             ).isoformat(),
-            "progress": rj.progress,
+            "progress": _progress,
         })
 
     try:
@@ -1109,7 +1202,7 @@ def _read_runner_commands(
 
 
 def stdin_reader(
-    cmd_queue: "import queue; queue.Queue[str]",
+    cmd_queue: queue.Queue[str],
 ) -> None:
     """stdinからコマンドを読み取るスレッド"""
     while True:
@@ -1341,29 +1434,24 @@ def main() -> None:
                 _pg["done"] = done
                 _pg["total"] = total
 
-        # code_dir指定時はサブプロセスで実行
-        if job.code_dir:
-            holder[0] = execute_job_subprocess(
-                job,
-                cancel_ev,
-                max_year_workers=workers,
-                result_id=rid,
-            )
-        elif job.type in ("multi_pair", "portfolio"):
-            holder[0] = execute_multi_pair_job(
-                job,
-                cancel_ev,
-                max_year_workers=workers,
-                result_id=rid,
-                progress_callback=_on_progress,
-            )
-        else:
-            holder[0] = execute_job(
-                job,
-                cancel_ev,
-                workers,
-                rid,
-            )
+        # 年数からtotalを初期化（WebUIで「データ準備中」にならないよう）
+        if _pg is not None and job.years:
+            try:
+                sy, ey = parse_years(job.years)
+                _pg["done"] = 0
+                _pg["total"] = ey - sy + 1
+            except Exception:
+                pass
+
+        # 全ジョブをサブプロセスで実行
+        # （毎回モジュールを新規インポートするため、
+        #   コード変更がランナー再起動なしに反映される）
+        holder[0] = execute_job_subprocess(
+            job,
+            cancel_ev,
+            max_year_workers=workers,
+            result_id=rid,
+        )
 
     while True:
         # -------------------------------------------------------
@@ -1595,6 +1683,7 @@ def main() -> None:
                 if _orig_id not in state.completed_ids:
                     state.completed_ids.append(_orig_id)
                 state.save()
+                _remove_job_from_queue(_orig_id)
             elif _res and _res.status == "cancelled":
                 logger.info(
                     "[%s] キャンセル済み",

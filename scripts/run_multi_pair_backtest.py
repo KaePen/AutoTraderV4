@@ -12,13 +12,15 @@ JPY/USDペアを時系列インターリーブで同時実行し、共有資金�
 from __future__ import annotations
 
 import argparse
-import csv
 import dataclasses
+import gc
 import heapq
+import json
 import logging
 import math
 import sys
 import time
+from collections.abc import Callable
 from concurrent.futures import (
     ProcessPoolExecutor,
     ThreadPoolExecutor,
@@ -266,7 +268,7 @@ class PortfolioState:
 
     def update_positions(
         self,
-        contexts: dict[str, "PairContext"],
+        contexts: dict[str, PairContext],
     ) -> None:
         """全ペアのポジション情報を更新
 
@@ -322,19 +324,11 @@ class PairContext:
 # =============================================================
 # データロード
 # =============================================================
-def load_pair_data(
+def _create_runner(
     symbol: str,
     data_dir: str,
-) -> tuple[BacktestRunner, dict[str, pd.DataFrame]]:
-    """ペアデータをロードしてBacktestRunnerとmarket_dataを返す
-
-    Args:
-        symbol: 通貨ペア名
-        data_dir: データディレクトリ
-
-    Returns:
-        tuple: (BacktestRunner, market_data辞書)
-    """
+) -> BacktestRunner:
+    """ペア用BacktestRunnerを作成"""
     preset = get_preset(symbol)
     config = BacktestConfig(
         symbol=symbol,
@@ -345,21 +339,42 @@ def load_pair_data(
         bonus_max_positions=preset.bonus_max_positions,
         bonus_score_threshold=preset.bonus_score_threshold,
     )
-    runner = BacktestRunner(
+    return BacktestRunner(
         data_dir=data_dir,
         config=config,
         verbose=False,
         log_to_file=False,
     )
-    # 全期間データをロード
-    # load_data()はDaily→D1フォールバック等を処理する
-    market_data = runner._load_all_timeframes(include_m1=True)
-    # _load_all_timeframes でD1がロードされない場合
-    # load_data() の Daily→D1 フォールバックを利用
+
+
+def load_pair_data(
+    symbol: str,
+    data_dir: str,
+    needed_years: list[int] | None = None,
+) -> tuple[BacktestRunner, dict[str, pd.DataFrame]]:
+    """ペアデータをロードしてBacktestRunnerとmarket_dataを返す
+
+    Args:
+        symbol: 通貨ペア名
+        data_dir: データディレクトリ
+        needed_years: 必要な年のリスト（指定時はキャッシュから
+            対象年のみロードしメモリ節約）
+
+    Returns:
+        tuple: (BacktestRunner, market_data辞書)
+    """
+    runner = _create_runner(symbol, data_dir)
+    market_data = runner._load_all_timeframes(
+        include_m1=True,
+        needed_years=needed_years,
+    )
     if "D1" not in market_data:
         runner.load_data()
         if runner._d1_df is not None:
             market_data["D1"] = runner._d1_df
+    # ランナー内部キャッシュを解放
+    if hasattr(runner, "_tf_data"):
+        runner._tf_data.clear()
     return runner, market_data
 
 
@@ -367,6 +382,7 @@ def load_all_pair_data(
     symbols: list[str],
     data_dir: str,
     max_workers: int = 6,
+    needed_years: list[int] | None = None,
 ) -> dict[str, tuple[BacktestRunner, dict[str, pd.DataFrame]]]:
     """全ペアのデータをスレッド並列でロード
 
@@ -377,6 +393,7 @@ def load_all_pair_data(
         symbols: シンボルリスト
         data_dir: データディレクトリ
         max_workers: 並列ワーカー数
+        needed_years: 必要な年リスト（メモリ節約用）
 
     Returns:
         dict[str, tuple[BacktestRunner, dict[str, pd.DataFrame]]]:
@@ -385,21 +402,33 @@ def load_all_pair_data(
     runners: dict[str, tuple[BacktestRunner, dict[str, pd.DataFrame]]] = {}
     workers = min(max_workers, len(symbols))
     _t0 = time.time()
-    print(f"\nデータロード中... ({len(symbols)}ペア, workers={workers})")
+    _yr_str = f", years={needed_years}" if needed_years else ""
+    print(
+        f"\nデータロード中... "
+        f"({len(symbols)}ペア, workers={workers}{_yr_str})",
+        flush=True,
+    )
 
     with ThreadPoolExecutor(max_workers=workers) as executor:
         futures = {
-            executor.submit(load_pair_data, sym, data_dir): sym
+            executor.submit(
+                load_pair_data, sym, data_dir, needed_years,
+            ): sym
             for sym in symbols
         }
-        for future in as_completed(futures):
+        for _done, future in enumerate(as_completed(futures), 1):
             sym = futures[future]
             _elapsed = time.time() - _t0
             runners[sym] = future.result()
-            print(f"  {sym}: ロード完了 ({_elapsed:.1f}s)")
+            print(
+                f"  [{_done}/{len(symbols)}] {sym}: "
+                f"ロード完了 ({_elapsed:.1f}s)",
+                flush=True,
+            )
 
+    gc.collect()
     total = time.time() - _t0
-    print(f"  全ペアロード完了: {total:.1f}s")
+    print(f"  全ペアロード完了: {total:.1f}s", flush=True)
     return runners
 
 
@@ -526,6 +555,7 @@ def run_multi_pair_year(
     contexts: dict[str, PairContext],
     multi_config: MultiPairConfig,
     portfolio: PortfolioState,
+    progress_file: str | None = None,
 ) -> dict[str, list[Any]]:
     """1年分のマルチペアインターリーブ実行
 
@@ -534,6 +564,7 @@ def run_multi_pair_year(
         contexts: ペアコンテキスト辞書
         multi_config: テスト設定
         portfolio: 共有ポートフォリオ状態
+        progress_file: 進捗書き出しファイルパス（WebUI連携用）
 
     Returns:
         dict: ペア別トレードリスト
@@ -657,9 +688,11 @@ def run_multi_pair_year(
             )
 
         # グローバル制限チェック（シグナルありの場合のみ）
-        if signal is not None:
-            if not portfolio.can_open_position(sym, multi_config):
-                signal = None  # エントリーブロック
+        if (
+            signal is not None
+            and not portfolio.can_open_position(sym, multi_config)
+        ):
+            signal = None  # エントリーブロック
 
         # balance記録・ポジション数スナップショット
         balance_before = ctx.simulator.state.balance
@@ -741,6 +774,21 @@ def run_multi_pair_year(
                 f"{elapsed:.0f}s",
                 end="\r",
             )
+            # WebUI用進捗ファイル書き出し（10000バーごと）
+            if progress_file and bar_num % 10000 == 0:
+                try:
+                    _pg_data = json.dumps({
+                        "year": year,
+                        "pct": round(pct, 1),
+                        "bars": bar_num,
+                        "total_bars": total_bars,
+                        "elapsed": round(elapsed, 0),
+                    })
+                    Path(progress_file).write_text(
+                        _pg_data, encoding="utf-8",
+                    )
+                except OSError:
+                    pass
 
     # 年末: 全ペア強制決済
     for sym, ctx in contexts.items():
@@ -788,6 +836,23 @@ def run_multi_pair_year(
         f"{elapsed:.0f}s          ",
     )
 
+    # 集計中フェーズを進捗ファイルに書き出し
+    if progress_file:
+        try:
+            _pg_data = json.dumps({
+                "year": year,
+                "pct": 100.0,
+                "bars": total_bars,
+                "total_bars": total_bars,
+                "elapsed": round(elapsed, 0),
+                "phase": "saving",
+            })
+            Path(progress_file).write_text(
+                _pg_data, encoding="utf-8",
+            )
+        except OSError:
+            pass
+
     # ペア別トレード返却
     pair_trades: dict[str, list[Any]] = {}
     for sym, ctx in contexts.items():
@@ -809,19 +874,25 @@ def _run_year_worker(args: tuple) -> dict[str, Any] | None:
     Args:
         args: (year, symbols, data_dir,
                multi_config_dict, bot_extra_overrides,
-               pm_extra_overrides)
+               pm_extra_overrides[, job_id])
 
     Returns:
         dict | None: 年の実行結果（データなしならNone）
     """
-    (
-        year,
-        symbols,
-        data_dir,
-        multi_config_dict,
-        bot_extra_overrides,
-        pm_extra_overrides,
-    ) = args
+    # 7要素目(job_id)はオプション（後方互換性）
+    if len(args) >= 7:
+        (
+            year, symbols, data_dir,
+            multi_config_dict, bot_extra_overrides,
+            pm_extra_overrides, _job_id,
+        ) = args
+    else:
+        (
+            year, symbols, data_dir,
+            multi_config_dict, bot_extra_overrides,
+            pm_extra_overrides,
+        ) = args
+        _job_id = ""
 
     # ワーカープロセス内でインポート（spawn対応）
     import sys as _sys
@@ -838,11 +909,27 @@ def _run_year_worker(args: tuple) -> dict[str, Any] | None:
     # MultiPairConfig 復元
     mc = MultiPairConfig(**multi_config_dict)
 
-    # データロード（各ワーカーが独自にスレッド並列ロード）
+    import time as _time
+
+    _t0 = _time.time()
+    print(
+        f"  [Worker {year}] データロード開始",
+        flush=True,
+    )
+
+    # データロード（対象年のみロードしメモリ節約）
     runners = load_all_pair_data(
         symbols,
         data_dir,
         max_workers=min(6, len(symbols)),
+        needed_years=[year],
+    )
+
+    _elapsed = _time.time() - _t0
+    print(
+        f"  [Worker {year}] データロード完了 "
+        f"({_elapsed:.1f}s)",
+        flush=True,
     )
 
     # ポートフォリオ初期化（年独立: 毎年100万リセット）
@@ -879,12 +966,39 @@ def _run_year_worker(args: tuple) -> dict[str, Any] | None:
     if not contexts:
         return None
 
+    print(
+        f"  [Worker {year}] インターリーブ実行中 "
+        f"({len(contexts)}ペア)...",
+        flush=True,
+    )
+
+    # 進捗ファイルパス（WebUI連携用）
+    _pg_file = ""
+    if _job_id:
+        _pg_dir = _Path("D:/Projects/AutoTraderV4_data")
+        _pg_file = str(
+            _pg_dir / f".worker_progress_{_job_id}_{year}.json"
+        )
+
     # インターリーブ実行
+    _t1 = _time.time()
     pair_trades = run_multi_pair_year(
         year,
         contexts,
         mc,
         portfolio,
+        progress_file=_pg_file or None,
+    )
+
+    _elapsed2 = _time.time() - _t1
+    _total = _time.time() - _t0
+    _year_trades = sum(len(t) for t in pair_trades.values())
+    _year_pnl = portfolio.equity - portfolio.initial_equity
+    print(
+        f"  [Worker {year}] 完了 "
+        f"(sim={_elapsed2:.1f}s, total={_total:.1f}s, "
+        f"trades={_year_trades}, PnL={_year_pnl:+,.0f})",
+        flush=True,
     )
 
     # 結果をシリアライズ可能なdictに変換
@@ -915,6 +1029,10 @@ def _run_year_worker(args: tuple) -> dict[str, Any] | None:
             "gross_loss": gl,
             "net_profit": np_,
         }
+
+    # メモリ解放（ワーカープロセス内）
+    del contexts, runners, pair_trades
+    gc.collect()
 
     return {
         "year": year,
@@ -1106,6 +1224,8 @@ def run_test_case(
     data_dir: str = "",
     bot_extra_overrides: dict[str, Any] | None = None,
     pm_extra_overrides: dict[str, Any] | None = None,
+    progress_callback: Callable[[int, int], None] | None = None,
+    job_id: str = "",
 ) -> dict[str, Any]:
     """テストケースを実行（順次 or 年並列）
 
@@ -1120,6 +1240,8 @@ def run_test_case(
         data_dir: データディレクトリ（並列実行時に必須）
         bot_extra_overrides: 追加botオーバーライド
         pm_extra_overrides: PM設定オーバーライド
+        progress_callback: 年完了時の進捗通知(done, total)
+        job_id: ジョブID（進捗ファイル名に使用）
 
     Returns:
         dict: テスト結果
@@ -1150,6 +1272,7 @@ def run_test_case(
                 mc_dict,
                 _extra,
                 _pm_extra,
+                job_id,
             )
             for year in range(start_year, end_year + 1)
         ]
@@ -1158,11 +1281,15 @@ def run_test_case(
         with ProcessPoolExecutor(
             max_workers=max_year_workers,
         ) as executor:
-            futures = executor.map(
-                _run_year_worker,
-                worker_args,
-            )
-            for yr_result in futures:
+            future_map = {
+                executor.submit(
+                    _run_year_worker, wa,
+                ): wa[0]  # wa[0] = year
+                for wa in worker_args
+            }
+            for future in as_completed(future_map):
+                future_map[future]  # year (使用済み)
+                yr_result = future.result()
                 if yr_result is not None:
                     year_results.append(yr_result)
                     print(
@@ -1172,6 +1299,10 @@ def run_test_case(
                         f"Equity="
                         f"{yr_result['final_equity']:,.0f}"
                     )
+                    if progress_callback is not None:
+                        progress_callback(
+                            len(year_results), num_years,
+                        )
 
         if not year_results:
             # データなし時のフォールバック
@@ -1214,6 +1345,12 @@ def run_test_case(
     total_blocked_exposure = 0
 
     for year in range(start_year, end_year + 1):
+        _t_year = time.time()
+        print(
+            f"\n  [{year}年] データロード開始...",
+            flush=True,
+        )
+
         # 毎年エクイティを初期残高にリセット
         portfolio = PortfolioState(
             equity=INITIAL_EQUITY,
@@ -1221,10 +1358,23 @@ def run_test_case(
             peak_equity=INITIAL_EQUITY,
         )
 
+        # 年ごとにデータロード（メモリ節約）
+        year_runners = load_all_pair_data(
+            symbols,
+            data_dir,
+            needed_years=[year],
+        )
+
+        _t_load = time.time() - _t_year
+        print(
+            f"  [{year}年] データロード完了 ({_t_load:.1f}s)",
+            flush=True,
+        )
+
         # ペアコンテキスト構築
         contexts: dict[str, PairContext] = {}
         for sym in symbols:
-            runner, full_md = runners[sym]
+            runner, full_md = year_runners[sym]
             # ペア別bot_config構築（multi_mode=True）
             bot_config = build_bot_config(
                 sym,
@@ -1249,12 +1399,28 @@ def run_test_case(
         if not contexts:
             continue
 
+        print(
+            f"  [{year}年] インターリーブ実行中 "
+            f"({len(contexts)}ペア)...",
+            flush=True,
+        )
+
         # インターリーブ実行
+        _t_sim = time.time()
         pair_trades = run_multi_pair_year(
             year,
             contexts,
             test_config,
             portfolio,
+        )
+
+        _t_sim_elapsed = time.time() - _t_sim
+        _t_total = time.time() - _t_year
+        print(
+            f"  [{year}年] 完了 "
+            f"(sim={_t_sim_elapsed:.1f}s, "
+            f"total={_t_total:.1f}s)",
+            flush=True,
         )
 
         # トレード蓄積
@@ -1294,6 +1460,13 @@ def run_test_case(
             f"Trades={year_trades}, "
             f"Equity={portfolio.equity:,.0f}"
         )
+        if progress_callback is not None:
+            _done = year - start_year + 1
+            progress_callback(_done, num_years)
+
+        # メモリ解放（年ごと）
+        del contexts, year_runners
+        gc.collect()
 
     # 結果集約（年独立モード）
     total_profit = sum(yr["pnl"] for yr in yearly_results_seq)
