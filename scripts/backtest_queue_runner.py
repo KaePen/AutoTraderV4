@@ -166,13 +166,12 @@ class Job:
     def cpu_cost(self) -> float:
         """このジョブが消費するCPUスレッド数
 
-        月並列有効時: year_workers × max_month_workers
+        月並列有効時: max_month_workers（年はシーケンシャル）
         月並列なし: year_workers × THREADS_PER_YEAR
         """
-        yw = self.effective_year_workers()
         if self._is_monthly():
-            return yw * self._max_month_workers()
-        return yw * THREADS_PER_YEAR
+            return float(self._max_month_workers())
+        return self.effective_year_workers() * THREADS_PER_YEAR
 
 
 @dataclass
