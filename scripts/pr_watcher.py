@@ -99,13 +99,12 @@ REPO = "KaePen/AutoTraderV4"
 POLL_INTERVAL_SEC = 5
 MAX_PARALLEL_MERGES = 3
 CLEANUP_EVERY_N_CYCLES = 10  # N周期ごとにフルクリーンアップ実行
+MAX_MERGE_RETRIES = 2  # 初回+リトライ2回=最大3回試行
 PROJECT_DIR = Path(os.environ.get("PROJECT_DIR", Path(__file__).parent.parent))
 TMP_DIR = PROJECT_DIR / "tmp"
 
 # 安全クリーンアップ設定
-CLEANUP_GRACE_MINUTES = int(
-    os.environ.get("CLEANUP_GRACE_MINUTES", "360")
-)
+CLEANUP_GRACE_MINUTES = int(os.environ.get("CLEANUP_GRACE_MINUTES", "360"))
 LOCK_FILE_NAME = ".claude-active"
 
 # merge + push は排他制御（並行マージによるpush競合を防止）
@@ -126,6 +125,28 @@ CONFLICT_RESOLVE_PROMPT = """
 解決できない場合は git -C {project_dir} merge --abort して処理を中断し理由を説明してください。
 
 【重要】git checkout は絶対に使わないこと。
+"""
+
+MERGE_FAIL_RESOLVE_PROMPT = """
+あなたはgitのマージ問題を診断・解決する専門エージェントです。
+
+対象PR: #{pr_number} - {pr_title}
+ブランチ: {branch}
+作業ディレクトリ: {project_dir}
+
+エラー内容:
+{error_detail}
+
+以下の手順で調査・解決してください:
+1. git -C {project_dir} status でリポジトリの状態を確認
+2. エラーの原因を特定
+3. 可能であれば解決策を実行
+4. 解決できない場合はその理由を説明
+
+【重要】
+- git push --force は絶対に使わないこと
+- main ブランチへの直接コミットはしないこと
+- 解決できない場合は正直にその旨を報告すること
 """
 
 
@@ -257,9 +278,9 @@ def _get_worktree_for_branch(branch: str) -> str | None:
     current_path: str | None = None
     for line in r.stdout.splitlines():
         if line.startswith("worktree "):
-            current_path = line[len("worktree "):]
+            current_path = line[len("worktree ") :]
         elif line.startswith("branch refs/heads/"):
-            wt_branch = line[len("branch refs/heads/"):]
+            wt_branch = line[len("branch refs/heads/") :]
             if (
                 wt_branch == branch
                 and current_path
@@ -377,7 +398,7 @@ def _cleanup_orphan_tmp_dirs() -> tuple[int, int]:
     if r.returncode == 0:
         for line in r.stdout.splitlines():
             if line.startswith("worktree "):
-                resolved = str(Path(line[len("worktree "):]).resolve())
+                resolved = str(Path(line[len("worktree ") :]).resolve())
                 valid_paths.add(resolved)
 
     removed = 0
@@ -524,7 +545,7 @@ def cleanup_stale() -> None:
             ref = line.strip()
             if not ref.startswith("origin/"):
                 continue
-            remote_branch = ref[len("origin/"):]
+            remote_branch = ref[len("origin/") :]
             if remote_branch in ("main", "HEAD"):
                 continue
             dr = _git(
@@ -630,6 +651,87 @@ def _resolve_conflict_with_claude(
     return resolved
 
 
+def _resolve_merge_failure_with_claude(
+    pr_number: int,
+    pr_title: str,
+    branch: str,
+    error_detail: str,
+) -> bool:
+    """Claudeエージェントにマージ失敗の診断・解決を委譲する。
+
+    コンフリクト以外のマージ失敗（pull --ff-only失敗、
+    merge失敗等）に対してClaude Codeを呼び出して解決を試みる。
+
+    Args:
+        pr_number: PR番号
+        pr_title: PRタイトル
+        branch: ブランチ名
+        error_detail: エラーの詳細情報
+
+    Returns:
+        bool: 解決成功ならTrue
+    """
+    prompt = MERGE_FAIL_RESOLVE_PROMPT.format(
+        pr_number=pr_number,
+        pr_title=pr_title,
+        branch=branch,
+        project_dir=str(PROJECT_DIR),
+        error_detail=error_detail,
+    )
+
+    print(
+        f"[INFO] PR #{pr_number} マージ失敗 - Claudeに診断・解決を委譲",
+        flush=True,
+    )
+
+    env = os.environ.copy()
+    env.pop("CLAUDECODE", None)
+
+    try:
+        result = subprocess.run(
+            [
+                CLAUDE_CMD,
+                "-p",
+                prompt,
+                "--allowedTools",
+                "Bash,Read,Edit,Write,Glob,Grep",
+            ],
+            env=env,
+            cwd=str(PROJECT_DIR),
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=600,  # 10分上限
+        )
+    except subprocess.TimeoutExpired:
+        print(
+            f"[ERROR] PR #{pr_number} マージ失敗解決タイムアウト（10分超過）",
+            flush=True,
+        )
+        return False
+
+    if result.stdout:
+        print(result.stdout, end="", flush=True)
+    if result.stderr:
+        print(result.stderr, end="", flush=True)
+
+    # 解決成功の判定: マージ中状態が解消されていること
+    if _is_merge_in_progress():
+        print(
+            f"[WARN] PR #{pr_number} マージ状態が残存 - merge --abort で復旧",
+            flush=True,
+        )
+        _git(["merge", "--abort"])
+        return False
+
+    print(
+        f"[INFO] PR #{pr_number} マージ失敗の診断完了",
+        flush=True,
+    )
+    return True
+
+
 # ─── PR取得・マージ ─────────────────────────────────
 
 
@@ -670,7 +772,8 @@ def auto_merge_pr(
     pr: dict[str, object],
     merged: set[int] | None = None,
     pending_cleanup: set[str] | None = None,
-) -> None:
+    fail_count: dict[int, int] | None = None,
+) -> str:
     """PRを差分確認してmainにマージする。
 
     マージ後のローカルクリーンアップはアクティブチェック付きで実行。
@@ -688,12 +791,42 @@ def auto_merge_pr(
         pr: PR情報辞書（number, title, headRefName）
         merged: マージ成功したPR番号のセット（成功時に追加）
         pending_cleanup: 削除延期ブランチのセット（リトライ用）
+        fail_count: PR番号→失敗回数の辞書（失敗時にカウントアップ）
+
+    Returns:
+        str: "merged"=成功, "failed"=失敗（リトライ不要）,
+             "retry"=失敗（リトライ可能）
     """
     num = pr["number"]
     branch = pr["headRefName"]
     title = pr["title"]
 
     print(f"[INFO] PR #{num} 処理開始: {title}", flush=True)
+
+    def _inc_fail() -> str:
+        """失敗カウントを増やし、リトライ可否を返す。"""
+        if fail_count is not None:
+            fail_count[num] = fail_count.get(num, 0) + 1
+            if fail_count[num] > MAX_MERGE_RETRIES:
+                print(
+                    f"[FAILED] PR #{num} 最大リトライ回数"
+                    f"（{MAX_MERGE_RETRIES}）超過 - スキップ",
+                    flush=True,
+                )
+                return "failed"
+        return "retry"
+
+    def _is_network_error(stderr: str) -> bool:
+        """ネットワーク系エラーかどうかを判定する。"""
+        indicators = [
+            "Could not resolve host",
+            "unable to access",
+            "Connection refused",
+            "Connection timed out",
+            "SSL",
+            "fatal: unable to connect",
+        ]
+        return any(ind in stderr for ind in indicators)
 
     # 1. リモートブランチをfetch
     r = _git(["fetch", "origin", branch])
@@ -702,7 +835,8 @@ def auto_merge_pr(
             f"[ERROR] PR #{num} fetch失敗: {r.stderr}",
             flush=True,
         )
-        return
+        # ネットワークエラーはClaude不要、リトライのみ
+        return _inc_fail()
 
     # 2. 差分サマリをログ出力（確認用）
     diff = _git(
@@ -723,11 +857,22 @@ def auto_merge_pr(
         # mainを最新化してからマージ
         r = _git(["pull", "--ff-only", "origin", "main"])
         if r.returncode != 0:
+            err = r.stderr.strip()
             print(
-                f"[ERROR] PR #{num} pull失敗: {r.stderr}",
+                f"[ERROR] PR #{num} pull失敗: {err}",
                 flush=True,
             )
-            return
+            if _is_network_error(err):
+                return _inc_fail()
+            # pull --ff-only失敗はClaude診断を試みる
+            resolved = _resolve_merge_failure_with_claude(
+                num,
+                title,
+                branch,
+                f"git pull --ff-only origin main 失敗:\n{err}",
+            )
+            if not resolved:
+                return _inc_fail()
 
         r = _git(
             [
@@ -745,28 +890,55 @@ def auto_merge_pr(
                 or "Automatic merge failed" in r.stderr
                 or _is_merge_in_progress()
             )
-            if not is_conflict:
+            if is_conflict:
+                resolved = _resolve_conflict_with_claude(
+                    num,
+                    title,
+                )
+                if not resolved:
+                    _git(["merge", "--abort"])
+                    return _inc_fail()
+            else:
+                err = r.stderr.strip()
                 print(
-                    f"[ERROR] PR #{num} merge失敗: {r.stderr}",
+                    f"[ERROR] PR #{num} merge失敗: {err}",
                     flush=True,
                 )
                 _git(["merge", "--abort"])
-                return
-
-            resolved = _resolve_conflict_with_claude(num, title)
-            if not resolved:
-                _git(["merge", "--abort"])
-                return
+                # merge失敗はClaude診断を試みる
+                resolved = _resolve_merge_failure_with_claude(
+                    num,
+                    title,
+                    branch,
+                    f"git merge --no-ff 失敗:\n{err}",
+                )
+                if not resolved:
+                    return _inc_fail()
+                # Claude解決後、再度マージを試みる
+                r2 = _git(
+                    [
+                        "merge",
+                        "--no-ff",
+                        f"origin/{branch}",
+                        "-m",
+                        f"Merge PR #{num}: {title}",
+                    ]
+                )
+                if r2.returncode != 0:
+                    _git(["merge", "--abort"])
+                    return _inc_fail()
 
         r = _git(["push", "origin", "main"])
         if r.returncode != 0:
+            err = r.stderr.strip()
             print(
-                f"[ERROR] PR #{num} push失敗: {r.stderr}",
+                f"[ERROR] PR #{num} push失敗: {err}",
                 flush=True,
             )
-            # マージコミットをロールバック（次のPRのpullが失敗するのを防止）
+            # マージコミットをロールバック
             _git(["reset", "--hard", "HEAD~1"])
-            return
+            # ネットワークエラーはClaude不要
+            return _inc_fail()
 
     # 4. リモートブランチ削除
     r = _git(["push", "origin", "--delete", branch])
@@ -784,18 +956,21 @@ def auto_merge_pr(
         reason = _is_worktree_active(wt_path)
         if reason:
             print(
-                f"[SKIP] PR #{num} ローカル掃除延期"
-                f"（{reason}）: {wt_path}",
+                f"[SKIP] PR #{num} ローカル掃除延期（{reason}）: {wt_path}",
                 flush=True,
             )
         else:
             _cleanup_ok = _delete_branch(
-                branch, force=True, respect_activity=False,
+                branch,
+                force=True,
+                respect_activity=False,
             )
     else:
         # worktreeなし → ブランチだけ削除
         _cleanup_ok = _delete_branch(
-            branch, force=True, respect_activity=False,
+            branch,
+            force=True,
+            respect_activity=False,
         )
 
     if not _cleanup_ok and pending_cleanup is not None:
@@ -806,7 +981,11 @@ def auto_merge_pr(
 
     if merged is not None:
         merged.add(num)
+    # 成功時は失敗カウントをリセット
+    if fail_count is not None and num in fail_count:
+        del fail_count[num]
     print(f"[INFO] PR #{num} マージ完了: {title}", flush=True)
+    return "merged"
 
 
 # ─── メインループ ──────────────────────────────────
@@ -839,9 +1018,13 @@ def main() -> None:
 
     # in_flight: 処理中（重複submit防止）
     # merged: マージ成功済み（再試行不要）
+    # failed: 最大リトライ超過（スキップ対象）
+    # fail_count: PR番号→失敗回数
     # pending_cleanup: 削除延期ブランチ（リトライ対象）
     in_flight: set[int] = set()
     merged: set[int] = set()
+    failed: set[int] = set()
+    fail_count: dict[int, int] = {}
     pending_cleanup: set[str] = set()
     cycle_count = 0
 
@@ -849,7 +1032,7 @@ def main() -> None:
         future: object,
         pr_num: int,
     ) -> None:
-        """ワーカー完了時: 成功ならmergedに、失敗ならin_flightから除外して再試行可能にする。"""
+        """ワーカー完了時: 結果に応じてmerged/failed/再試行可能に振り分ける。"""
         from concurrent.futures import Future
 
         in_flight.discard(pr_num)
@@ -857,10 +1040,24 @@ def main() -> None:
             exc = future.exception()
             if exc:
                 print(
-                    f"[ERROR] PR #{pr_num} 未処理例外"
-                    f"（次サイクルで再試行）: {exc}",
+                    f"[ERROR] PR #{pr_num} 未処理例外: {exc}",
                     flush=True,
                 )
+                # 例外時もfail_countを増やす
+                cnt = fail_count.get(pr_num, 0) + 1
+                fail_count[pr_num] = cnt
+                if cnt > MAX_MERGE_RETRIES:
+                    failed.add(pr_num)
+                    print(
+                        f"[FAILED] PR #{pr_num} リトライ上限超過 - スキップ",
+                        flush=True,
+                    )
+                return
+            result = future.result()
+            if result == "failed":
+                failed.add(pr_num)
+            # "merged"はauto_merge_pr内でmergedに追加済み
+            # "retry"は何もしない（次サイクルで再試行）
 
     with ThreadPoolExecutor(
         max_workers=MAX_PARALLEL_MERGES,
@@ -868,12 +1065,9 @@ def main() -> None:
         try:
             while True:
                 prs = get_open_prs()
-                # マージ済み・処理中のPRをスキップ
-                skip = merged | in_flight
-                new_prs = [
-                    pr for pr in prs
-                    if pr["number"] not in skip
-                ]
+                # マージ済み・処理中・失敗済みのPRをスキップ
+                skip = merged | in_flight | failed
+                new_prs = [pr for pr in prs if pr["number"] not in skip]
 
                 cycle_count += 1
 
@@ -898,6 +1092,7 @@ def main() -> None:
                             pr,
                             merged,
                             pending_cleanup,
+                            fail_count,
                         )
                         fut.add_done_callback(
                             lambda f, n=pr_num: _on_future_done(f, n)
@@ -919,8 +1114,7 @@ def main() -> None:
                             quiet=True,
                         ):
                             print(
-                                f"[INFO] 延期ブランチ削除"
-                                f"成功: {br}",
+                                f"[INFO] 延期ブランチ削除成功: {br}",
                                 flush=True,
                             )
                             done.add(br)
