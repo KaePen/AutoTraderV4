@@ -510,6 +510,13 @@ class UnifiedBotConfig:
     volume_filter_threshold: float = 0.8
     # ボリュームフィルタ最大ペナルティ
     volume_filter_penalty: float = 0.3
+    # --- M1モメンタム確認ゲート ---
+    # M1モメンタム確認ゲート有効化
+    m1_momentum_gate_enabled: bool = True
+    # 最大待機M1足数
+    m1_momentum_max_wait: int = 5
+    # 必要連続モメンタム足数
+    m1_momentum_required: int = 2
 
     def get_evaluator_config(self, timeframe: str) -> EvaluatorConfig:
         """時間足別評価器設定を取得
