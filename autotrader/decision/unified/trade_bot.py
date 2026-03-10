@@ -11,7 +11,7 @@
 from __future__ import annotations
 
 import dataclasses
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 from datetime import date, datetime, timedelta
 from typing import TYPE_CHECKING
 
@@ -83,6 +83,75 @@ class PendingEntry:
     rationale: str = ""
     consensus: object | None = None
     regime_result: object | None = None
+
+
+@dataclass
+class PendingMomentumEntry:
+    """M1モメンタム確認待機エントリー.
+
+    コンセンサス通過後、M1の直近足が
+    トレード方向にモメンタムを持つことを確認する。
+
+    Attributes:
+        direction: シグナル方向
+        bars_waited: 待機済みM1足数
+        max_wait_bars: 最大待機足数
+        momentum_required: 必要連続モメンタム足数
+        momentum_count: 現在の連続カウント
+        sl_pips: SL(pips)
+        tp_pips: TP(pips)
+        confidence: 確度
+        consensus_score: コンセンサススコア
+        lot: ロットサイズ
+        primary_tf: 主要時間足
+        rationale: 判断理由
+        regime: レジーム文字列
+        mode: モード文字列
+        entry_threshold: エントリー閾値
+        htf_alignment: HTF整合スコア
+        penalty_total: ペナルティ合計
+        penalty_breakdown: ペナルティ内訳
+        trend_strength: トレンド強度
+        strategy_id: 戦略ID
+        tf_score_breakdowns: TF別スコア内訳
+        buy_score: BUYスコア
+        sell_score: SELLスコア
+        aligned_tfs: 整合TFリスト
+        scores: TF別スコア
+        tf_directions: TF別方向
+    """
+
+    direction: SignalType
+    bars_waited: int = 0
+    max_wait_bars: int = 5
+    momentum_required: int = 2
+    momentum_count: int = 0
+    # シグナル情報の保存
+    sl_pips: float = 0.0
+    tp_pips: float = 0.0
+    confidence: float = 0.0
+    consensus_score: float = 0.0
+    lot: float = 0.0
+    primary_tf: str = ""
+    rationale: str = ""
+    regime: str = ""
+    mode: str = ""
+    consensus: object | None = None
+    regime_result: object | None = None
+    entry_threshold: float = 0.0
+    htf_alignment: float = 0.0
+    penalty_total: float = 0.0
+    penalty_breakdown: dict = field(default_factory=dict)
+    trend_strength: float = 0.0
+    strategy_id: str = ""
+    tf_score_breakdowns: dict = field(
+        default_factory=dict,
+    )
+    buy_score: float = 0.0
+    sell_score: float = 0.0
+    aligned_tfs: list = field(default_factory=list)
+    scores: dict = field(default_factory=dict)
+    tf_directions: dict = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -610,6 +679,11 @@ class UnifiedTradeBot:
         # M1リトレースエントリー保留
         self._pending_entry: PendingEntry | None = None
 
+        # M1モメンタム確認待機
+        self._pending_momentum: (
+            PendingMomentumEntry | None
+        ) = None
+
     def set_market_data(
         self,
         data: dict[str, pd.DataFrame],
@@ -809,6 +883,13 @@ class UnifiedTradeBot:
                 return self._hold_signal(
                     f"リトレース待機中({_pe.bars_waited}/{_pe.max_wait_bars})"
                 )
+
+        # M1モメンタム確認待機チェック
+        if self._pending_momentum is not None:
+            return self._check_pending_momentum(
+                current_time,
+                candle,
+            )
 
         # 1. 日次リセット
         py_time = current_time.to_pydatetime()
@@ -1708,6 +1789,60 @@ class UnifiedTradeBot:
             else plan.mode
         )
 
+        # M1モメンタム確認ゲート:
+        # リトレース待機と排他的（リトレース優先）
+        if (
+            self.config.m1_momentum_gate_enabled
+            and not self.config.m1_retrace_entry_enabled
+            and self._pending_entry is None
+        ):
+            _scores = {
+                tf: sig.confidence
+                for tf, sig in tf_signals.items()
+            }
+            self._pending_momentum = PendingMomentumEntry(
+                direction=consensus.direction,
+                bars_waited=0,
+                max_wait_bars=(
+                    self.config.m1_momentum_max_wait
+                ),
+                momentum_required=(
+                    self.config.m1_momentum_required
+                ),
+                momentum_count=0,
+                sl_pips=sl_pips,
+                tp_pips=tp_pips,
+                confidence=ret_confidence,
+                consensus_score=consensus.score,
+                lot=lot,
+                primary_tf=plan.primary_tf,
+                rationale=rationale,
+                regime=regime_result.regime.value,
+                mode=plan.mode,
+                consensus=consensus,
+                regime_result=regime_result,
+                entry_threshold=consensus.threshold,
+                htf_alignment=htf_alignment,
+                penalty_total=sg_result.total_penalty,
+                penalty_breakdown={
+                    r.value: v
+                    for r, v in sg_result.penalties.items()
+                },
+                trend_strength=(
+                    regime_result.trend_strength
+                ),
+                strategy_id=_strategy_id,
+                tf_score_breakdowns=tf_breakdowns,
+                buy_score=consensus.buy_score,
+                sell_score=consensus.sell_score,
+                aligned_tfs=consensus.aligned_tfs,
+                scores=_scores,
+                tf_directions=tf_directions,
+            )
+            return self._hold_signal(
+                "M1モメンタム確認待機開始"
+            )
+
         return ConsolidatedSignal(
             direction=consensus.direction,
             confidence=ret_confidence,
@@ -2312,6 +2447,125 @@ class UnifiedTradeBot:
                 if pe.regime_result and hasattr(pe.regime_result, "regime")
                 else None
             ),
+        )
+
+    def _check_pending_momentum(
+        self,
+        current_time: pd.Timestamp,
+        candle: Candle | None,
+    ) -> ConsolidatedSignal:
+        """M1モメンタム確認待機を処理する.
+
+        Args:
+            current_time: 現在時刻
+            candle: 現在足
+
+        Returns:
+            ConsolidatedSignal: シグナル
+        """
+        pm = self._pending_momentum
+        assert pm is not None  # noqa: S101
+        pm.bars_waited += 1
+
+        # M1足のモメンタム確認
+        m1_row = self._get_current_row(
+            "M1", current_time,
+        )
+        if m1_row is not None:
+            close = m1_row.get("close")
+            open_ = m1_row.get("open")
+            if (
+                close is not None
+                and open_ is not None
+                and not pd.isna(close)
+                and not pd.isna(open_)
+            ):
+                _cl = float(close)
+                _op = float(open_)
+                # 方向確認: BUY=陽線, SELL=陰線
+                is_momentum = (
+                    pm.direction == SignalType.BUY
+                    and _cl > _op
+                ) or (
+                    pm.direction == SignalType.SELL
+                    and _cl < _op
+                )
+
+                if is_momentum:
+                    pm.momentum_count += 1
+                else:
+                    pm.momentum_count = 0  # リセット
+
+                # 確認完了 → エントリーシグナル発行
+                if pm.momentum_count >= pm.momentum_required:
+                    sig = self._build_momentum_signal(
+                        pm, _cl,
+                    )
+                    self._pending_momentum = None
+                    return sig
+
+        # タイムアウト → 見送り
+        if pm.bars_waited >= pm.max_wait_bars:
+            self._pending_momentum = None
+            return self._hold_signal(
+                "M1モメンタム確認タイムアウト"
+                f"({pm.max_wait_bars}本)"
+            )
+
+        # 待機継続 → HOLD
+        return self._hold_signal(
+            f"M1モメンタム確認中"
+            f"({pm.momentum_count}/"
+            f"{pm.momentum_required}連続, "
+            f"{pm.bars_waited}/"
+            f"{pm.max_wait_bars}本)"
+        )
+
+    def _build_momentum_signal(
+        self,
+        pm: PendingMomentumEntry,
+        entry_close: float,
+    ) -> ConsolidatedSignal:
+        """モメンタム確認済みエントリーシグナルを構築.
+
+        Args:
+            pm: モメンタム待機データ
+            entry_close: エントリー時点の終値
+
+        Returns:
+            ConsolidatedSignal: エントリーシグナル
+        """
+        return ConsolidatedSignal(
+            direction=pm.direction,
+            confidence=pm.confidence,
+            primary_tf=pm.primary_tf,
+            aligned_tfs=pm.aligned_tfs,
+            sl_pips=pm.sl_pips,
+            tp_pips=pm.tp_pips,
+            rationale=(
+                f"M1モメンタム確認済み: "
+                f"{pm.momentum_required}本連続, "
+                f"waited={pm.bars_waited}bars, "
+                f"{pm.rationale}"
+            ),
+            scores=pm.scores,
+            regime=pm.regime,
+            mode=pm.mode,
+            consensus_score=pm.consensus_score,
+            tf_score_breakdowns=(
+                pm.tf_score_breakdowns
+            ),
+            tf_directions=pm.tf_directions,
+            strategy_id=pm.strategy_id,
+            entry_threshold=pm.entry_threshold,
+            htf_alignment=pm.htf_alignment,
+            penalty_total=pm.penalty_total,
+            penalty_breakdown=pm.penalty_breakdown,
+            trend_strength=pm.trend_strength,
+            buy_score=pm.buy_score,
+            sell_score=pm.sell_score,
+            lot=pm.lot,
+            entry_price=entry_close,
         )
 
     def _get_current_row(
