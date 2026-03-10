@@ -67,6 +67,9 @@ from autotrader.decision.unified import (  # noqa: E402
 from autotrader.decision.unified.adaptive import (  # noqa: E402
     TradeRecord,
 )
+from autotrader.decision.unified.position_manager import (  # noqa: E402
+    PositionManagerConfig,
+)
 
 
 def load_signal_overrides(
@@ -410,6 +413,7 @@ def setup_pair_context(
     bot_config: UnifiedBotConfig,
     initial_balance: float,
     full_market_data: dict[str, pd.DataFrame] | None = None,
+    pm_config_overrides: dict[str, Any] | None = None,
 ) -> PairContext | None:
     """ペアごとのBot/Simulator/Arraysを初期化
 
@@ -420,6 +424,7 @@ def setup_pair_context(
         bot_config: ボット設定
         initial_balance: 初期残高
         full_market_data: 全期間market_data（年フィルタ前）
+        pm_config_overrides: PM設定オーバーライド
 
     Returns:
         PairContext | None: コンテキスト（データなしならNone）
@@ -467,6 +472,19 @@ def setup_pair_context(
     preset = get_preset(symbol)
     _pip_unit = get_pip_unit(symbol)
     _quote_ccy_rate = get_quote_ccy_rate(symbol)
+
+    # PM設定構築（オーバーライド対応）
+    pm_cfg: PositionManagerConfig | None = None
+    if bot_config.use_position_manager:
+        pm_cfg_dict: dict[str, Any] = {
+            "spread_pips": preset.spread_pips,
+            "slippage_pips": preset.slippage_pips,
+            "pip_unit": _pip_unit,
+        }
+        if pm_config_overrides:
+            pm_cfg_dict.update(pm_config_overrides)
+        pm_cfg = PositionManagerConfig(**pm_cfg_dict)
+
     sim_config = SimulatorConfig(
         initial_balance=initial_balance,
         spread_pips=preset.spread_pips,
@@ -483,6 +501,7 @@ def setup_pair_context(
         commission_per_lot=preset.commission_per_lot,
         bot_config=bot_config,
         sl_tp_in_pips=True,
+        pm_config=pm_cfg,
     )
     simulator = TradeSimulator(config=sim_config)
 
@@ -789,7 +808,8 @@ def _run_year_worker(args: tuple) -> dict[str, Any] | None:
 
     Args:
         args: (year, symbols, data_dir,
-               multi_config_dict, bot_extra_overrides)
+               multi_config_dict, bot_extra_overrides,
+               pm_extra_overrides)
 
     Returns:
         dict | None: 年の実行結果（データなしならNone）
@@ -800,6 +820,7 @@ def _run_year_worker(args: tuple) -> dict[str, Any] | None:
         data_dir,
         multi_config_dict,
         bot_extra_overrides,
+        pm_extra_overrides,
     ) = args
 
     # ワーカープロセス内でインポート（spawn対応）
@@ -848,6 +869,9 @@ def _run_year_worker(args: tuple) -> dict[str, Any] | None:
             bot_config,
             portfolio.equity,
             full_market_data=full_md,
+            pm_config_overrides=(
+                pm_extra_overrides or None
+            ),
         )
         if ctx is not None:
             contexts[sym] = ctx
@@ -1081,6 +1105,7 @@ def run_test_case(
     max_year_workers: int = 1,
     data_dir: str = "",
     bot_extra_overrides: dict[str, Any] | None = None,
+    pm_extra_overrides: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """テストケースを実行（順次 or 年並列）
 
@@ -1094,6 +1119,7 @@ def run_test_case(
         max_year_workers: 年並列数（1=順次, >1=並列）
         data_dir: データディレクトリ（並列実行時に必須）
         bot_extra_overrides: 追加botオーバーライド
+        pm_extra_overrides: PM設定オーバーライド
 
     Returns:
         dict: テスト結果
@@ -1115,6 +1141,7 @@ def run_test_case(
     # --- 年並列実行 ---
     if max_year_workers > 1:
         mc_dict = asdict(test_config)
+        _pm_extra = pm_extra_overrides or {}
         worker_args = [
             (
                 year,
@@ -1122,6 +1149,7 @@ def run_test_case(
                 data_dir,
                 mc_dict,
                 _extra,
+                _pm_extra,
             )
             for year in range(start_year, end_year + 1)
         ]
@@ -1211,6 +1239,9 @@ def run_test_case(
                 bot_config,
                 INITIAL_EQUITY,
                 full_market_data=full_md,
+                pm_config_overrides=(
+                    pm_extra_overrides or None
+                ),
             )
             if ctx is not None:
                 contexts[sym] = ctx
