@@ -2786,6 +2786,30 @@ class LiveTradingEngine:
             logger.warning("[RSS] RSS初期化スキップ: %s", e)
             self._rss_collector = None
 
+        # カレンダーベースの指標前ブロック用メモリサービス初期化
+        # analyzer=None: LLM分析なし、イベント検知のみ
+        if self._fundamental_collector:
+            try:
+                from autotrader.adapters.fundamental.memory import (
+                    FundamentalMemoryService,
+                )
+
+                self._fundamental_memory = FundamentalMemoryService(
+                    event_guard_minutes=30,
+                    cached_events_getter=(
+                        self._fundamental_collector.get_cached_events
+                    ),
+                    analyzer=None,
+                )
+                logger.info(
+                    "[Calendar] 指標前エントリーブロック有効化"
+                )
+            except Exception as e:
+                logger.error(
+                    "[Calendar] メモリサービス初期化失敗: %s",
+                    e,
+                )
+
     async def _start_fundamental_tasks(self) -> None:
         """ファンダメンタル収集タスクを起動
 
