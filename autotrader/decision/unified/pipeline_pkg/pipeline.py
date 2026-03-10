@@ -1080,10 +1080,28 @@ class SizingStep:
             sl_pips = min(
                 sl_pips, bot.config.trend_sl_max_pips,
             )
+        # レジーム別動的TP比率
         tp_sl_ratio = (
             plan.get_recommended_tp_sl_ratio()
             * bot.config.tp_sl_ratio
         )
+        if bot.config.dynamic_tp_enabled:
+            _regime = ctx.regime_result
+            if _regime is not None:
+                _r = _regime.regime
+                if _r == MarketRegime.TREND:
+                    _dyn = bot.config.dynamic_tp_trend
+                elif _r == MarketRegime.RANGE:
+                    _dyn = bot.config.dynamic_tp_range
+                elif _r == MarketRegime.HIGH_VOL:
+                    _dyn = (
+                        bot.config.dynamic_tp_high_vol
+                    )
+                else:
+                    _dyn = (
+                        bot.config.dynamic_tp_low_vol
+                    )
+                tp_sl_ratio = tp_sl_ratio * _dyn
         tp_pips = sl_pips * tp_sl_ratio
 
         # ポジションサイジング

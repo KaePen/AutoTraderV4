@@ -479,6 +479,17 @@ class UnifiedBotConfig:
     pip_unit: float = 0.01
     # クォート通貨→口座通貨(JPY)変換レート
     quote_ccy_rate: float = 1.0
+    # --- レジーム別動的TP比率 ---
+    # 動的TP有効化（Falseで従来の固定tp_sl_ratio）
+    dynamic_tp_enabled: bool = True
+    # TREND時のTP倍率（利益を伸ばす）
+    dynamic_tp_trend: float = 1.5
+    # RANGE時のTP倍率（早めの利確）
+    dynamic_tp_range: float = 0.85
+    # HIGH_VOL時のTP倍率
+    dynamic_tp_high_vol: float = 1.1
+    # LOW_VOL/デフォルト時のTP倍率
+    dynamic_tp_low_vol: float = 1.0
     # --- M1リトレースエントリー ---
     # リトレースエントリー有効化
     m1_retrace_entry_enabled: bool = False
