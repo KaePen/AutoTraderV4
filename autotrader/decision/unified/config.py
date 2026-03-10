@@ -258,6 +258,10 @@ class FilterConfig:
     off_hours_high_align_threshold: float = 0.55
     high_align_penalty_threshold: float | None = None
     high_align_penalty_score: float = 1.0
+    # ボリュームフィルタ
+    volume_filter_enabled: bool = True
+    volume_filter_threshold: float = 0.8
+    volume_filter_penalty: float = 0.3
 
 
 @dataclass(frozen=True)
@@ -499,6 +503,13 @@ class UnifiedBotConfig:
     m1_retrace_max_wait_bars: int = 5
     # タイムアウト時にフォールバックエントリーするか
     m1_retrace_fallback_entry: bool = True
+    # --- ボリュームフィルタ ---
+    # ボリュームフィルタ有効化
+    volume_filter_enabled: bool = True
+    # ボリュームMA比率の閾値（これ未満でペナルティ）
+    volume_filter_threshold: float = 0.8
+    # ボリュームフィルタ最大ペナルティ
+    volume_filter_penalty: float = 0.3
 
     def get_evaluator_config(self, timeframe: str) -> EvaluatorConfig:
         """時間足別評価器設定を取得
@@ -638,6 +649,9 @@ class UnifiedBotConfig:
             ),
             high_align_penalty_threshold=(self.high_align_penalty_threshold),
             high_align_penalty_score=self.high_align_penalty_score,
+            volume_filter_enabled=self.volume_filter_enabled,
+            volume_filter_threshold=self.volume_filter_threshold,
+            volume_filter_penalty=self.volume_filter_penalty,
         )
 
     @classmethod

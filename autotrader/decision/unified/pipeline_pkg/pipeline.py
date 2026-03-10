@@ -657,6 +657,16 @@ class FilterStep:
             if _e_atr is not None and not pd.isna(_e_atr):
                 _entry_tf_atr_abs = float(_e_atr)
 
+        # ボリューム比率（エントリーTFから取得）
+        _vol_ratio: float | None = None
+        if (
+            bot.config.volume_filter_enabled
+            and _entry_tf_row is not None
+        ):
+            _vr = _entry_tf_row.get("volume_ratio")
+            if _vr is not None and not pd.isna(_vr):
+                _vol_ratio = float(_vr)
+
         sg_context = {
             "spread_pips": bot._get_spread_pips(
                 current_time,
@@ -670,6 +680,7 @@ class FilterStep:
                 if htf_alignment >= 0.3
                 else "mixed"
             ),
+            "volume_ratio": _vol_ratio,
         }
         sg_result = bot.soft_guard.check(
             sg_context,
