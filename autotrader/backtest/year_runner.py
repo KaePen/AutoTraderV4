@@ -35,7 +35,7 @@ def run_unified_year(
     sim_config: SimulatorConfig,
     year: int,
     market_data: "dict[str, pd.DataFrame]",
-    use_m1: bool = False,
+    use_m1: bool = True,
     fundamental_provider: Any = None,
     period_start: datetime | None = None,
     period_end: datetime | None = None,
