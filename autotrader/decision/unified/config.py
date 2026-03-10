@@ -485,7 +485,7 @@ class UnifiedBotConfig:
     quote_ccy_rate: float = 1.0
     # --- レジーム別動的TP比率 ---
     # 動的TP有効化（Falseで従来の固定tp_sl_ratio）
-    dynamic_tp_enabled: bool = True
+    dynamic_tp_enabled: bool = False
     # TREND時のTP倍率（利益を伸ばす）
     dynamic_tp_trend: float = 1.5
     # RANGE時のTP倍率（早めの利確）
