@@ -61,6 +61,9 @@ from autotrader.backtest.year_runner import (
     run_unified_year,
     validate_trade_log,
 )
+from autotrader.backtest.month_runner import (
+    run_monthly_parallel,
+)
 from autotrader.backtest.metrics_aggregator import (
     aggregate_results,
     aggregate_results_from_yearly,
@@ -216,6 +219,7 @@ __all__ = [
     # 分割モジュール（新規）
     "run_unified_year",
     "validate_trade_log",
+    "run_monthly_parallel",
     "aggregate_results",
     "aggregate_results_from_yearly",
     "_worker_process_init",

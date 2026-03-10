@@ -39,6 +39,9 @@ from autotrader.backtest.metrics_aggregator import (
     aggregate_results,
     aggregate_results_from_yearly,
 )
+from autotrader.backtest.month_runner import (
+    run_monthly_parallel,
+)
 from autotrader.backtest.parallel_worker import (
     _run_year_worker,
     _worker_process_init,
@@ -883,6 +886,313 @@ class BacktestRunner:
             yearly_results,
             self.config.initial_balance,
         )
+
+    def run_unified_monthly(
+        self,
+        start_year: int,
+        end_year: int,
+        config: "UnifiedBotConfig | None" = None,
+        use_m1: bool = True,
+        pm_config: "PositionManagerConfig | None" = None,
+        max_month_workers: int = 12,
+        max_year_workers: int = 1,
+        fundamental_csv: str | None = None,
+        fundamental_csv_list: list[str] | None = None,
+        fundamental_parquet_list: (
+            list[str] | None
+        ) = None,
+        event_llm_csv_list: (
+            list[str] | None
+        ) = None,
+        event_llm_parquet_list: (
+            list[str] | None
+        ) = None,
+        news_llm_csv_list: (
+            list[str] | None
+        ) = None,
+        news_llm_parquet_list: (
+            list[str] | None
+        ) = None,
+        fundamental_guard_minutes: int = 30,
+        period_start: datetime | None = None,
+        period_end: datetime | None = None,
+        sequential: bool = False,
+        adaptive_config: "TunerConfig | None" = None,
+    ) -> BacktestResult:
+        """月単位並列バックテスト実行
+
+        年を12ヶ月に分割し、各月を独立equityで並列実行。
+        M1解像度バックテスト時の速度低下を12並列で相殺する。
+        各月末にオープンポジションを強制クローズする。
+
+        Args:
+            start_year: 開始年
+            end_year: 終了年
+            config: 統合ボット設定
+            use_m1: M1基準ループ使用
+            pm_config: PositionManager設定
+            max_month_workers: 月並列ワーカー数
+            max_year_workers: 年並列ワーカー数
+                （現在は年シーケンシャル固定）
+            fundamental_csv: 経済イベントCSVパス
+            fundamental_csv_list: 複数CSV
+            fundamental_parquet_list: Parquet
+            event_llm_csv_list: イベントLLM CSV
+            event_llm_parquet_list: イベントLLM Pq
+            news_llm_csv_list: ニュースLLM CSV
+            news_llm_parquet_list: ニュースLLM Pq
+            fundamental_guard_minutes: 指標前停止分
+            period_start: 開始日時
+            period_end: 終了日時
+            sequential: シーケンシャル強制
+            adaptive_config: アダプティブ設定
+
+        Returns:
+            BacktestResult: バックテスト結果
+        """
+        from autotrader.decision.unified import (
+            UnifiedBotConfig,
+        )
+
+        bot_config = config or UnifiedBotConfig()
+
+        # スイングウィンドウ設定
+        if config is not None:
+            self._m1_structure_sl_swing_window = (
+                config.m1_structure_sl_swing_window
+            )
+
+        if self._h1_df is None:
+            self.load_data()
+
+        # ファンダメンタルプロバイダー初期化
+        # （run_unified と同じロジック）
+        fundamental_provider = None
+        _csv_paths: list[str] = []
+        if fundamental_csv_list:
+            _csv_paths = fundamental_csv_list
+        elif fundamental_csv:
+            _csv_paths = [fundamental_csv]
+
+        _has_data = (
+            bool(_csv_paths)
+            or bool(fundamental_parquet_list)
+            or bool(event_llm_csv_list)
+            or bool(event_llm_parquet_list)
+            or bool(news_llm_csv_list)
+            or bool(news_llm_parquet_list)
+        )
+        _log = logging.getLogger(__name__)
+        if _has_data:
+            try:
+                from autotrader.adapters.fundamental.backtest_provider import (
+                    BacktestFundamentalProvider,
+                )
+
+                fundamental_provider = (
+                    BacktestFundamentalProvider(
+                        event_guard_minutes=(
+                            fundamental_guard_minutes
+                        ),
+                        decay_coefficient=(
+                            bot_config
+                            .fundamental_decay_coefficient
+                        ),
+                        post_event_lag_seconds=(
+                            bot_config
+                            .fundamental_post_event_lag_seconds
+                        ),
+                    )
+                )
+                if fundamental_parquet_list:
+                    for _pq in fundamental_parquet_list:
+                        fundamental_provider.load_parquet(
+                            _pq,
+                        )
+                if _csv_paths:
+                    for _csv in _csv_paths:
+                        fundamental_provider.load_csv(
+                            _csv,
+                        )
+                _sym = self.config.symbol
+                if event_llm_parquet_list:
+                    for _pq in event_llm_parquet_list:
+                        fundamental_provider.load_event_llm_parquet(
+                            _pq, _sym
+                        )
+                if event_llm_csv_list:
+                    for _csv in event_llm_csv_list:
+                        fundamental_provider.load_event_llm_csv(
+                            _csv, _sym
+                        )
+                if news_llm_parquet_list:
+                    for _pq in news_llm_parquet_list:
+                        fundamental_provider.load_news_llm_parquet(
+                            _pq, _sym
+                        )
+                if news_llm_csv_list:
+                    for _csv in news_llm_csv_list:
+                        fundamental_provider.load_news_llm_csv(
+                            _csv, _sym
+                        )
+                if bot_config.fundamental_assessor_enabled:
+                    fundamental_provider.enable_memory()
+            except Exception as e:
+                _log.warning(
+                    "[Fundamental] データ読込失敗: %s",
+                    e,
+                )
+
+        # M1/M5 自動ロード判定
+        _short_tfs = {"M1", "M5"}
+        _needs_short_tf = use_m1 or bool(
+            set(bot_config.timeframes) & _short_tfs
+        )
+
+        years = list(range(start_year, end_year + 1))
+        needed_years = years
+
+        # イベント発行
+        self._emitter.emit_backtest_start(
+            start_year=start_year,
+            end_year=end_year,
+            config={
+                "timeframes": bot_config.timeframes,
+                "use_m1": use_m1,
+                "monthly_parallel": True,
+                "max_month_workers": max_month_workers,
+            },
+        )
+
+        def _on_tf_loaded(
+            tf: str, current: int, total: int
+        ) -> None:
+            self._emitter.emit_init_progress(
+                "tf_loading", tf, current, total
+            )
+
+        market_data = self._load_all_timeframes(
+            include_m1=_needs_short_tf,
+            on_tf_loaded=_on_tf_loaded,
+            needed_years=needed_years,
+        )
+
+        # シミュレーター設定
+        _pip_unit = get_pip_unit(self.config.symbol)
+        _qcr = get_quote_ccy_rate(self.config.symbol)
+        sim_config = SimulatorConfig(
+            initial_balance=(
+                self.config.initial_balance
+            ),
+            spread_pips=self.config.spread_pips,
+            slippage_pips=self.config.slippage_pips,
+            pip_value=self.config.pip_value,
+            max_positions=self.config.max_positions,
+            bonus_max_positions=(
+                self.config.bonus_max_positions
+            ),
+            bonus_score_threshold=(
+                self.config.bonus_score_threshold
+            ),
+            default_volume=(
+                self.config.volume or 1.0
+            ),
+            use_position_manager=(
+                bot_config.use_position_manager
+            ),
+            pm_config=pm_config,
+            use_dynamic_lot=(
+                bot_config.use_dynamic_lot
+            ),
+            pip_unit=_pip_unit,
+            quote_ccy_rate=_qcr,
+            commission_per_lot=(
+                self.config.commission_per_lot
+            ),
+            use_session_spread=(
+                self.config.use_session_spread
+            ),
+            sl_tp_in_pips=True,
+        )
+
+        yearly_results: list[dict[str, Any]] = []
+        _effective_mw = (
+            1 if sequential else max_month_workers
+        )
+
+        # 年ループ（現在はシーケンシャル）
+        for year in years:
+            if self._check_cancel_requested():
+                break
+
+            self._emitter.emit_year_start(year)
+
+            # 年データフィルタリング
+            _s = datetime(year, 1, 1)
+            _e = datetime(year + 1, 1, 1)
+            year_market_data = {
+                tf: df[
+                    (df["time"] >= _s)
+                    & (df["time"] < _e)
+                ].reset_index(drop=True)
+                for tf, df in market_data.items()
+            }
+
+            year_result = run_monthly_parallel(
+                runner=self,
+                bot_config=bot_config,
+                sim_config=sim_config,
+                year=year,
+                market_data=year_market_data,
+                use_m1=use_m1,
+                fundamental_provider=(
+                    fundamental_provider
+                ),
+                max_workers=_effective_mw,
+                emitter=self._emitter,
+                adaptive_config=adaptive_config,
+            )
+
+            if year_result is not None:
+                # ワーカー収集データをマージ
+                for _listener in (
+                    self._emitter._listeners
+                ):
+                    if isinstance(
+                        _listener, FileEventListener
+                    ):
+                        _listener.merge_worker_data(
+                            year_result.pop(
+                                "_worker_trade_rows",
+                                [],
+                            ),
+                            year_result.pop(
+                                "_worker_stats",
+                                {},
+                            ),
+                        )
+                        _listener.sort_trade_rows()
+                        break
+
+                yearly_results.append(year_result)
+                self._emitter.emit_year_end(
+                    year_result,
+                )
+
+        result = self._aggregate_results_from_yearly(
+            yearly_results,
+        )
+
+        self._emitter.emit_backtest_end(
+            {
+                "total_trades": result.trades,
+                "win_rate": result.win_rate,
+                "profit_factor": result.profit_factor,
+                "monthly_parallel": True,
+            }
+        )
+
+        return result
 
     def run_compare(
         self,
