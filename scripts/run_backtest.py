@@ -289,6 +289,12 @@ def parse_args() -> argparse.Namespace:
         help="ロット当たり手数料上書き（デフォルト: preset値）",
     )
     parser.add_argument(
+        "--spread-multiplier",
+        type=float,
+        default=1.0,
+        help="スプレッド倍率（ストレステスト用、デフォルト: 1.0）",
+    )
+    parser.add_argument(
         "--session-spread",
         action="store_true",
         help="セッション別スプレッド有効化",
@@ -1470,6 +1476,11 @@ def run_single_backtest(args: argparse.Namespace):
         if args.commission is not None
         else _preset.commission_per_lot
     )
+    # スプレッド・スリッページ乗算（ストレステスト用）
+    _sp_mult = getattr(args, "spread_multiplier", 1.0)
+    _spread = _preset.spread_pips * _sp_mult
+    _slippage = _preset.slippage_pips * _sp_mult
+
     config = BacktestServiceConfig(
         start_year=start_year,
         end_year=end_year,
@@ -1479,8 +1490,8 @@ def run_single_backtest(args: argparse.Namespace):
         symbol=args.symbol,
         timeframe=args.timeframe,
         max_positions=args.max_positions,
-        spread_pips=_preset.spread_pips,
-        slippage_pips=_preset.slippage_pips,
+        spread_pips=_spread,
+        slippage_pips=_slippage,
         verbose=False,
         use_short_timeframe=use_short_tf,
         enable_scalping=args.enable_scalping,

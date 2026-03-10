@@ -443,6 +443,7 @@ def setup_pair_context(
     initial_balance: float,
     full_market_data: dict[str, pd.DataFrame] | None = None,
     pm_config_overrides: dict[str, Any] | None = None,
+    spread_multiplier: float = 1.0,
 ) -> PairContext | None:
     """ペアごとのBot/Simulator/Arraysを初期化
 
@@ -454,6 +455,7 @@ def setup_pair_context(
         initial_balance: 初期残高
         full_market_data: 全期間market_data（年フィルタ前）
         pm_config_overrides: PM設定オーバーライド
+        spread_multiplier: スプレッド倍率（ストレステスト用）
 
     Returns:
         PairContext | None: コンテキスト（データなしならNone）
@@ -502,12 +504,16 @@ def setup_pair_context(
     _pip_unit = get_pip_unit(symbol)
     _quote_ccy_rate = get_quote_ccy_rate(symbol)
 
+    # スプレッド・スリッページ乗算（ストレステスト用）
+    _spread = preset.spread_pips * spread_multiplier
+    _slippage = preset.slippage_pips * spread_multiplier
+
     # PM設定構築（オーバーライド対応）
     pm_cfg: PositionManagerConfig | None = None
     if bot_config.use_position_manager:
         pm_cfg_dict: dict[str, Any] = {
-            "spread_pips": preset.spread_pips,
-            "slippage_pips": preset.slippage_pips,
+            "spread_pips": _spread,
+            "slippage_pips": _slippage,
             "pip_unit": _pip_unit,
         }
         if pm_config_overrides:
@@ -516,8 +522,8 @@ def setup_pair_context(
 
     sim_config = SimulatorConfig(
         initial_balance=initial_balance,
-        spread_pips=preset.spread_pips,
-        slippage_pips=preset.slippage_pips,
+        spread_pips=_spread,
+        slippage_pips=_slippage,
         pip_value=preset.pip_value,
         max_positions=preset.max_positions,
         bonus_max_positions=preset.bonus_max_positions,
@@ -874,13 +880,22 @@ def _run_year_worker(args: tuple) -> dict[str, Any] | None:
     Args:
         args: (year, symbols, data_dir,
                multi_config_dict, bot_extra_overrides,
-               pm_extra_overrides[, job_id])
+               pm_extra_overrides[, job_id
+               [, spread_multiplier]])
 
     Returns:
         dict | None: 年の実行結果（データなしならNone）
     """
-    # 7要素目(job_id)はオプション（後方互換性）
-    if len(args) >= 7:
+    # 8要素目(spread_multiplier)はオプション（後方互換性）
+    _job_id = ""
+    _spread_mult = 1.0
+    if len(args) >= 8:
+        (
+            year, symbols, data_dir,
+            multi_config_dict, bot_extra_overrides,
+            pm_extra_overrides, _job_id, _spread_mult,
+        ) = args
+    elif len(args) >= 7:
         (
             year, symbols, data_dir,
             multi_config_dict, bot_extra_overrides,
@@ -892,7 +907,6 @@ def _run_year_worker(args: tuple) -> dict[str, Any] | None:
             multi_config_dict, bot_extra_overrides,
             pm_extra_overrides,
         ) = args
-        _job_id = ""
 
     # ワーカープロセス内でインポート（spawn対応）
     import sys as _sys
@@ -959,6 +973,7 @@ def _run_year_worker(args: tuple) -> dict[str, Any] | None:
             pm_config_overrides=(
                 pm_extra_overrides or None
             ),
+            spread_multiplier=_spread_mult,
         )
         if ctx is not None:
             contexts[sym] = ctx
@@ -1226,6 +1241,7 @@ def run_test_case(
     pm_extra_overrides: dict[str, Any] | None = None,
     progress_callback: Callable[[int, int], None] | None = None,
     job_id: str = "",
+    spread_multiplier: float = 1.0,
 ) -> dict[str, Any]:
     """テストケースを実行（順次 or 年並列）
 
@@ -1242,6 +1258,7 @@ def run_test_case(
         pm_extra_overrides: PM設定オーバーライド
         progress_callback: 年完了時の進捗通知(done, total)
         job_id: ジョブID（進捗ファイル名に使用）
+        spread_multiplier: スプレッド倍率（ストレステスト用）
 
     Returns:
         dict: テスト結果
@@ -1273,6 +1290,7 @@ def run_test_case(
                 _extra,
                 _pm_extra,
                 job_id,
+                spread_multiplier,
             )
             for year in range(start_year, end_year + 1)
         ]
@@ -1392,6 +1410,7 @@ def run_test_case(
                 pm_config_overrides=(
                     pm_extra_overrides or None
                 ),
+                spread_multiplier=spread_multiplier,
             )
             if ctx is not None:
                 contexts[sym] = ctx
