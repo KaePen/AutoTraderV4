@@ -990,9 +990,12 @@ def _run_year_worker(args: tuple) -> dict[str, Any] | None:
     # 進捗ファイルパス（WebUI連携用）
     _pg_file = ""
     if _job_id:
-        _pg_dir = _Path("D:/Projects/AutoTraderV4_data")
+        _pg_dir = _Path(
+            "D:/Projects/AutoTraderV4_data/worker_progress",
+        )
+        _pg_dir.mkdir(parents=True, exist_ok=True)
         _pg_file = str(
-            _pg_dir / f".worker_progress_{_job_id}_{year}.json"
+            _pg_dir / f"{_job_id}_{year}.json"
         )
 
     # インターリーブ実行

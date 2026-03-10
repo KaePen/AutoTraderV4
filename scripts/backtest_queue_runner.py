@@ -83,6 +83,7 @@ THREADS_PER_YEAR = 1.5  # 1年あたりの必要CPUスレッド数
 # Web UI連携用ファイル
 RUNNER_STATE_FILE = _DATA_ROOT / "runner_state.json"
 RUNNER_CMD_FILE = _DATA_ROOT / "runner_commands.json"
+WORKER_PROGRESS_DIR = _DATA_ROOT / "worker_progress"
 
 
 # ===================================================================
@@ -383,6 +384,30 @@ def cleanup_stale_running(state: QueueState) -> None:
             "中断ジョブ %d件をクリーンアップ完了",
             cleaned,
         )
+
+
+def cleanup_worker_progress() -> None:
+    """起動時にワーカー進捗ファイルを全削除
+
+    起動時にはワーカーは存在しないため、
+    前回の残骸を安全に削除できる。
+    """
+    if not WORKER_PROGRESS_DIR.exists():
+        return
+    cleaned = 0
+    for path in WORKER_PROGRESS_DIR.glob("*.json"):
+        with contextlib.suppress(OSError):
+            path.unlink()
+            cleaned += 1
+    if cleaned > 0:
+        logger.info(
+            "ワーカー進捗ファイル %d件をクリーンアップ",
+            cleaned,
+        )
+    # 旧形式（_DATA_ROOT直下）も掃除
+    for path in _DATA_ROOT.glob(".worker_progress_*.json"):
+        with contextlib.suppress(OSError):
+            path.unlink()
 
 
 # ===================================================================
@@ -842,8 +867,8 @@ def execute_multi_pair_job(
     _save_result(result)
 
     # ワーカー進捗ファイル掃除
-    for pg_f in _DATA_ROOT.glob(
-        f".worker_progress_{_rid}_*.json",
+    for pg_f in WORKER_PROGRESS_DIR.glob(
+        f"{_rid}_*.json",
     ):
         with contextlib.suppress(OSError):
             pg_f.unlink()
@@ -1113,9 +1138,8 @@ def _write_runner_state(
             _done_bars = 0
             for yr in range(sy, ey + 1):
                 _pg_path = (
-                    _DATA_ROOT
-                    / f".worker_progress_{rj.result_id}"
-                    f"_{yr}.json"
+                    WORKER_PROGRESS_DIR
+                    / f"{rj.result_id}_{yr}.json"
                 )
                 if _pg_path.exists():
                     _wp = json.loads(
@@ -1410,6 +1434,8 @@ def main() -> None:
     state = QueueState.load()
     state.sync_with_queue()
     cleanup_stale_running(state)
+    WORKER_PROGRESS_DIR.mkdir(parents=True, exist_ok=True)
+    cleanup_worker_progress()
 
     # コマンドキュー
     cmd_queue: _q.Queue[str] = _q.Queue()
