@@ -894,7 +894,7 @@ class BacktestRunner:
         config: "UnifiedBotConfig | None" = None,
         use_m1: bool = True,
         pm_config: "PositionManagerConfig | None" = None,
-        max_month_workers: int = 12,
+        max_month_workers: int = 6,
         max_year_workers: int = 1,
         fundamental_csv: str | None = None,
         fundamental_csv_list: list[str] | None = None,
