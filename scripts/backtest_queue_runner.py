@@ -37,6 +37,7 @@ import time
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
+from collections.abc import Callable
 from typing import Any
 
 # Windows cp932エンコーディング回避
@@ -76,6 +77,10 @@ DEFAULT_DATA_DIR = str(_DATA_ROOT / "data")
 
 POLL_INTERVAL = 2.0  # キューポーリング間隔（秒）
 THREADS_PER_YEAR = 1.5  # 1年あたりの必要CPUスレッド数
+
+# Web UI連携用ファイル
+RUNNER_STATE_FILE = _DATA_ROOT / "runner_state.json"
+RUNNER_CMD_FILE = _DATA_ROOT / "runner_commands.json"
 
 
 # ===================================================================
@@ -203,6 +208,9 @@ class RunningJob:
     max_year_workers: int
     started_at: float  # time.time()
     result_id: str = ""  # 連番付きID
+    progress: dict[str, Any] = field(
+        default_factory=dict,
+    )  # {"done": N, "total": M}
 
     @property
     def cpu_cost(self) -> float:
@@ -576,6 +584,9 @@ def execute_multi_pair_job(
     cancel_event: threading.Event,
     max_year_workers: int = 1,
     result_id: str = "",
+    progress_callback: Callable[
+        [int, int], None
+    ] | None = None,
 ) -> JobResult:
     """マルチ通貨ペアインターリーブジョブを実行
 
@@ -588,6 +599,7 @@ def execute_multi_pair_job(
         cancel_event: キャンセルイベント
         max_year_workers: 年並列ワーカー数（1=順次）
         result_id: 連番付き結果ID
+        progress_callback: 年完了時の進捗通知
 
     Returns:
         JobResult: インターリーブ実行結果
@@ -656,6 +668,14 @@ def execute_multi_pair_job(
             global_max_exposure_lot=mpc.get(
                 "global_max_exposure_lot",
                 10.0,
+            ),
+            base_risk_pct=mpc.get(
+                "base_risk_pct",
+                0.02,
+            ),
+            consensus_threshold=mpc.get(
+                "consensus_threshold",
+                9.0,
             ),
         )
 
@@ -1001,6 +1021,89 @@ def _execute_job_from_file(job_file: str) -> None:
 
 
 # ===================================================================
+# Web UI連携: 状態書き出し・コマンド読み取り
+# ===================================================================
+
+
+def _write_runner_state(
+    running_jobs: list[RunningJob],
+    state: QueueState,
+    paused: bool,
+    cpu_threads: int,
+) -> None:
+    """キューランナー状態をJSONファイルに書き出し
+
+    Web UIがこのファイルを読み取って表示する。
+    """
+    now = datetime.now().isoformat()
+    jobs_data: list[dict[str, Any]] = []
+    for rj in running_jobs:
+        elapsed = time.time() - rj.started_at
+        jobs_data.append({
+            "job_id": rj.job.id,
+            "result_id": rj.result_id,
+            "type": rj.job.type,
+            "symbol": rj.job.symbol,
+            "symbols": rj.job.symbols,
+            "years": rj.job.years,
+            "description": rj.job.description,
+            "workers": rj.max_year_workers,
+            "cpu_cost": rj.cpu_cost,
+            "elapsed_seconds": elapsed,
+            "started_at": datetime.fromtimestamp(
+                rj.started_at,
+            ).isoformat(),
+            "progress": rj.progress,
+        })
+
+    try:
+        total_jobs = len(load_queue())
+    except Exception:
+        total_jobs = 0
+
+    data = {
+        "paused": paused,
+        "cpu_threads": cpu_threads,
+        "running_jobs": jobs_data,
+        "completed_ids": state.completed_ids,
+        "total_jobs": total_jobs,
+        "updated_at": now,
+    }
+    try:
+        tmp = RUNNER_STATE_FILE.with_suffix(".tmp")
+        tmp.write_text(
+            json.dumps(
+                data, ensure_ascii=False, indent=2,
+            ),
+            encoding="utf-8",
+        )
+        tmp.replace(RUNNER_STATE_FILE)
+    except OSError:
+        pass
+
+
+def _read_runner_commands(
+    cmd_queue: Any,
+) -> None:
+    """Web UIからのコマンドファイルを読み取り
+
+    コマンドがあればcmd_queueに投入し、ファイル削除。
+    """
+    if not RUNNER_CMD_FILE.exists():
+        return
+    try:
+        data = json.loads(
+            RUNNER_CMD_FILE.read_text(encoding="utf-8"),
+        )
+        commands = data.get("commands", [])
+        for cmd in commands:
+            cmd_queue.put(str(cmd).strip())
+        RUNNER_CMD_FILE.unlink(missing_ok=True)
+    except (json.JSONDecodeError, OSError):
+        pass
+
+
+# ===================================================================
 # 対話コマンドリーダー
 # ===================================================================
 
@@ -1227,8 +1330,17 @@ def main() -> None:
         holder: list[JobResult | None],
         workers: int,
         rid: str = "",
+        progress: dict[str, Any] | None = None,
     ) -> None:
         """ジョブ実行スレッド（typeとcode_dirに応じて振り分け）"""
+        # 進捗コールバック
+        _pg = progress
+
+        def _on_progress(done: int, total: int) -> None:
+            if _pg is not None:
+                _pg["done"] = done
+                _pg["total"] = total
+
         # code_dir指定時はサブプロセスで実行
         if job.code_dir:
             holder[0] = execute_job_subprocess(
@@ -1243,6 +1355,7 @@ def main() -> None:
                 cancel_ev,
                 max_year_workers=workers,
                 result_id=rid,
+                progress_callback=_on_progress,
             )
         else:
             holder[0] = execute_job(
@@ -1554,6 +1667,7 @@ def main() -> None:
                 )
                 cancel_ev = threading.Event()
                 holder: list[JobResult | None] = [None]
+                _prog: dict[str, Any] = {}
                 t = threading.Thread(
                     target=_run_job_wrapper,
                     args=(
@@ -1562,6 +1676,7 @@ def main() -> None:
                         holder,
                         workers,
                         _rid,
+                        _prog,
                     ),
                     daemon=True,
                 )
@@ -1573,10 +1688,17 @@ def main() -> None:
                     max_year_workers=workers,
                     started_at=time.time(),
                     result_id=_rid,
+                    progress=_prog,
                 )
                 running_jobs.append(rj_new)
                 running_ids.add(job.id)
                 t.start()
+
+        # Web UI連携: 状態書き出し＋コマンド読み取り
+        _write_runner_state(
+            running_jobs, state, paused, cpu_threads,
+        )
+        _read_runner_commands(cmd_queue)
 
         time.sleep(POLL_INTERVAL)
 
