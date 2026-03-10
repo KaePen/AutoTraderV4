@@ -550,6 +550,16 @@ def execute_job(
         # L3: ジョブ指定 overrides（最高優先）
         bot_ovr.update(job.overrides.get("bot", {}))
 
+        # UnifiedBotConfigに存在しないキーを除去
+        _valid_fields = {
+            f.name
+            for f in UnifiedBotConfig.__dataclass_fields__.values()
+        }
+        bot_ovr = {
+            k: v for k, v in bot_ovr.items()
+            if k in _valid_fields
+        }
+
         # pm overrides 構築
         pm_ovr: dict[str, Any] = {}
         pm_ovr.update(sym_ovr.get("pm_config", {}))
