@@ -233,19 +233,32 @@ function _updateJobCard(card, j) {
   if (cpuEl) cpuEl.textContent = fmtNum(j.cpu_cost, 1) + ' threads';
 
   // プログレスバー更新
-  // progress は {done: pct値, total: 100} の百分率形式
+  // progress.pct: ワーカー進捗ファイルからの細粒度% (0-100)
+  // progress.done/total: 年完了ベースの粗い進捗
   const pg = j.progress || {};
-  const done = pg.done || 0;
-  const total = pg.total || 0;
-  const pct = total > 0 ? Math.min(100, Math.round(done / total * 100)) : 0;
+  let pct = 0;
+  let label = '';
+  if (pg.phase === 'saving') {
+    // 集計・保存中
+    pct = 100;
+    label = '集計中...';
+  } else if (pg.pct != null && pg.pct > 0) {
+    // ワーカーからの細粒度進捗
+    pct = Math.min(100, Math.round(pg.pct));
+    label = `${pct}%`;
+  } else if ((pg.total || 0) > 0) {
+    // 年完了ベース
+    pct = Math.min(100, Math.round((pg.done || 0) / pg.total * 100));
+    label = pct > 0 ? `${pct}%` : 'シミュレーション中...';
+  }
 
   const barEl = card.querySelector('[data-field="progress-bar"]');
   if (barEl) barEl.style.width = pct + '%';
 
   const labelEl = card.querySelector('[data-field="progress-label"]');
   if (labelEl) {
-    if (total > 0) {
-      labelEl.textContent = `${pct}%`;
+    if (label) {
+      labelEl.textContent = label;
       labelEl.className = 'text-xs mono text-cyan-400';
     } else {
       labelEl.textContent = 'データ準備中...';
