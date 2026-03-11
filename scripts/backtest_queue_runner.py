@@ -1607,7 +1607,7 @@ def _execute_month_multi_pair(
         gl = 0.0
         np_ = 0.0
         for trade in trades:
-            pnl = trade.get("pnl", 0.0)
+            pnl = trade.pnl
             np_ += pnl
             if pnl > 0:
                 wins += 1
