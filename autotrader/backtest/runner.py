@@ -532,10 +532,17 @@ class BacktestRunner:
         ).max()
 
         # ボリューム移動平均比率
-        if "volume" in df.columns:
-            _vol_ma = df["volume"].rolling(20).mean()
+        # MT5 Parquetは tick_volume(実データ) と volume(常に0) を持つ
+        _vol_col = None
+        if "tick_volume" in df.columns and df["tick_volume"].sum() > 0:
+            _vol_col = "tick_volume"
+        elif "volume" in df.columns and df["volume"].sum() > 0:
+            _vol_col = "volume"
+
+        if _vol_col is not None:
+            _vol_ma = df[_vol_col].rolling(20).mean()
             df["volume_ma_20"] = _vol_ma
-            df["volume_ratio"] = df["volume"] / (
+            df["volume_ratio"] = df[_vol_col] / (
                 _vol_ma.replace(0, float("nan"))
             )
 

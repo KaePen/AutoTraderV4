@@ -247,10 +247,17 @@ class PrecomputeEngine:
         result = self.compute_smc_indicators(result)
 
         # ボリューム移動平均比率
-        if "volume" in result.columns:
-            _vol_ma = result["volume"].rolling(20).mean()
+        # MT5 Parquetは tick_volume(実データ) と volume(常に0) を持つ
+        _vol_col = None
+        if "tick_volume" in result.columns and result["tick_volume"].sum() > 0:
+            _vol_col = "tick_volume"
+        elif "volume" in result.columns and result["volume"].sum() > 0:
+            _vol_col = "volume"
+
+        if _vol_col is not None:
+            _vol_ma = result[_vol_col].rolling(20).mean()
             result["volume_ma_20"] = _vol_ma
-            result["volume_ratio"] = result["volume"] / (
+            result["volume_ratio"] = result[_vol_col] / (
                 _vol_ma.replace(0, float("nan"))
             )
 
