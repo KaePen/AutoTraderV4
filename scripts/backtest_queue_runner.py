@@ -1218,17 +1218,12 @@ def _execute_month_single(
     )
     service = BacktestService(svc_config)
     runner = service.create_runner()
-    runner.load_data()
 
-    # 年データから月フィルタ
-    market_data: dict[str, Any] = {}
-    for tf_name in [
-        "M1", "M5", "M15", "M30", "H1", "H4", "H8", "D1",
-    ]:
-        attr = f"_{tf_name.lower()}_df"
-        df = getattr(runner, attr, None)
-        if df is not None:
-            market_data[tf_name] = df
+    # 全8TFをロード（load_data()は4TFのみなので不可）
+    market_data = runner._load_all_timeframes(
+        include_m1=True,
+        needed_years=[year],
+    )
 
     month_data = _filter_market_data_for_month(
         market_data, year, month,
