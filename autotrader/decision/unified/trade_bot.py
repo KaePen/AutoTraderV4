@@ -1281,13 +1281,37 @@ class UnifiedTradeBot:
             _e_atr = _entry_tf_row.get("atr_14")
             if _e_atr is not None and not pd.isna(_e_atr):
                 _entry_tf_atr_abs = float(_e_atr)
+
+        # ボリューム比率（エントリーTFから取得）
+        _vol_ratio: float | None = None
+        if (
+            self.config.volume_filter_enabled
+            and _entry_tf_row is not None
+        ):
+            _vr = _entry_tf_row.get("volume_ratio")
+            if _vr is not None and not pd.isna(_vr):
+                _vol_ratio = float(_vr)
+
         sg_context = {
             "spread_pips": self._get_spread_pips(current_time),
             "current_time": current_time.to_pydatetime(),
             "atr_ratio": _atr_ratio,
             "recent_losses": self.state.consecutive_losses,
             "trend_strength": regime_result.trend_strength,
-            "mtf_alignment": ("aligned" if htf_alignment >= 0.3 else "mixed"),
+            "mtf_alignment": (
+                "aligned" if htf_alignment >= 0.3
+                else "mixed"
+            ),
+            "volume_ratio": _vol_ratio,
+            "volume_filter_enabled": (
+                self.config.volume_filter_enabled
+            ),
+            "volume_filter_threshold": (
+                self.config.volume_filter_threshold
+            ),
+            "volume_filter_penalty": (
+                self.config.volume_filter_penalty
+            ),
         }
         sg_result = self.soft_guard.check(
             sg_context,
