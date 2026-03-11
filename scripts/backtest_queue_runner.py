@@ -1362,6 +1362,15 @@ def _execute_month_single(
         slippage_pips=_slippage,
         pip_value=preset.pip_value,
         commission_per_lot=preset.commission_per_lot,
+        max_positions=preset.max_positions,
+        bonus_max_positions=bot_config.bonus_max_positions,
+        bonus_score_threshold=bot_config.bonus_score_threshold,
+        use_dynamic_lot=bot_config.use_dynamic_lot,
+        use_position_manager=bot_config.use_position_manager,
+        pip_unit=pip_unit,
+        quote_ccy_rate=qcr,
+        sl_tp_in_pips=True,
+        pm_config=PositionManagerConfig(**pm_ovr),
     )
 
     result = run_unified_year(
