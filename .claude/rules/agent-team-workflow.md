@@ -68,6 +68,8 @@ Agent(
 - `git commit --amend` による公開済みコミットの書き換え
 - `--no-verify` によるフックスキップ
 - `git push --force` を main/master に実行
+- worktree 内からの `EnterWorktree` 実行（ネストworktree作成の禁止）
+- worktree 内で `isolation: "worktree"` 付きサブエージェント起動の禁止
 
 ## スタンドアロンセッション（エージェントチーム未使用時）
 
