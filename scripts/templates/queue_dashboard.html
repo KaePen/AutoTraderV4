@@ -24,7 +24,6 @@
     from { opacity: 0; transform: translateY(4px); }
     to { opacity: 1; transform: translateY(0); }
   }
-  /* スクロールバー */
   ::-webkit-scrollbar { width: 6px; }
   ::-webkit-scrollbar-track { background: #1e293b; }
   ::-webkit-scrollbar-thumb { background: #475569; border-radius: 3px; }
@@ -60,7 +59,7 @@
           class="btn px-4 py-2 bg-green-600 text-white rounded-lg text-sm font-medium">
           再開
         </button>
-        <button onclick="if(confirm('全ジョブを停止しますか？')) sendCmd('stop')"
+        <button onclick="if(confirm('全タスクを停止しますか？')) sendCmd('stop')"
           class="btn px-4 py-2 bg-red-600 text-white rounded-lg text-sm font-medium">
           全停止
         </button>
@@ -68,7 +67,7 @@
     </div>
   </div>
 
-  <!-- 実行中ジョブ -->
+  <!-- 実行中ジョブ（月タスク表示） -->
   <div class="mb-4">
     <h2 class="text-sm font-semibold text-slate-400 uppercase tracking-wider mb-2 px-1">
       実行中ジョブ
@@ -175,13 +174,13 @@ function changeCpu() {
 }
 
 // ===================================================================
-// 表示更新
+// 表示更新（月スケジューラ対応）
 // ===================================================================
 
-function _createJobCard(j) {
-  const id = j.job_id || j.result_id || '-';
-  const symbols = (j.symbols || []).join(', ') || j.symbol || '-';
-  const typeLabel = j.type === 'multi_pair' ? 'マルチペア' : 'シングル';
+function _createJobCard(jp) {
+  // jp = job_progress エントリ
+  const id = jp.result_id || jp.job_id || '-';
+  const typeLabel = jp.type === 'multi_pair' ? 'マルチペア' : 'シングル';
 
   const card = document.createElement('div');
   card.className = 'card px-5 py-4 fade-in';
@@ -208,94 +207,100 @@ function _createJobCard(j) {
     <div class="grid grid-cols-3 gap-4 text-sm text-slate-300">
       <div>
         <span class="text-slate-500">シンボル:</span>
-        <span class="mono">${symbols}</span>
+        <span class="mono">${jp.symbol || '-'}</span>
       </div>
       <div>
         <span class="text-slate-500">期間:</span>
-        <span class="mono">${j.years || '-'}</span>
+        <span class="mono">${jp.years || '-'}</span>
       </div>
       <div>
-        <span class="text-slate-500">CPU:</span>
-        <span class="mono" data-field="cpu">${fmtNum(j.cpu_cost, 1)} threads</span>
-        <span class="text-slate-500 ml-2">workers:</span>
-        <span class="mono">${j.workers || '-'}</span>
+        <span class="text-slate-500">進捗:</span>
+        <span class="mono" data-field="month-count">${jp.completed || 0}/${jp.total || 0}月</span>
       </div>
     </div>
-    ${j.description ? `<div class="mt-2 text-xs text-slate-500">${j.description}</div>` : ''}
+    <div class="mt-2" data-field="running-months"></div>
+    ${jp.description ? `<div class="mt-2 text-xs text-slate-500">${jp.description}</div>` : ''}
   `;
   return card;
 }
 
-function _updateJobCard(card, j) {
+function _updateJobCard(card, jp, runningTasks) {
   const elapsedEl = card.querySelector('[data-field="elapsed"]');
-  if (elapsedEl) elapsedEl.textContent = fmtLiveElapsed(j.started_at);
-  const cpuEl = card.querySelector('[data-field="cpu"]');
-  if (cpuEl) cpuEl.textContent = fmtNum(j.cpu_cost, 1) + ' threads';
+  if (elapsedEl) elapsedEl.textContent = fmtLiveElapsed(jp.started_at);
 
   // プログレスバー更新
-  // progress.pct: ワーカー進捗ファイルからの細粒度% (0-100)
-  // progress.done/total: 年完了ベースの粗い進捗
-  const pg = j.progress || {};
-  let pct = 0;
-  let label = '';
-  if (pg.phase === 'saving') {
-    // 集計・保存中
-    pct = 100;
-    label = '集計中...';
-  } else if (pg.pct != null && pg.pct > 0) {
-    // ワーカーからの細粒度進捗
-    pct = Math.min(100, Math.round(pg.pct));
-    label = `${pct}%`;
-  } else if ((pg.total || 0) > 0) {
-    // 年完了ベース
-    pct = Math.min(100, Math.round((pg.done || 0) / pg.total * 100));
-    label = pct > 0 ? `${pct}%` : 'シミュレーション中...';
-  }
-
+  const pct = Math.min(100, Math.round(jp.pct || 0));
   const barEl = card.querySelector('[data-field="progress-bar"]');
   if (barEl) barEl.style.width = pct + '%';
 
   const labelEl = card.querySelector('[data-field="progress-label"]');
   if (labelEl) {
-    if (label) {
-      labelEl.textContent = label;
+    if (pct > 0) {
+      labelEl.textContent = `${jp.completed}/${jp.total}月 (${pct}%)`;
       labelEl.className = 'text-xs mono text-cyan-400';
     } else {
       labelEl.textContent = 'データ準備中...';
       labelEl.className = 'text-xs text-slate-400';
     }
   }
+
+  const countEl = card.querySelector('[data-field="month-count"]');
+  if (countEl) countEl.textContent = `${jp.completed || 0}/${jp.total || 0}月`;
+
+  // 実行中月タスク表示
+  const monthsEl = card.querySelector('[data-field="running-months"]');
+  if (monthsEl && runningTasks) {
+    const jobTasks = runningTasks.filter(t => t.result_id === jp.result_id);
+    if (jobTasks.length > 0) {
+      monthsEl.innerHTML = `
+        <div class="flex flex-wrap gap-1">
+          ${jobTasks.map(t => `
+            <span class="text-xs px-2 py-0.5 bg-cyan-900/50 text-cyan-300 rounded mono">
+              ${t.year}/${String(t.month).padStart(2, '0')}
+            </span>
+          `).join('')}
+        </div>
+      `;
+    } else {
+      monthsEl.innerHTML = '';
+    }
+  }
 }
 
-function renderRunningJobs(jobs) {
+function renderRunningJobs(status) {
   const el = document.getElementById('running-jobs');
-  if (!jobs || jobs.length === 0) {
+  const jobProgress = status?.job_progress || [];
+  const runningTasks = status?.running_tasks || [];
+
+  // in_progressのジョブのみ
+  const active = jobProgress.filter(jp => jp.status === 'in_progress');
+
+  if (active.length === 0 && runningTasks.length === 0) {
     if (!el.querySelector('.empty-msg')) {
       el.innerHTML = '<div class="card px-5 py-4 text-slate-500 text-sm empty-msg">ジョブなし</div>';
     }
     return;
   }
 
-  // 空メッセージ除去
   const emptyMsg = el.querySelector('.empty-msg');
   if (emptyMsg) emptyMsg.remove();
 
-  const currentIds = new Set(jobs.map(j => j.job_id || j.result_id || '-'));
+  const currentIds = new Set(active.map(jp => jp.result_id || jp.job_id || '-'));
 
   // 不要なカード削除
   el.querySelectorAll('[data-job-id]').forEach(card => {
     if (!currentIds.has(card.dataset.jobId)) card.remove();
   });
 
-  // 既存カード更新 or 新規追加
-  jobs.forEach(j => {
-    const id = j.job_id || j.result_id || '-';
+  // 更新 or 追加
+  active.forEach(jp => {
+    const id = jp.result_id || jp.job_id || '-';
     let card = el.querySelector(`[data-job-id="${id}"]`);
     if (card) {
-      _updateJobCard(card, j);
+      _updateJobCard(card, jp, runningTasks);
     } else {
-      card = _createJobCard(j);
-      _updateJobCard(card, j);
+      card = _createJobCard(jp);
+      _updateJobCard(card, jp, runningTasks);
       el.appendChild(card);
     }
   });
@@ -308,7 +313,6 @@ function renderCompletedJobs(results) {
     return;
   }
 
-  // completed のみ表示（running は除外）
   const completed = results.filter(r => r.status === 'completed' || r.status === 'failed' || r.status === 'cancelled');
   if (completed.length === 0) {
     el.innerHTML = '<div class="card px-5 py-4 text-slate-500 text-sm">結果なし</div>';
@@ -340,7 +344,6 @@ function renderCompletedJobs(results) {
     </div>
   `;
 
-  // ペア詳細展開イベント
   document.querySelectorAll('.expand-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       const target = document.getElementById(btn.dataset.target);
@@ -361,9 +364,6 @@ function renderResultRow(r) {
   const hasPairs = r.pair_details && r.pair_details.length > 0;
   const pairId = 'pairs-' + (r.job_id || '').replace(/[^a-zA-Z0-9]/g, '_');
 
-  // 年間収益率
-  const annualReturn = r.portfolio_metrics?.annual_return_pct;
-
   let row = `
     <tr class="border-b border-slate-800 hover:bg-slate-800/50">
       <td class="px-4 py-3 font-medium text-white">
@@ -383,7 +383,6 @@ function renderResultRow(r) {
     </tr>
   `;
 
-  // ペア別詳細行
   if (hasPairs) {
     row += `
       <tr id="${pairId}" class="hidden">
@@ -415,11 +414,6 @@ function renderResultRow(r) {
         </td>
       </tr>
     `;
-  }
-
-  // 年次詳細があれば表示
-  if (r.yearly_details && r.yearly_details.length > 0 && hasPairs) {
-    // 年次はペア詳細の下に含める（同じ展開ブロック内）
   }
 
   return row;
@@ -466,7 +460,6 @@ function updateHeader(status) {
     return;
   }
 
-  // 最終更新からの経過チェック
   const lastUpdate = new Date(status.updated_at).getTime();
   const stale = (Date.now() - lastUpdate) > 15000;
 
@@ -479,10 +472,9 @@ function updateHeader(status) {
     statusEl.innerHTML = '<span class="text-green-400">● 稼働中</span>';
   }
 
-  const used = (status.running_jobs || []).reduce((s, j) => s + (j.cpu_cost || 0), 0);
-  cpuEl.textContent = `CPU: ${used.toFixed(1)} / ${status.cpu_threads || '?'} threads`;
+  const usedTasks = (status.running_tasks || []).length;
+  cpuEl.textContent = `CPU: ${usedTasks} / ${status.cpu_threads || '?'} スロット`;
 
-  // CPU入力の初期値を同期（ユーザーが変更中でなければ）
   const cpuInput = document.getElementById('cpu-input');
   if (cpuInput && document.activeElement !== cpuInput && status.cpu_threads) {
     cpuInput.value = status.cpu_threads;
@@ -498,7 +490,7 @@ async function pollStatus() {
     const res = await fetch(API + '/api/status');
     lastStatus = await res.json();
     updateHeader(lastStatus);
-    renderRunningJobs(lastStatus.running_jobs || []);
+    renderRunningJobs(lastStatus);
   } catch(e) {
     updateHeader(null);
   }
@@ -529,8 +521,8 @@ setInterval(pollResults, 5000);
 
 // 経過時間リアルタイム更新
 setInterval(() => {
-  if (lastStatus?.running_jobs?.length > 0) {
-    renderRunningJobs(lastStatus.running_jobs);
+  if (lastStatus?.job_progress?.length > 0) {
+    renderRunningJobs(lastStatus);
   }
 }, 1000);
 </script>

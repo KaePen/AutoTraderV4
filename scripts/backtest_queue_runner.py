@@ -1,24 +1,22 @@
 #!/usr/bin/env python3
-"""バックテストキューランナー（並行実行・CPUバジェット管理）
+"""バックテストキューランナー（月レベルスケジューラ）
 
-キューファイル（backtest_queue.json）を監視し、
-CPUバジェット内で複数ジョブを並行実行する常駐スクリプト。
+月タスク = スケジューリングの原子単位 = 1CPU。
+キュー先頭のジョブから月タスクを生成し、CPUスロットを埋める。
+月完了 → 即保存 → 次の月タスクを投入 → CPUを常に使い切る。
 
-各ジョブは max_year_workers を申告し、1年=1.5スレッドとして
-利用可能CPUスレッド数の範囲内で同時実行される。
-
-再起動安全: completed_ids ベースで管理し、
-中断されたジョブは再起動時に自動的に再実行される。
+再起動安全: month_results/ ディレクトリベースのチェックポイントで
+中断された月をスキップし残月のみ再実行。
 
 使い方:
     uv run python scripts/backtest_queue_runner.py --cpu-threads 12
 
 対話コマンド:
-    stop    - 全実行中ジョブ停止+ログ削除+キュー先頭に戻す
-    pause   - 新規ジョブ取得を一時停止
+    stop    - 全実行中タスク停止+キュー先頭に戻す
+    pause   - 新規タスク取得を一時停止
     resume  - 一時停止解除
     status  - 現在の状態表示
-    cpu N   - CPUスレッド数を動的変更（超過分は最新ジョブから停止）
+    cpu N   - CPUスレッド数を動的変更
     quit    - ランナー終了
 """
 
@@ -34,9 +32,9 @@ import os
 import queue
 import subprocess
 import sys
+import tempfile
 import threading
 import time
-from collections.abc import Callable
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
 from pathlib import Path
@@ -75,10 +73,10 @@ _DATA_ROOT = Path("D:/Projects/AutoTraderV4_data")
 QUEUE_FILE = _DATA_ROOT / "backtest_queue.json"
 STATE_FILE = _DATA_ROOT / "backtest_queue_state.json"
 RESULTS_DIR = _DATA_ROOT / "backtest_results"
+MONTH_RESULTS_DIR = _DATA_ROOT / "month_results"
 DEFAULT_DATA_DIR = str(_DATA_ROOT / "data")
 
 POLL_INTERVAL = 2.0  # キューポーリング間隔（秒）
-THREADS_PER_YEAR = 1.5  # 1年あたりの必要CPUスレッド数
 
 # Web UI連携用ファイル
 RUNNER_STATE_FILE = _DATA_ROOT / "runner_state.json"
@@ -109,7 +107,7 @@ class Job:
     )  # multi_pair用
     years: str = "2023-2025"
     description: str = ""
-    max_year_workers: int = 0  # 0=年数から自動計算
+    max_year_workers: int = 0  # 後方互換（無視される）
     overrides: dict[str, Any] = field(default_factory=dict)
     multi_pair_config: dict[str, Any] = field(
         default_factory=dict,
@@ -134,44 +132,6 @@ class Job:
             ),
             code_dir=d.get("code_dir", ""),
         )
-
-    def effective_year_workers(self) -> int:
-        """実効年並列数（0なら年数から自動計算）
-
-        multi_pairジョブでmax_year_workers > 1の場合、
-        年並列実行のため実際のワーカー数を返す。
-        max_year_workers == 0 なら年数から自動計算。
-        """
-        if self.type in ("multi_pair", "portfolio"):
-            if self.max_year_workers > 0:
-                return self.max_year_workers
-            # 0=自動: 年数から計算
-            start, end = parse_years(self.years)
-            return max(1, end - start + 1)
-        if self.max_year_workers > 0:
-            return self.max_year_workers
-        start, end = parse_years(self.years)
-        return max(1, end - start + 1)
-
-    def _is_monthly(self) -> bool:
-        """月並列バックテストが有効か"""
-        bt = self.overrides.get("backtest", {})
-        return bool(bt.get("use_monthly", False))
-
-    def _max_month_workers(self) -> int:
-        """月並列ワーカー数"""
-        bt = self.overrides.get("backtest", {})
-        return int(bt.get("max_month_workers", 6))
-
-    def cpu_cost(self) -> float:
-        """このジョブが消費するCPUスレッド数
-
-        月並列有効時: max_month_workers（年はシーケンシャル）
-        月並列なし: year_workers × THREADS_PER_YEAR
-        """
-        if self._is_monthly():
-            return float(self._max_month_workers())
-        return self.effective_year_workers() * THREADS_PER_YEAR
 
 
 @dataclass
@@ -214,32 +174,56 @@ class JobResult:
 
 
 @dataclass
-class RunningJob:
-    """実行中ジョブのトラッキング"""
+class MonthTask:
+    """月タスク（スケジューリングの原子単位 = 1CPU）"""
 
-    job: Job
-    thread: threading.Thread
-    cancel_event: threading.Event
-    result_holder: list[JobResult | None]
-    max_year_workers: int
+    job_id: str  # 元ジョブID
+    result_id: str  # 連番付きID ("003_usdjpy-verify")
+    job_type: str  # "single" / "multi_pair"
+    year: int
+    month: int  # 1-12
+    job_dict: dict  # Job定義（サブプロセスに渡す）
+
+
+@dataclass
+class RunningMonthTask:
+    """実行中月タスクのトラッキング"""
+
+    task: MonthTask
+    process: subprocess.Popen  # type: ignore[type-arg]
     started_at: float  # time.time()
-    result_id: str = ""  # 連番付きID
-    progress: dict[str, Any] = field(
-        default_factory=dict,
-    )  # {"done": N, "total": M}
+
+
+@dataclass
+class JobProgress:
+    """ジョブ進捗"""
+
+    job_id: str
+    result_id: str
+    job_type: str
+    symbol: str  # 表示用
+    years: str
+    description: str
+    total_months: int  # 例: 36 (3年×12月)
+    completed_months: set[tuple[int, int]] = field(
+        default_factory=set,
+    )
+    status: str = "pending"  # "pending" / "in_progress" / "completed"
+    started_at: float = 0.0
 
     @property
-    def cpu_cost(self) -> float:
-        """消費CPUスレッド数（Jobの計算に委任）"""
-        return self.job.cpu_cost()
+    def completed_count(self) -> int:
+        return len(self.completed_months)
+
+    @property
+    def pct(self) -> float:
+        if self.total_months <= 0:
+            return 0.0
+        return self.completed_count / self.total_months * 100
 
 
 def _get_queue_job_ids() -> set[str]:
-    """キューファイルのジョブID一覧を取得
-
-    Returns:
-        set[str]: ジョブIDセット（空キューは空セット）
-    """
+    """キューファイルのジョブID一覧を取得"""
     if not QUEUE_FILE.exists():
         return set()
     try:
@@ -255,11 +239,7 @@ def _get_queue_job_ids() -> set[str]:
 
 
 def _compute_queue_hash() -> str:
-    """キューファイルのジョブID一覧からハッシュを計算
-
-    Returns:
-        str: ハッシュ文字列（空キューは空文字列）
-    """
+    """キューファイルのジョブID一覧からハッシュを計算"""
     ids = sorted(_get_queue_job_ids())
     if not ids:
         return ""
@@ -277,8 +257,6 @@ class QueueState:
     completed_ids にあるジョブをスキップする。
     job_counter はグローバル連番で結果ファイル名の
     一意性を保証する。
-    キュー変更時はキューから削除されたジョブの
-    completed_ids のみ除去し、新規追加は影響なし。
     """
 
     completed_ids: list[str] = field(default_factory=list)
@@ -291,7 +269,6 @@ class QueueState:
         if not current_hash:
             return
         if self.queue_hash and self.queue_hash != current_hash:
-            # キューから削除されたジョブのみ除去
             current_ids = _get_queue_job_ids()
             removed = [
                 cid for cid in self.completed_ids
@@ -381,7 +358,6 @@ def cleanup_stale_running(state: QueueState) -> None:
             job_id = data.get("job_id", "")
             if status == "running":
                 path.unlink()
-                # completed_ids から除外（念のため）
                 if job_id in state.completed_ids:
                     state.completed_ids.remove(job_id)
                 cleaned += 1
@@ -400,11 +376,7 @@ def cleanup_stale_running(state: QueueState) -> None:
 
 
 def cleanup_worker_progress() -> None:
-    """起動時にワーカー進捗ファイルを全削除
-
-    起動時にはワーカーは存在しないため、
-    前回の残骸を安全に削除できる。
-    """
+    """起動時にワーカー進捗ファイルを全削除"""
     if not WORKER_PROGRESS_DIR.exists():
         return
     cleaned = 0
@@ -473,7 +445,7 @@ def _remove_job_from_queue(job_id: str) -> None:
 
 
 # ===================================================================
-# ジョブ実行
+# ユーティリティ
 # ===================================================================
 
 
@@ -484,443 +456,6 @@ def parse_years(years_str: str) -> tuple[int, int]:
         return int(parts[0]), int(parts[1])
     y = int(years_str)
     return y, y
-
-
-def execute_job(
-    job: Job,
-    cancel_event: threading.Event,
-    max_year_workers: int = 5,
-    result_id: str = "",
-) -> JobResult:
-    """バックテストジョブを実行
-
-    Args:
-        job: 実行するジョブ
-        cancel_event: キャンセルイベント
-        max_year_workers: 年並列実行数
-        result_id: 連番付き結果ID
-
-    Returns:
-        JobResult: 実行結果
-    """
-    from autotrader.backtest.service import (
-        BacktestService,
-        BacktestServiceConfig,
-    )
-    from autotrader.config.trading_params import (
-        get_pip_unit,
-        get_preset,
-        get_quote_ccy_rate,
-        get_symbol_overrides,
-    )
-    from autotrader.decision.unified import UnifiedBotConfig
-    from autotrader.decision.unified.position_manager import (
-        PositionManagerConfig,
-    )
-
-    _rid = result_id or job.id
-    result = JobResult(
-        job_id=_rid,
-        status="running",
-        symbol=job.symbol,
-        years=job.years,
-        description=job.description,
-        started_at=datetime.now().isoformat(),
-        overrides_used=job.overrides,
-    )
-    _save_result(result)
-
-    start_time = time.time()
-    start_year, end_year = parse_years(job.years)
-
-    try:
-        # プリセット取得
-        preset = get_preset(job.symbol)
-        sym_ovr = get_symbol_overrides(job.symbol)
-
-        # bot overrides 構築
-        pip_unit = get_pip_unit(job.symbol)
-        qcr = get_quote_ccy_rate(job.symbol)
-        bot_ovr: dict[str, Any] = {}
-        # L1: プリセット
-        bot_ovr.update(
-            {
-                "max_positions": preset.max_positions,
-                "bonus_max_positions": (preset.bonus_max_positions),
-                "bonus_score_threshold": (preset.bonus_score_threshold),
-                "base_risk_pct": preset.base_risk_pct,
-                "max_lot_per_trade": preset.max_lot_per_trade,
-                "max_total_exposure_lot": (preset.max_total_exposure_lot),
-                "equity_floor_pct": preset.equity_floor_pct,
-                "pip_unit": pip_unit,
-                "quote_ccy_rate": qcr,
-            }
-        )
-        # L2: ペア別 signal/filter/risk_mgmt
-        bot_ovr.update(sym_ovr.get("signal", {}))
-        bot_ovr.update(sym_ovr.get("filter", {}))
-        bot_ovr.update(sym_ovr.get("risk_mgmt", {}))
-        # L3: ジョブ指定 overrides（最高優先）
-        bot_ovr.update(job.overrides.get("bot", {}))
-
-        # UnifiedBotConfigに存在しないキーを除去
-        _valid_fields = {
-            f.name
-            for f in UnifiedBotConfig.__dataclass_fields__.values()
-        }
-        bot_ovr = {
-            k: v for k, v in bot_ovr.items()
-            if k in _valid_fields
-        }
-
-        # pm overrides 構築
-        pm_ovr: dict[str, Any] = {}
-        pm_ovr.update(sym_ovr.get("pm_config", {}))
-        pm_ovr.update(job.overrides.get("pm", {}))
-
-        bot_config = UnifiedBotConfig(**bot_ovr)
-        pm_config = PositionManagerConfig(**pm_ovr)
-
-        # バックテスト設定
-        bt_ovr = job.overrides.get("backtest", {})
-        data_dir = bt_ovr.get(
-            "data_dir",
-            DEFAULT_DATA_DIR,
-        )
-        initial_balance = bt_ovr.get(
-            "initial_balance",
-            1_000_000,
-        )
-
-        # スプレッド倍率（ストレステスト用）
-        _sp_mult = bt_ovr.get("spread_multiplier", 1.0)
-        _spread = preset.spread_pips * _sp_mult
-        _slippage = preset.slippage_pips * _sp_mult
-
-        svc_config = BacktestServiceConfig(
-            start_year=start_year,
-            end_year=end_year,
-            initial_balance=initial_balance,
-            data_dir=data_dir,
-            symbol=job.symbol,
-            spread_pips=_spread,
-            slippage_pips=_slippage,
-            max_positions=preset.max_positions,
-            bonus_max_positions=(bot_config.bonus_max_positions),
-            bonus_score_threshold=(bot_config.bonus_score_threshold),
-            pip_value=preset.pip_value,
-            commission_per_lot=preset.commission_per_lot,
-            use_short_timeframe=True,
-        )
-
-        service = BacktestService(svc_config)
-        runner = service.create_runner()
-
-        # キャンセルコールバック設定
-        runner.set_cancel_callback(cancel_event.is_set)
-
-        # ログパスを記録
-        _fl = runner._file_listener
-        if _fl is not None:
-            result.log_dir = str(_fl.log_dir)
-            result.trades_csv = str(_fl.trades_file)
-            result.summary_log = str(
-                _fl.summary_file,
-            )
-
-        # データ読み込み
-        logger.info(
-            "[%s] データ読み込み中... (%s %s, workers=%d)",
-            job.id,
-            job.symbol,
-            job.years,
-            max_year_workers,
-        )
-        runner.load_data()
-
-        # バックテスト実行
-        _use_monthly = bt_ovr.get(
-            "use_monthly", False
-        )
-        if _use_monthly:
-            logger.info(
-                "[%s] 月単位並列バックテスト実行中...",
-                job.id,
-            )
-            _max_mw = bt_ovr.get(
-                "max_month_workers", 12
-            )
-            bt_result = runner.run_unified_monthly(
-                start_year=start_year,
-                end_year=end_year,
-                config=bot_config,
-                pm_config=pm_config,
-                use_m1=True,
-                max_month_workers=_max_mw,
-                max_year_workers=max_year_workers,
-            )
-        else:
-            logger.info(
-                "[%s] バックテスト実行中...",
-                job.id,
-            )
-            bt_result = runner.run_unified(
-                start_year=start_year,
-                end_year=end_year,
-                config=bot_config,
-                pm_config=pm_config,
-                use_m1=True,
-                max_year_workers=max_year_workers,
-            )
-
-        if cancel_event.is_set():
-            result.status = "cancelled"
-            result.error = "ユーザーにより停止"
-        else:
-            result.status = "completed"
-            result.net_profit = bt_result.net_profit
-            result.trades = bt_result.trades
-            result.win_rate = bt_result.win_rate
-            result.profit_factor = bt_result.profit_factor
-            result.max_drawdown = bt_result.max_drawdown
-            result.sharpe_ratio = bt_result.sharpe_ratio
-            result.yearly_details = bt_result.yearly_results
-
-            # 月間プラス率を計算
-            if bt_result.monthly_results:
-                plus_months = sum(
-                    1
-                    for m in bt_result.monthly_results
-                    if m.get("profit", 0) > 0
-                )
-                total = len(bt_result.monthly_results)
-                result.monthly_plus_rate = (
-                    plus_months / total * 100 if total > 0 else 0
-                )
-
-    except Exception as e:
-        result.status = "failed"
-        result.error = str(e)
-        logger.exception("[%s] ジョブ失敗: %s", job.id, e)
-
-    result.elapsed_seconds = round(
-        time.time() - start_time,
-        1,
-    )
-    result.finished_at = datetime.now().isoformat()
-    _save_result(result)
-    return result
-
-
-def execute_multi_pair_job(
-    job: Job,
-    cancel_event: threading.Event,
-    max_year_workers: int = 1,
-    result_id: str = "",
-    progress_callback: Callable[
-        [int, int], None
-    ] | None = None,
-) -> JobResult:
-    """マルチ通貨ペアインターリーブジョブを実行
-
-    時系列インターリーブ方式で複数ペアを共有エクイティプール＋
-    グローバルポジション制限で同時実行する。
-    max_year_workers > 1 の場合、年並列実行を行う。
-
-    Args:
-        job: 実行するジョブ（type="multi_pair"）
-        cancel_event: キャンセルイベント
-        max_year_workers: 年並列ワーカー数（1=順次）
-        result_id: 連番付き結果ID
-        progress_callback: 年完了時の進捗通知
-
-    Returns:
-        JobResult: インターリーブ実行結果
-    """
-    from scripts.run_multi_pair_backtest import (
-        TEST_MATRIX,
-        MultiPairConfig,
-        run_test_case,
-    )
-
-    _rid = result_id or job.id
-
-    # 対象シンボル決定（空なら全6ペア）
-    _default_symbols = [
-        "USDJPY",
-        "EURJPY",
-        "GBPJPY",
-        "AUDJPY",
-        "CADJPY",
-        "CHFJPY",
-    ]
-    symbols = job.symbols or _default_symbols
-    symbols_str = ",".join(symbols)
-
-    result = JobResult(
-        job_id=_rid,
-        status="running",
-        job_type="multi_pair",
-        symbol=symbols_str,
-        years=job.years,
-        description=job.description,
-        started_at=datetime.now().isoformat(),
-        overrides_used=job.overrides,
-    )
-    _save_result(result)
-
-    start_time = time.time()
-    start_year, end_year = parse_years(job.years)
-
-    # バックテスト共通設定
-    bt_ovr = job.overrides.get("backtest", {})
-    data_dir = bt_ovr.get("data_dir", DEFAULT_DATA_DIR)
-
-    # MultiPairConfig 構築
-    mpc = job.multi_pair_config
-    test_name = mpc.get("test_name", "")
-    if test_name and test_name in TEST_MATRIX:
-        multi_config = TEST_MATRIX[test_name]
-        logger.info(
-            "[%s] TEST_MATRIX '%s' を使用",
-            _rid,
-            test_name,
-        )
-    else:
-        multi_config = MultiPairConfig(
-            name=mpc.get("name", job.id),
-            global_max_positions=mpc.get(
-                "global_max_positions",
-                6,
-            ),
-            per_pair_max_positions=mpc.get(
-                "per_pair_max_positions",
-                1,
-            ),
-            global_max_exposure_lot=mpc.get(
-                "global_max_exposure_lot",
-                10.0,
-            ),
-        )
-
-    # スプレッド倍率（ストレステスト用）
-    spread_mult = mpc.get("spread_multiplier", 1.0)
-
-    # bot追加オーバーライド
-    # multi_pair_config の base_risk_pct / consensus_threshold は
-    # bot overrides として渡す（MultiPairConfigには含まない）
-    bot_extra: dict[str, Any] = {}
-    if "base_risk_pct" in mpc:
-        bot_extra["base_risk_pct"] = mpc["base_risk_pct"]
-    if "consensus_threshold" in mpc:
-        bot_extra["consensus_threshold"] = mpc[
-            "consensus_threshold"
-        ]
-    bot_ovr_cfg = job.overrides.get("bot", {})
-    if bot_ovr_cfg:
-        bot_extra.update(bot_ovr_cfg)
-
-    # PM設定オーバーライド
-    pm_extra: dict[str, Any] = {}
-    pm_ovr_cfg = job.overrides.get("pm", {})
-    if pm_ovr_cfg:
-        pm_extra.update(pm_ovr_cfg)
-
-    try:
-        logger.info(
-            "[%s] マルチペア実行開始 (%s, %s, workers=%d)",
-            _rid,
-            symbols_str,
-            job.years,
-            max_year_workers,
-        )
-
-        # run_test_caseに委譲（年ごとにデータロード）
-        agg = run_test_case(
-            test_config=multi_config,
-            runners={},
-            symbols=symbols,
-            start_year=start_year,
-            end_year=end_year,
-            max_year_workers=max_year_workers,
-            data_dir=data_dir,
-            bot_extra_overrides=bot_extra,
-            pm_extra_overrides=pm_extra,
-            progress_callback=progress_callback,
-            job_id=_rid,
-            spread_multiplier=spread_mult,
-        )
-
-        if cancel_event.is_set():
-            result.status = "cancelled"
-            result.error = "ユーザーにより停止"
-        else:
-            result.status = "completed"
-            result.net_profit = agg["total_profit"]
-            result.trades = agg["total_trades"]
-            result.win_rate = agg["wr"]
-            result.profit_factor = agg["pf"]
-            result.max_drawdown = agg["max_dd_pct"]
-            result.sharpe_ratio = agg["sharpe"]
-            result.monthly_plus_rate = agg["monthly_wr"]
-            result.yearly_details = agg["yearly_results"]
-
-            # ペア別結果
-            pair_details = []
-            for sym in symbols:
-                pm = agg["pair_metrics"].get(sym, {})
-                if pm.get("trades", 0) > 0:
-                    pair_details.append(
-                        {
-                            "symbol": sym,
-                            "net_profit": pm["profit"],
-                            "trades": pm["trades"],
-                            "win_rate": pm["wr"],
-                            "profit_factor": pm["pf"],
-                            "contribution_pct": (pm["contribution"]),
-                        }
-                    )
-            result.pair_details = pair_details
-
-            # ポートフォリオメトリクス
-            result.portfolio_metrics = {
-                "total_profit": agg["total_profit"],
-                "annual_return_pct": (agg["annual_return_pct"]),
-                "max_dd_pct": agg["max_dd_pct"],
-                "sharpe_ratio": agg["sharpe"],
-                "portfolio_wr": agg["wr"],
-                "portfolio_pf": agg["pf"],
-                "monthly_win_rate": agg["monthly_wr"],
-                "blocked_global": (agg["blocked_global"]),
-                "blocked_per_pair": (agg["blocked_per_pair"]),
-                "blocked_exposure": (agg["blocked_exposure"]),
-                "final_equity": agg["final_equity"],
-            }
-
-    except Exception as e:
-        result.status = "failed"
-        result.error = str(e)
-        logger.exception(
-            "[%s] マルチペアジョブ失敗: %s",
-            job.id,
-            e,
-        )
-
-    result.elapsed_seconds = round(
-        time.time() - start_time,
-        1,
-    )
-    result.finished_at = datetime.now().isoformat()
-    _save_result(result)
-
-    # ワーカー進捗ファイル掃除
-    for pg_f in WORKER_PROGRESS_DIR.glob(
-        f"{_rid}_*.json",
-    ):
-        with contextlib.suppress(OSError):
-            pg_f.unlink()
-
-    return result
 
 
 def _save_result(result: JobResult) -> None:
@@ -939,182 +474,1088 @@ def _save_result(result: JobResult) -> None:
 
 
 # ===================================================================
-# サブプロセス実行（code_dir 指定時）
+# 月タスク生成・チェックポイント
 # ===================================================================
 
 
-def execute_job_subprocess(
-    job: Job,
-    cancel_event: threading.Event,
-    max_year_workers: int = 5,
-    result_id: str = "",
-) -> JobResult:
-    """code_dir指定ジョブをサブプロセスで実行
-
-    code_dirのコードでバックテストを実行するため、
-    サブプロセスとしてqueue_runnerの--execute-jobモードを起動する。
-    サブプロセスはcode_dir内のautotraderモジュールを使用する。
+def _get_completed_months(
+    result_id: str,
+) -> set[tuple[int, int]]:
+    """月結果ディレクトリから完了月を取得
 
     Args:
-        job: 実行するジョブ（code_dir指定済み）
-        cancel_event: キャンセルイベント
-        max_year_workers: 年並列実行数
-        result_id: 連番付き結果ID
+        result_id: 結果ID
 
     Returns:
-        JobResult: 実行結果
+        完了月のセット {(year, month), ...}
     """
-    import tempfile  # noqa: PLC0415
+    result_dir = MONTH_RESULTS_DIR / result_id
+    completed: set[tuple[int, int]] = set()
+    if not result_dir.exists():
+        return completed
+    for path in result_dir.glob("*.json"):
+        name = path.stem
+        # year_YYYY_MM.json 形式はスキップ（年集約）
+        if name.startswith("year_"):
+            continue
+        parts = name.split("_")
+        if len(parts) == 2:
+            try:
+                yr = int(parts[0])
+                mo = int(parts[1])
+                completed.add((yr, mo))
+            except ValueError:
+                continue
+    return completed
 
-    _rid = result_id or job.id
-    code_dir = job.code_dir or str(_project_root)
 
-    # ジョブ情報をJSONファイルに書き出し
-    job_data = {
-        "job": asdict(job),
-        "max_year_workers": max_year_workers,
-        "result_id": _rid,
-        "results_dir": str(RESULTS_DIR),
-        "data_dir": DEFAULT_DATA_DIR,
+def generate_pending_months(
+    job: Job,
+    result_id: str,
+) -> list[MonthTask]:
+    """ジョブから未完了月タスクを生成
+
+    Args:
+        job: ジョブ定義
+        result_id: 結果ID
+
+    Returns:
+        未完了の月タスクリスト（年月順）
+    """
+    start_year, end_year = parse_years(job.years)
+    completed = _get_completed_months(result_id)
+
+    tasks: list[MonthTask] = []
+    for yr in range(start_year, end_year + 1):
+        for mo in range(1, 13):
+            if (yr, mo) in completed:
+                continue
+            tasks.append(
+                MonthTask(
+                    job_id=job.id,
+                    result_id=result_id,
+                    job_type=job.type,
+                    year=yr,
+                    month=mo,
+                    job_dict=asdict(job),
+                )
+            )
+    return tasks
+
+
+def _is_year_complete(
+    result_id: str,
+    year: int,
+) -> bool:
+    """指定年の12ヶ月が全て完了しているか"""
+    completed = _get_completed_months(result_id)
+    return all((year, mo) in completed for mo in range(1, 13))
+
+
+def _is_job_complete(
+    job: Job,
+    result_id: str,
+) -> bool:
+    """ジョブの全月が完了しているか"""
+    start_year, end_year = parse_years(job.years)
+    for yr in range(start_year, end_year + 1):
+        if not _is_year_complete(result_id, yr):
+            return False
+    return True
+
+
+# ===================================================================
+# 月結果の読み込み
+# ===================================================================
+
+
+def _load_month_results(
+    result_id: str,
+    year: int,
+) -> list[dict[str, Any]]:
+    """指定年の12ヶ月結果を読み込み
+
+    Args:
+        result_id: 結果ID
+        year: 対象年
+
+    Returns:
+        月結果リスト（月順ソート済み）
+    """
+    result_dir = MONTH_RESULTS_DIR / result_id
+    results: list[dict[str, Any]] = []
+    for mo in range(1, 13):
+        path = result_dir / f"{year}_{mo:02d}.json"
+        if path.exists():
+            try:
+                data = json.loads(
+                    path.read_text(encoding="utf-8"),
+                )
+                results.append(data)
+            except (json.JSONDecodeError, OSError) as e:
+                logger.warning(
+                    "月結果読み込み失敗 %s: %s",
+                    path.name,
+                    e,
+                )
+    results.sort(key=lambda r: r.get("month", 0))
+    return results
+
+
+# ===================================================================
+# 年集約
+# ===================================================================
+
+
+def _aggregate_year_single(
+    result_id: str,
+    year: int,
+) -> dict[str, Any] | None:
+    """単独BTの年集約
+
+    month_runner._aggregate_monthly_to_yearly を再利用。
+
+    Args:
+        result_id: 結果ID
+        year: 対象年
+
+    Returns:
+        年次結果辞書
+    """
+    from autotrader.backtest.month_runner import (
+        _aggregate_monthly_to_yearly,
+    )
+
+    monthly = _load_month_results(result_id, year)
+    if not monthly:
+        return None
+
+    initial_balance = monthly[0].get(
+        "initial_balance", 1_000_000,
+    )
+    yearly = _aggregate_monthly_to_yearly(
+        monthly, year, initial_balance,
+    )
+
+    # 年集約結果を保存
+    year_path = (
+        MONTH_RESULTS_DIR / result_id / f"year_{year}.json"
+    )
+    year_path.write_text(
+        json.dumps(
+            yearly, indent=2, ensure_ascii=False, default=str,
+        ),
+        encoding="utf-8",
+    )
+    logger.info(
+        "[%s] %d年集約完了: trades=%d, profit=%.0f",
+        result_id,
+        year,
+        yearly.get("trades", 0),
+        yearly.get("net_profit", 0.0),
+    )
+    return yearly
+
+
+def _aggregate_year_multi_pair(
+    result_id: str,
+    year: int,
+) -> dict[str, Any] | None:
+    """マルチペアBTの年集約
+
+    12ヶ月分の pair_summaries, monthly_pnl, blocked_* を合算。
+
+    Args:
+        result_id: 結果ID
+        year: 対象年
+
+    Returns:
+        年次結果辞書（aggregate_year_results互換）
+    """
+    monthly = _load_month_results(result_id, year)
+    if not monthly:
+        return None
+
+    year_pnl = 0.0
+    year_trades = 0
+    initial_equity = monthly[0].get(
+        "initial_equity", 1_000_000,
+    )
+    final_equity = initial_equity
+
+    # 月次PnL
+    monthly_pnl: dict[str, float] = {}
+    # ペア別集計
+    pair_summaries: dict[str, dict[str, Any]] = {}
+    max_dd_pct = 0.0
+    blocked_global = 0
+    blocked_per_pair = 0
+    blocked_exposure = 0
+
+    for mr in monthly:
+        _pnl = mr.get("year_pnl", 0.0)
+        year_pnl += _pnl
+        year_trades += mr.get("year_trades", 0)
+
+        # 月次PnL
+        for key, pnl in mr.get("monthly_pnl", {}).items():
+            monthly_pnl[key] = (
+                monthly_pnl.get(key, 0.0) + pnl
+            )
+
+        # DD
+        _dd = mr.get("max_dd_pct", 0.0)
+        if _dd > max_dd_pct:
+            max_dd_pct = _dd
+
+        # blocked
+        blocked_global += mr.get("blocked_global", 0)
+        blocked_per_pair += mr.get("blocked_per_pair", 0)
+        blocked_exposure += mr.get("blocked_exposure", 0)
+
+        # ペア別
+        for sym, ps in mr.get("pair_summaries", {}).items():
+            if sym not in pair_summaries:
+                pair_summaries[sym] = {
+                    "trades": 0,
+                    "wins": 0,
+                    "gross_profit": 0.0,
+                    "gross_loss": 0.0,
+                    "net_profit": 0.0,
+                }
+            agg = pair_summaries[sym]
+            agg["trades"] += ps.get("trades", 0)
+            agg["wins"] += ps.get("wins", 0)
+            agg["gross_profit"] += ps.get("gross_profit", 0.0)
+            agg["gross_loss"] += ps.get("gross_loss", 0.0)
+            agg["net_profit"] += ps.get("net_profit", 0.0)
+
+    final_equity = initial_equity + year_pnl
+
+    yearly = {
+        "year": year,
+        "year_pnl": year_pnl,
+        "year_trades": year_trades,
+        "final_equity": final_equity,
+        "max_dd_pct": max_dd_pct,
+        "monthly_pnl": monthly_pnl,
+        "pair_summaries": pair_summaries,
+        "blocked_global": blocked_global,
+        "blocked_per_pair": blocked_per_pair,
+        "blocked_exposure": blocked_exposure,
     }
 
-    _sym_label = (
-        ",".join(job.symbols) if job.symbols else job.symbol
+    # 年集約結果を保存
+    year_path = (
+        MONTH_RESULTS_DIR / result_id / f"year_{year}.json"
     )
+    year_path.write_text(
+        json.dumps(
+            yearly, indent=2, ensure_ascii=False, default=str,
+        ),
+        encoding="utf-8",
+    )
+    logger.info(
+        "[%s] %d年マルチペア集約完了:"
+        " trades=%d, pnl=%.0f",
+        result_id,
+        year,
+        year_trades,
+        year_pnl,
+    )
+    return yearly
+
+
+def aggregate_year(
+    result_id: str,
+    year: int,
+    job_type: str,
+) -> dict[str, Any] | None:
+    """年集約（タイプ振り分け）"""
+    if job_type in ("multi_pair", "portfolio"):
+        return _aggregate_year_multi_pair(result_id, year)
+    return _aggregate_year_single(result_id, year)
+
+
+# ===================================================================
+# ジョブ集約
+# ===================================================================
+
+
+def _aggregate_job_single(
+    job: Job,
+    result_id: str,
+) -> JobResult:
+    """単独BTジョブ全体集約"""
+    start_year, end_year = parse_years(job.years)
+    yearly_results: list[dict[str, Any]] = []
+
+    for yr in range(start_year, end_year + 1):
+        year_path = (
+            MONTH_RESULTS_DIR / result_id / f"year_{yr}.json"
+        )
+        if year_path.exists():
+            try:
+                yearly = json.loads(
+                    year_path.read_text(encoding="utf-8"),
+                )
+                yearly_results.append(yearly)
+            except (json.JSONDecodeError, OSError):
+                continue
+
+    if not yearly_results:
+        return JobResult(
+            job_id=result_id,
+            status="completed",
+            job_type="single",
+            symbol=job.symbol,
+            years=job.years,
+            description=job.description,
+        )
+
+    # 全年集約
+    total_trades = sum(
+        yr.get("trades", 0) for yr in yearly_results
+    )
+    total_profit = sum(
+        yr.get("net_profit", 0.0) for yr in yearly_results
+    )
+
+    # 加重WR
+    if total_trades > 0:
+        wr = sum(
+            yr.get("win_rate", 0.0) * yr.get("trades", 0)
+            for yr in yearly_results
+        ) / total_trades
+    else:
+        wr = 0.0
+
+    # PF
+    total_wins = sum(
+        yr.get("_total_win_amount", 0.0)
+        for yr in yearly_results
+    )
+    total_losses = sum(
+        yr.get("_total_loss_amount", 0.0)
+        for yr in yearly_results
+    )
+    # 年集約にwin/loss amountがない場合はPFを加重平均
+    if total_wins == 0.0 and total_losses == 0.0:
+        # 個別月結果からwin/loss集計
+        for yr_data in yearly_results:
+            _yr = yr_data.get("year", 0)
+            for mr in _load_month_results(result_id, _yr):
+                total_wins += mr.get("total_win_amount", 0.0)
+                total_losses += mr.get(
+                    "total_loss_amount", 0.0,
+                )
+    pf = (
+        total_wins / total_losses
+        if total_losses > 0
+        else 999.99
+    )
+
+    # DD
+    max_dd = max(
+        yr.get("max_drawdown", 0.0)
+        for yr in yearly_results
+    )
+
+    # Sharpe: 全月次リターンから計算
+    initial_balance = 1_000_000
+    all_monthly_returns: list[float] = []
+    for yr_data in yearly_results:
+        for mr_compat in yr_data.get("monthly_results", []):
+            _pnl = mr_compat.get("pnl", 0.0)
+            all_monthly_returns.append(
+                _pnl / initial_balance
+            )
+
+    if len(all_monthly_returns) >= 2:
+        import numpy as np
+        _arr = np.array(all_monthly_returns)
+        _mean = float(np.mean(_arr))
+        _std = float(np.std(_arr, ddof=1))
+        sharpe = (
+            _mean / _std * (12**0.5) if _std > 0 else 0.0
+        )
+    else:
+        sharpe = 0.0
+
+    # 月間プラス率
+    if all_monthly_returns:
+        plus_months = sum(
+            1 for r in all_monthly_returns if r > 0
+        )
+        monthly_plus = (
+            plus_months / len(all_monthly_returns) * 100
+        )
+    else:
+        monthly_plus = 0.0
+
+    # yearly_details
+    yr_details = []
+    for yr_data in yearly_results:
+        yr_details.append({
+            "year": yr_data.get("year", 0),
+            "trades": yr_data.get("trades", 0),
+            "net_profit": yr_data.get("net_profit", 0.0),
+            "win_rate": yr_data.get("win_rate", 0.0),
+            "profit_factor": yr_data.get("profit_factor", 0.0),
+            "max_drawdown": yr_data.get("max_drawdown", 0.0),
+            "sharpe": yr_data.get("sharpe", 0.0),
+        })
+
     result = JobResult(
-        job_id=_rid,
-        status="running",
-        job_type=job.type,
-        symbol=_sym_label,
+        job_id=result_id,
+        status="completed",
+        job_type="single",
+        symbol=job.symbol,
         years=job.years,
         description=job.description,
-        started_at=datetime.now().isoformat(),
+        net_profit=total_profit,
+        trades=total_trades,
+        win_rate=wr,
+        profit_factor=pf,
+        max_drawdown=max_dd,
+        sharpe_ratio=sharpe,
+        monthly_plus_rate=monthly_plus,
+        yearly_details=yr_details,
         overrides_used=job.overrides,
     )
-    _save_result(result)
+    return result
 
-    start_time = time.time()
+
+def _aggregate_job_multi_pair(
+    job: Job,
+    result_id: str,
+) -> JobResult:
+    """マルチペアジョブ全体集約"""
+    from scripts.run_multi_pair_backtest import (
+        aggregate_year_results,
+    )
+
+    start_year, end_year = parse_years(job.years)
+    symbols = job.symbols or [
+        "USDJPY", "EURJPY", "GBPJPY",
+        "AUDJPY", "CADJPY", "CHFJPY",
+    ]
+    symbols_str = ",".join(symbols)
+    num_years = end_year - start_year + 1
+
+    # 年集約結果を読み込み
+    year_results: list[dict[str, Any]] = []
+    for yr in range(start_year, end_year + 1):
+        year_path = (
+            MONTH_RESULTS_DIR / result_id / f"year_{yr}.json"
+        )
+        if year_path.exists():
+            try:
+                yearly = json.loads(
+                    year_path.read_text(encoding="utf-8"),
+                )
+                year_results.append(yearly)
+            except (json.JSONDecodeError, OSError):
+                continue
+
+    if not year_results:
+        return JobResult(
+            job_id=result_id,
+            status="completed",
+            job_type="multi_pair",
+            symbol=symbols_str,
+            years=job.years,
+            description=job.description,
+        )
+
+    # aggregate_year_results を使って集約
+    mpc = job.multi_pair_config
+    test_name = mpc.get("name", job.id)
+    agg = aggregate_year_results(
+        test_name, year_results, symbols, num_years,
+    )
+
+    # ペア別結果
+    pair_details = []
+    for sym in symbols:
+        pm = agg["pair_metrics"].get(sym, {})
+        if pm.get("trades", 0) > 0:
+            pair_details.append({
+                "symbol": sym,
+                "net_profit": pm["profit"],
+                "trades": pm["trades"],
+                "win_rate": pm["wr"],
+                "profit_factor": pm["pf"],
+                "contribution_pct": pm["contribution"],
+            })
+
+    result = JobResult(
+        job_id=result_id,
+        status="completed",
+        job_type="multi_pair",
+        symbol=symbols_str,
+        years=job.years,
+        description=job.description,
+        net_profit=agg["total_profit"],
+        trades=agg["total_trades"],
+        win_rate=agg["wr"],
+        profit_factor=agg["pf"],
+        max_drawdown=agg["max_dd_pct"],
+        sharpe_ratio=agg["sharpe"],
+        monthly_plus_rate=agg["monthly_wr"],
+        yearly_details=agg["yearly_results"],
+        pair_details=pair_details,
+        portfolio_metrics={
+            "total_profit": agg["total_profit"],
+            "annual_return_pct": agg["annual_return_pct"],
+            "max_dd_pct": agg["max_dd_pct"],
+            "sharpe_ratio": agg["sharpe"],
+            "portfolio_wr": agg["wr"],
+            "portfolio_pf": agg["pf"],
+            "monthly_win_rate": agg["monthly_wr"],
+            "blocked_global": agg["blocked_global"],
+            "blocked_per_pair": agg["blocked_per_pair"],
+            "blocked_exposure": agg["blocked_exposure"],
+            "final_equity": agg["final_equity"],
+        },
+        overrides_used=job.overrides,
+    )
+    return result
+
+
+def aggregate_job(
+    job: Job,
+    result_id: str,
+) -> JobResult:
+    """ジョブ全体集約（タイプ振り分け）"""
+    if job.type in ("multi_pair", "portfolio"):
+        return _aggregate_job_multi_pair(job, result_id)
+    return _aggregate_job_single(job, result_id)
+
+
+# ===================================================================
+# サブプロセス実行
+# ===================================================================
+
+
+def _launch_month_subprocess(
+    task: MonthTask,
+) -> subprocess.Popen:  # type: ignore[type-arg]
+    """月タスクをサブプロセスで起動
+
+    Args:
+        task: 月タスク
+
+    Returns:
+        起動済みPopen
+    """
+    job_dict = task.job_dict
+    code_dir = job_dict.get("code_dir", "") or str(
+        _project_root
+    )
+
+    # 月結果ディレクトリ作成
+    result_dir = MONTH_RESULTS_DIR / task.result_id
+    result_dir.mkdir(parents=True, exist_ok=True)
+
+    result_path = str(
+        result_dir / f"{task.year}_{task.month:02d}.json"
+    )
+
+    # 月タスク情報を一時ファイルに保存
+    task_data = {
+        "job": job_dict,
+        "year": task.year,
+        "month": task.month,
+        "result_path": result_path,
+        "data_dir": DEFAULT_DATA_DIR,
+        "result_id": task.result_id,
+    }
+
+    fd, task_file = tempfile.mkstemp(
+        suffix=".json", prefix="month_task_",
+    )
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(task_data, f, ensure_ascii=False)
+    except Exception:
+        os.close(fd)
+        raise
+
+    runner_script = (
+        Path(code_dir) / "scripts" / "backtest_queue_runner.py"
+    )
+    cmd = [
+        sys.executable,
+        str(runner_script),
+        "--execute-month",
+        task_file,
+    ]
+
+    proc = subprocess.Popen(
+        cmd,
+        cwd=code_dir,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        env={**os.environ, "PYTHONUNBUFFERED": "1"},
+    )
+    return proc
+
+
+def _execute_month_single(
+    job_dict: dict[str, Any],
+    year: int,
+    month: int,
+    result_path: str,
+    data_dir: str,
+) -> None:
+    """単独BT月実行（サブプロセス内）
+
+    month_runner._run_month_worker の処理をインラインで実行。
+    """
+    from autotrader.backtest.events import (
+        BacktestEventEmitter,
+    )
+    from autotrader.backtest.file_listener import (
+        TradeRowCollector,
+    )
+    from autotrader.backtest.month_runner import (
+        _filter_market_data_for_month,
+    )
+    from autotrader.backtest.service import (
+        BacktestService,
+        BacktestServiceConfig,
+    )
+    from autotrader.backtest.simulator import SimulatorConfig
+    from autotrader.backtest.year_runner import (
+        run_unified_year,
+    )
+    from autotrader.config.trading_params import (
+        get_pip_unit,
+        get_preset,
+        get_quote_ccy_rate,
+        get_symbol_overrides,
+    )
+    from autotrader.decision.unified import UnifiedBotConfig
+    from autotrader.decision.unified.position_manager import (
+        PositionManagerConfig,
+    )
+
+    job = Job.from_dict(job_dict)
+    symbol = job.symbol
+    overrides = job.overrides or {}
+    bt_ovr = overrides.get("backtest", {})
+    initial_balance = bt_ovr.get("initial_balance", 1_000_000)
+
+    # プリセット取得
+    preset = get_preset(symbol)
+    sym_ovr = get_symbol_overrides(symbol)
+    pip_unit = get_pip_unit(symbol)
+    qcr = get_quote_ccy_rate(symbol)
+
+    # bot overrides 構築
+    bot_ovr: dict[str, Any] = {}
+    bot_ovr.update({
+        "max_positions": preset.max_positions,
+        "bonus_max_positions": preset.bonus_max_positions,
+        "bonus_score_threshold": preset.bonus_score_threshold,
+        "base_risk_pct": preset.base_risk_pct,
+        "max_lot_per_trade": preset.max_lot_per_trade,
+        "max_total_exposure_lot": preset.max_total_exposure_lot,
+        "equity_floor_pct": preset.equity_floor_pct,
+        "pip_unit": pip_unit,
+        "quote_ccy_rate": qcr,
+    })
+    bot_ovr.update(sym_ovr.get("signal", {}))
+    bot_ovr.update(sym_ovr.get("filter", {}))
+    bot_ovr.update(sym_ovr.get("risk_mgmt", {}))
+    bot_ovr.update(overrides.get("bot", {}))
+
+    _valid_fields = {
+        f.name
+        for f in UnifiedBotConfig.__dataclass_fields__.values()
+    }
+    bot_ovr = {
+        k: v for k, v in bot_ovr.items()
+        if k in _valid_fields
+    }
+
+    pm_ovr: dict[str, Any] = {}
+    pm_ovr.update(sym_ovr.get("pm_config", {}))
+    pm_ovr.update(overrides.get("pm", {}))
+
+    bot_config = UnifiedBotConfig(**bot_ovr)
+    PositionManagerConfig(**pm_ovr)  # バリデーション用
+
+    # スプレッド倍率
+    _sp_mult = bt_ovr.get("spread_multiplier", 1.0)
+    _spread = preset.spread_pips * _sp_mult
+    _slippage = preset.slippage_pips * _sp_mult
+
+    # BacktestService経由でRunner作成
+    svc_config = BacktestServiceConfig(
+        start_year=year,
+        end_year=year,
+        initial_balance=initial_balance,
+        data_dir=data_dir,
+        symbol=symbol,
+        spread_pips=_spread,
+        slippage_pips=_slippage,
+        max_positions=preset.max_positions,
+        bonus_max_positions=bot_config.bonus_max_positions,
+        bonus_score_threshold=bot_config.bonus_score_threshold,
+        pip_value=preset.pip_value,
+        commission_per_lot=preset.commission_per_lot,
+        use_short_timeframe=True,
+    )
+    service = BacktestService(svc_config)
+    runner = service.create_runner()
+    runner.load_data()
+
+    # 年データから月フィルタ
+    market_data: dict[str, Any] = {}
+    for tf_name in [
+        "M1", "M5", "M15", "M30", "H1", "H4", "H8", "D1",
+    ]:
+        attr = f"_{tf_name.lower()}_df"
+        df = getattr(runner, attr, None)
+        if df is not None:
+            market_data[tf_name] = df
+
+    month_data = _filter_market_data_for_month(
+        market_data, year, month,
+    )
+
+    # period_start / period_end
+    period_start = datetime(year, month, 1)
+    if month == 12:
+        period_end = datetime(year + 1, 1, 1)
+    else:
+        period_end = datetime(year, month + 1, 1)
+
+    # エミッターとコレクター
+    _emitter = BacktestEventEmitter()
+    _collector = TradeRowCollector()
+    _emitter.add_listener(_collector)
+
+    # 月データをRunnerに設定
+    runner._m1_df = month_data.get("M1")
+    runner._m5_df = month_data.get("M5")
+    runner._m15_df = month_data.get("M15")
+    runner._m30_df = month_data.get("M30")
+    runner._h1_df = month_data.get("H1")
+    runner._h4_df = month_data.get("H4")
+    runner._h8_df = month_data.get("H8")
+    runner._d1_df = month_data.get("D1")
+
+    sim_config = SimulatorConfig(
+        initial_balance=initial_balance,
+        spread_pips=_spread,
+        slippage_pips=_slippage,
+        pip_value=preset.pip_value,
+        commission_per_lot=preset.commission_per_lot,
+    )
+
+    result = run_unified_year(
+        runner=runner,
+        bot_config=bot_config,
+        sim_config=sim_config,
+        year=year,
+        market_data=month_data,
+        use_m1=True,
+        period_start=period_start,
+        period_end=period_end,
+        emitter=_emitter,
+    )
+
+    if result is None:
+        result = {}
+
+    # 月情報を付加
+    result["month"] = month
+    result["initial_balance"] = initial_balance
+
+    # FORCE_CLOSE/win/loss集計
+    fc_count = 0
+    fc_pnl = 0.0
+    total_win_amount = 0.0
+    total_loss_amount = 0.0
+    for row in _collector._trade_rows:
+        _pnl = float(row.get("profit_loss", 0.0))
+        if _pnl > 0:
+            total_win_amount += _pnl
+        else:
+            total_loss_amount += abs(_pnl)
+        if row.get("exit_reason") == "FORCE_CLOSE":
+            fc_count += 1
+            fc_pnl += _pnl
+    result["force_closed_trades"] = fc_count
+    result["force_close_pnl"] = fc_pnl
+    result["total_win_amount"] = total_win_amount
+    result["total_loss_amount"] = total_loss_amount
+
+    # _worker_*キーは月結果保存不要 → 除外
+    result.pop("_worker_trade_rows", None)
+    result.pop("_worker_stats", None)
+
+    # 結果保存
+    Path(result_path).write_text(
+        json.dumps(
+            result, indent=2, ensure_ascii=False, default=str,
+        ),
+        encoding="utf-8",
+    )
+
+
+def _execute_month_multi_pair(
+    job_dict: dict[str, Any],
+    year: int,
+    month: int,
+    result_path: str,
+    data_dir: str,
+) -> None:
+    """マルチペアBT月実行（サブプロセス内）
+
+    1ヶ月分のマルチペアインターリーブ実行を行う。
+    PortfolioStateは月ごとにリセット。
+    """
+    from scripts.run_multi_pair_backtest import (
+        INITIAL_EQUITY,
+        MultiPairConfig,
+        PortfolioState,
+        build_bot_config,
+        load_all_pair_data,
+        run_multi_pair_year,
+        setup_pair_context,
+    )
+
+    job = Job.from_dict(job_dict)
+    _default_symbols = [
+        "USDJPY", "EURJPY", "GBPJPY",
+        "AUDJPY", "CADJPY", "CHFJPY",
+    ]
+    symbols = job.symbols or _default_symbols
+    overrides = job.overrides or {}
+    mpc = job.multi_pair_config
+
+    # MultiPairConfig 構築
+    from scripts.run_multi_pair_backtest import TEST_MATRIX
+    test_name = mpc.get("test_name", "")
+    if test_name and test_name in TEST_MATRIX:
+        multi_config = TEST_MATRIX[test_name]
+    else:
+        multi_config = MultiPairConfig(
+            name=mpc.get("name", job.id),
+            global_max_positions=mpc.get(
+                "global_max_positions", 6,
+            ),
+            per_pair_max_positions=mpc.get(
+                "per_pair_max_positions", 1,
+            ),
+            global_max_exposure_lot=mpc.get(
+                "global_max_exposure_lot", 10.0,
+            ),
+        )
+
+    # bot追加オーバーライド
+    bot_extra: dict[str, Any] = {}
+    if "base_risk_pct" in mpc:
+        bot_extra["base_risk_pct"] = mpc["base_risk_pct"]
+    if "consensus_threshold" in mpc:
+        bot_extra["consensus_threshold"] = mpc[
+            "consensus_threshold"
+        ]
+    bot_extra.update(overrides.get("bot", {}))
+
+    pm_extra: dict[str, Any] = {}
+    pm_extra.update(overrides.get("pm", {}))
+
+    spread_mult = mpc.get("spread_multiplier", 1.0)
+
+    # データロード（年単位）
+    year_runners = load_all_pair_data(
+        symbols, data_dir, needed_years=[year],
+    )
+
+    # 月ごとに独立PortfolioState
+    portfolio = PortfolioState(
+        equity=INITIAL_EQUITY,
+        initial_equity=INITIAL_EQUITY,
+        peak_equity=INITIAL_EQUITY,
+    )
+
+    # ペアコンテキスト構築（月データのみ）
+    from autotrader.backtest.month_runner import (
+        _filter_market_data_for_month,
+    )
+
+    contexts: dict[str, Any] = {}
+    for sym in symbols:
+        runner, full_md = year_runners[sym]
+
+        # 月フィルタリング
+        month_md = _filter_market_data_for_month(
+            full_md, year, month,
+        )
+        # 月データが空なら skip
+        _has_data = any(
+            len(df) > 0 for df in month_md.values()
+        )
+        if not _has_data:
+            continue
+
+        bot_config = build_bot_config(
+            sym,
+            extra_overrides=bot_extra or None,
+            multi_mode=True,
+        )
+        ctx = setup_pair_context(
+            sym, runner, year, bot_config,
+            INITIAL_EQUITY,
+            full_market_data=month_md,
+            pm_config_overrides=pm_extra or None,
+            spread_multiplier=spread_mult,
+        )
+        if ctx is not None:
+            contexts[sym] = ctx
+
+    if not contexts:
+        # 月データなし → 空結果
+        Path(result_path).write_text(
+            json.dumps(
+                {
+                    "year": year,
+                    "month": month,
+                    "year_pnl": 0.0,
+                    "year_trades": 0,
+                    "final_equity": INITIAL_EQUITY,
+                    "initial_equity": INITIAL_EQUITY,
+                    "max_dd_pct": 0.0,
+                    "monthly_pnl": {},
+                    "pair_summaries": {},
+                    "blocked_global": 0,
+                    "blocked_per_pair": 0,
+                    "blocked_exposure": 0,
+                },
+                indent=2,
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+        return
+
+    # インターリーブ実行（月データは自動的に1ヶ月分）
+    pair_trades = run_multi_pair_year(
+        year, contexts, multi_config, portfolio,
+    )
+
+    # 月次結果構築
+    year_pnl = portfolio.equity - INITIAL_EQUITY
+    year_trades = sum(len(t) for t in pair_trades.values())
+
+    # ペア別サマリー
+    pair_summaries: dict[str, dict[str, Any]] = {}
+    for sym, trades in pair_trades.items():
+        wins = 0
+        gp = 0.0
+        gl = 0.0
+        np_ = 0.0
+        for trade in trades:
+            pnl = trade.get("pnl", 0.0)
+            np_ += pnl
+            if pnl > 0:
+                wins += 1
+                gp += pnl
+            else:
+                gl += abs(pnl)
+        pair_summaries[sym] = {
+            "trades": len(trades),
+            "wins": wins,
+            "gross_profit": gp,
+            "gross_loss": gl,
+            "net_profit": np_,
+        }
+
+    # monthly_pnlをstring key化
+    monthly_pnl_str: dict[str, float] = {}
+    for key, pnl in portfolio.monthly_pnl.items():
+        if isinstance(key, tuple):
+            monthly_pnl_str[f"{key[0]}-{key[1]:02d}"] = pnl
+        else:
+            monthly_pnl_str[str(key)] = pnl
+
+    month_result = {
+        "year": year,
+        "month": month,
+        "year_pnl": year_pnl,
+        "year_trades": year_trades,
+        "final_equity": portfolio.equity,
+        "initial_equity": INITIAL_EQUITY,
+        "max_dd_pct": portfolio.max_dd_pct,
+        "monthly_pnl": monthly_pnl_str,
+        "pair_summaries": pair_summaries,
+        "blocked_global": portfolio.blocked_global,
+        "blocked_per_pair": portfolio.blocked_per_pair,
+        "blocked_exposure": portfolio.blocked_exposure,
+    }
+
+    Path(result_path).write_text(
+        json.dumps(
+            month_result,
+            indent=2,
+            ensure_ascii=False,
+            default=str,
+        ),
+        encoding="utf-8",
+    )
+
+
+def _execute_month_from_file(task_file: str) -> None:
+    """--execute-monthモード: 月タスクJSONから1ヶ月実行
+
+    サブプロセスとして呼ばれ、指定月を実行して終了する。
+
+    Args:
+        task_file: 月タスクJSONファイルのパス
+    """
+    data = json.loads(
+        Path(task_file).read_text(encoding="utf-8"),
+    )
+    job_dict = data["job"]
+    year = data["year"]
+    month = data["month"]
+    result_path = data["result_path"]
+    data_dir = data.get("data_dir", DEFAULT_DATA_DIR)
+
+    job_type = job_dict.get("type", "single")
 
     try:
-        # ジョブ情報を一時ファイルに保存
-        with tempfile.NamedTemporaryFile(
-            mode="w",
-            suffix=".json",
-            delete=False,
-            encoding="utf-8",
-        ) as f:
-            json.dump(job_data, f, ensure_ascii=False)
-            job_file = f.name
-
-        # code_dir内のqueue_runnerを--execute-jobで起動
-        runner_script = Path(code_dir) / "scripts" / "backtest_queue_runner.py"
-        cmd = [
-            sys.executable,
-            str(runner_script),
-            "--execute-job",
-            job_file,
-        ]
-
-        _is_custom = job.code_dir and code_dir != str(_project_root)
-        logger.info(
-            "[%s] サブプロセス実行%s",
-            _rid,
-            f": code_dir={code_dir}" if _is_custom else "",
-        )
-
-        proc = subprocess.Popen(
-            cmd,
-            cwd=code_dir,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            env={**os.environ, "PYTHONUNBUFFERED": "1"},
-        )
-
-        # キャンセル監視しつつ出力を読み取り
-        while proc.poll() is None:
-            if cancel_event.is_set():
-                proc.terminate()
-                try:
-                    proc.wait(timeout=10)
-                except subprocess.TimeoutExpired:
-                    proc.kill()
-                result.status = "cancelled"
-                result.error = "ユーザーにより停止"
-                break
-            # 出力をログに転送
-            if proc.stdout:
-                line = proc.stdout.readline()
-                if line:
-                    logger.info(
-                        "[%s:sub] %s",
-                        _rid,
-                        line.rstrip(),
-                    )
-            time.sleep(0.1)
-
-        # 残りの出力を読み取り
-        if proc.stdout:
-            for line in proc.stdout:
-                logger.info(
-                    "[%s:sub] %s",
-                    _rid,
-                    line.rstrip(),
-                )
-
-        # 結果ファイルを読み取り
-        result_path = RESULTS_DIR / f"{_rid}.json"
-        if result_path.exists():
-            saved = json.loads(
-                result_path.read_text(encoding="utf-8"),
+        if job_type in ("multi_pair", "portfolio"):
+            _execute_month_multi_pair(
+                job_dict, year, month, result_path, data_dir,
             )
-            result = JobResult(
-                **{
-                    k: v
-                    for k, v in saved.items()
-                    if k in JobResult.__dataclass_fields__
-                }
+        else:
+            _execute_month_single(
+                job_dict, year, month, result_path, data_dir,
             )
-        elif result.status != "cancelled":
-            rc = proc.returncode
-            if rc != 0:
-                result.status = "failed"
-                result.error = f"サブプロセス終了コード: {rc}"
-            else:
-                result.status = "completed"
-
-    except Exception as e:
-        result.status = "failed"
-        result.error = str(e)
-        logger.exception(
-            "[%s] サブプロセスジョブ失敗: %s",
-            job.id,
-            e,
-        )
     finally:
         # 一時ファイル削除
-        try:
-            if "job_file" in locals():
-                os.unlink(job_file)
-        except OSError:
-            pass
+        with contextlib.suppress(OSError):
+            os.unlink(task_file)
 
-    result.elapsed_seconds = round(
-        time.time() - start_time,
-        1,
-    )
-    result.finished_at = datetime.now().isoformat()
-    _save_result(result)
-    return result
+
+# ===================================================================
+# 後方互換: --execute-job モード
+# ===================================================================
 
 
 def _execute_job_from_file(job_file: str) -> None:
     """--execute-jobモード: ジョブファイルから単一ジョブを実行
 
-    サブプロセスとして呼ばれ、指定ジョブを実行して終了する。
-    cwd は code_dir に設定されている前提。
+    後方互換のため残存。新規実行は --execute-month を使用。
 
     Args:
         job_file: ジョブ情報JSONファイルのパス
@@ -1123,7 +1564,6 @@ def _execute_job_from_file(job_file: str) -> None:
         Path(job_file).read_text(encoding="utf-8"),
     )
     job = Job.from_dict(data["job"])
-    workers = data.get("max_year_workers", 5)
     rid = data.get("result_id", job.id)
 
     # 結果ディレクトリを親プロセスと共有
@@ -1132,28 +1572,36 @@ def _execute_job_from_file(job_file: str) -> None:
     if results_dir:
         RESULTS_DIR = Path(results_dir)
 
-    # データディレクトリ上書き
     global DEFAULT_DATA_DIR  # noqa: PLW0603
     dd = data.get("data_dir", "")
     if dd:
         DEFAULT_DATA_DIR = dd
 
-    cancel_ev = threading.Event()
+    # 全年全月を順次実行し結果保存
+    start_year, end_year = parse_years(job.years)
+    for yr in range(start_year, end_year + 1):
+        for mo in range(1, 13):
+            result_dir = MONTH_RESULTS_DIR / rid
+            result_dir.mkdir(parents=True, exist_ok=True)
+            rp = str(result_dir / f"{yr}_{mo:02d}.json")
+            if Path(rp).exists():
+                continue
+            if job.type in ("multi_pair", "portfolio"):
+                _execute_month_multi_pair(
+                    data["job"], yr, mo, rp, DEFAULT_DATA_DIR,
+                )
+            else:
+                _execute_month_single(
+                    data["job"], yr, mo, rp, DEFAULT_DATA_DIR,
+                )
 
-    if job.type in ("multi_pair", "portfolio"):
-        execute_multi_pair_job(
-            job,
-            cancel_ev,
-            max_year_workers=workers,
-            result_id=rid,
-        )
-    else:
-        execute_job(
-            job,
-            cancel_ev,
-            workers,
-            rid,
-        )
+    # 年集約 + ジョブ集約
+    for yr in range(start_year, end_year + 1):
+        aggregate_year(rid, yr, job.type)
+    result = aggregate_job(job, rid)
+    result.started_at = datetime.now().isoformat()
+    result.finished_at = datetime.now().isoformat()
+    _save_result(result)
 
 
 # ===================================================================
@@ -1162,90 +1610,61 @@ def _execute_job_from_file(job_file: str) -> None:
 
 
 def _write_runner_state(
-    running_jobs: list[RunningJob],
+    running_tasks: list[RunningMonthTask],
+    job_progress: dict[str, JobProgress],
     state: QueueState,
     paused: bool,
     cpu_threads: int,
 ) -> None:
-    """キューランナー状態をJSONファイルに書き出し
-
-    Web UIがこのファイルを読み取って表示する。
-    """
+    """キューランナー状態をJSONファイルに書き出し"""
     now = datetime.now().isoformat()
-    jobs_data: list[dict[str, Any]] = []
-    for rj in running_jobs:
-        elapsed = time.time() - rj.started_at
 
-        # ワーカー進捗ファイルから細粒度進捗を集約
-        _progress = dict(rj.progress)
-        try:
-            sy, ey = parse_years(rj.job.years)
-            _year_progresses: list[dict[str, Any]] = []
-            _total_bars = 0
-            _done_bars = 0
-            for yr in range(sy, ey + 1):
-                _pg_path = (
-                    WORKER_PROGRESS_DIR
-                    / f"{rj.result_id}_{yr}.json"
-                )
-                if _pg_path.exists():
-                    _wp = json.loads(
-                        _pg_path.read_text(encoding="utf-8"),
-                    )
-                    _year_progresses.append(_wp)
-                    _total_bars += _wp.get("total_bars", 0)
-                    _done_bars += _wp.get("bars", 0)
-            if _total_bars > 0:
-                _overall_pct = round(
-                    _done_bars / _total_bars * 100, 1,
-                )
-                _progress["pct"] = _overall_pct
-                _progress["done_bars"] = _done_bars
-                _progress["total_bars"] = _total_bars
-                _progress["years"] = _year_progresses
-                # 全年がsavingフェーズなら集計中
-                if _year_progresses and all(
-                    yp.get("phase") == "saving"
-                    for yp in _year_progresses
-                ):
-                    _progress["phase"] = "saving"
-        except Exception:
-            pass
-
-        jobs_data.append({
-            "job_id": rj.job.id,
-            "result_id": rj.result_id,
-            "type": rj.job.type,
-            "symbol": rj.job.symbol,
-            "symbols": rj.job.symbols,
-            "years": rj.job.years,
-            "description": rj.job.description,
-            "workers": rj.max_year_workers,
-            "monthly": rj.job._is_monthly(),
-            "month_workers": (
-                rj.job._max_month_workers()
-                if rj.job._is_monthly()
-                else 0
-            ),
-            "cpu_cost": rj.cpu_cost,
-            "elapsed_seconds": elapsed,
+    # 実行中タスク
+    tasks_data: list[dict[str, Any]] = []
+    for rt in running_tasks:
+        t = rt.task
+        elapsed = time.time() - rt.started_at
+        tasks_data.append({
+            "job_id": t.job_id,
+            "result_id": t.result_id,
+            "type": t.job_type,
+            "year": t.year,
+            "month": t.month,
+            "symbol": t.job_dict.get("symbol", ""),
+            "elapsed": round(elapsed, 1),
             "started_at": datetime.fromtimestamp(
-                rj.started_at,
+                rt.started_at,
             ).isoformat(),
-            "progress": _progress,
         })
 
-    try:
-        total_jobs = len(load_queue())
-    except Exception:
-        total_jobs = 0
+    # ジョブ進捗
+    progress_data: list[dict[str, Any]] = []
+    for jp in job_progress.values():
+        if jp.status in ("in_progress", "pending"):
+            progress_data.append({
+                "job_id": jp.job_id,
+                "result_id": jp.result_id,
+                "type": jp.job_type,
+                "symbol": jp.symbol,
+                "years": jp.years,
+                "description": jp.description,
+                "completed": jp.completed_count,
+                "total": jp.total_months,
+                "pct": round(jp.pct, 1),
+                "status": jp.status,
+                "started_at": (
+                    datetime.fromtimestamp(jp.started_at).isoformat()
+                    if jp.started_at > 0
+                    else ""
+                ),
+            })
 
     data = {
         "paused": paused,
         "cpu_threads": cpu_threads,
-        "running_jobs": jobs_data,
+        "running_tasks": tasks_data,
+        "job_progress": progress_data,
         "completed_ids": state.completed_ids,
-        "total_jobs": total_jobs,
         "updated_at": now,
     }
     try:
@@ -1264,10 +1683,7 @@ def _write_runner_state(
 def _read_runner_commands(
     cmd_queue: Any,
 ) -> None:
-    """Web UIからのコマンドファイルを読み取り
-
-    コマンドがあればcmd_queueに投入し、ファイル削除。
-    """
+    """Web UIからのコマンドファイルを読み取り"""
     if not RUNNER_CMD_FILE.exists():
         return
     try:
@@ -1303,133 +1719,6 @@ def stdin_reader(
 
 
 # ===================================================================
-# CPUバジェット管理
-# ===================================================================
-
-
-def calc_used_threads(
-    running: list[RunningJob],
-) -> float:
-    """実行中ジョブの合計CPUスレッド消費量"""
-    return sum(rj.cpu_cost for rj in running)
-
-
-def _kill_job_child_processes(
-    rj: RunningJob,
-) -> int:
-    """ジョブの子プロセスを強制終了
-
-    ジョブ開始時刻以降に作成された子プロセスを特定し、
-    強制終了する。
-
-    Args:
-        rj: 対象のRunningJob
-
-    Returns:
-        int: 終了させたプロセス数
-    """
-    import psutil  # noqa: PLC0415
-
-    killed = 0
-    try:
-        parent = psutil.Process(os.getpid())
-        children = parent.children(recursive=True)
-        # ジョブ開始後に生成された子プロセスのみ対象
-        targets = [
-            c for c in children if c.create_time() >= rj.started_at - 1.0
-        ]
-        for child in targets:
-            try:
-                child.kill()
-                killed += 1
-            except psutil.NoSuchProcess:
-                pass
-        if targets:
-            psutil.wait_procs(targets, timeout=5)
-    except psutil.NoSuchProcess:
-        pass
-    return killed
-
-
-def force_stop_running_job(
-    rj: RunningJob,
-) -> None:
-    """ジョブを確実に停止（子プロセスも強制終了）
-
-    1. cancel_event でgraceful停止を試行
-    2. タイムアウトしたら子プロセスを強制終了
-    3. スレッド終了を待機
-
-    Args:
-        rj: 停止対象のRunningJob
-    """
-    rj.cancel_event.set()
-
-    # graceful停止を短時間試行
-    rj.thread.join(timeout=5)
-
-    if rj.thread.is_alive():
-        # 子プロセス強制終了
-        killed = _kill_job_child_processes(rj)
-        if killed > 0:
-            logger.info(
-                ">>> [%s] 子プロセス%d個を強制終了",
-                rj.job.id,
-                killed,
-            )
-        # スレッド終了を再待機
-        rj.thread.join(timeout=10)
-        if rj.thread.is_alive():
-            logger.warning(
-                ">>> [%s] デーモンスレッド残存（プロセス終了時に回収）",
-                rj.job.id,
-            )
-
-    # 結果ファイル削除
-    _rpath = RESULTS_DIR / f"{rj.result_id}.json"
-    if _rpath.exists():
-        _rpath.unlink()
-        logger.info(
-            ">>> 結果ファイル削除: %s",
-            _rpath.name,
-        )
-
-
-def stop_newest_jobs_until_budget(
-    running: list[RunningJob],
-    cpu_threads: int,
-    state: QueueState,
-) -> None:
-    """CPUバジェット超過時、最新ジョブから停止
-
-    Args:
-        running: 実行中ジョブリスト（変更される）
-        cpu_threads: 利用可能CPUスレッド数
-        state: キュー状態
-    """
-    # 開始時刻の新しい順にソート
-    by_newest = sorted(
-        running,
-        key=lambda rj: rj.started_at,
-        reverse=True,
-    )
-    for rj in by_newest:
-        if calc_used_threads(running) <= cpu_threads:
-            break
-        logger.info(
-            ">>> CPU超過: [%s] を停止中 (cost=%.1f)...",
-            rj.job.id,
-            rj.cpu_cost,
-        )
-        force_stop_running_job(rj)
-        # completed_ids から除外（再実行対象に戻す）
-        if rj.job.id in state.completed_ids:
-            state.completed_ids.remove(rj.job.id)
-        running.remove(rj)
-    state.save()
-
-
-# ===================================================================
 # メインループ
 # ===================================================================
 
@@ -1439,7 +1728,7 @@ def main() -> None:
     import queue as _q  # noqa: PLC0415
 
     parser = argparse.ArgumentParser(
-        description="バックテストキューランナー",
+        description="バックテストキューランナー（月スケジューラ）",
     )
     parser.add_argument(
         "--cpu-threads",
@@ -1451,11 +1740,22 @@ def main() -> None:
         "--execute-job",
         type=str,
         default="",
-        help="単一ジョブ実行モード（JSONファイルパス）",
+        help="後方互換: 単一ジョブ実行モード（JSONファイルパス）",
+    )
+    parser.add_argument(
+        "--execute-month",
+        type=str,
+        default="",
+        help="月タスク実行モード（JSONファイルパス）",
     )
     cli_args = parser.parse_args()
 
-    # --execute-job モード: サブプロセスとして単一ジョブ実行
+    # --execute-month モード
+    if cli_args.execute_month:
+        _execute_month_from_file(cli_args.execute_month)
+        return
+
+    # --execute-job モード（後方互換）
     if cli_args.execute_job:
         _execute_job_from_file(cli_args.execute_job)
         return
@@ -1463,20 +1763,17 @@ def main() -> None:
     cpu_threads: int = cli_args.cpu_threads
 
     print("=" * 60)
-    print("  バックテストキューランナー（並行実行）")
+    print("  バックテストキューランナー（月スケジューラ）")
     print("=" * 60)
     print(f"  キューファイル: {QUEUE_FILE}")
     print(f"  結果ディレクトリ: {RESULTS_DIR}")
+    print(f"  月結果ディレクトリ: {MONTH_RESULTS_DIR}")
     print(f"  ポーリング間隔: {POLL_INTERVAL}s")
-    print(
-        f"  CPUスレッド: {cpu_threads}"
-        f" (通常: 1年={THREADS_PER_YEAR}t,"
-        f" 月並列: year_w×month_w)",
-    )
+    print(f"  CPUスレッド: {cpu_threads} (月タスク=1CPU)")
     print()
     print("  コマンド:")
-    print("    stop   - 全ジョブ停止+ログ削除+キュー先頭")
-    print("    pause  - 新規ジョブ取得を一時停止")
+    print("    stop   - 全タスク停止+キュー先頭")
+    print("    pause  - 新規タスク取得を一時停止")
     print("    resume - 一時停止解除")
     print("    status - 現在の状態表示")
     print("    cpu N  - CPUスレッド数を変更")
@@ -1484,8 +1781,9 @@ def main() -> None:
     print("=" * 60)
 
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+    MONTH_RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 
-    # 状態読み込み + キューハッシュ検証 + 中断ジョブクリーンアップ
+    # 状態読み込み + クリーンアップ
     state = QueueState.load()
     state.sync_with_queue()
     cleanup_stale_running(state)
@@ -1505,75 +1803,47 @@ def main() -> None:
 
     # 状態
     paused = False
-    running_jobs: list[RunningJob] = []
-
-    def _run_job_wrapper(
-        job: Job,
-        cancel_ev: threading.Event,
-        holder: list[JobResult | None],
-        workers: int,
-        rid: str = "",
-        progress: dict[str, Any] | None = None,
-    ) -> None:
-        """ジョブ実行スレッド（typeとcode_dirに応じて振り分け）"""
-        # 進捗コールバック
-        _pg = progress
-
-        def _on_progress(done: int, total: int) -> None:
-            if _pg is not None:
-                _pg["done"] = done
-                _pg["total"] = total
-
-        # 年数からtotalを初期化（WebUIで「データ準備中」にならないよう）
-        if _pg is not None and job.years:
-            try:
-                sy, ey = parse_years(job.years)
-                _pg["done"] = 0
-                _pg["total"] = ey - sy + 1
-            except Exception:
-                pass
-
-        # 全ジョブをサブプロセスで実行
-        # （毎回モジュールを新規インポートするため、
-        #   コード変更がランナー再起動なしに反映される）
-        holder[0] = execute_job_subprocess(
-            job,
-            cancel_ev,
-            max_year_workers=workers,
-            result_id=rid,
-        )
+    running_tasks: list[RunningMonthTask] = []
+    job_progress: dict[str, JobProgress] = {}
+    # result_id → Job のマッピング
+    active_jobs: dict[str, Job] = {}
 
     while True:
-        # -------------------------------------------------------
+        # ---------------------------------------------------
         # コマンド処理
-        # -------------------------------------------------------
+        # ---------------------------------------------------
         try:
             while True:
                 raw_cmd = cmd_queue.get_nowait()
                 cmd = raw_cmd.lower().strip()
 
                 if cmd == "stop":
-                    if running_jobs:
+                    if running_tasks:
                         logger.info(
-                            ">>> 全ジョブ停止中 (%d件)...",
-                            len(running_jobs),
+                            ">>> 全タスク停止中 (%d件)...",
+                            len(running_tasks),
                         )
-                        # 全ジョブにcancel通知
-                        for rj in running_jobs:
-                            rj.cancel_event.set()
-                        # 全ジョブを確実に停止
-                        for rj in running_jobs:
-                            force_stop_running_job(rj)
-                        running_jobs.clear()
+                        for rt in running_tasks:
+                            rt.process.terminate()
+                        # 全プロセス終了待ち
+                        for rt in running_tasks:
+                            try:
+                                rt.process.wait(timeout=10)
+                            except subprocess.TimeoutExpired:
+                                rt.process.kill()
+                        running_tasks.clear()
                         # 全リセット
                         state.completed_ids.clear()
                         state.save()
+                        job_progress.clear()
+                        active_jobs.clear()
+                        # 月結果もクリーン
                         logger.info(
                             ">>> キュー先頭にリセット",
                         )
                     else:
                         logger.info(
-                            ">>> 実行中ジョブなし",
+                            ">>> 実行中タスクなし",
                         )
 
                 elif cmd == "pause":
@@ -1588,9 +1858,7 @@ def main() -> None:
                     parts = cmd.split()
                     if len(parts) == 2:
                         try:
-                            new_cpu = int(parts[1])
-                            if new_cpu < 1:
-                                new_cpu = 1
+                            new_cpu = max(1, int(parts[1]))
                             old_cpu = cpu_threads
                             cpu_threads = new_cpu
                             logger.info(
@@ -1598,22 +1866,22 @@ def main() -> None:
                                 old_cpu,
                                 cpu_threads,
                             )
-                            # 超過チェック
-                            used = calc_used_threads(
-                                running_jobs,
-                            )
-                            if used > cpu_threads:
+                            # 超過分を最新から停止
+                            while (
+                                len(running_tasks) > cpu_threads
+                                and running_tasks
+                            ):
+                                rt = running_tasks.pop()
+                                rt.process.terminate()
+                                try:
+                                    rt.process.wait(timeout=5)
+                                except subprocess.TimeoutExpired:
+                                    rt.process.kill()
                                 logger.info(
-                                    ">>> 使用中: %.1f"
-                                    " > 上限: %d"
-                                    " → 最新ジョブから停止",
-                                    used,
-                                    cpu_threads,
-                                )
-                                stop_newest_jobs_until_budget(
-                                    running_jobs,
-                                    cpu_threads,
-                                    state,
+                                    ">>> CPU超過: %s %d/%02d 停止",
+                                    rt.task.job_id,
+                                    rt.task.year,
+                                    rt.task.month,
                                 )
                         except ValueError:
                             logger.error(
@@ -1622,273 +1890,289 @@ def main() -> None:
                             )
                     else:
                         logger.info(
-                            ">>> 現在のCPUスレッド: %d (使用例: cpu 8)",
+                            ">>> 現在のCPUスレッド: %d"
+                            " (使用中: %d)",
                             cpu_threads,
+                            len(running_tasks),
                         )
 
                 elif cmd == "status":
                     _jobs = load_queue()
-                    used = calc_used_threads(
-                        running_jobs,
-                    )
                     _done = len(state.completed_ids)
                     _total = len(_jobs)
                     _remain = _total - _done
-                    print(f"  状態: {'一時停止' if paused else '稼働中'}")
-                    print(f"  CPUスレッド: {used:.1f}/{cpu_threads} 使用中")
-                    print(f"  実行中ジョブ: {len(running_jobs)}件")
-                    for rj in running_jobs:
-                        elapsed = time.time() - rj.started_at
-                        # multi_pairの場合はシンボル一覧
-                        if rj.job.type in (
-                            "multi_pair",
-                            "portfolio",
-                        ):
-                            _sym = ",".join(rj.job.symbols)
-                            _label = f"[multi_pair] {_sym}"
-                        else:
-                            _label = rj.job.symbol
-                        _cd = (
-                            f" code_dir={rj.job.code_dir}"
-                            if rj.job.code_dir
-                            else ""
-                        )
-                        _mw = ""
-                        if rj.job._is_monthly():
-                            _mw = (
-                                f" month_w="
-                                f"{rj.job._max_month_workers()}"
+                    print(
+                        f"  状態: "
+                        f"{'一時停止' if paused else '稼働中'}"
+                    )
+                    print(
+                        f"  CPU: {len(running_tasks)}"
+                        f"/{cpu_threads} 使用中"
+                    )
+                    for rid, jp in job_progress.items():
+                        if jp.status == "in_progress":
+                            print(
+                                f"    [{rid}] {jp.symbol}"
+                                f" {jp.years}"
+                                f" {jp.completed_count}"
+                                f"/{jp.total_months}月"
+                                f" ({jp.pct:.0f}%)"
                             )
-                        print(
-                            f"    - [{rj.job.id}]"
-                            f" {_label}"
-                            f" {rj.job.years}"
-                            f" year_w="
-                            f"{rj.max_year_workers}"
-                            f"{_mw}"
-                            f" cost={rj.cpu_cost:.1f}"
-                            f" ({elapsed:.0f}s)"
-                            f"{_cd}"
-                        )
-                    print(f"  進捗: {_done}/{_total} (残り{_remain}件)")
+                    print(
+                        f"  進捗: {_done}/{_total}"
+                        f" (残り{_remain}件)"
+                    )
 
                 elif cmd == "quit":
-                    if running_jobs:
+                    if running_tasks:
                         logger.info(
-                            ">>> 全ジョブ停止中...",
+                            ">>> 全タスク停止中...",
                         )
-                        for rj in running_jobs:
-                            rj.cancel_event.set()
-                        for rj in running_jobs:
-                            force_stop_running_job(rj)
+                        for rt in running_tasks:
+                            rt.process.terminate()
+                        for rt in running_tasks:
+                            try:
+                                rt.process.wait(timeout=10)
+                            except subprocess.TimeoutExpired:
+                                rt.process.kill()
                     logger.info(">>> ランナー終了")
                     return
 
         except _q.Empty:
             pass
 
-        # -------------------------------------------------------
-        # 完了ジョブの回収
-        # -------------------------------------------------------
-        finished: list[RunningJob] = []
-        for rj in running_jobs:
-            if not rj.thread.is_alive():
-                finished.append(rj)
+        # ---------------------------------------------------
+        # 完了タスク回収
+        # ---------------------------------------------------
+        finished: list[RunningMonthTask] = []
+        for rt in running_tasks:
+            if rt.process.poll() is not None:
+                finished.append(rt)
 
-        for rj in finished:
-            _res = rj.result_holder[0]
-            if _res and _res.status == "completed":
-                if _res.job_type == "multi_pair":
-                    _pm = _res.portfolio_metrics
-                    logger.info(
-                        "[%s] マルチペア完了:"
-                        " profit=%.0f,"
-                        " 年間=%.1f%%,"
-                        " WR=%.1f%%,"
-                        " PF=%.2f,"
-                        " DD=%.2f%%,"
-                        " Sharpe=%.2f,"
-                        " 月間+=%.1f%%"
-                        " (%dペア, %.0fs)",
-                        _res.job_id,
-                        _res.net_profit,
-                        _pm.get(
-                            "annual_return_pct",
-                            0,
-                        ),
-                        _res.win_rate,
-                        _res.profit_factor,
-                        _res.max_drawdown,
-                        _res.sharpe_ratio,
-                        _res.monthly_plus_rate,
-                        len(_res.pair_details),
-                        _res.elapsed_seconds,
-                    )
-                    # 制限発動統計
-                    _bg = _pm.get(
-                        "blocked_global",
-                        0,
-                    )
-                    _bp = _pm.get(
-                        "blocked_per_pair",
-                        0,
-                    )
-                    _be = _pm.get(
-                        "blocked_exposure",
-                        0,
-                    )
-                    if _bg or _bp or _be:
-                        logger.info(
-                            "  制限発動: global=%d, per_pair=%d, exposure=%d",
-                            _bg,
-                            _bp,
-                            _be,
-                        )
-                    # 各ペアの結果も表示
-                    for pd in _res.pair_details:
-                        logger.info(
-                            "  %s:"
-                            " profit=%.0f,"
-                            " WR=%.1f%%,"
-                            " PF=%.2f,"
-                            " 寄与=%.1f%%",
-                            pd["symbol"],
-                            pd["net_profit"],
-                            pd["win_rate"],
-                            pd["profit_factor"],
-                            pd.get(
-                                "contribution_pct",
-                                0,
-                            ),
-                        )
-                else:
-                    logger.info(
-                        "[%s] 完了: profit=%.0f,"
-                        " WR=%.1f%%,"
-                        " PF=%.2f,"
-                        " DD=%.2f%%"
-                        " (%.0fs)",
-                        _res.job_id,
-                        _res.net_profit,
-                        _res.win_rate,
-                        _res.profit_factor,
-                        _res.max_drawdown,
-                        _res.elapsed_seconds,
-                    )
-                # 元のjob.idで完了記録（連番なし）
-                _orig_id = rj.job.id
-                if _orig_id not in state.completed_ids:
-                    state.completed_ids.append(_orig_id)
-                state.save()
-                _remove_job_from_queue(_orig_id)
-            elif _res and _res.status == "cancelled":
-                logger.info(
-                    "[%s] キャンセル済み",
-                    _res.job_id,
-                )
-            elif _res and _res.status == "failed":
-                logger.error(
-                    "[%s] 失敗: %s",
-                    _res.job_id,
-                    _res.error,
-                )
-                state.save()
-            running_jobs.remove(rj)
+        for rt in finished:
+            running_tasks.remove(rt)
+            t = rt.task
+            rid = t.result_id
 
-        # -------------------------------------------------------
-        # 新規ジョブ取得（CPUバジェット内で複数起動）
-        # 常にインデックス0からスキャン（再起動安全）
-        # -------------------------------------------------------
+            # プロセス終了コード確認
+            rc = rt.process.returncode
+            if rc != 0:
+                logger.warning(
+                    "[%s] %d/%02d 失敗 (rc=%d)",
+                    rid, t.year, t.month, rc,
+                )
+                # 失敗した月結果は保存されないので
+                # 次回再実行される
+                continue
+
+            logger.info(
+                "[%s] %d/%02d 完了 (%.0fs)",
+                rid,
+                t.year,
+                t.month,
+                time.time() - rt.started_at,
+            )
+
+            # 進捗更新
+            if rid in job_progress:
+                jp = job_progress[rid]
+                jp.completed_months.add((t.year, t.month))
+
+                # 年完了チェック
+                if _is_year_complete(rid, t.year):
+                    logger.info(
+                        "[%s] %d年 全月完了 → 年集約中...",
+                        rid, t.year,
+                    )
+                    aggregate_year(rid, t.year, t.job_type)
+
+                # ジョブ完了チェック
+                if rid in active_jobs:
+                    job = active_jobs[rid]
+                    if _is_job_complete(job, rid):
+                        logger.info(
+                            "[%s] 全月完了 → ジョブ集約中...",
+                            rid,
+                        )
+                        result = aggregate_job(job, rid)
+                        elapsed = (
+                            time.time() - jp.started_at
+                            if jp.started_at > 0
+                            else 0.0
+                        )
+                        result.elapsed_seconds = round(
+                            elapsed, 1,
+                        )
+                        result.started_at = (
+                            datetime.fromtimestamp(
+                                jp.started_at,
+                            ).isoformat()
+                            if jp.started_at > 0
+                            else ""
+                        )
+                        result.finished_at = (
+                            datetime.now().isoformat()
+                        )
+                        _save_result(result)
+
+                        # ログ出力
+                        if result.job_type == "multi_pair":
+                            _pm = result.portfolio_metrics
+                            logger.info(
+                                "[%s] マルチペア完了:"
+                                " profit=%.0f,"
+                                " WR=%.1f%%,"
+                                " PF=%.2f,"
+                                " DD=%.2f%%,"
+                                " Sharpe=%.2f"
+                                " (%.0fs)",
+                                result.job_id,
+                                result.net_profit,
+                                result.win_rate,
+                                result.profit_factor,
+                                result.max_drawdown,
+                                result.sharpe_ratio,
+                                result.elapsed_seconds,
+                            )
+                        else:
+                            logger.info(
+                                "[%s] 完了:"
+                                " profit=%.0f,"
+                                " WR=%.1f%%,"
+                                " PF=%.2f,"
+                                " DD=%.2f%%"
+                                " (%.0fs)",
+                                result.job_id,
+                                result.net_profit,
+                                result.win_rate,
+                                result.profit_factor,
+                                result.max_drawdown,
+                                result.elapsed_seconds,
+                            )
+
+                        # 完了記録
+                        _orig_id = job.id
+                        if _orig_id not in state.completed_ids:
+                            state.completed_ids.append(
+                                _orig_id,
+                            )
+                        state.save()
+                        _remove_job_from_queue(_orig_id)
+
+                        # 掃除
+                        jp.status = "completed"
+                        del active_jobs[rid]
+
+        # ---------------------------------------------------
+        # 新規タスク投入（CPUスロット埋め）
+        # ---------------------------------------------------
         if not paused:
             jobs = load_queue()
-            running_ids = {rj.job.id for rj in running_jobs}
             _done = set(state.completed_ids)
+            # 実行中ジョブID
+            _active_job_ids = {
+                jp.job_id
+                for jp in job_progress.values()
+                if jp.status == "in_progress"
+            }
+
             for job in jobs:
+                if len(running_tasks) >= cpu_threads:
+                    break
+
                 # 完了済みスキップ
                 if job.id in _done:
                     continue
 
-                # 実行中スキップ
-                if job.id in running_ids:
-                    continue
+                # result_idを決定（初回のみ発行）
+                # job_progress に既にあるならそれを使う
+                existing_jp = None
+                for _jp in job_progress.values():
+                    if _jp.job_id == job.id and _jp.status != "completed":
+                        existing_jp = _jp
+                        break
 
-                # CPUバジェットチェック
-                workers = job.effective_year_workers()
-                cost = job.cpu_cost()
-                used = calc_used_threads(running_jobs)
-                remaining = cpu_threads - used
+                if existing_jp:
+                    rid = existing_jp.result_id
+                else:
+                    _cnt = state.next_counter()
+                    rid = f"{_cnt:03d}_{job.id}"
 
-                if cost > remaining:
-                    # バジェット不足 → 次サイクルで
+                    start_year, end_year = parse_years(
+                        job.years,
+                    )
+                    total_months = (
+                        (end_year - start_year + 1) * 12
+                    )
+                    _sym_label = (
+                        ",".join(job.symbols)
+                        if job.symbols
+                        else job.symbol
+                    )
+                    jp_new = JobProgress(
+                        job_id=job.id,
+                        result_id=rid,
+                        job_type=job.type,
+                        symbol=_sym_label,
+                        years=job.years,
+                        description=job.description,
+                        total_months=total_months,
+                        completed_months=_get_completed_months(
+                            rid,
+                        ),
+                        status="in_progress",
+                        started_at=time.time(),
+                    )
+                    job_progress[rid] = jp_new
+                    active_jobs[rid] = job
+
+                    logger.info(
+                        "[%s] 開始: %s %s %s"
+                        " (全%d月, CPU=%d)",
+                        rid,
+                        _sym_label,
+                        job.years,
+                        job.description,
+                        total_months,
+                        cpu_threads,
+                    )
+
+                # 未完了月タスクを生成
+                pending = generate_pending_months(job, rid)
+
+                # 実行中の月を除外
+                _running_months = {
+                    (rt.task.year, rt.task.month)
+                    for rt in running_tasks
+                    if rt.task.result_id == rid
+                }
+                pending = [
+                    mt for mt in pending
+                    if (mt.year, mt.month) not in _running_months
+                ]
+
+                for mt in pending:
+                    if len(running_tasks) >= cpu_threads:
+                        break
+                    proc = _launch_month_subprocess(mt)
+                    running_tasks.append(
+                        RunningMonthTask(
+                            task=mt,
+                            process=proc,
+                            started_at=time.time(),
+                        )
+                    )
+
+                if len(running_tasks) >= cpu_threads:
                     break
 
-                # 連番付き結果ID生成
-                _cnt = state.next_counter()
-                _rid = f"{_cnt:03d}_{job.id}"
-
-                # ジョブ起動ログ
-                if job.type in (
-                    "multi_pair",
-                    "portfolio",
-                ):
-                    _sym_label = "[multi_pair] " + ",".join(job.symbols)
-                else:
-                    _sym_label = job.symbol
-                _code_label = (
-                    f" code_dir={job.code_dir}" if job.code_dir else ""
-                )
-                _monthly_label = ""
-                if job._is_monthly():
-                    _monthly_label = (
-                        f" monthly={job._max_month_workers()}"
-                    )
-                logger.info(
-                    "[%s] 開始: %s %s %s"
-                    " (year_w=%d%s, cost=%.1f,"
-                    " used=%.1f/%.0f)%s",
-                    _rid,
-                    _sym_label,
-                    job.years,
-                    job.description,
-                    workers,
-                    _monthly_label,
-                    cost,
-                    used + cost,
-                    cpu_threads,
-                    _code_label,
-                )
-                cancel_ev = threading.Event()
-                holder: list[JobResult | None] = [None]
-                _prog: dict[str, Any] = {}
-                t = threading.Thread(
-                    target=_run_job_wrapper,
-                    args=(
-                        job,
-                        cancel_ev,
-                        holder,
-                        workers,
-                        _rid,
-                        _prog,
-                    ),
-                    daemon=True,
-                )
-                rj_new = RunningJob(
-                    job=job,
-                    thread=t,
-                    cancel_event=cancel_ev,
-                    result_holder=holder,
-                    max_year_workers=workers,
-                    started_at=time.time(),
-                    result_id=_rid,
-                    progress=_prog,
-                )
-                running_jobs.append(rj_new)
-                running_ids.add(job.id)
-                t.start()
-
-        # Web UI連携: 状態書き出し＋コマンド読み取り
+        # Web UI連携
         _write_runner_state(
-            running_jobs, state, paused, cpu_threads,
+            running_tasks,
+            job_progress,
+            state,
+            paused,
+            cpu_threads,
         )
         _read_runner_commands(cmd_queue)
 
