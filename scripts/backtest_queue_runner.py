@@ -2300,10 +2300,25 @@ def main() -> None:
                 # 完了 → 除去
                 del _precomputing[_pc_rid]
 
+            # アクティブジョブの未完了月タスク数を計算
+            # → CPUスレッド数以上の未完了月があれば新ジョブ不要
+            _active_pending_months = 0
+            for _aj_rid, _aj_job in active_jobs.items():
+                _aj_jp = job_progress.get(_aj_rid)
+                if _aj_jp and _aj_jp.status == "in_progress":
+                    _remaining = (
+                        _aj_jp.total_months
+                        - len(_aj_jp.completed_months)
+                    )
+                    _active_pending_months += max(0, _remaining)
+
             for job in jobs:
                 if _pc_busy:
                     break
                 if _current_cpu_load(running_tasks) >= cpu_threads:
+                    break
+                # 未完了月タスクが十分あれば新ジョブ不要
+                if _active_pending_months >= cpu_threads:
                     break
 
                 # 完了済みスキップ
@@ -2351,6 +2366,7 @@ def main() -> None:
                     )
                     job_progress[rid] = jp_new
                     active_jobs[rid] = job
+                    _active_pending_months += total_months
 
                     logger.info(
                         "[%s] 開始: %s %s %s"
