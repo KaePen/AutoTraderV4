@@ -143,5 +143,8 @@ def _run_year_worker(
             _collector._trade_rows
         )
         result["_worker_stats"] = _collector.get_stats()
+        result["_worker_blocked_rows"] = (
+            _collector._blocked_rows
+        )
 
     return result

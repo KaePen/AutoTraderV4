@@ -362,6 +362,7 @@ def _run_month_worker(
     result["month"] = month
     result["_worker_trade_rows"] = _collector._trade_rows
     result["_worker_stats"] = _collector.get_stats()
+    result["_worker_blocked_rows"] = _collector._blocked_rows
 
     # FORCE_CLOSE トレード数を集計
     fc_count = 0

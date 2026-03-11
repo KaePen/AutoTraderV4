@@ -37,6 +37,9 @@ class SizingContext:
     open_same_direction_lot: float = 0.0
     liquidity_factor: float = 1.0
     volatility_multiplier: float = 1.0
+    consensus_score: float = 0.0
+    consensus_threshold: float = 9.0
+    atr_ratio: float = 1.0
 
 
 @dataclass(frozen=True)

@@ -1185,6 +1185,10 @@ class BacktestRunner:
                                 "_worker_stats",
                                 {},
                             ),
+                            year_result.pop(
+                                "_worker_blocked_rows",
+                                [],
+                            ),
                         )
                         _listener.sort_trade_rows()
                         break
@@ -1756,6 +1760,9 @@ class BacktestRunner:
                     _listener.merge_worker_data(
                         yr.pop("_worker_trade_rows", []),
                         yr.pop("_worker_stats", {}),
+                        yr.pop(
+                            "_worker_blocked_rows", []
+                        ),
                     )
                 _listener.sort_trade_rows()
                 break

@@ -169,6 +169,14 @@ class PositionSizerConfig:
     # 流動性ゾーン連動TP設定
     liquidity_tp_enabled: bool = True     # 流動性TPを有効化
     liquidity_tp_safety_margin: float = 0.01  # 流動性ゾーンの1%手前でTP
+    # スコア比例サイジング
+    score_proportional_sizing: bool = False
+    score_sizing_floor: float = 0.6
+    score_sizing_full_range: float = 3.0
+    # ATR連続サイジング
+    atr_sizing_enabled: bool = False
+    atr_sizing_threshold: float = 1.5
+    atr_sizing_max_reduction: float = 0.5
 
 
 class PositionSizer:
@@ -433,6 +441,44 @@ class PositionSizer:
         adjust *= fund_adjust
         if fund_adjust < 1.0:
             reasons.append(f"ファンダ{fund_adjust:.2f}x")
+
+        # スコア比例サイジング
+        if self.config.score_proportional_sizing:
+            score_above = (
+                context.consensus_score
+                - context.consensus_threshold
+            )
+            if score_above >= 0:
+                ratio = min(
+                    score_above
+                    / self.config.score_sizing_full_range,
+                    1.0,
+                )
+                floor = self.config.score_sizing_floor
+                score_mult = floor + (1.0 - floor) * ratio
+                adjust *= score_mult
+                reasons.append(
+                    f"スコア比例{score_mult:.2f}x"
+                )
+
+        # ATR連続サイジング
+        if (
+            self.config.atr_sizing_enabled
+            and context.atr_ratio
+            > self.config.atr_sizing_threshold
+        ):
+            excess = (
+                context.atr_ratio
+                - self.config.atr_sizing_threshold
+            ) / self.config.atr_sizing_threshold
+            atr_mult = max(
+                1.0
+                - excess
+                * self.config.atr_sizing_max_reduction,
+                0.5,
+            )
+            adjust *= atr_mult
+            reasons.append(f"ATR{atr_mult:.2f}x")
 
         # 最終調整値を0.1〜2.0に制限
         adjust = max(0.1, min(2.0, adjust))

@@ -592,6 +592,24 @@ class UnifiedTradeBot:
                 equity_caution_pct=self.config.equity_caution_pct,
                 slippage_buffer_pips=self.config.slippage_buffer_pips,
                 pip_value=_sizer_pv,
+                score_proportional_sizing=(
+                    self.config.score_proportional_sizing
+                ),
+                score_sizing_floor=(
+                    self.config.score_sizing_floor
+                ),
+                score_sizing_full_range=(
+                    self.config.score_sizing_full_range
+                ),
+                atr_sizing_enabled=(
+                    self.config.atr_sizing_enabled
+                ),
+                atr_sizing_threshold=(
+                    self.config.atr_sizing_threshold
+                ),
+                atr_sizing_max_reduction=(
+                    self.config.atr_sizing_max_reduction
+                ),
             )
         )
 
@@ -1753,6 +1771,9 @@ class UnifiedTradeBot:
                 open_same_direction_lot=(self.state.open_same_direction_lot),
                 liquidity_factor=_liq_factor,
                 volatility_multiplier=_vol_mult,
+                consensus_score=consensus.score,
+                consensus_threshold=consensus.threshold,
+                atr_ratio=_atr_ratio,
             )
             sizing_result = self.position_sizer.calculate(sizing_context)
             if sizing_result.blocked:
