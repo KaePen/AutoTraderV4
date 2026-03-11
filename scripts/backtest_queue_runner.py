@@ -175,7 +175,10 @@ class JobResult:
 
 @dataclass
 class MonthTask:
-    """月タスク（スケジューリングの原子単位 = 1CPU）"""
+    """月タスク（スケジューリングの原子単位）
+
+    CPUコスト: シングル=1.2, マルチペア=1.5
+    """
 
     job_id: str  # 元ジョブID
     result_id: str  # 連番付きID ("003_usdjpy-verify")
@@ -183,6 +186,26 @@ class MonthTask:
     year: int
     month: int  # 1-12
     job_dict: dict  # Job定義（サブプロセスに渡す）
+    cpu_cost: float = 1.0  # スケジューリング時のCPUコスト
+
+
+# ジョブタイプ別CPUコスト
+CPU_COST_SINGLE: float = 1.2
+CPU_COST_MULTI_PAIR: float = 1.5
+
+
+def _cpu_cost_for_type(job_type: str) -> float:
+    """ジョブタイプからCPUコストを返す"""
+    if job_type == "multi_pair":
+        return CPU_COST_MULTI_PAIR
+    return CPU_COST_SINGLE
+
+
+def _current_cpu_load(
+    running_tasks: list[RunningMonthTask],
+) -> float:
+    """実行中タスクの合計CPUコストを返す"""
+    return sum(rt.task.cpu_cost for rt in running_tasks)
 
 
 @dataclass
@@ -538,6 +561,7 @@ def generate_pending_months(
                     year=yr,
                     month=mo,
                     job_dict=asdict(job),
+                    cpu_cost=_cpu_cost_for_type(job.type),
                 )
             )
     return tasks
@@ -1877,7 +1901,11 @@ def main() -> None:
     print(f"  結果ディレクトリ: {RESULTS_DIR}")
     print(f"  月結果ディレクトリ: {MONTH_RESULTS_DIR}")
     print(f"  ポーリング間隔: {POLL_INTERVAL}s")
-    print(f"  CPUスレッド: {cpu_threads} (月タスク=1CPU)")
+    print(
+        f"  CPUスレッド: {cpu_threads}"
+        f" (シングル={CPU_COST_SINGLE}CPU,"
+        f" マルチ={CPU_COST_MULTI_PAIR}CPU)",
+    )
     print()
     print("  コマンド:")
     print("    stop   - 全タスク停止+キュー先頭")
@@ -1982,7 +2010,8 @@ def main() -> None:
                             )
                             # 超過分を最新から停止
                             while (
-                                len(running_tasks) > cpu_threads
+                                _current_cpu_load(running_tasks)
+                                > cpu_threads
                                 and running_tasks
                             ):
                                 rt = running_tasks.pop()
@@ -2015,8 +2044,9 @@ def main() -> None:
                     else:
                         logger.info(
                             ">>> 現在のCPUスレッド: %d"
-                            " (使用中: %d)",
+                            " (負荷: %.1f, タスク: %d)",
                             cpu_threads,
+                            _current_cpu_load(running_tasks),
                             len(running_tasks),
                         )
 
@@ -2029,9 +2059,11 @@ def main() -> None:
                         f"  状態: "
                         f"{'一時停止' if paused else '稼働中'}"
                     )
+                    _load = _current_cpu_load(running_tasks)
                     print(
-                        f"  CPU: {len(running_tasks)}"
+                        f"  CPU: {_load:.1f}"
                         f"/{cpu_threads} 使用中"
+                        f" ({len(running_tasks)}タスク)"
                     )
                     for rid, jp in job_progress.items():
                         if jp.status == "in_progress":
@@ -2236,7 +2268,7 @@ def main() -> None:
             }
 
             for job in jobs:
-                if len(running_tasks) >= cpu_threads:
+                if _current_cpu_load(running_tasks) >= cpu_threads:
                     break
 
                 # 完了済みスキップ
@@ -2324,7 +2356,7 @@ def main() -> None:
                 ]
 
                 for mt in pending:
-                    if len(running_tasks) >= cpu_threads:
+                    if _current_cpu_load(running_tasks) + mt.cpu_cost > cpu_threads:
                         break
                     proc = _launch_month_subprocess(mt)
                     running_tasks.append(
@@ -2335,7 +2367,7 @@ def main() -> None:
                         )
                     )
 
-                if len(running_tasks) >= cpu_threads:
+                if _current_cpu_load(running_tasks) >= cpu_threads:
                     break
 
         # Web UI連携
