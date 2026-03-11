@@ -319,7 +319,14 @@ function renderCompletedJobs(results) {
     return;
   }
 
+  // 最新10件に制限
+  const recent = completed.slice(-10);
+  const headerLabel = completed.length > 10
+    ? `完了済みジョブ（最新10件 / 全${completed.length}件）`
+    : `完了済みジョブ（${completed.length}件）`;
+
   el.innerHTML = `
+    <div class="text-xs text-slate-400 mb-1 px-1">${headerLabel}</div>
     <div class="card overflow-hidden">
       <table class="w-full text-sm">
         <thead>
@@ -338,7 +345,7 @@ function renderCompletedJobs(results) {
           </tr>
         </thead>
         <tbody>
-          ${completed.map(r => renderResultRow(r)).join('')}
+          ${recent.map(r => renderResultRow(r)).join('')}
         </tbody>
       </table>
     </div>
