@@ -1127,8 +1127,10 @@ def _precompute_indicators(
         symbol: 通貨ペア名
         data_dir: データディレクトリパス
     """
-    from autotrader.backtest.config import BacktestConfig
-    from autotrader.backtest.runner import BacktestRunner
+    from autotrader.backtest.runner import (
+        BacktestConfig,
+        BacktestRunner,
+    )
     from autotrader.config.trading_params import get_preset
 
     _log = logging.getLogger("queue_runner")
