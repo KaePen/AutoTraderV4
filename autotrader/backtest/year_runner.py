@@ -345,7 +345,7 @@ def run_unified_year(
                     # デフォルト値で補完
                     _wi_sl = (
                         consolidated.sl_pips
-                        or bot_config.min_sl_pips
+                        or bot_config.default_sl_pips
                     )
                     _wi_tp = (
                         consolidated.tp_pips
