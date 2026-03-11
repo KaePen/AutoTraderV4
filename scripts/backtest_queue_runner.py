@@ -1110,19 +1110,66 @@ def _launch_month_subprocess(
     return proc
 
 
+def _precompute_indicators(
+    symbol: str,
+    data_dir: str,
+) -> None:
+    """インジケータ事前計算フェーズ
+
+    全TF・全年のデータをロードしてインジケータを計算し、
+    年別parquetキャッシュに保存する。
+    月並列ワーカーはこのキャッシュから高速に読み込む。
+
+    ウォームアップは全期間計算で自動処理されるため、
+    年境界での指標精度問題は発生しない。
+
+    Args:
+        symbol: 通貨ペア名
+        data_dir: データディレクトリパス
+    """
+    from autotrader.backtest.config import BacktestConfig
+    from autotrader.backtest.runner import BacktestRunner
+    from autotrader.config.trading_params import get_preset
+
+    _log = logging.getLogger("queue_runner")
+
+    preset = get_preset(symbol)
+    config = BacktestConfig(
+        symbol=symbol,
+        spread_pips=preset.spread_pips,
+        slippage_pips=preset.slippage_pips,
+        pip_value=preset.pip_value,
+        max_positions=preset.max_positions,
+        bonus_max_positions=preset.bonus_max_positions,
+        bonus_score_threshold=preset.bonus_score_threshold,
+    )
+    runner = BacktestRunner(
+        data_dir=data_dir,
+        config=config,
+        verbose=False,
+        log_to_file=False,
+    )
+
+    _log.info(
+        "[%s] インジケータ事前計算開始（全TF・全年）",
+        symbol,
+    )
+    runner._load_all_timeframes(include_m1=True)
+    _log.info(
+        "[%s] インジケータ事前計算完了 → キャッシュ保存済み",
+        symbol,
+    )
+
+
 def _load_month_only(
     runner: Any,
     year: int,
     month: int,
 ) -> dict[str, Any]:
-    """月データのみロード（メモリ効率版）
+    """月データのみロード（キャッシュ利用版）
 
-    インジケータキャッシュ（年別parquet）から直接読み込み、
-    月フィルタして返す。キャッシュがない場合のみ
-    チャートparquetから年フィルタ付きで読み込む。
-
-    _load_all_timeframes を使わないため、キャッシュミス時に
-    全15年分をロード+インジケータ計算するボトルネックを回避。
+    事前計算フェーズで生成されたインジケータキャッシュから
+    年データを読み込み、月フィルタして返す。
 
     Args:
         runner: BacktestRunner インスタンス
@@ -1136,139 +1183,42 @@ def _load_month_only(
 
     _log = logging.getLogger("queue_runner")
 
+    # キャッシュから年データをロード
+    year_data = runner._load_all_timeframes(
+        include_m1=True,
+        needed_years=[year],
+    )
+
+    if not year_data:
+        _log.warning(
+            "[%s] 年データなし: %d年",
+            runner.config.symbol, year,
+        )
+        return {}
+
+    # 月フィルタ
     month_start = datetime(year, month, 1)
     if month == 12:
         month_end = datetime(year + 1, 1, 1)
     else:
         month_end = datetime(year, month + 1, 1)
 
-    _all_tfs = [
-        "M1", "M5", "M15", "M30",
-        "H1", "H4", "H8", "D1",
-    ]
     month_data: dict[str, Any] = {}
-    symbol = runner.config.symbol
-    chart_cache_dir = runner.chart_dir / "cache"
-
-    for tf in _all_tfs:
-        df = _load_tf_cached_year(
-            runner, tf, symbol, year,
-            chart_cache_dir, _log,
-        )
-        if df is None:
+    for tf, df in year_data.items():
+        if df is None or df.empty:
             continue
-
-        # 月フィルタ
         mask = (
             (df["time"] >= month_start)
             & (df["time"] < month_end)
         )
         month_df = df[mask].reset_index(drop=True)
-        del df
-        gc.collect()
-
         if not month_df.empty:
             month_data[tf] = month_df
 
+    del year_data
+    gc.collect()
+
     return month_data
-
-
-def _load_tf_cached_year(
-    runner: Any,
-    tf: str,
-    symbol: str,
-    year: int,
-    chart_cache_dir: Path,
-    _log: Any,
-) -> Any:
-    """1TFの年データをインジケータキャッシュから読み込み
-
-    優先順位:
-    1. インジケータキャッシュ ({year}.parquet) ← 最速
-    2. チャートparquet → 年フィルタ → インジケータ計算
-
-    Returns:
-        インジケータ付き年DataFrame、またはNone
-    """
-    import pandas as pd
-
-    # --- インジケータキャッシュを探索 ---
-    _cache_root = runner.data_dir / ".indicator_cache"
-    if _cache_root.is_dir():
-        # キャッシュキー = TF_{mtime}_{size}
-        for cache_dir in _cache_root.iterdir():
-            if (
-                cache_dir.is_dir()
-                and cache_dir.name.startswith(f"{tf}_")
-            ):
-                year_pq = cache_dir / f"{year}.parquet"
-                if year_pq.exists():
-                    try:
-                        return pd.read_parquet(year_pq)
-                    except Exception as e:
-                        _log.warning(
-                            "[%s] キャッシュ読み込み失敗: %s",
-                            tf, e,
-                        )
-
-    # --- キャッシュなし: チャートparquetから年フィルタ ---
-    _log.info(
-        "[%s] キャッシュなし → チャートparquetから"
-        " %d年分のみ読み込み",
-        tf, year,
-    )
-    chart_pq = chart_cache_dir / f"{symbol}_{tf}.parquet"
-    if not chart_pq.exists():
-        # CSVフォールバック
-        csv_dir = runner.chart_dir / "csv"
-        csv_files = sorted(
-            csv_dir.glob(f"{symbol}_{tf}_*.csv"),
-        ) if csv_dir.exists() else []
-        if not csv_files:
-            return None
-        from autotrader.backtest.data_loader import (
-            DataLoader,
-        )
-        loader = DataLoader(runner.chart_dir)
-        df = loader.load_csv(csv_files[0])
-    else:
-        # pyarrow filters で年フィルタ（全15年分を避ける）
-        try:
-            import pyarrow.parquet as pq
-
-            year_start = pd.Timestamp(year, 1, 1)
-            year_end = pd.Timestamp(year + 1, 1, 1)
-            table = pq.read_table(
-                chart_pq,
-                filters=[
-                    ("time", ">=", year_start),
-                    ("time", "<", year_end),
-                ],
-            )
-            df = table.to_pandas()
-            del table
-        except Exception:
-            # フィルタ失敗時は全読み→年フィルタ
-            df = pd.read_parquet(chart_pq)
-
-    if df is None or df.empty:
-        return None
-
-    # 年フィルタ（CSV読み込み時 or pyarrowフィルタ未対応時）
-    if "time" in df.columns:
-        year_start_dt = datetime(year, 1, 1)
-        year_end_dt = datetime(year + 1, 1, 1)
-        df = df[
-            (df["time"] >= year_start_dt)
-            & (df["time"] < year_end_dt)
-        ].reset_index(drop=True)
-
-    if df.empty:
-        return None
-
-    # インジケータ計算（1年分のみ → 高速）
-    df = runner._calculate_indicators(df)
-    return df
 
 
 def _execute_month_single(
@@ -2334,6 +2284,19 @@ def main() -> None:
                         total_months,
                         cpu_threads,
                     )
+
+                    # インジケータ事前計算
+                    # 全TF・全年を1回だけ計算→キャッシュ保存
+                    # 月ワーカーはキャッシュから高速読み込み
+                    _precompute_symbols = (
+                        job.symbols
+                        if job.symbols
+                        else [job.symbol]
+                    )
+                    for _sym in _precompute_symbols:
+                        _precompute_indicators(
+                            _sym, DEFAULT_DATA_DIR,
+                        )
 
                 # 未完了月タスクを生成
                 pending = generate_pending_months(job, rid)
