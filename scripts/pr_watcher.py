@@ -5,7 +5,7 @@
 
 環境変数:
     PROJECT_DIR: プロジェクトディレクトリ（省略時はスクリプトの親ディレクトリ）
-    CLEANUP_GRACE_MINUTES: worktree保護の猶予時間（省略時360分=6時間）
+    CLEANUP_GRACE_MINUTES: worktree保護の猶予時間（省略時60分）
 """
 
 from __future__ import annotations
@@ -102,9 +102,10 @@ CLEANUP_EVERY_N_CYCLES = 10  # N周期ごとにフルクリーンアップ実行
 MAX_MERGE_RETRIES = 2  # 初回+リトライ2回=最大3回試行
 PROJECT_DIR = Path(os.environ.get("PROJECT_DIR", Path(__file__).parent.parent))
 TMP_DIR = PROJECT_DIR / "tmp"
+WORKTREE_DIR = PROJECT_DIR / ".claude" / "worktrees"
 
 # 安全クリーンアップ設定
-CLEANUP_GRACE_MINUTES = int(os.environ.get("CLEANUP_GRACE_MINUTES", "360"))
+CLEANUP_GRACE_MINUTES = int(os.environ.get("CLEANUP_GRACE_MINUTES", "60"))
 LOCK_FILE_NAME = ".claude-active"
 
 # merge + push は排他制御（並行マージによるpush競合を防止）
@@ -326,11 +327,22 @@ def _remove_worktree(
         print(f"[INFO] worktree削除: {wt_path}", flush=True)
         return True
 
+    # git worktree remove失敗時: shutil.rmtreeでフォールバック
     print(
-        f"[WARN] worktree削除失敗: {wt_path}: {r.stderr.strip()}",
+        f"[WARN] git worktree remove失敗、rmtreeで再試行: {wt_path}",
         flush=True,
     )
-    return False
+    try:
+        shutil.rmtree(wt_path)
+        _git(["worktree", "prune"])
+        print(f"[INFO] worktree強制削除成功: {wt_path}", flush=True)
+        return True
+    except OSError as e:
+        print(
+            f"[ERROR] worktree強制削除も失敗: {wt_path}: {e}",
+            flush=True,
+        )
+        return False
 
 
 def _delete_branch(
@@ -361,13 +373,23 @@ def _delete_branch(
             quiet=quiet,
         )
         if not removed:
+            # アクティブ保護の場合のみスキップ
+            if respect_activity and _is_worktree_active(wt_path):
+                if not quiet:
+                    print(
+                        f"[SKIP] アクティブworktreeのため"
+                        f"ブランチ削除スキップ: {branch}",
+                        flush=True,
+                    )
+                return False
+            # アクティブでない場合はpruneしてブランチ削除を続行
+            _git(["worktree", "prune"])
             if not quiet:
                 print(
-                    f"[WARN] worktree除去失敗のため"
-                    f"ブランチ削除スキップ: {branch}",
+                    f"[INFO] worktree除去失敗だがprune後に"
+                    f"ブランチ削除続行: {branch}",
                     flush=True,
                 )
-            return False
     flag = "-D" if force else "-d"
     r = _git(["branch", flag, branch])
     if r.returncode == 0:
@@ -380,18 +402,62 @@ def _delete_branch(
     return False
 
 
-def _cleanup_orphan_tmp_dirs() -> tuple[int, int]:
-    """tmp/配下の孤立ディレクトリを削除する。
+def _cleanup_nested_worktrees(wt_path: Path) -> tuple[int, int]:
+    """worktree内のネストworktreeを再帰的に削除する。
+
+    worktree内に .claude/worktrees/ が存在する場合、
+    その中身を全て削除する。ネストworktreeはいかなる場合も
+    許容されないため、アクティブチェックなしで削除する。
+
+    Args:
+        wt_path: worktreeディレクトリのパス
+
+    Returns:
+        tuple[int, int]: (削除数, エラー数)
+    """
+    nested_dir = wt_path / ".claude" / "worktrees"
+    if not nested_dir.exists() or not nested_dir.is_dir():
+        return 0, 0
+
+    removed = 0
+    errors = 0
+    for entry in nested_dir.iterdir():
+        if not entry.is_dir():
+            continue
+        try:
+            shutil.rmtree(entry)
+            print(
+                f"[INFO] ネストworktree削除: {entry}",
+                flush=True,
+            )
+            removed += 1
+        except OSError as e:
+            print(
+                f"[WARN] ネストworktree削除失敗: {entry}: {e}",
+                flush=True,
+            )
+            errors += 1
+
+    # 空になった .claude/worktrees/ ディレクトリも削除
+    try:
+        if nested_dir.exists() and not any(nested_dir.iterdir()):
+            nested_dir.rmdir()
+    except OSError:
+        pass
+
+    return removed, errors
+
+
+def _cleanup_orphan_dirs() -> tuple[int, int]:
+    """tmp/と.claude/worktrees/配下の孤立ディレクトリを削除する。
 
     有効なworktreeに紐づかないディレクトリを削除。
     ただしアクティブなディレクトリは保護する。
+    ネストworktree（worktree内の.claude/worktrees/）も再帰削除。
 
     Returns:
         tuple[int, int]: (削除数, 保護数)
     """
-    if not TMP_DIR.exists():
-        return 0, 0
-
     # 有効なworktreeパスを収集
     valid_paths: set[str] = set()
     r = _git(["worktree", "list", "--porcelain"])
@@ -403,30 +469,40 @@ def _cleanup_orphan_tmp_dirs() -> tuple[int, int]:
 
     removed = 0
     protected = 0
-    for entry in TMP_DIR.iterdir():
-        if not entry.is_dir():
-            continue
-        if str(entry.resolve()) in valid_paths:
-            continue
 
-        # 安全チェック: アクティブなディレクトリは保護
-        reason = _is_worktree_active(entry)
-        if reason:
-            protected += 1
+    # 対象ディレクトリ: tmp/ と .claude/worktrees/
+    target_dirs = [TMP_DIR, WORKTREE_DIR]
+    for target_dir in target_dirs:
+        if not target_dir.exists():
             continue
+        for entry in target_dir.iterdir():
+            if not entry.is_dir():
+                continue
+            if str(entry.resolve()) in valid_paths:
+                # 有効worktree内のネストworktreeを掃除
+                r_nested, _ = _cleanup_nested_worktrees(entry)
+                removed += r_nested
+                continue
 
-        try:
-            shutil.rmtree(entry)
-            print(
-                f"[INFO] 孤立ディレクトリ削除: {entry.name}",
-                flush=True,
-            )
-            removed += 1
-        except OSError as e:
-            print(
-                f"[WARN] ディレクトリ削除失敗: {entry.name}: {e}",
-                flush=True,
-            )
+            # 安全チェック: アクティブなディレクトリは保護
+            reason = _is_worktree_active(entry)
+            if reason:
+                protected += 1
+                continue
+
+            try:
+                shutil.rmtree(entry)
+                print(
+                    f"[INFO] 孤立ディレクトリ削除: {entry}",
+                    flush=True,
+                )
+                removed += 1
+            except OSError as e:
+                print(
+                    f"[WARN] ディレクトリ削除失敗: {entry}: {e}",
+                    flush=True,
+                )
+
     return removed, protected
 
 
@@ -441,7 +517,7 @@ def cleanup_stale() -> None:
     3. マージ済みローカルブランチを削除（アクティブworktree保護）
     4. 孤立ローカルブランチ（リモート無し＆worktree無し）を削除
     5. マージ済みリモートブランチを削除
-    6. tmp/配下の孤立ディレクトリを削除（アクティブ保護）
+    6. tmp/・.claude/worktrees/配下の孤立ディレクトリを削除（アクティブ保護）
     """
     print("[INFO] クリーンアップ開始...", flush=True)
     cleaned = 0
@@ -563,10 +639,10 @@ def cleanup_stale() -> None:
                 )
                 cleaned += 1
 
-    # 6. tmp/配下の孤立ディレクトリを削除（アクティブ保護）
-    tmp_removed, tmp_protected = _cleanup_orphan_tmp_dirs()
-    cleaned += tmp_removed
-    protected_count += tmp_protected
+    # 6. 孤立ディレクトリ削除（tmp/ + .claude/worktrees/、アクティブ保護）
+    dir_removed, dir_protected = _cleanup_orphan_dirs()
+    cleaned += dir_removed
+    protected_count += dir_protected
 
     # アクティブworktree保護のサマリ出力
     if protected_count > 0:
@@ -978,6 +1054,9 @@ def auto_merge_pr(
 
     # 6. worktree prune（壊れた登録があれば解消）
     _git(["worktree", "prune"])
+
+    # 7. マージ後即時: 孤立ディレクトリを掃除
+    _cleanup_orphan_dirs()
 
     if merged is not None:
         merged.add(num)
