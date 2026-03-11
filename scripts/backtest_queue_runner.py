@@ -1943,6 +1943,12 @@ def main() -> None:
     job_progress: dict[str, JobProgress] = {}
     # result_id → Job のマッピング
     active_jobs: dict[str, Job] = {}
+    # 集約済み年の追跡（重複実行防止）
+    # key: (result_id, year)
+    aggregated_years: set[tuple[str, int]] = set()
+    # 事前計算中のジョブ（バックグラウンドスレッド）
+    # result_id → Thread
+    _precomputing: dict[str, threading.Thread] = {}
 
     while True:
         # ---------------------------------------------------
@@ -1979,6 +1985,7 @@ def main() -> None:
                         state.save()
                         job_progress.clear()
                         active_jobs.clear()
+                        aggregated_years.clear()
                         # 月結果もクリーン
                         logger.info(
                             ">>> キュー先頭にリセット",
@@ -2169,8 +2176,13 @@ def main() -> None:
                 jp = job_progress[rid]
                 jp.completed_months.add((t.year, t.month))
 
-                # 年完了チェック
-                if _is_year_complete(rid, t.year):
+                # 年完了チェック（重複防止ガード付き）
+                _year_key = (rid, t.year)
+                if (
+                    _year_key not in aggregated_years
+                    and _is_year_complete(rid, t.year)
+                ):
+                    aggregated_years.add(_year_key)
                     logger.info(
                         "[%s] %d年 全月完了 → 年集約中...",
                         rid, t.year,
@@ -2328,18 +2340,38 @@ def main() -> None:
                         cpu_threads,
                     )
 
-                    # インジケータ事前計算
-                    # 全TF・全年を1回だけ計算→キャッシュ保存
-                    # 月ワーカーはキャッシュから高速読み込み
+                    # インジケータ事前計算（バックグラウンド）
+                    # メインループをブロックしない
                     _precompute_symbols = (
                         job.symbols
                         if job.symbols
                         else [job.symbol]
                     )
-                    for _sym in _precompute_symbols:
-                        _precompute_indicators(
-                            _sym, DEFAULT_DATA_DIR,
-                        )
+
+                    def _bg_precompute(
+                        symbols: list[str],
+                        _rid: str = rid,
+                    ) -> None:
+                        for _sym in symbols:
+                            _precompute_indicators(
+                                _sym, DEFAULT_DATA_DIR,
+                            )
+
+                    _pc_thread = threading.Thread(
+                        target=_bg_precompute,
+                        args=(_precompute_symbols,),
+                        daemon=True,
+                    )
+                    _pc_thread.start()
+                    _precomputing[rid] = _pc_thread
+
+                # 事前計算中のジョブはタスク投入をスキップ
+                if rid in _precomputing:
+                    _pc_t = _precomputing[rid]
+                    if _pc_t.is_alive():
+                        continue
+                    # 完了 → 除去
+                    del _precomputing[rid]
 
                 # 未完了月タスクを生成
                 pending = generate_pending_months(job, rid)
