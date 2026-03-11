@@ -340,18 +340,24 @@ def run_unified_year(
                     ),
                 )
                 # What-If: ブロックシグナルを仮想追跡
-                if (
-                    whatif_tracker is not None
-                    and consolidated.sl_pips
-                    and consolidated.tp_pips
-                ):
+                if whatif_tracker is not None:
+                    # HOLDシグナルはSL/TP=0のため
+                    # デフォルト値で補完
+                    _wi_sl = (
+                        consolidated.sl_pips
+                        or bot_config.min_sl_pips
+                    )
+                    _wi_tp = (
+                        consolidated.tp_pips
+                        or _wi_sl * 2.0
+                    )
                     whatif_tracker.add_signal(
                         signal_time=candle_time,
                         symbol=runner.config.symbol,
                         direction=_dir,
                         entry_price=candle.close,
-                        sl_pips=consolidated.sl_pips,
-                        tp_pips=consolidated.tp_pips,
+                        sl_pips=_wi_sl,
+                        tp_pips=_wi_tp,
                         consensus_score=_cs,
                         block_reason=(
                             consolidated.rationale or ""
