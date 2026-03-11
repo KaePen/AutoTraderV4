@@ -213,8 +213,9 @@ symbols:
     slippage_pips: 0.5
     default_sl_pips: 20.0
     default_tp_pips: 40.0
-    # USDJPY最適化結果 (2026-03-09, 2023-2025検証, pip_value修正後)
-    # +31.3M, WR 74.1%, MaxDD 9.13%, Trades 5,734
+    # USDJPY最適化結果 (2026-03-12, 2024-2025検証, P2+P3)
+    # BCA 0.60維持, VF T3維持（デフォルト値）
+    # P3: VF T3 +630K vs OFF, WR +3.4pp, PF +0.55, DD -0.30pp
     max_positions: 1              # マルチペア運用: per_pair=1 に統一
     bonus_max_positions: 0
     bonus_score_threshold: 7.0
@@ -222,6 +223,7 @@ symbols:
     max_lot_per_trade: 2.0
     max_total_exposure_lot: 5.0
     equity_floor_pct: 0.30
+    # VF: T3 (デフォルト値と同一のため明示不要)
 
   EURJPY:
     pip_value: 100.0
@@ -229,15 +231,18 @@ symbols:
     slippage_pips: 0.7
     default_sl_pips: 25.0
     default_tp_pips: 50.0
-    # EURJPY最適化結果 (2026-03-09, 2023-2025検証, pip_value修正後)
-    # +33.6M, WR 74.8%, MaxDD 5.61%, Trades 5,609
+    # EURJPY最適化結果 (2026-03-12, 2024-2025検証, P2+P3)
+    # BCA 0.70維持, VF T2 (1.0/0.5) — Profit最大+330K, Sharpe 5.33
     max_positions: 1              # マルチペア運用: per_pair=1 に統一
     bonus_score_threshold: 7.5
     base_risk_pct: 0.02
     max_lot_per_trade: 2.0
     max_total_exposure_lot: 4.0
     signal:
-      bca_min_edge: 0.70  # 最適化結果: 0.70が最良 (+50K vs 0.65, PF/Sharpe/WR改善)
+      bca_min_edge: 0.70
+      volume_filter_enabled: true
+      volume_filter_threshold: 1.0   # T2: Profit+330K, DD -0.31pp vs OFF
+      volume_filter_penalty: 0.5
 
   GBPJPY:
     pip_value: 100.0
@@ -245,8 +250,8 @@ symbols:
     slippage_pips: 1.0
     default_sl_pips: 30.0
     default_tp_pips: 60.0
-    # GBPJPY最適化結果 (2026-03-09, 2023-2025検証, pip_value修正後)
-    # +20.2M, WR 73.1%, MaxDD 9.79%, Trades 6,315
+    # GBPJPY最適化結果 (2026-03-12, 2024-2025検証, P2+P3)
+    # BCA 0.65→0.70 (DD -1.4pp), VF OFF（効果なし）
     max_positions: 1              # マルチペア運用: per_pair=1 に統一
     bonus_max_positions: 0
     bonus_score_threshold: 8.0
@@ -254,7 +259,8 @@ symbols:
     max_lot_per_trade: 1.5
     max_total_exposure_lot: 3.0
     signal:
-      bca_min_edge: 0.65  # 最適化結果: 0.65が最良 (+500K vs 0.55)
+      bca_min_edge: 0.70  # P2結果: 0.70が最良 (DD -1.4pp vs 0.65)
+      volume_filter_enabled: false  # P3結果: VF効果なし
 
   AUDJPY:
     pip_value: 100.0
@@ -262,15 +268,18 @@ symbols:
     slippage_pips: 0.7
     default_sl_pips: 20.0
     default_tp_pips: 40.0
-    # AUDJPY最適化結果 (2026-03-09, 2023-2025検証, pip_value修正後)
-    # +9.5M, WR 70.9%, MaxDD 9.22%, Trades 5,164
+    # AUDJPY最適化結果 (2026-03-12, 2024-2025検証, P2+P3)
+    # BCA 0.55→0.65 (PF +0.079), VF T2 (1.0/0.5) — Profit+80K, Sharpe最高
     max_positions: 1              # マルチペア運用: per_pair=1 に統一
     bonus_score_threshold: 7.0
     base_risk_pct: 0.012
     max_lot_per_trade: 1.5
     max_total_exposure_lot: 3.0
     signal:
-      bca_min_edge: 0.55  # 最適化結果: 0.55が最良（最高利益）
+      bca_min_edge: 0.65  # P2結果: 0.65が最良 (PF +0.079 vs 0.55)
+      volume_filter_enabled: true
+      volume_filter_threshold: 1.0   # T2: Profit+80K, Sharpe +0.18 vs OFF
+      volume_filter_penalty: 0.5
 
   CADJPY:
     pip_value: 100.0
@@ -278,15 +287,18 @@ symbols:
     slippage_pips: 0.7
     default_sl_pips: 20.0
     default_tp_pips: 40.0
-    # CADJPY最適化結果 (2026-03-09, 2023-2025検証, pip_value修正後)
-    # +8.0M, WR 70.0%, MaxDD 9.66%, Trades 4,721
+    # CADJPY最適化結果 (2026-03-12, 2024-2025検証, P2+P3)
+    # BCA 0.65→0.70 (Sharpe +0.73), VF T2 (1.0/0.5) — Profit+220K, DD -1.61pp
     max_positions: 1              # マルチペア運用: per_pair=1 に統一
     bonus_score_threshold: 7.0
     base_risk_pct: 0.012
     max_lot_per_trade: 1.0
     max_total_exposure_lot: 2.0
     signal:
-      bca_min_edge: 0.65  # 最適化結果: 0.65が最良 (PF 1.89, 月間+100%)
+      bca_min_edge: 0.70  # P2結果: 0.70が最良 (Sharpe +0.73, WR +0.4pp vs 0.65)
+      volume_filter_enabled: true
+      volume_filter_threshold: 1.0   # T2: Profit+220K, DD -1.61pp vs OFF
+      volume_filter_penalty: 0.5
 
   CHFJPY:
     pip_value: 100.0
@@ -294,13 +306,16 @@ symbols:
     slippage_pips: 0.7
     default_sl_pips: 25.0
     default_tp_pips: 50.0
-    # CHFJPY最適化結果 (2026-03-09, 2023-2025検証, pip_value修正後)
-    # +18.4M, WR 72.9%, MaxDD 9.68%, Trades 6,029
+    # CHFJPY最適化結果 (2026-03-12, 2024-2025検証, P2+P3)
+    # BCA追加 0.70 (Sharpe +0.71), VF T3維持（DD -2.53pp）
     max_positions: 1              # マルチペア運用: per_pair=1 に統一
     bonus_score_threshold: 7.5
     base_risk_pct: 0.015
     max_lot_per_trade: 1.5
     max_total_exposure_lot: 3.0
+    signal:
+      bca_min_edge: 0.70  # P2結果: 0.70が最良 (Sharpe +0.71 vs 0.60)
+      # VF: T3 (デフォルト値と同一のため明示不要)
 
 # --- マルチ通貨ペア ポートフォリオ設定 ---
 # ポートフォリオ制約のみ（base_risk_pct/consensus_threshold は個別プリセットの責務）
