@@ -681,6 +681,15 @@ class FilterStep:
                 else "mixed"
             ),
             "volume_ratio": _vol_ratio,
+            "volume_filter_enabled": (
+                bot.config.volume_filter_enabled
+            ),
+            "volume_filter_threshold": (
+                bot.config.volume_filter_threshold
+            ),
+            "volume_filter_penalty": (
+                bot.config.volume_filter_penalty
+            ),
         }
         sg_result = bot.soft_guard.check(
             sg_context,

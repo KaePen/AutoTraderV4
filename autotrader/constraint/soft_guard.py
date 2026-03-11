@@ -336,8 +336,21 @@ class SoftGuard:
                 (self.check_recent_performance, SoftGuardReason.RECENT_LOSS),
                 (self.check_mtf_conflict, SoftGuardReason.MTF_CONFLICT),
                 (self.check_trend_strength, SoftGuardReason.WEAK_TREND),
-                (self.check_volume, SoftGuardReason.LOW_VOLUME),
             ])
+            # ボリュームフィルタ: enabled時のみチェック、config値を渡す
+            if context.get("volume_filter_enabled", False):
+                _thr = context.get(
+                    "volume_filter_threshold", 0.8,
+                )
+                _pen = context.get(
+                    "volume_filter_penalty", 0.3,
+                )
+                checks.append((
+                    lambda ctx, t=_thr, p=_pen: (
+                        self.check_volume(ctx, t, p)
+                    ),
+                    SoftGuardReason.LOW_VOLUME,
+                ))
 
         for check_func, reason_code in checks:
             penalty, reason = check_func(context)
