@@ -345,11 +345,11 @@ def run_unified_year(
                     # デフォルト値で補完
                     _wi_sl = (
                         consolidated.sl_pips
-                        or bot_config.default_sl_pips
+                        or bot_config.sl_min_pips
                     )
                     _wi_tp = (
                         consolidated.tp_pips
-                        or _wi_sl * 2.0
+                        or _wi_sl * bot_config.tp_sl_ratio
                     )
                     whatif_tracker.add_signal(
                         signal_time=candle_time,
