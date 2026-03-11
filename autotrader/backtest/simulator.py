@@ -95,8 +95,8 @@ class SimulatorConfig:
     bot_config: Any = None
     # 実スプレッドデータを使用（CSVの<SPREAD>列、デフォルトOFF）
     use_actual_spread_data: bool = False
-    # SL/TPがpips値で渡される（True=ライブ統一形式、False=従来の価格値）
-    sl_tp_in_pips: bool = False
+    # SL/TPがpips値で渡される（ライブ統一形式）
+    sl_tp_in_pips: bool = True
 
     @classmethod
     def from_preset(
