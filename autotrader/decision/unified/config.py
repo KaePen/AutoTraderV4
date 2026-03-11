@@ -260,8 +260,8 @@ class FilterConfig:
     high_align_penalty_score: float = 1.0
     # ボリュームフィルタ
     volume_filter_enabled: bool = True
-    volume_filter_threshold: float = 0.8
-    volume_filter_penalty: float = 0.3
+    volume_filter_threshold: float = 1.5
+    volume_filter_penalty: float = 0.8
 
 
 @dataclass(frozen=True)
@@ -507,9 +507,9 @@ class UnifiedBotConfig:
     # ボリュームフィルタ有効化
     volume_filter_enabled: bool = True
     # ボリュームMA比率の閾値（これ未満でペナルティ）
-    volume_filter_threshold: float = 0.8
+    volume_filter_threshold: float = 1.5
     # ボリュームフィルタ最大ペナルティ
-    volume_filter_penalty: float = 0.3
+    volume_filter_penalty: float = 0.8
     # --- M1モメンタム確認ゲート ---
     # M1モメンタム確認ゲート有効化
     m1_momentum_gate_enabled: bool = False
