@@ -2279,7 +2279,19 @@ def main() -> None:
                 if jp.status == "in_progress"
             }
 
+            # 事前計算中のジョブがあれば完了を待つ
+            # （新ジョブ登録をブロックして直列化）
+            _pc_busy = False
+            for _pc_rid, _pc_t in list(_precomputing.items()):
+                if _pc_t.is_alive():
+                    _pc_busy = True
+                    break
+                # 完了 → 除去
+                del _precomputing[_pc_rid]
+
             for job in jobs:
+                if _pc_busy:
+                    break
                 if _current_cpu_load(running_tasks) >= cpu_threads:
                     break
 
@@ -2364,14 +2376,12 @@ def main() -> None:
                     )
                     _pc_thread.start()
                     _precomputing[rid] = _pc_thread
+                    # 事前計算開始→次のポーリングで完了確認
+                    break
 
-                # 事前計算中のジョブはタスク投入をスキップ
+                # 事前計算待ちのジョブはタスク投入スキップ
                 if rid in _precomputing:
-                    _pc_t = _precomputing[rid]
-                    if _pc_t.is_alive():
-                        continue
-                    # 完了 → 除去
-                    del _precomputing[rid]
+                    break
 
                 # 未完了月タスクを生成
                 pending = generate_pending_months(job, rid)
