@@ -72,20 +72,36 @@ git rebase origin/main  # 同一ブランチで継続する場合
 `--delete-branch` によりリモートブランチは自動削除される。
 ローカルブランチは次のブランチ切り替え時に `git branch -D <branch>` で削除。
 
-### セッション終了時
+### セッション終了時の自動掃除
 
-- EnterWorktreeで入ったworktreeは ExitWorktree で抜ける
-- 作業完了後のworktreeディレクトリは放置してよい（次セッションで掃除）
+Stop hookで `cleanup-worktrees.sh` が自動実行され、以下を処理:
+- git登録済みworktreeの `--force` 削除
+- git未登録の孤立ディレクトリの削除
+- `git worktree prune` の実行
 
-### 孤立worktreeの対処（前セッションの異常終了等）
+EnterWorktreeで入ったworktreeは ExitWorktree で抜ける。
 
-次セッション開始時に確認:
+### セッション開始時の掃除（必須）
+
+worktree作成前に必ず実行:
 ```bash
+# git登録済みworktreeの掃除
 git worktree list
-# 不要なworktreeがあれば削除
+# main以外があれば削除
 git worktree remove <path> --force
 git worktree prune
+
+# 孤立ディレクトリの掃除
+rm -rf .claude/worktrees/*/
+
+# マージされていないPRの確認
+gh pr list --author @me --state open
 ```
+
+### VSCodeブランチ表示について
+
+`gh pr merge --delete-branch` 後にVSCodeのブランチ表示が変わるのは正常動作（mainのHEAD更新を検知）。
+実害はないため、VSCodeではmainブランチを開いた状態を維持し、worktree作業はClaude Codeターミナルで完結させる。
 
 ## エージェント分類
 
