@@ -1,11 +1,13 @@
-"""PRウォッチャー - PRを検知して自動マージし、ブランチ・worktreeを掃除する。
+"""PRウォッチャー - PRを検知して自動マージする。
+
+掃除（ブランチ削除・worktree削除）はセッション側が責任を持つ。
+pr_watcherはマージ専用。
 
 使い方:
     python -u scripts/pr_watcher.py
 
 環境変数:
     PROJECT_DIR: プロジェクトディレクトリ（省略時はスクリプトの親ディレクトリ）
-    CLEANUP_GRACE_MINUTES: worktree保護の猶予時間（省略時60分）
 """
 
 from __future__ import annotations
@@ -13,7 +15,6 @@ from __future__ import annotations
 import io
 import json
 import os
-import shutil
 import subprocess
 import sys
 import threading
@@ -98,15 +99,8 @@ CLAUDE_CMD = _find_claude_executable()
 REPO = "KaePen/AutoTraderV4"
 POLL_INTERVAL_SEC = 5
 MAX_PARALLEL_MERGES = 3
-CLEANUP_EVERY_N_CYCLES = 10  # N周期ごとにフルクリーンアップ実行
 MAX_MERGE_RETRIES = 2  # 初回+リトライ2回=最大3回試行
 PROJECT_DIR = Path(os.environ.get("PROJECT_DIR", Path(__file__).parent.parent))
-TMP_DIR = PROJECT_DIR / "tmp"
-WORKTREE_DIR = PROJECT_DIR / ".claude" / "worktrees"
-
-# 安全クリーンアップ設定
-CLEANUP_GRACE_MINUTES = int(os.environ.get("CLEANUP_GRACE_MINUTES", "60"))
-LOCK_FILE_NAME = ".claude-active"
 
 # merge + push は排他制御（並行マージによるpush競合を防止）
 _merge_lock = threading.Lock()
@@ -179,480 +173,6 @@ def _is_merge_in_progress() -> bool:
         bool: MERGE_HEADが存在すればTrue
     """
     return (PROJECT_DIR / ".git" / "MERGE_HEAD").exists()
-
-
-# ─── 安全チェック ─────────────────────────────────────
-
-
-def _has_lock_file(wt_path: str | Path) -> bool:
-    """worktreeにロックファイルが存在するか確認する。
-
-    エージェントは作業開始時に .claude-active を作成し、
-    完了時に削除する規約。このファイルがある間はクリーンアップ対象外。
-
-    Args:
-        wt_path: worktreeディレクトリのパス
-
-    Returns:
-        bool: ロックファイルが存在すればTrue
-    """
-    return Path(wt_path, LOCK_FILE_NAME).exists()
-
-
-def _is_dir_recently_modified(
-    dir_path: str | Path,
-    grace_minutes: int = CLEANUP_GRACE_MINUTES,
-) -> bool:
-    """ディレクトリが最近変更されたか確認する。
-
-    ディレクトリ自体のmtimeと、直下のファイルのmtimeを確認し、
-    いずれかがgrace_minutes以内であればTrueを返す。
-
-    Args:
-        dir_path: 確認するディレクトリのパス
-        grace_minutes: 猶予時間（分）
-
-    Returns:
-        bool: 猶予時間内に変更があればTrue
-    """
-    p = Path(dir_path)
-    if not p.exists():
-        return False
-
-    threshold = time.time() - (grace_minutes * 60)
-
-    # ディレクトリ自体のmtime
-    try:
-        if p.stat().st_mtime > threshold:
-            return True
-    except OSError:
-        return False
-
-    # 直下のファイル・サブディレクトリのmtimeも確認
-    try:
-        for entry in p.iterdir():
-            try:
-                if entry.stat().st_mtime > threshold:
-                    return True
-            except OSError:
-                continue
-    except OSError:
-        pass
-
-    return False
-
-
-def _is_worktree_active(wt_path: str | Path) -> str | None:
-    """worktreeがアクティブ（使用中）かどうか判定する。
-
-    ロックファイルまたは最近の変更があれば使用中とみなす。
-
-    Args:
-        wt_path: worktreeディレクトリのパス
-
-    Returns:
-        str | None: 使用中の理由（None=使用中でない）
-    """
-    if _has_lock_file(wt_path):
-        return "ロックファイル検出"
-    if _is_dir_recently_modified(wt_path):
-        return f"最近変更あり（{CLEANUP_GRACE_MINUTES}分以内）"
-    return None
-
-
-# ─── worktree / ブランチ掃除 ────────────────────────
-
-
-def _get_worktree_for_branch(branch: str) -> str | None:
-    """ブランチに紐づくworktreeパスを取得する。
-
-    Args:
-        branch: ブランチ名
-
-    Returns:
-        str | None: worktreeパス（メインworktreeは除外）
-    """
-    r = _git(["worktree", "list", "--porcelain"])
-    if r.returncode != 0:
-        return None
-
-    current_path: str | None = None
-    for line in r.stdout.splitlines():
-        if line.startswith("worktree "):
-            current_path = line[len("worktree ") :]
-        elif line.startswith("branch refs/heads/"):
-            wt_branch = line[len("branch refs/heads/") :]
-            if (
-                wt_branch == branch
-                and current_path
-                and Path(current_path).resolve() != PROJECT_DIR.resolve()
-            ):
-                return current_path
-    return None
-
-
-def _remove_worktree(
-    branch: str,
-    *,
-    respect_activity: bool = True,
-    quiet: bool = False,
-) -> bool:
-    """ブランチに紐づくworktreeを削除する。
-
-    Args:
-        branch: ブランチ名
-        respect_activity: Trueの場合、アクティブなworktreeは削除しない
-        quiet: Trueの場合、SKIP/WARNログを抑制する
-
-    Returns:
-        bool: 削除した場合True
-    """
-    wt_path = _get_worktree_for_branch(branch)
-    if not wt_path:
-        return False
-
-    # 安全チェック: アクティブなworktreeは削除しない
-    if respect_activity:
-        reason = _is_worktree_active(wt_path)
-        if reason:
-            if not quiet:
-                print(
-                    f"[SKIP] worktree保護（{reason}）: {wt_path}",
-                    flush=True,
-                )
-            return False
-
-    r = _git(["worktree", "remove", "--force", wt_path])
-    if r.returncode == 0:
-        print(f"[INFO] worktree削除: {wt_path}", flush=True)
-        return True
-
-    # git worktree remove失敗時: shutil.rmtreeでフォールバック
-    print(
-        f"[WARN] git worktree remove失敗、rmtreeで再試行: {wt_path}",
-        flush=True,
-    )
-    try:
-        shutil.rmtree(wt_path)
-        _git(["worktree", "prune"])
-        print(f"[INFO] worktree強制削除成功: {wt_path}", flush=True)
-        return True
-    except OSError as e:
-        print(
-            f"[ERROR] worktree強制削除も失敗: {wt_path}: {e}",
-            flush=True,
-        )
-        return False
-
-
-def _delete_branch(
-    branch: str,
-    *,
-    force: bool = False,
-    respect_activity: bool = True,
-    quiet: bool = False,
-) -> bool:
-    """ローカルブランチを削除する（worktreeがあれば先に除去）。
-
-    worktree削除に失敗した場合はブランチ削除もスキップする。
-
-    Args:
-        branch: ブランチ名
-        force: -D（強制）を使うかどうか
-        respect_activity: Trueの場合、アクティブなworktreeは削除しない
-        quiet: Trueの場合、SKIP/WARNログを抑制する
-
-    Returns:
-        bool: 削除した場合True
-    """
-    wt_path = _get_worktree_for_branch(branch)
-    if wt_path:
-        removed = _remove_worktree(
-            branch,
-            respect_activity=respect_activity,
-            quiet=quiet,
-        )
-        if not removed:
-            # アクティブ保護の場合のみスキップ
-            if respect_activity and _is_worktree_active(wt_path):
-                if not quiet:
-                    print(
-                        f"[SKIP] アクティブworktreeのため"
-                        f"ブランチ削除スキップ: {branch}",
-                        flush=True,
-                    )
-                return False
-            # アクティブでない場合はpruneしてブランチ削除を続行
-            _git(["worktree", "prune"])
-            if not quiet:
-                print(
-                    f"[INFO] worktree除去失敗だがprune後に"
-                    f"ブランチ削除続行: {branch}",
-                    flush=True,
-                )
-    flag = "-D" if force else "-d"
-    r = _git(["branch", flag, branch])
-    if r.returncode == 0:
-        return True
-    if "not found" not in r.stderr:
-        print(
-            f"[WARN] ブランチ削除失敗 ({branch}): {r.stderr.strip()}",
-            flush=True,
-        )
-    return False
-
-
-def _cleanup_nested_worktrees(wt_path: Path) -> tuple[int, int]:
-    """worktree内のネストworktreeを再帰的に削除する。
-
-    worktree内に .claude/worktrees/ が存在する場合、
-    その中身を全て削除する。ネストworktreeはいかなる場合も
-    許容されないため、アクティブチェックなしで削除する。
-
-    Args:
-        wt_path: worktreeディレクトリのパス
-
-    Returns:
-        tuple[int, int]: (削除数, エラー数)
-    """
-    nested_dir = wt_path / ".claude" / "worktrees"
-    if not nested_dir.exists() or not nested_dir.is_dir():
-        return 0, 0
-
-    removed = 0
-    errors = 0
-    for entry in nested_dir.iterdir():
-        if not entry.is_dir():
-            continue
-        try:
-            shutil.rmtree(entry)
-            print(
-                f"[INFO] ネストworktree削除: {entry}",
-                flush=True,
-            )
-            removed += 1
-        except OSError as e:
-            print(
-                f"[WARN] ネストworktree削除失敗: {entry}: {e}",
-                flush=True,
-            )
-            errors += 1
-
-    # 空になった .claude/worktrees/ ディレクトリも削除
-    try:
-        if nested_dir.exists() and not any(nested_dir.iterdir()):
-            nested_dir.rmdir()
-    except OSError:
-        pass
-
-    return removed, errors
-
-
-def _cleanup_orphan_dirs() -> tuple[int, int]:
-    """tmp/と.claude/worktrees/配下の孤立ディレクトリを削除する。
-
-    有効なworktreeに紐づかないディレクトリを削除。
-    ただしアクティブなディレクトリは保護する。
-    ネストworktree（worktree内の.claude/worktrees/）も再帰削除。
-
-    Returns:
-        tuple[int, int]: (削除数, 保護数)
-    """
-    # 有効なworktreeパスを収集
-    valid_paths: set[str] = set()
-    r = _git(["worktree", "list", "--porcelain"])
-    if r.returncode == 0:
-        for line in r.stdout.splitlines():
-            if line.startswith("worktree "):
-                resolved = str(Path(line[len("worktree ") :]).resolve())
-                valid_paths.add(resolved)
-
-    removed = 0
-    protected = 0
-
-    # 対象ディレクトリ: tmp/ と .claude/worktrees/
-    target_dirs = [TMP_DIR, WORKTREE_DIR]
-    for target_dir in target_dirs:
-        if not target_dir.exists():
-            continue
-        for entry in target_dir.iterdir():
-            if not entry.is_dir():
-                continue
-            if str(entry.resolve()) in valid_paths:
-                # 有効worktree内のネストworktreeを掃除
-                r_nested, _ = _cleanup_nested_worktrees(entry)
-                removed += r_nested
-                continue
-
-            # 安全チェック: アクティブなディレクトリは保護
-            reason = _is_worktree_active(entry)
-            if reason:
-                protected += 1
-                continue
-
-            try:
-                shutil.rmtree(entry)
-                print(
-                    f"[INFO] 孤立ディレクトリ削除: {entry}",
-                    flush=True,
-                )
-                removed += 1
-            except OSError as e:
-                print(
-                    f"[WARN] ディレクトリ削除失敗: {entry}: {e}",
-                    flush=True,
-                )
-
-    return removed, protected
-
-
-def cleanup_stale() -> None:
-    """ゴミworktree・ブランチ・リモート参照を一掃する。
-
-    アクティブなworktree（ロックファイルまたは最近の変更あり）は保護する。
-
-    実行内容:
-    1. git worktree prune（壊れた登録を解除）
-    2. git fetch --prune（削除済みリモート参照を掃除）
-    3. マージ済みローカルブランチを削除（アクティブworktree保護）
-    4. 孤立ローカルブランチ（リモート無し＆worktree無し）を削除
-    5. マージ済みリモートブランチを削除
-    6. tmp/・.claude/worktrees/配下の孤立ディレクトリを削除（アクティブ保護）
-    """
-    print("[INFO] クリーンアップ開始...", flush=True)
-    cleaned = 0
-    protected_count = 0
-
-    # 1. worktree prune
-    _git(["worktree", "prune"])
-
-    # 2. fetch --prune
-    r = _git(["fetch", "--prune", "origin"])
-    if r.returncode == 0 and r.stderr:
-        pruned_lines = [
-            ln for ln in r.stderr.splitlines() if "[deleted]" in ln
-        ]
-        if pruned_lines:
-            print(
-                f"[INFO] staleリモート参照 {len(pruned_lines)}件を削除",
-                flush=True,
-            )
-            cleaned += len(pruned_lines)
-
-    # 3. マージ済みローカルブランチを削除（アクティブworktree保護）
-    r = _git(["branch", "--merged", "main"])
-    if r.returncode == 0:
-        for line in r.stdout.splitlines():
-            branch = line.strip()
-            if branch.startswith("* "):
-                branch = branch[2:]
-            if not branch or branch == "main":
-                continue
-            if _delete_branch(
-                branch,
-                force=True,
-                respect_activity=True,
-                quiet=True,
-            ):
-                print(
-                    f"[INFO] マージ済みブランチ削除: {branch}",
-                    flush=True,
-                )
-                cleaned += 1
-            else:
-                # 削除失敗 = アクティブworktreeで保護された
-                wt = _get_worktree_for_branch(branch)
-                if wt and _is_worktree_active(wt):
-                    protected_count += 1
-
-    # 4. 孤立ローカルブランチ（リモート無し＆worktree無し）
-    r = _git(["branch"])
-    if r.returncode == 0:
-        for line in r.stdout.splitlines():
-            branch = line.strip()
-            if branch.startswith("* "):
-                branch = branch[2:]
-            if not branch or branch == "main":
-                continue
-            # リモートに存在するか確認
-            rr = _git(
-                [
-                    "rev-parse",
-                    "--verify",
-                    f"refs/remotes/origin/{branch}",
-                ]
-            )
-            if rr.returncode != 0:
-                # worktreeがアクティブなら残す
-                wt = _get_worktree_for_branch(branch)
-                if wt:
-                    reason = _is_worktree_active(wt)
-                    if reason:
-                        protected_count += 1
-                        continue
-                    # worktreeあるがアクティブでない → 削除可能
-                    print(
-                        f"[WARN] 孤立ブランチ"
-                        f"（非アクティブworktree）: {branch}",
-                        flush=True,
-                    )
-                if _delete_branch(
-                    branch,
-                    force=True,
-                    respect_activity=True,
-                    quiet=True,
-                ):
-                    print(
-                        f"[INFO] 孤立ブランチ削除: {branch}",
-                        flush=True,
-                    )
-                    cleaned += 1
-                else:
-                    # quiet=Trueで抑制されたが保護された場合
-                    if not wt:
-                        wt = _get_worktree_for_branch(branch)
-                    if wt and _is_worktree_active(wt):
-                        protected_count += 1
-
-    # 5. マージ済みリモートブランチを削除
-    r = _git(["branch", "-r", "--merged", "main"])
-    if r.returncode == 0:
-        for line in r.stdout.splitlines():
-            ref = line.strip()
-            if not ref.startswith("origin/"):
-                continue
-            remote_branch = ref[len("origin/") :]
-            if remote_branch in ("main", "HEAD"):
-                continue
-            dr = _git(
-                [
-                    "push",
-                    "origin",
-                    "--delete",
-                    remote_branch,
-                ]
-            )
-            if dr.returncode == 0:
-                print(
-                    f"[INFO] マージ済みリモート削除: {remote_branch}",
-                    flush=True,
-                )
-                cleaned += 1
-
-    # 6. 孤立ディレクトリ削除（tmp/ + .claude/worktrees/、アクティブ保護）
-    dir_removed, dir_protected = _cleanup_orphan_dirs()
-    cleaned += dir_removed
-    protected_count += dir_protected
-
-    # アクティブworktree保護のサマリ出力
-    if protected_count > 0:
-        print(
-            f"[INFO] アクティブworktree: {protected_count}件保護中",
-            flush=True,
-        )
-
-    status = f"{cleaned}件処理" if cleaned > 0 else "不要なゴミなし"
-    print(f"[INFO] クリーンアップ完了: {status}", flush=True)
 
 
 # ─── コンフリクト解決 ──────────────────────────────
@@ -847,26 +367,18 @@ def get_open_prs() -> list[dict[str, object]]:
 def auto_merge_pr(
     pr: dict[str, object],
     merged: set[int] | None = None,
-    pending_cleanup: set[str] | None = None,
     fail_count: dict[int, int] | None = None,
 ) -> str:
-    """PRを差分確認してmainにマージする。
-
-    マージ後のローカルクリーンアップはアクティブチェック付きで実行。
-    worktreeがアクティブ（エージェント使用中）の場合はリモートブランチのみ
-    削除し、ローカルの掃除は次回の cleanup_stale() に委譲する。
+    """PRをmainにマージする（マージ専用、掃除はしない）。
 
     手順:
     1. fetch → 差分ログ出力
     2. merge + push（排他制御）
-    3. リモートブランチ削除
-    4. ローカルクリーンアップ（アクティブworktree保護）
-    5. worktree prune
+    3. worktree prune / fetch --prune（軽量メンテナンスのみ）
 
     Args:
         pr: PR情報辞書（number, title, headRefName）
         merged: マージ成功したPR番号のセット（成功時に追加）
-        pending_cleanup: 削除延期ブランチのセット（リトライ用）
         fail_count: PR番号→失敗回数の辞書（失敗時にカウントアップ）
 
     Returns:
@@ -911,7 +423,6 @@ def auto_merge_pr(
             f"[ERROR] PR #{num} fetch失敗: {r.stderr}",
             flush=True,
         )
-        # ネットワークエラーはClaude不要、リトライのみ
         return _inc_fail()
 
     # 2. 差分サマリをログ出力（確認用）
@@ -940,7 +451,6 @@ def auto_merge_pr(
             )
             if _is_network_error(err):
                 return _inc_fail()
-            # pull --ff-only失敗はClaude診断を試みる
             resolved = _resolve_merge_failure_with_claude(
                 num,
                 title,
@@ -981,7 +491,6 @@ def auto_merge_pr(
                     flush=True,
                 )
                 _git(["merge", "--abort"])
-                # merge失敗はClaude診断を試みる
                 resolved = _resolve_merge_failure_with_claude(
                     num,
                     title,
@@ -990,7 +499,6 @@ def auto_merge_pr(
                 )
                 if not resolved:
                     return _inc_fail()
-                # Claude解決後、再度マージを試みる
                 r2 = _git(
                     [
                         "merge",
@@ -1013,50 +521,11 @@ def auto_merge_pr(
             )
             # マージコミットをロールバック
             _git(["reset", "--hard", "HEAD~1"])
-            # ネットワークエラーはClaude不要
             return _inc_fail()
 
-    # 4. リモートブランチ削除
-    r = _git(["push", "origin", "--delete", branch])
-    if r.returncode != 0:
-        print(
-            f"[WARN] PR #{num} リモートブランチ削除失敗: {r.stderr.strip()}",
-            flush=True,
-        )
-
-    # 5. ローカルクリーンアップ（アクティブworktree保護）
-    # 失敗時は pending_cleanup に追加してリトライ対象にする
-    _cleanup_ok = False
-    wt_path = _get_worktree_for_branch(branch)
-    if wt_path:
-        reason = _is_worktree_active(wt_path)
-        if reason:
-            print(
-                f"[SKIP] PR #{num} ローカル掃除延期（{reason}）: {wt_path}",
-                flush=True,
-            )
-        else:
-            _cleanup_ok = _delete_branch(
-                branch,
-                force=True,
-                respect_activity=False,
-            )
-    else:
-        # worktreeなし → ブランチだけ削除
-        _cleanup_ok = _delete_branch(
-            branch,
-            force=True,
-            respect_activity=False,
-        )
-
-    if not _cleanup_ok and pending_cleanup is not None:
-        pending_cleanup.add(branch)
-
-    # 6. worktree prune（壊れた登録があれば解消）
+    # 4. 軽量メンテナンス（壊れた登録の解除のみ）
     _git(["worktree", "prune"])
-
-    # 7. マージ後即時: 孤立ディレクトリを掃除
-    _cleanup_orphan_dirs()
+    _git(["fetch", "--prune", "origin"])
 
     if merged is not None:
         merged.add(num)
@@ -1081,37 +550,30 @@ def main() -> None:
         f"[INFO] 最大並行処理数: {MAX_PARALLEL_MERGES}",
         flush=True,
     )
-    print(
-        f"[INFO] クリーンアップ猶予: {CLEANUP_GRACE_MINUTES}分",
-        flush=True,
-    )
     print(f"[INFO] gh: {GH_CMD}", flush=True)
     print(
         "[INFO] 停止するには Ctrl+C を押してください",
         flush=True,
     )
 
-    # 起動時クリーンアップ（排他制御下で実行）
-    with _merge_lock:
-        cleanup_stale()
+    # 起動時に壊れたworktree登録とstaleリモート参照を掃除
+    _git(["worktree", "prune"])
+    _git(["fetch", "--prune", "origin"])
 
     # in_flight: 処理中（重複submit防止）
     # merged: マージ成功済み（再試行不要）
     # failed: 最大リトライ超過（スキップ対象）
     # fail_count: PR番号→失敗回数
-    # pending_cleanup: 削除延期ブランチ（リトライ対象）
     in_flight: set[int] = set()
     merged: set[int] = set()
     failed: set[int] = set()
     fail_count: dict[int, int] = {}
-    pending_cleanup: set[str] = set()
-    cycle_count = 0
 
     def _on_future_done(
         future: object,
         pr_num: int,
     ) -> None:
-        """ワーカー完了時: 結果に応じてmerged/failed/再試行可能に振り分ける。"""
+        """ワーカー完了時コールバック。"""
         from concurrent.futures import Future
 
         in_flight.discard(pr_num)
@@ -1122,21 +584,19 @@ def main() -> None:
                     f"[ERROR] PR #{pr_num} 未処理例外: {exc}",
                     flush=True,
                 )
-                # 例外時もfail_countを増やす
                 cnt = fail_count.get(pr_num, 0) + 1
                 fail_count[pr_num] = cnt
                 if cnt > MAX_MERGE_RETRIES:
                     failed.add(pr_num)
                     print(
-                        f"[FAILED] PR #{pr_num} リトライ上限超過 - スキップ",
+                        f"[FAILED] PR #{pr_num} リトライ上限超過"
+                        " - スキップ",
                         flush=True,
                     )
                 return
             result = future.result()
             if result == "failed":
                 failed.add(pr_num)
-            # "merged"はauto_merge_pr内でmergedに追加済み
-            # "retry"は何もしない（次サイクルで再試行）
 
     with ThreadPoolExecutor(
         max_workers=MAX_PARALLEL_MERGES,
@@ -1144,24 +604,16 @@ def main() -> None:
         try:
             while True:
                 prs = get_open_prs()
-                # マージ済み・処理中・失敗済みのPRをスキップ
                 skip = merged | in_flight | failed
                 new_prs = [pr for pr in prs if pr["number"] not in skip]
 
-                cycle_count += 1
-
                 if not new_prs:
-                    # PRがないタイミングで定期クリーンアップ
-                    if cycle_count % CLEANUP_EVERY_N_CYCLES == 0:
-                        with _merge_lock:
-                            cleanup_stale()
-                    else:
-                        print(
-                            f"[INFO] 未処理PRなし"
-                            f" - {POLL_INTERVAL_SEC}秒後"
-                            "に再確認",
-                            flush=True,
-                        )
+                    print(
+                        f"[INFO] 未処理PRなし"
+                        f" - {POLL_INTERVAL_SEC}秒後"
+                        "に再確認",
+                        flush=True,
+                    )
                 else:
                     for pr in new_prs:
                         pr_num = pr["number"]
@@ -1170,7 +622,6 @@ def main() -> None:
                             auto_merge_pr,
                             pr,
                             merged,
-                            pending_cleanup,
                             fail_count,
                         )
                         fut.add_done_callback(
@@ -1181,25 +632,6 @@ def main() -> None:
                             f" をキューに追加: {pr['title']}",
                             flush=True,
                         )
-
-                # 削除延期ブランチのリトライ
-                if pending_cleanup:
-                    done = set()
-                    for br in list(pending_cleanup):
-                        if _delete_branch(
-                            br,
-                            force=True,
-                            respect_activity=True,
-                            quiet=True,
-                        ):
-                            print(
-                                f"[INFO] 延期ブランチ削除成功: {br}",
-                                flush=True,
-                            )
-                            done.add(br)
-                    pending_cleanup -= done
-                    if done:
-                        _git(["worktree", "prune"])
 
                 time.sleep(POLL_INTERVAL_SEC)
         except KeyboardInterrupt:
