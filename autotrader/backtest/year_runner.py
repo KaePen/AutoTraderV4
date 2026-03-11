@@ -299,6 +299,35 @@ def run_unified_year(
                 candle_time=candle_time,
                 score_breakdowns=(consolidated.tf_score_breakdowns),
             )
+        else:
+            # ブロックされたシグナルを記録（スコア>0のみ）
+            _cs = consolidated.consensus_score
+            if _cs is not None and _cs > 0:
+                _dir = (
+                    "BUY"
+                    if consolidated.buy_score
+                    > consolidated.sell_score
+                    else "SELL"
+                )
+                _emitter.emit_signal_blocked(
+                    candle_time=candle_time,
+                    symbol=runner.config.symbol,
+                    direction=_dir,
+                    score=_cs,
+                    threshold=(
+                        consolidated.entry_threshold
+                        or 9.0
+                    ),
+                    block_reason=(
+                        consolidated.rationale or ""
+                    ),
+                    regime=(
+                        consolidated.regime or ""
+                    ),
+                    mode=(
+                        consolidated.mode or ""
+                    ),
+                )
 
         # Signalオブジェクトに変換
         signal = None

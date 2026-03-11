@@ -35,6 +35,8 @@ class EventType(Enum):
     POSITION_OPENED = "position_opened"
     POSITION_CLOSED = "position_closed"
     
+    SIGNAL_BLOCKED = "signal_blocked"
+
     # 分析イベント
     METRICS_UPDATE = "metrics_update"
     INDICATOR_UPDATE = "indicator_update"
@@ -179,6 +181,34 @@ class TradeEvent(BacktestEvent):
     def __post_init__(self):
         if self.exit_price is not None:
             self.event_type = EventType.POSITION_CLOSED
+
+
+@dataclass
+class SignalBlockedEvent(BacktestEvent):
+    """シグナルブロックイベント
+
+    コンセンサス閾値未達でHOLDとなったシグナルを記録。
+
+    Attributes:
+        symbol: 通貨ペア
+        would_be_direction: ブロックされなければ取る方向
+        consensus_score: コンセンサススコア
+        threshold: エントリー閾値
+        block_reason: ブロック理由
+        regime: 相場レジーム
+        mode: トレーディングモード
+    """
+
+    event_type: EventType = field(
+        default=EventType.SIGNAL_BLOCKED
+    )
+    symbol: str = ""
+    would_be_direction: str = ""
+    consensus_score: float = 0.0
+    threshold: float = 9.0
+    block_reason: str = ""
+    regime: str = ""
+    mode: str = ""
 
 
 @dataclass
@@ -1108,6 +1138,29 @@ class BacktestEventEmitter:
             event.data["signal_data"] = signal_data
         self.emit(event)
     
+    def emit_signal_blocked(
+        self,
+        candle_time: datetime,
+        symbol: str,
+        direction: str,
+        score: float,
+        threshold: float,
+        block_reason: str,
+        regime: str = "",
+        mode: str = "",
+    ) -> None:
+        """シグナルブロックイベント"""
+        self.emit(SignalBlockedEvent(
+            timestamp=candle_time,
+            symbol=symbol,
+            would_be_direction=direction,
+            consensus_score=score,
+            threshold=threshold,
+            block_reason=block_reason,
+            regime=regime,
+            mode=mode,
+        ))
+
     def emit_metrics(
         self,
         balance: float,

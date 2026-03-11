@@ -517,6 +517,20 @@ class UnifiedBotConfig:
     m1_momentum_max_wait: int = 5
     # 必要連続モメンタム足数
     m1_momentum_required: int = 2
+    # --- スコア比例サイジング ---
+    # スコア比例サイジング有効化（デフォルトOFF）
+    score_proportional_sizing: bool = False
+    # 閾値ちょうどでのロット倍率下限
+    score_sizing_floor: float = 0.6
+    # 閾値からこのpt超過で1.0x到達
+    score_sizing_full_range: float = 3.0
+    # --- ATR連続サイジング ---
+    # ATR連続サイジング有効化（デフォルトOFF）
+    atr_sizing_enabled: bool = False
+    # ATR/ATR_MA比率がこの倍率以上で縮小開始
+    atr_sizing_threshold: float = 1.5
+    # 最大縮小率（0.5=最大50%縮小）
+    atr_sizing_max_reduction: float = 0.5
 
     def get_evaluator_config(self, timeframe: str) -> EvaluatorConfig:
         """時間足別評価器設定を取得

@@ -12,6 +12,7 @@ from autotrader.backtest.events import (
     BacktestEvent,
     EventListener,
     EventType,
+    SignalBlockedEvent,
     SignalEvent,
     TradeEvent,
 )
@@ -87,6 +88,18 @@ CSV_COLUMNS = [
     "rationale",
 ]
 
+# ブロックシグナルCSVカラム定義
+BLOCKED_CSV_COLUMNS = [
+    "timestamp",
+    "symbol",
+    "would_be_direction",
+    "consensus_score",
+    "threshold",
+    "block_reason",
+    "regime",
+    "mode",
+]
+
 # STAGNATION reason文字列からminutes/MFE_Rを抽出する正規表現
 _RE_STAG_MINUTES = re.compile(
     r"(\d+(?:\.\d+)?)分(?:経過)?",
@@ -130,6 +143,9 @@ class FileEventListener(EventListener):
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         self.summary_file = self.log_dir / f"summary_{timestamp}.log"
         self.trades_file = self.log_dir / f"trades_{timestamp}.csv"
+        self.blocked_file = (
+            self.log_dir / f"blocked_signals_{timestamp}.csv"
+        )
 
         # 後方互換性のためlog_fileも設定
         self.log_file = self.summary_file
@@ -141,6 +157,7 @@ class FileEventListener(EventListener):
         # シグナル→トレード紐付け用の内部状態
         self._pending_signal: dict | None = None
         self._trade_rows: list[dict] = []
+        self._blocked_rows: list[dict] = []
 
         # 統計カウンター
         self._exit_stats: dict[str, dict[str, float]] = {}
@@ -222,6 +239,8 @@ class FileEventListener(EventListener):
             self._handle_position_closed(event)
         elif event.event_type == EventType.METRICS_UPDATE:
             self._handle_metrics(event)
+        elif event.event_type == EventType.SIGNAL_BLOCKED:
+            self._handle_signal_blocked(event)
 
     def _handle_backtest_start(self, event: BacktestEvent) -> None:
         """バックテスト開始イベント"""
@@ -241,6 +260,7 @@ class FileEventListener(EventListener):
         """バックテスト終了イベント"""
         # CSVファイル書き出し
         self._write_trades_csv()
+        self._write_blocked_csv()
 
         # カテゴリ別統計出力
         self._write_summary("")
@@ -679,6 +699,42 @@ class FileEventListener(EventListener):
         """メトリクス更新イベント（ファイルには詳細出力しない）"""
         pass
 
+    def _handle_signal_blocked(
+        self, event: BacktestEvent
+    ) -> None:
+        """ブロックされたシグナルを蓄積"""
+        if not isinstance(event, SignalBlockedEvent):
+            return
+        self._blocked_rows.append({
+            "timestamp": self._format_timestamp(
+                event.timestamp
+            ),
+            "symbol": event.symbol,
+            "would_be_direction": event.would_be_direction,
+            "consensus_score": (
+                f"{event.consensus_score:.2f}"
+            ),
+            "threshold": f"{event.threshold:.2f}",
+            "block_reason": event.block_reason,
+            "regime": event.regime,
+            "mode": event.mode,
+        })
+
+    def _write_blocked_csv(self) -> None:
+        """ブロックシグナルCSVを書き出し"""
+        if not self._blocked_rows:
+            return
+        with open(
+            self.blocked_file, "w",
+            newline="", encoding="utf-8",
+        ) as f:
+            writer = csv.DictWriter(
+                f, fieldnames=BLOCKED_CSV_COLUMNS,
+                extrasaction="ignore",
+            )
+            writer.writeheader()
+            writer.writerows(self._blocked_rows)
+
     def get_log_path(self) -> Path:
         """ログファイルパスを取得
 
@@ -699,6 +755,7 @@ class FileEventListener(EventListener):
         self,
         trade_rows: list[dict],
         stats: dict[str, dict[str, dict[str, float]]],
+        blocked_rows: list[dict] | None = None,
     ) -> None:
         """ワーカープロセスのトレードデータをマージ
 
@@ -709,8 +766,11 @@ class FileEventListener(EventListener):
             trade_rows: ワーカー収集トレード行リスト
             stats: ワーカー収集統計辞書
                    (exit/mode/regime/cross の各キーを持つ)
+            blocked_rows: ブロックシグナル行リスト
         """
         self._trade_rows.extend(trade_rows)
+        if blocked_rows:
+            self._blocked_rows.extend(blocked_rows)
         stat_map = {
             "exit": self._exit_stats,
             "mode": self._mode_stats,
@@ -775,6 +835,7 @@ class TradeRowCollector(EventListener):
     def __init__(self) -> None:
         """初期化"""
         self._trade_rows: list[dict] = []
+        self._blocked_rows: list[dict] = []
         self._exit_stats: dict[str, dict[str, float]] = {}
         self._mode_stats: dict[str, dict[str, float]] = {}
         self._regime_stats: dict[str, dict[str, float]] = {}
@@ -806,11 +867,32 @@ class TradeRowCollector(EventListener):
         stats[key]["total_pnl"] += pnl
 
     def on_event(self, event: BacktestEvent) -> None:
-        """イベント処理（POSITION_CLOSEDのみ収集）
+        """イベント処理（POSITION_CLOSED + SIGNAL_BLOCKED）
 
         Args:
             event: バックテストイベント
         """
+        if event.event_type == EventType.SIGNAL_BLOCKED:
+            if isinstance(event, SignalBlockedEvent):
+                self._blocked_rows.append({
+                    "timestamp": event.timestamp.strftime(
+                        "%Y-%m-%d %H:%M:%S"
+                    ),
+                    "symbol": event.symbol,
+                    "would_be_direction": (
+                        event.would_be_direction
+                    ),
+                    "consensus_score": (
+                        f"{event.consensus_score:.2f}"
+                    ),
+                    "threshold": (
+                        f"{event.threshold:.2f}"
+                    ),
+                    "block_reason": event.block_reason,
+                    "regime": event.regime,
+                    "mode": event.mode,
+                })
+            return
         if event.event_type != EventType.POSITION_CLOSED:
             return
         if not isinstance(event, TradeEvent):
