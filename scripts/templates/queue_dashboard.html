@@ -320,7 +320,7 @@ function renderCompletedJobs(results) {
   }
 
   // 最新10件に制限
-  const recent = completed.slice(-10);
+  const recent = completed.slice(0, 10);
   const headerLabel = completed.length > 10
     ? `完了済みジョブ（最新10件 / 全${completed.length}件）`
     : `完了済みジョブ（${completed.length}件）`;
