@@ -209,9 +209,9 @@ def run_unified_year(
         # What-If: 毎足更新（SL/TP判定）
         if whatif_tracker is not None:
             whatif_tracker.update(
-                high=candle["high"],
-                low=candle["low"],
-                close=candle["close"],
+                high=candle.high,
+                low=candle.low,
+                close=candle.close,
                 candle_time=candle_time,
             )
 
@@ -349,7 +349,7 @@ def run_unified_year(
                         signal_time=candle_time,
                         symbol=runner.config.symbol,
                         direction=_dir,
-                        entry_price=candle["close"],
+                        entry_price=candle.close,
                         sl_pips=consolidated.sl_pips,
                         tp_pips=consolidated.tp_pips,
                         consensus_score=_cs,
@@ -757,7 +757,7 @@ def run_unified_year(
     # What-If: 残りの仮想ポジションを強制決済
     if whatif_tracker is not None and last_candle:
         whatif_tracker.force_close_all(
-            close=last_candle["close"],
+            close=last_candle.close,
             candle_time=arrays.get_time(arrays.n_rows - 1),
         )
 
