@@ -2317,9 +2317,6 @@ def main() -> None:
                     break
                 if _current_cpu_load(running_tasks) >= cpu_threads:
                     break
-                # 未完了月タスクが十分あれば新ジョブ不要
-                if _active_pending_months >= cpu_threads:
-                    break
 
                 # 完了済みスキップ
                 if job.id in _done:
@@ -2336,6 +2333,9 @@ def main() -> None:
                 if existing_jp:
                     rid = existing_jp.result_id
                 else:
+                    # 新ジョブ登録: 未完了月が十分なら不要
+                    if _active_pending_months >= cpu_threads:
+                        break
                     _cnt = state.next_counter()
                     rid = f"{_cnt:03d}_{job.id}"
 
