@@ -1100,6 +1100,7 @@ def _launch_month_subprocess(
     proc = subprocess.Popen(
         cmd,
         cwd=code_dir,
+        stdin=subprocess.DEVNULL,
         stdout=log_file,
         stderr=subprocess.STDOUT,
         env={**os.environ, "PYTHONUNBUFFERED": "1"},
