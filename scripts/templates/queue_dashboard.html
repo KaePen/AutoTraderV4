@@ -479,8 +479,11 @@ function updateHeader(status) {
     statusEl.innerHTML = '<span class="text-green-400">● 稼働中</span>';
   }
 
-  const usedTasks = (status.running_tasks || []).length;
-  cpuEl.textContent = `CPU: ${usedTasks} / ${status.cpu_threads || '?'} スロット`;
+  const tasks = status.running_tasks || [];
+  const usedTasks = tasks.length;
+  const cpuLoad = tasks.reduce((sum, t) => sum + (t.cpu_cost || 1.0), 0);
+  const loadStr = Number.isInteger(cpuLoad) ? cpuLoad : cpuLoad.toFixed(1);
+  cpuEl.textContent = `ワーカー: ${usedTasks} | CPU: ${loadStr} / ${status.cpu_threads || '?'}`;
 
   const cpuInput = document.getElementById('cpu-input');
   if (cpuInput && document.activeElement !== cpuInput && status.cpu_threads) {

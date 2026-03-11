@@ -1774,6 +1774,7 @@ def _write_runner_state(
             "year": t.year,
             "month": t.month,
             "symbol": t.job_dict.get("symbol", ""),
+            "cpu_cost": t.cpu_cost,
             "elapsed": round(elapsed, 1),
             "started_at": datetime.fromtimestamp(
                 rt.started_at,
