@@ -1092,16 +1092,20 @@ def _launch_month_subprocess(
         task_file,
     ]
 
+    # ログファイルにリダイレクト（パイプデッドロック防止）
+    log_path = result_dir / f"{task.year}_{task.month:02d}.log"
+    log_file = open(  # noqa: SIM115
+        log_path, "w", encoding="utf-8", errors="replace",
+    )
     proc = subprocess.Popen(
         cmd,
         cwd=code_dir,
-        stdout=subprocess.PIPE,
+        stdout=log_file,
         stderr=subprocess.STDOUT,
-        text=True,
-        encoding="utf-8",
-        errors="replace",
         env={**os.environ, "PYTHONUNBUFFERED": "1"},
     )
+    # log_file はプロセス終了後に閉じる
+    proc._log_file = log_file  # type: ignore[attr-defined]
     return proc
 
 
@@ -1831,6 +1835,12 @@ def main() -> None:
                                 rt.process.wait(timeout=10)
                             except subprocess.TimeoutExpired:
                                 rt.process.kill()
+                            _lf = getattr(
+                                rt.process, "_log_file", None,
+                            )
+                            if _lf:
+                                with contextlib.suppress(Exception):
+                                    _lf.close()
                         running_tasks.clear()
                         # 全リセット
                         state.completed_ids.clear()
@@ -1877,6 +1887,16 @@ def main() -> None:
                                     rt.process.wait(timeout=5)
                                 except subprocess.TimeoutExpired:
                                     rt.process.kill()
+                                _lf = getattr(
+                                    rt.process,
+                                    "_log_file",
+                                    None,
+                                )
+                                if _lf:
+                                    with contextlib.suppress(
+                                        Exception,
+                                    ):
+                                        _lf.close()
                                 logger.info(
                                     ">>> CPU超過: %s %d/%02d 停止",
                                     rt.task.job_id,
@@ -1935,6 +1955,14 @@ def main() -> None:
                                 rt.process.wait(timeout=10)
                             except subprocess.TimeoutExpired:
                                 rt.process.kill()
+                            _lf = getattr(
+                                rt.process, "_log_file", None,
+                            )
+                            if _lf:
+                                with contextlib.suppress(
+                                    Exception,
+                                ):
+                                    _lf.close()
                     logger.info(">>> ランナー終了")
                     return
 
@@ -1954,12 +1982,39 @@ def main() -> None:
             t = rt.task
             rid = t.result_id
 
+            # ログファイルを閉じる
+            _lf = getattr(rt.process, "_log_file", None)
+            if _lf:
+                with contextlib.suppress(Exception):
+                    _lf.close()
+
             # プロセス終了コード確認
             rc = rt.process.returncode
             if rc != 0:
+                # ログファイルからエラー内容を取得
+                _log_path = (
+                    MONTH_RESULTS_DIR / rid
+                    / f"{t.year}_{t.month:02d}.log"
+                )
+                _err_tail = ""
+                if _log_path.exists():
+                    try:
+                        lines = _log_path.read_text(
+                            encoding="utf-8",
+                            errors="replace",
+                        ).splitlines()
+                        _err_tail = "\n".join(
+                            lines[-10:]
+                        )
+                    except OSError:
+                        pass
                 logger.warning(
-                    "[%s] %d/%02d 失敗 (rc=%d)",
-                    rid, t.year, t.month, rc,
+                    "[%s] %d/%02d 失敗 (rc=%d)%s",
+                    rid,
+                    t.year,
+                    t.month,
+                    rc,
+                    f"\n{_err_tail}" if _err_tail else "",
                 )
                 # 失敗した月結果は保存されないので
                 # 次回再実行される
