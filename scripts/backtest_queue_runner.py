@@ -1110,6 +1110,55 @@ def _launch_month_subprocess(
     return proc
 
 
+def _load_month_only(
+    runner: Any,
+    year: int,
+    month: int,
+) -> dict[str, Any]:
+    """月データのみロード（メモリ効率版）
+
+    TFを1つずつ順次ロードし、即座に月フィルタして
+    年全体のDataFrameを解放する。
+    ピークメモリ: 1TF年分 + 全TF月分。
+
+    Args:
+        runner: BacktestRunner インスタンス
+        year: 対象年
+        month: 対象月
+
+    Returns:
+        月フィルタ済み market_data dict
+    """
+    from autotrader.backtest.month_runner import (
+        _filter_market_data_for_month,
+    )
+
+    _all_tfs = [
+        "M1", "M5", "M15", "M30",
+        "H1", "H4", "H8", "D1",
+    ]
+    month_data: dict[str, Any] = {}
+
+    for tf in _all_tfs:
+        # 1TFだけロード
+        year_data = runner._load_all_timeframes(
+            include_m1=True,
+            needed_years=[year],
+            timeframes_to_load=[tf],
+        )
+        if tf in year_data:
+            # 即座に月フィルタ
+            filtered = _filter_market_data_for_month(
+                {tf: year_data[tf]}, year, month,
+            )
+            if tf in filtered and not filtered[tf].empty:
+                month_data[tf] = filtered[tf]
+        # year_data はここでスコープ外 → GC対象
+        del year_data
+
+    return month_data
+
+
 def _execute_month_single(
     job_dict: dict[str, Any],
     year: int,
@@ -1126,9 +1175,6 @@ def _execute_month_single(
     )
     from autotrader.backtest.file_listener import (
         TradeRowCollector,
-    )
-    from autotrader.backtest.month_runner import (
-        _filter_market_data_for_month,
     )
     from autotrader.backtest.service import (
         BacktestService,
@@ -1219,15 +1265,10 @@ def _execute_month_single(
     service = BacktestService(svc_config)
     runner = service.create_runner()
 
-    # 全8TFをロード（load_data()は4TFのみなので不可）
-    market_data = runner._load_all_timeframes(
-        include_m1=True,
-        needed_years=[year],
-    )
-
-    month_data = _filter_market_data_for_month(
-        market_data, year, month,
-    )
+    # 月データのみロード（メモリ効率版）
+    # TFを1つずつロード→月フィルタ→年データ解放
+    # ピークメモリ: 1TF年分 + 全TF月分
+    month_data = _load_month_only(runner, year, month)
 
     # period_start / period_end
     period_start = datetime(year, month, 1)
@@ -1327,7 +1368,6 @@ def _execute_month_multi_pair(
         MultiPairConfig,
         PortfolioState,
         build_bot_config,
-        load_all_pair_data,
         run_multi_pair_year,
         setup_pair_context,
     )
@@ -1375,11 +1415,6 @@ def _execute_month_multi_pair(
 
     spread_mult = mpc.get("spread_multiplier", 1.0)
 
-    # データロード（年単位）
-    year_runners = load_all_pair_data(
-        symbols, data_dir, needed_years=[year],
-    )
-
     # 月ごとに独立PortfolioState
     portfolio = PortfolioState(
         equity=INITIAL_EQUITY,
@@ -1387,18 +1422,17 @@ def _execute_month_multi_pair(
         peak_equity=INITIAL_EQUITY,
     )
 
-    # ペアコンテキスト構築（月データのみ）
-    from autotrader.backtest.month_runner import (
-        _filter_market_data_for_month,
+    # ペアコンテキスト構築（月データのみ・メモリ効率版）
+    # ペアを1つずつロード→月フィルタ→年データ解放
+    from scripts.run_multi_pair_backtest import (
+        _create_runner,
     )
 
     contexts: dict[str, Any] = {}
     for sym in symbols:
-        runner, full_md = year_runners[sym]
-
-        # 月フィルタリング
-        month_md = _filter_market_data_for_month(
-            full_md, year, month,
+        _sym_runner = _create_runner(sym, data_dir)
+        month_md = _load_month_only(
+            _sym_runner, year, month,
         )
         # 月データが空なら skip
         _has_data = any(
@@ -1406,6 +1440,7 @@ def _execute_month_multi_pair(
         )
         if not _has_data:
             continue
+        runner = _sym_runner
 
         bot_config = build_bot_config(
             sym,
