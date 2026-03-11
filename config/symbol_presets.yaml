@@ -216,12 +216,13 @@ symbols:
     # USDJPY最適化結果 (2026-03-12, 2024-2025検証, P2+P3)
     # BCA 0.60維持, VF T3維持（デフォルト値）
     # P3: VF T3 +630K vs OFF, WR +3.4pp, PF +0.55, DD -0.30pp
+    # Tier 1: 高品質ペア (WR 76-78%, PF 2.4+)
     max_positions: 1              # マルチペア運用: per_pair=1 に統一
     bonus_max_positions: 0
     bonus_score_threshold: 7.0
-    base_risk_pct: 0.02
-    max_lot_per_trade: 2.0
-    max_total_exposure_lot: 5.0
+    base_risk_pct: 0.02           # Tier 1: 2.0%
+    max_lot_per_trade: 2.0        # Tier 1
+    max_total_exposure_lot: 4.0   # Tier 1: 統一
     equity_floor_pct: 0.30
     # VF: T3 (デフォルト値と同一のため明示不要)
 
@@ -233,11 +234,12 @@ symbols:
     default_tp_pips: 50.0
     # EURJPY最適化結果 (2026-03-12, 2024-2025検証, P2+P3)
     # BCA 0.70維持, VF T2 (1.0/0.5) — Profit最大+330K, Sharpe 5.33
+    # Tier 1: 高品質ペア (WR 76-78%, PF 2.4+)
     max_positions: 1              # マルチペア運用: per_pair=1 に統一
     bonus_score_threshold: 7.5
-    base_risk_pct: 0.02
-    max_lot_per_trade: 2.0
-    max_total_exposure_lot: 4.0
+    base_risk_pct: 0.02           # Tier 1: 2.0%
+    max_lot_per_trade: 2.0        # Tier 1
+    max_total_exposure_lot: 4.0   # Tier 1
     signal:
       bca_min_edge: 0.70
       volume_filter_enabled: true
@@ -252,12 +254,13 @@ symbols:
     default_tp_pips: 60.0
     # GBPJPY最適化結果 (2026-03-12, 2024-2025検証, P2+P3)
     # BCA 0.65→0.70 (DD -1.4pp), VF OFF（効果なし）
+    # Tier 2: 標準ペア (WR 73-75%, PF 2.0前後)
     max_positions: 1              # マルチペア運用: per_pair=1 に統一
     bonus_max_positions: 0
     bonus_score_threshold: 8.0
-    base_risk_pct: 0.015
-    max_lot_per_trade: 1.5
-    max_total_exposure_lot: 3.0
+    base_risk_pct: 0.015          # Tier 2: 1.5%
+    max_lot_per_trade: 1.5        # Tier 2
+    max_total_exposure_lot: 3.0   # Tier 2
     signal:
       bca_min_edge: 0.70  # P2結果: 0.70が最良 (DD -1.4pp vs 0.65)
       volume_filter_enabled: false  # P3結果: VF効果なし
@@ -270,11 +273,12 @@ symbols:
     default_tp_pips: 40.0
     # AUDJPY最適化結果 (2026-03-12, 2024-2025検証, P2+P3)
     # BCA 0.55→0.65 (PF +0.079), VF T2 (1.0/0.5) — Profit+80K, Sharpe最高
+    # Tier 2: 標準ペア — risk 0.012→0.015に引き上げ
     max_positions: 1              # マルチペア運用: per_pair=1 に統一
     bonus_score_threshold: 7.0
-    base_risk_pct: 0.012
-    max_lot_per_trade: 1.5
-    max_total_exposure_lot: 3.0
+    base_risk_pct: 0.015          # Tier 2: 1.5% (旧0.012)
+    max_lot_per_trade: 1.5        # Tier 2
+    max_total_exposure_lot: 3.0   # Tier 2
     signal:
       bca_min_edge: 0.65  # P2結果: 0.65が最良 (PF +0.079 vs 0.55)
       volume_filter_enabled: true
@@ -289,11 +293,12 @@ symbols:
     default_tp_pips: 40.0
     # CADJPY最適化結果 (2026-03-12, 2024-2025検証, P2+P3)
     # BCA 0.65→0.70 (Sharpe +0.73), VF T2 (1.0/0.5) — Profit+220K, DD -1.61pp
+    # Tier 2: 標準ペア — risk 0.012→0.015, lot 1.0→1.5に引き上げ
     max_positions: 1              # マルチペア運用: per_pair=1 に統一
     bonus_score_threshold: 7.0
-    base_risk_pct: 0.012
-    max_lot_per_trade: 1.0
-    max_total_exposure_lot: 2.0
+    base_risk_pct: 0.015          # Tier 2: 1.5% (旧0.012)
+    max_lot_per_trade: 1.5        # Tier 2 (旧1.0)
+    max_total_exposure_lot: 3.0   # Tier 2 (旧2.0)
     signal:
       bca_min_edge: 0.70  # P2結果: 0.70が最良 (Sharpe +0.73, WR +0.4pp vs 0.65)
       volume_filter_enabled: true
@@ -308,11 +313,12 @@ symbols:
     default_tp_pips: 50.0
     # CHFJPY最適化結果 (2026-03-12, 2024-2025検証, P2+P3)
     # BCA追加 0.70 (Sharpe +0.71), VF T3維持（DD -2.53pp）
+    # Tier 2: 標準ペア
     max_positions: 1              # マルチペア運用: per_pair=1 に統一
     bonus_score_threshold: 7.5
-    base_risk_pct: 0.015
-    max_lot_per_trade: 1.5
-    max_total_exposure_lot: 3.0
+    base_risk_pct: 0.015          # Tier 2: 1.5%
+    max_lot_per_trade: 1.5        # Tier 2
+    max_total_exposure_lot: 3.0   # Tier 2
     signal:
       bca_min_edge: 0.70  # P2結果: 0.70が最良 (Sharpe +0.71 vs 0.60)
       # VF: T3 (デフォルト値と同一のため明示不要)
