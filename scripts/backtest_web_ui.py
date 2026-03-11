@@ -66,13 +66,34 @@ def _read_json(path: Path) -> dict[str, Any]:
 
 
 def _list_result_files() -> list[dict[str, Any]]:
-    """完了済み結果ファイル一覧を読み取り"""
+    """完了済み結果ファイル一覧を読み取り（新旧両形式対応）"""
     if not _RESULTS_DIR.exists():
         return []
     results: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    # 新形式: サブディレクトリ内の result.json
+    for d in sorted(
+        _RESULTS_DIR.iterdir(), reverse=True,
+    ):
+        if d.is_dir():
+            rp = d / "result.json"
+            if not rp.exists():
+                continue
+            try:
+                data = json.loads(
+                    rp.read_text(encoding="utf-8"),
+                )
+                data["_file"] = f"{d.name}/result.json"
+                results.append(data)
+                seen.add(d.name)
+            except (json.JSONDecodeError, OSError):
+                continue
+    # 旧形式: フラットJSON（後方互換）
     for f in sorted(
         _RESULTS_DIR.glob("*.json"), reverse=True,
     ):
+        if f.stem in seen:
+            continue
         try:
             data = json.loads(
                 f.read_text(encoding="utf-8"),
@@ -123,24 +144,113 @@ async def api_results() -> JSONResponse:
     return JSONResponse(results)
 
 
+def _find_result_json(result_id: str) -> Path | None:
+    """新形式(dir/result.json)と旧形式(flat .json)を検索"""
+    # 完全一致: 新形式
+    new = _RESULTS_DIR / result_id / "result.json"
+    if new.exists():
+        return new
+    # 完全一致: 旧形式
+    old = _RESULTS_DIR / f"{result_id}.json"
+    if old.exists():
+        return old
+    # 部分一致: 新形式
+    for d in _RESULTS_DIR.iterdir():
+        if d.is_dir() and result_id in d.name:
+            rp = d / "result.json"
+            if rp.exists():
+                return rp
+    # 部分一致: 旧形式
+    for f in _RESULTS_DIR.glob("*.json"):
+        if result_id in f.stem:
+            return f
+    return None
+
+
 @app.get("/api/result/{result_id}")
 async def api_result_detail(
     result_id: str,
 ) -> JSONResponse:
     """特定ジョブの詳細結果"""
-    # result_idに対応するファイルを検索
-    for f in _RESULTS_DIR.glob("*.json"):
-        if result_id in f.stem:
-            try:
-                data = json.loads(
-                    f.read_text(encoding="utf-8"),
-                )
-                return JSONResponse(data)
-            except (json.JSONDecodeError, OSError):
-                pass
-    return JSONResponse(
-        {"error": "結果が見つかりません"},
-        status_code=404,
+    path = _find_result_json(result_id)
+    if path is None:
+        return JSONResponse(
+            {"error": "結果が見つかりません"},
+            status_code=404,
+        )
+    try:
+        data = json.loads(
+            path.read_text(encoding="utf-8"),
+        )
+        return JSONResponse(data)
+    except (json.JSONDecodeError, OSError):
+        return JSONResponse(
+            {"error": "結果の読み取りに失敗"},
+            status_code=500,
+        )
+
+
+@app.get("/api/result/{result_id}/trades")
+async def api_result_trades(
+    result_id: str,
+) -> Any:
+    """トレードCSVダウンロード"""
+    from fastapi.responses import FileResponse
+
+    csv_path = _RESULTS_DIR / result_id / "trades.csv"
+    if not csv_path.exists():
+        return JSONResponse(
+            {"error": "trades.csv が見つかりません"},
+            status_code=404,
+        )
+    return FileResponse(
+        csv_path,
+        media_type="text/csv",
+        filename=f"{result_id}_trades.csv",
+    )
+
+
+@app.get("/api/result/{result_id}/blocked")
+async def api_result_blocked(
+    result_id: str,
+) -> Any:
+    """ブロックシグナルCSVダウンロード"""
+    from fastapi.responses import FileResponse
+
+    csv_path = (
+        _RESULTS_DIR / result_id / "blocked_signals.csv"
+    )
+    if not csv_path.exists():
+        return JSONResponse(
+            {"error": "blocked_signals.csv が見つかりません"},
+            status_code=404,
+        )
+    return FileResponse(
+        csv_path,
+        media_type="text/csv",
+        filename=f"{result_id}_blocked_signals.csv",
+    )
+
+
+@app.get("/api/result/{result_id}/whatif")
+async def api_result_whatif(
+    result_id: str,
+) -> Any:
+    """What-IfトレードCSVダウンロード"""
+    from fastapi.responses import FileResponse
+
+    csv_path = (
+        _RESULTS_DIR / result_id / "whatif_trades.csv"
+    )
+    if not csv_path.exists():
+        return JSONResponse(
+            {"error": "whatif_trades.csv が見つかりません"},
+            status_code=404,
+        )
+    return FileResponse(
+        csv_path,
+        media_type="text/csv",
+        filename=f"{result_id}_whatif_trades.csv",
     )
 
 

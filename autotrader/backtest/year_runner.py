@@ -42,6 +42,7 @@ def run_unified_year(
     emitter: "BacktestEventEmitter | None" = None,
     row_progress_callback: ("Callable[[int, int], None] | None") = None,
     adaptive_config: "TunerConfig | None" = None,
+    whatif_tracker: Any = None,
 ) -> dict[str, Any] | None:
     """統合ボットで1年分のバックテスト実行（self-contained）
 
@@ -62,6 +63,7 @@ def run_unified_year(
         row_progress_callback: 行レベル進捗コールバック
             (completed_rows, total_rows) → None。
             並列実行時にUIへリアルタイム進捗を通知する。
+        whatif_tracker: WhatIfTracker（ブロックシグナル仮想追跡）
 
     Returns:
         年別結果（monthly_results フィールドを含む）
@@ -204,6 +206,15 @@ def run_unified_year(
             open_sell_count=sell_count,
         )
 
+        # What-If: 毎足更新（SL/TP判定）
+        if whatif_tracker is not None:
+            whatif_tracker.update(
+                high=candle["high"],
+                low=candle["low"],
+                close=candle["close"],
+                candle_time=candle_time,
+            )
+
         # Layer 5: エクイティ記録
         py_time = candle_time
         bot.risk_manager.record_equity(
@@ -328,6 +339,30 @@ def run_unified_year(
                         consolidated.mode or ""
                     ),
                 )
+                # What-If: ブロックシグナルを仮想追跡
+                if (
+                    whatif_tracker is not None
+                    and consolidated.sl_pips
+                    and consolidated.tp_pips
+                ):
+                    whatif_tracker.add_signal(
+                        signal_time=candle_time,
+                        symbol=runner.config.symbol,
+                        direction=_dir,
+                        entry_price=candle["close"],
+                        sl_pips=consolidated.sl_pips,
+                        tp_pips=consolidated.tp_pips,
+                        consensus_score=_cs,
+                        block_reason=(
+                            consolidated.rationale or ""
+                        ),
+                        regime=(
+                            consolidated.regime or ""
+                        ),
+                        mode=(
+                            consolidated.mode or ""
+                        ),
+                    )
 
         # Signalオブジェクトに変換
         signal = None
@@ -718,6 +753,13 @@ def run_unified_year(
     # 強制決済
     if last_candle:
         simulator.force_close_all(last_candle, ExitReason.FORCE_CLOSE)
+
+    # What-If: 残りの仮想ポジションを強制決済
+    if whatif_tracker is not None and last_candle:
+        whatif_tracker.force_close_all(
+            close=last_candle["close"],
+            candle_time=arrays.get_time(arrays.n_rows - 1),
+        )
 
     # 最終月の結果
     if current_month:
