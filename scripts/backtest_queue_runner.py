@@ -24,12 +24,14 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import csv
 import hashlib
 import io
 import json
 import logging
 import os
 import queue
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -372,6 +374,30 @@ def cleanup_stale_running(state: QueueState) -> None:
     if not RESULTS_DIR.exists():
         return
     cleaned = 0
+    # 新形式: サブディレクトリ内の result.json
+    for d in RESULTS_DIR.iterdir():
+        if d.is_dir():
+            rp = d / "result.json"
+            if not rp.exists():
+                continue
+            try:
+                data = json.loads(
+                    rp.read_text(encoding="utf-8"),
+                )
+                status = data.get("status", "")
+                job_id = data.get("job_id", "")
+                if status == "running":
+                    shutil.rmtree(d, ignore_errors=True)
+                    if job_id in state.completed_ids:
+                        state.completed_ids.remove(job_id)
+                    cleaned += 1
+                    logger.info(
+                        "クリーンアップ: %s/ (中断済み)",
+                        d.name,
+                    )
+            except (json.JSONDecodeError, KeyError, OSError):
+                continue
+    # 旧形式: フラットJSON（後方互換）
     for path in RESULTS_DIR.glob("*.json"):
         try:
             data = json.loads(
@@ -482,9 +508,13 @@ def parse_years(years_str: str) -> tuple[int, int]:
 
 
 def _save_result(result: JobResult) -> None:
-    """結果をファイルに保存"""
-    RESULTS_DIR.mkdir(parents=True, exist_ok=True)
-    path = RESULTS_DIR / f"{result.job_id}.json"
+    """結果をディレクトリに保存
+
+    新形式: RESULTS_DIR/{job_id}/result.json
+    """
+    result_dir = RESULTS_DIR / result.job_id
+    result_dir.mkdir(parents=True, exist_ok=True)
+    path = result_dir / "result.json"
     path.write_text(
         json.dumps(
             asdict(result),
@@ -494,6 +524,48 @@ def _save_result(result: JobResult) -> None:
         ),
         encoding="utf-8",
     )
+
+
+def _find_result_path(result_id: str) -> Path | None:
+    """新形式(dir/result.json)と旧形式(flat .json)の両方を検索
+
+    Args:
+        result_id: 結果ID
+
+    Returns:
+        結果JSONのパス（見つからない場合はNone）
+    """
+    new = RESULTS_DIR / result_id / "result.json"
+    if new.exists():
+        return new
+    old = RESULTS_DIR / f"{result_id}.json"
+    if old.exists():
+        return old
+    return None
+
+
+def _write_csv(
+    path: Path,
+    columns: list[str],
+    rows: list[dict],
+) -> None:
+    """CSV書き出しヘルパー
+
+    Args:
+        path: 出力先パス
+        columns: カラムリスト
+        rows: 行データ（辞書リスト）
+    """
+    if not rows:
+        return
+    with open(
+        path, "w", newline="", encoding="utf-8",
+    ) as f:
+        writer = csv.DictWriter(
+            f, fieldnames=columns, extrasaction="ignore",
+        )
+        writer.writeheader()
+        writer.writerows(rows)
 
 
 # ===================================================================
@@ -941,6 +1013,68 @@ def _aggregate_job_single(
             "sharpe": yr_data.get("sharpe", 0.0),
         })
 
+    # 全月のトレード行・ブロック行を収集してCSV出力
+    all_trade_rows: list[dict] = []
+    all_blocked_rows: list[dict] = []
+    for yr in range(start_year, end_year + 1):
+        for mr in _load_month_results(result_id, yr):
+            all_trade_rows.extend(
+                mr.get("trade_rows", []),
+            )
+            all_blocked_rows.extend(
+                mr.get("blocked_rows", []),
+            )
+
+    # 時系列ソート
+    all_trade_rows.sort(
+        key=lambda r: r.get("entry_time", ""),
+    )
+    all_blocked_rows.sort(
+        key=lambda r: r.get("timestamp", ""),
+    )
+
+    # What-If行の収集
+    all_whatif_rows: list[dict] = []
+    for yr in range(start_year, end_year + 1):
+        for mr in _load_month_results(result_id, yr):
+            all_whatif_rows.extend(
+                mr.get("whatif_rows", []),
+            )
+    all_whatif_rows.sort(
+        key=lambda r: r.get("signal_time", ""),
+    )
+
+    # CSV書き出し
+    from autotrader.backtest.file_listener import (
+        BLOCKED_CSV_COLUMNS,
+        CSV_COLUMNS,
+    )
+    from autotrader.backtest.whatif_tracker import (
+        WHATIF_CSV_COLUMNS,
+    )
+
+    result_dir = RESULTS_DIR / result_id
+    result_dir.mkdir(parents=True, exist_ok=True)
+    _write_csv(
+        result_dir / "trades.csv",
+        CSV_COLUMNS, all_trade_rows,
+    )
+    _write_csv(
+        result_dir / "blocked_signals.csv",
+        BLOCKED_CSV_COLUMNS, all_blocked_rows,
+    )
+    _write_csv(
+        result_dir / "whatif_trades.csv",
+        WHATIF_CSV_COLUMNS, all_whatif_rows,
+    )
+    logger.info(
+        "CSV出力: trades=%d, blocked=%d, whatif=%d → %s/",
+        len(all_trade_rows),
+        len(all_blocked_rows),
+        len(all_whatif_rows),
+        result_id,
+    )
+
     result = JobResult(
         job_id=result_id,
         status="completed",
@@ -1381,6 +1515,14 @@ def _execute_month_single(
     _collector = TradeRowCollector()
     _emitter.add_listener(_collector)
 
+    # What-If トラッカー（有効時のみ）
+    whatif_tracker = None
+    if bt_ovr.get("whatif_enabled", False):
+        from autotrader.backtest.whatif_tracker import (
+            WhatIfTracker,
+        )
+        whatif_tracker = WhatIfTracker(pip_unit=pip_unit)
+
     # 月データをRunnerに設定
     runner._m1_df = month_data.get("M1")
     runner._m5_df = month_data.get("M5")
@@ -1418,6 +1560,7 @@ def _execute_month_single(
         period_start=period_start,
         period_end=period_end,
         emitter=_emitter,
+        whatif_tracker=whatif_tracker,
     )
 
     if result is None:
@@ -1446,8 +1589,15 @@ def _execute_month_single(
     result["total_win_amount"] = total_win_amount
     result["total_loss_amount"] = total_loss_amount
 
-    # _worker_*キーは月結果保存不要 → 除外
+    # トレード行・ブロック行を月結果に保持（CSV集約用）
+    result["trade_rows"] = _collector._trade_rows
+    result["blocked_rows"] = _collector._blocked_rows
+    # What-If行（有効時のみ）
+    if whatif_tracker is not None:
+        result["whatif_rows"] = whatif_tracker.get_closed_rows()
+    # 旧キーの除外（後方互換）
     result.pop("_worker_trade_rows", None)
+    result.pop("_worker_blocked_rows", None)
     result.pop("_worker_stats", None)
 
     # 結果保存
