@@ -1117,9 +1117,12 @@ def _load_month_only(
 ) -> dict[str, Any]:
     """月データのみロード（メモリ効率版）
 
-    TFを1つずつ順次ロードし、即座に月フィルタして
-    年全体のDataFrameを解放する。
-    ピークメモリ: 1TF年分 + 全TF月分。
+    インジケータキャッシュ（年別parquet）から直接読み込み、
+    月フィルタして返す。キャッシュがない場合のみ
+    チャートparquetから年フィルタ付きで読み込む。
+
+    _load_all_timeframes を使わないため、キャッシュミス時に
+    全15年分をロード+インジケータ計算するボトルネックを回避。
 
     Args:
         runner: BacktestRunner インスタンス
@@ -1129,34 +1132,143 @@ def _load_month_only(
     Returns:
         月フィルタ済み market_data dict
     """
-    from autotrader.backtest.month_runner import (
-        _filter_market_data_for_month,
-    )
+    import gc
+
+    _log = logging.getLogger("queue_runner")
+
+    month_start = datetime(year, month, 1)
+    if month == 12:
+        month_end = datetime(year + 1, 1, 1)
+    else:
+        month_end = datetime(year, month + 1, 1)
 
     _all_tfs = [
         "M1", "M5", "M15", "M30",
         "H1", "H4", "H8", "D1",
     ]
     month_data: dict[str, Any] = {}
+    symbol = runner.config.symbol
+    chart_cache_dir = runner.chart_dir / "cache"
 
     for tf in _all_tfs:
-        # 1TFだけロード
-        year_data = runner._load_all_timeframes(
-            include_m1=True,
-            needed_years=[year],
-            timeframes_to_load=[tf],
+        df = _load_tf_cached_year(
+            runner, tf, symbol, year,
+            chart_cache_dir, _log,
         )
-        if tf in year_data:
-            # 即座に月フィルタ
-            filtered = _filter_market_data_for_month(
-                {tf: year_data[tf]}, year, month,
-            )
-            if tf in filtered and not filtered[tf].empty:
-                month_data[tf] = filtered[tf]
-        # year_data はここでスコープ外 → GC対象
-        del year_data
+        if df is None:
+            continue
+
+        # 月フィルタ
+        mask = (
+            (df["time"] >= month_start)
+            & (df["time"] < month_end)
+        )
+        month_df = df[mask].reset_index(drop=True)
+        del df
+        gc.collect()
+
+        if not month_df.empty:
+            month_data[tf] = month_df
 
     return month_data
+
+
+def _load_tf_cached_year(
+    runner: Any,
+    tf: str,
+    symbol: str,
+    year: int,
+    chart_cache_dir: Path,
+    _log: Any,
+) -> Any:
+    """1TFの年データをインジケータキャッシュから読み込み
+
+    優先順位:
+    1. インジケータキャッシュ ({year}.parquet) ← 最速
+    2. チャートparquet → 年フィルタ → インジケータ計算
+
+    Returns:
+        インジケータ付き年DataFrame、またはNone
+    """
+    import pandas as pd
+
+    # --- インジケータキャッシュを探索 ---
+    _cache_root = runner.data_dir / ".indicator_cache"
+    if _cache_root.is_dir():
+        # キャッシュキー = TF_{mtime}_{size}
+        for cache_dir in _cache_root.iterdir():
+            if (
+                cache_dir.is_dir()
+                and cache_dir.name.startswith(f"{tf}_")
+            ):
+                year_pq = cache_dir / f"{year}.parquet"
+                if year_pq.exists():
+                    try:
+                        return pd.read_parquet(year_pq)
+                    except Exception as e:
+                        _log.warning(
+                            "[%s] キャッシュ読み込み失敗: %s",
+                            tf, e,
+                        )
+
+    # --- キャッシュなし: チャートparquetから年フィルタ ---
+    _log.info(
+        "[%s] キャッシュなし → チャートparquetから"
+        " %d年分のみ読み込み",
+        tf, year,
+    )
+    chart_pq = chart_cache_dir / f"{symbol}_{tf}.parquet"
+    if not chart_pq.exists():
+        # CSVフォールバック
+        csv_dir = runner.chart_dir / "csv"
+        csv_files = sorted(
+            csv_dir.glob(f"{symbol}_{tf}_*.csv"),
+        ) if csv_dir.exists() else []
+        if not csv_files:
+            return None
+        from autotrader.backtest.data_loader import (
+            DataLoader,
+        )
+        loader = DataLoader(runner.chart_dir)
+        df = loader.load_csv(csv_files[0])
+    else:
+        # pyarrow filters で年フィルタ（全15年分を避ける）
+        try:
+            import pyarrow.parquet as pq
+
+            year_start = pd.Timestamp(year, 1, 1)
+            year_end = pd.Timestamp(year + 1, 1, 1)
+            table = pq.read_table(
+                chart_pq,
+                filters=[
+                    ("time", ">=", year_start),
+                    ("time", "<", year_end),
+                ],
+            )
+            df = table.to_pandas()
+            del table
+        except Exception:
+            # フィルタ失敗時は全読み→年フィルタ
+            df = pd.read_parquet(chart_pq)
+
+    if df is None or df.empty:
+        return None
+
+    # 年フィルタ（CSV読み込み時 or pyarrowフィルタ未対応時）
+    if "time" in df.columns:
+        year_start_dt = datetime(year, 1, 1)
+        year_end_dt = datetime(year + 1, 1, 1)
+        df = df[
+            (df["time"] >= year_start_dt)
+            & (df["time"] < year_end_dt)
+        ].reset_index(drop=True)
+
+    if df.empty:
+        return None
+
+    # インジケータ計算（1年分のみ → 高速）
+    df = runner._calculate_indicators(df)
+    return df
 
 
 def _execute_month_single(
