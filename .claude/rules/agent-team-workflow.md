@@ -5,6 +5,28 @@
 - main ブランチへの直接コミットは禁止
 - コード変更は `isolation: "worktree"` 付きエージェント経由で行う
 - 変更は PR ベースでマージする（リポジトリ: `KaePen/AutoTraderV4`）
+- `live` ブランチへの直接コミット・プッシュは禁止（PRのみ）
+- `live` ブランチへのマージは `/deploy-live` スキル経由のみ
+
+## ブランチ戦略
+
+```
+worktree ブランチ (feat/xxx, fix/xxx)
+  ↓ PR → main にマージ（pr_watcher.py が自動処理）
+main ブランチ（開発・検証・バックテスト）
+  ↓ /deploy-live → live にマージ（検証済みのみ）
+live ブランチ（本番リアルトレード専用）
+```
+
+| ブランチ | 用途 | 直接コミット | PR元 |
+|---------|------|------------|------|
+| worktree | エージェント作業用 | ○ | → main |
+| main | 開発・検証のベース | ✕ | ← worktree |
+| live | リアルトレード本番 | ✕ | ← main のみ |
+
+- **main**: 全PRのマージ先。バックテスト検証環境
+- **live**: 本番トレード環境。mainで検証済みの変更のみ `/deploy-live` 経由でマージ
+- **worktree**: `isolation: "worktree"` で作成される一時ブランチ
 
 ## エージェント分類
 
@@ -68,6 +90,8 @@ Agent(
 - `git commit --amend` による公開済みコミットの書き換え
 - `--no-verify` によるフックスキップ
 - `git push --force` を main/master に実行
+- `live` ブランチへの直接コミット・プッシュ
+- `live` ブランチへの worktree からの直接マージ（必ず main 経由）
 - worktree 内からの `EnterWorktree` 実行（ネストworktree作成の禁止）
 - worktree 内で `isolation: "worktree"` 付きサブエージェント起動の禁止
 
