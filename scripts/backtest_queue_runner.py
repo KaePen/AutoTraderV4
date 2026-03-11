@@ -580,10 +580,21 @@ def _is_job_complete(
     job: Job,
     result_id: str,
 ) -> bool:
-    """ジョブの全月が完了しているか"""
+    """ジョブの全月完了 かつ 全年集約ファイル存在を確認
+
+    月完了と年集約ファイル書出しにタイムラグがあるため、
+    年集約ファイルの存在も確認して集約の早期実行を防ぐ。
+    """
     start_year, end_year = parse_years(job.years)
     for yr in range(start_year, end_year + 1):
         if not _is_year_complete(result_id, yr):
+            return False
+        # 年集約ファイルも存在するか確認
+        year_path = (
+            MONTH_RESULTS_DIR / result_id
+            / f"year_{yr}.json"
+        )
+        if not year_path.exists():
             return False
     return True
 
