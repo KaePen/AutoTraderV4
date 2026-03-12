@@ -258,6 +258,9 @@ class FilterConfig:
     off_hours_high_align_threshold: float = 0.55
     high_align_penalty_threshold: float | None = None
     high_align_penalty_score: float = 1.0
+    # TREND方向整合フィルター
+    trend_direction_filter_enabled: bool = False
+    trend_direction_min_alignment: float = 0.1
     # ボリュームフィルタ
     volume_filter_enabled: bool = True
     volume_filter_threshold: float = 1.5
@@ -433,6 +436,10 @@ class UnifiedBotConfig:
     high_align_penalty_threshold: float | None = None
     # 高alignment時のスコアペナルティ量
     high_align_penalty_score: float = 1.0
+    # TREND方向整合フィルター（BUY時HTF弱気/SELL時HTF強気をブロック）
+    trend_direction_filter_enabled: bool = False
+    # HTF alignment最小値（BUY: align>=min, SELL: align<=-min）
+    trend_direction_min_alignment: float = 0.1
     # ADXエントリー上限（None=無効, 例: 35.0で追いかけ防止）
     adx_upper_limit: float | None = None
     # TREND時整合TF上限（None=無効, 例: 6でTF過多ブロック）
