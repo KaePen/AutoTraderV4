@@ -213,9 +213,9 @@ symbols:
     slippage_pips: 0.5
     default_sl_pips: 20.0
     default_tp_pips: 40.0
-    # USDJPY最適化結果 (2026-03-12, P2+P3+WI)
-    # WI: TSM 0.85 -> +1,353K (+9.2%), WR +0.3pp
-    # Tier 1 (WR 77%, PF 2.4)
+    # USDJPY最適化結果 (2026-03-13, RL-T Round 5)
+    # CS11+RTT2.0: WR 78.49%, 2,371 trades, PF 3.10, DD 6.10%
+    # Tier 1 (WR 78%, PF 3.1)
     max_positions: 1
     bonus_max_positions: 0
     bonus_score_threshold: 7.0
@@ -225,6 +225,9 @@ symbols:
     equity_floor_pct: 0.30
     signal:
       trend_strength_max: 0.85    # WI: +1,353K, WR +0.3pp vs 0.7
+      multi_consensus_threshold: 11.0  # RL-T: CS11+RTT2.0 balanced
+    filter:
+      regime_trend_threshold_add: 2.0  # RL-T: TREND DD圧縮
 
   EURJPY:
     pip_value: 100.0
@@ -232,9 +235,9 @@ symbols:
     slippage_pips: 0.7
     default_sl_pips: 25.0
     default_tp_pips: 50.0
-    # EURJPY最適化結果 (2026-03-12, P2+P3+WI)
-    # WI: PCAP 0.5 -> +764K (+4.5%), PF -0.04
-    # Tier 1 (WR 75%, PF 2.1)
+    # EURJPY最適化結果 (2026-03-13, RL-T Round 5)
+    # CS11+RTT2.0: WR 75.43%, 3,451 trades, PF 2.48, DD 4.68%
+    # Tier 1 (WR 75%, PF 2.5)
     max_positions: 1              # マルチペア運用: per_pair=1 に統一
     bonus_score_threshold: 7.5
     base_risk_pct: 0.02           # Tier 1: 2.0%
@@ -246,6 +249,9 @@ symbols:
       volume_filter_threshold: 1.0   # T2: Profit+330K, DD -0.31pp vs OFF
       volume_filter_penalty: 0.5
       penalty_cap: 0.5              # WI: +764K, WR -1.1pp, PF -0.04
+      multi_consensus_threshold: 11.0  # RL-T: CS11+RTT2.0
+    filter:
+      regime_trend_threshold_add: 2.0  # RL-T: TREND DD圧縮
 
   GBPJPY:
     pip_value: 100.0
@@ -253,9 +259,9 @@ symbols:
     slippage_pips: 1.0
     default_sl_pips: 30.0
     default_tp_pips: 60.0
-    # GBPJPY最適化結果 (2026-03-12, 2024-2025検証, P2+P3)
-    # BCA 0.65→0.70 (DD -1.4pp), VF OFF（効果なし）
-    # Tier 2: 標準ペア (WR 73-75%, PF 2.0前後)
+    # GBPJPY最適化結果 (2026-03-13, RL-T Round 5)
+    # CS12+M1MR+RTT2.0: WR 75.02%, 3,274 trades, PF 2.31, DD 3.83%
+    # Tier 2 (WR 75%, PF 2.3)
     max_positions: 1              # マルチペア運用: per_pair=1 に統一
     bonus_max_positions: 0
     bonus_score_threshold: 8.0
@@ -267,6 +273,10 @@ symbols:
       volume_filter_enabled: false  # P3結果: VF効果なし
       penalty_cap: 0.5              # IM-T9/T15: +6.0%(6Y), WR -0.9pp, DD 5.52%
       trend_strength_max: 0.85       # IM-T30: +9.9%(6Y), DD 5.27%
+      m1_micro_reversal_enabled: true  # RL-T20: +450K, WR +0.36pp, DD -0.30pp
+      multi_consensus_threshold: 12.0  # RL-T: CS12+M1MR+RTT2.0
+    filter:
+      regime_trend_threshold_add: 2.0  # RL-T: TREND DD圧縮
 
   AUDJPY:
     pip_value: 100.0
@@ -274,9 +284,9 @@ symbols:
     slippage_pips: 0.7
     default_sl_pips: 20.0
     default_tp_pips: 40.0
-    # AUDJPY最適化結果 (2026-03-12, P2+P3+WI)
-    # WI: PCAP 0.5 -> +2,054K (+22.3%), PF +0.03
-    # Tier 2
+    # AUDJPY最適化結果 (2026-03-13, RL-T Round 5)
+    # CS12+RTT2.0: WR 72.95%, 2,532 trades, PF 2.20, DD 4.30%
+    # Tier 2 (WR 73%, PF 2.2)
     max_positions: 1              # マルチペア運用: per_pair=1 に統一
     bonus_score_threshold: 7.0
     base_risk_pct: 0.015          # Tier 2: 1.5% (旧0.012)
@@ -289,6 +299,9 @@ symbols:
       volume_filter_penalty: 0.5
       penalty_cap: 0.5              # WI: +2,054K, WR -0.2pp, PF +0.03
       trend_strength_max: 0.85       # IM-T32: +4.6%(6Y), DD 4.20%
+      multi_consensus_threshold: 12.0  # RL-T: CS12+RTT2.0
+    filter:
+      regime_trend_threshold_add: 2.0  # RL-T: TREND DD圧縮
 
   CADJPY:
     pip_value: 100.0
@@ -296,9 +309,9 @@ symbols:
     slippage_pips: 0.7
     default_sl_pips: 20.0
     default_tp_pips: 40.0
-    # CADJPY最適化結果 (2026-03-12, 2024-2025検証, P2+P3)
-    # BCA 0.65→0.70 (Sharpe +0.73), VF T2 (1.0/0.5) — Profit+220K, DD -1.61pp
-    # Tier 2: 標準ペア — risk 0.012→0.015, lot 1.0→1.5に引き上げ
+    # CADJPY最適化結果 (2026-03-13, RL-T Round 5)
+    # CS12+RTT2.0: WR 73.14%, 2,156 trades, PF 2.36, DD 4.29%
+    # Tier 2 (WR 73%, PF 2.4)
     max_positions: 1              # マルチペア運用: per_pair=1 に統一
     bonus_score_threshold: 7.0
     base_risk_pct: 0.015          # Tier 2: 1.5% (旧0.012)
@@ -310,6 +323,9 @@ symbols:
       volume_filter_threshold: 1.0   # T2: Profit+220K, DD -1.61pp vs OFF
       volume_filter_penalty: 0.5
       trend_strength_max: 0.85       # IM-T24: +8.5%(6Y), DD 4.60%
+      multi_consensus_threshold: 12.0  # RL-T: CS12+RTT2.0
+    filter:
+      regime_trend_threshold_add: 2.0  # RL-T: TREND DD圧縮
 
   CHFJPY:
     pip_value: 100.0
@@ -317,9 +333,9 @@ symbols:
     slippage_pips: 0.7
     default_sl_pips: 25.0
     default_tp_pips: 50.0
-    # CHFJPY最適化結果 (2026-03-12, P2+P3+WI)
-    # WI: PCAP 0.5 -> +2,918K (+34.6%), PF +0.05
-    # Tier 2
+    # CHFJPY最適化結果 (2026-03-13, RL-T Round 5)
+    # CS11+RTT2.0: WR 74.01%, 3,043 trades, PF 2.17, DD 4.73%
+    # Tier 2 (WR 74%, PF 2.2)
     max_positions: 1              # マルチペア運用: per_pair=1 に統一
     bonus_score_threshold: 7.5
     base_risk_pct: 0.015          # Tier 2: 1.5%
@@ -329,6 +345,9 @@ symbols:
       bca_min_edge: 0.70  # P2結果: 0.70が最良 (Sharpe +0.71 vs 0.60)
       penalty_cap: 0.5              # WI: +2,918K, WR +0.2pp, PF +0.05
       trend_strength_max: 0.85       # IM-T31: +4.0%(6Y), DD 5.30%
+      multi_consensus_threshold: 11.0  # RL-T: CS11+RTT2.0
+    filter:
+      regime_trend_threshold_add: 2.0  # RL-T: TREND DD圧縮
 
 # --- マルチ通貨ペア ポートフォリオ設定 ---
 # ポートフォリオ制約のみ（base_risk_pct/consensus_threshold は個別プリセットの責務）

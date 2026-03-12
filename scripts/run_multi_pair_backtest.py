@@ -79,7 +79,10 @@ def load_signal_overrides(
     preset_path: Path | None = None,
     multi_mode: bool = False,
 ) -> dict[str, Any]:
-    """symbol_presets.yaml からsignal設定を読み込み
+    """symbol_presets.yaml からsignal/filter/risk_mgmt設定を読み込み
+
+    signal, filter, risk_mgmt の3セクションをマージして返す。
+    単独BT queue runner と同等の設定解決を行う。
 
     Args:
         symbol: 通貨ペアシンボル
@@ -88,18 +91,33 @@ def load_signal_overrides(
             multi_consensus_threshold を consensus_threshold
             として返す。
     """
-    path = preset_path or (_PROJECT_ROOT / "config" / "symbol_presets.yaml")
+    path = preset_path or (
+        _PROJECT_ROOT / "config" / "symbol_presets.yaml"
+    )
     if not path.exists():
         return {}
     with open(path, encoding="utf-8") as f:
         raw: dict[str, Any] = yaml.safe_load(f) or {}
+    # トップレベルデフォルト
     defaults = dict(raw.get("signal", {}))
+    filter_defaults = dict(raw.get("filter", {}))
+    risk_defaults = dict(raw.get("risk_mgmt", {}))
+    # 通貨ペア別上書き
     symbols = raw.get("symbols", {})
     sym_data = symbols.get(symbol, {})
     if isinstance(sym_data, dict):
         sym_signal = sym_data.get("signal", {})
         if sym_signal:
             defaults.update(sym_signal)
+        sym_filter = sym_data.get("filter", {})
+        if sym_filter:
+            filter_defaults.update(sym_filter)
+        sym_risk = sym_data.get("risk_mgmt", {})
+        if sym_risk:
+            risk_defaults.update(sym_risk)
+    # filter/risk_mgmt をマージ
+    defaults.update(filter_defaults)
+    defaults.update(risk_defaults)
     # multi_mode: multi_consensus_threshold → consensus_threshold
     if multi_mode:
         mct = defaults.pop(
