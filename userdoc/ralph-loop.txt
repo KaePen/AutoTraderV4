@@ -13,3 +13,10 @@
 
 すべての基準を満たした場合、TASK_COMPLETEという文字列を正確に出力します。
 " --completion-promise "TASK_COMPLETE" --max-iterations 30
+
+/ralph-loop:ralph-loop "
+目標に向かって検証と改善を続けてください。            
+BTマネージャーの再起動が必要であれば教えてください。
+
+すべての基準を満たした場合、TASK_COMPLETEという文字列を正確に出力します。
+" --completion-promise "TASK_COMPLETE" --max-iterations 30
