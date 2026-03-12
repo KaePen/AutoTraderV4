@@ -265,6 +265,7 @@ symbols:
     signal:
       bca_min_edge: 0.70  # P2結果: 0.70が最良 (DD -1.4pp vs 0.65)
       volume_filter_enabled: false  # P3結果: VF効果なし
+      penalty_cap: 0.5              # IM-T9/T15: +6.0%(6Y), WR -0.9pp, DD 5.52%
 
   AUDJPY:
     pip_value: 100.0
