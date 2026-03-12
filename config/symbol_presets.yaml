@@ -213,18 +213,18 @@ symbols:
     slippage_pips: 0.5
     default_sl_pips: 20.0
     default_tp_pips: 40.0
-    # USDJPY最適化結果 (2026-03-12, 2024-2025検証, P2+P3)
-    # BCA 0.60維持, VF T3維持（デフォルト値）
-    # P3: VF T3 +630K vs OFF, WR +3.4pp, PF +0.55, DD -0.30pp
-    # Tier 1: 高品質ペア (WR 76-78%, PF 2.4+)
-    max_positions: 1              # マルチペア運用: per_pair=1 に統一
+    # USDJPY最適化結果 (2026-03-12, P2+P3+WI)
+    # WI: TSM 0.85 -> +1,353K (+9.2%), WR +0.3pp
+    # Tier 1 (WR 77%, PF 2.4)
+    max_positions: 1
     bonus_max_positions: 0
     bonus_score_threshold: 7.0
-    base_risk_pct: 0.02           # Tier 1: 2.0%
-    max_lot_per_trade: 2.0        # Tier 1
-    max_total_exposure_lot: 4.0   # Tier 1: 統一
+    base_risk_pct: 0.02
+    max_lot_per_trade: 2.0
+    max_total_exposure_lot: 4.0
     equity_floor_pct: 0.30
-    # VF: T3 (デフォルト値と同一のため明示不要)
+    signal:
+      trend_strength_max: 0.85    # WI: +1,353K, WR +0.3pp vs 0.7
 
   EURJPY:
     pip_value: 100.0
@@ -232,9 +232,9 @@ symbols:
     slippage_pips: 0.7
     default_sl_pips: 25.0
     default_tp_pips: 50.0
-    # EURJPY最適化結果 (2026-03-12, 2024-2025検証, P2+P3)
-    # BCA 0.70維持, VF T2 (1.0/0.5) — Profit最大+330K, Sharpe 5.33
-    # Tier 1: 高品質ペア (WR 76-78%, PF 2.4+)
+    # EURJPY最適化結果 (2026-03-12, P2+P3+WI)
+    # WI: PCAP 0.5 -> +764K (+4.5%), PF -0.04
+    # Tier 1 (WR 75%, PF 2.1)
     max_positions: 1              # マルチペア運用: per_pair=1 に統一
     bonus_score_threshold: 7.5
     base_risk_pct: 0.02           # Tier 1: 2.0%
@@ -245,6 +245,7 @@ symbols:
       volume_filter_enabled: true
       volume_filter_threshold: 1.0   # T2: Profit+330K, DD -0.31pp vs OFF
       volume_filter_penalty: 0.5
+      penalty_cap: 0.5              # WI: +764K, WR -1.1pp, PF -0.04
 
   GBPJPY:
     pip_value: 100.0
@@ -271,9 +272,9 @@ symbols:
     slippage_pips: 0.7
     default_sl_pips: 20.0
     default_tp_pips: 40.0
-    # AUDJPY最適化結果 (2026-03-12, 2024-2025検証, P2+P3)
-    # BCA 0.55→0.65 (PF +0.079), VF T2 (1.0/0.5) — Profit+80K, Sharpe最高
-    # Tier 2: 標準ペア — risk 0.012→0.015に引き上げ
+    # AUDJPY最適化結果 (2026-03-12, P2+P3+WI)
+    # WI: PCAP 0.5 -> +2,054K (+22.3%), PF +0.03
+    # Tier 2
     max_positions: 1              # マルチペア運用: per_pair=1 に統一
     bonus_score_threshold: 7.0
     base_risk_pct: 0.015          # Tier 2: 1.5% (旧0.012)
@@ -284,6 +285,7 @@ symbols:
       volume_filter_enabled: true
       volume_filter_threshold: 1.0   # T2: Profit+80K, Sharpe +0.18 vs OFF
       volume_filter_penalty: 0.5
+      penalty_cap: 0.5              # WI: +2,054K, WR -0.2pp, PF +0.03
 
   CADJPY:
     pip_value: 100.0
@@ -311,9 +313,9 @@ symbols:
     slippage_pips: 0.7
     default_sl_pips: 25.0
     default_tp_pips: 50.0
-    # CHFJPY最適化結果 (2026-03-12, 2024-2025検証, P2+P3)
-    # BCA追加 0.70 (Sharpe +0.71), VF T3維持（DD -2.53pp）
-    # Tier 2: 標準ペア
+    # CHFJPY最適化結果 (2026-03-12, P2+P3+WI)
+    # WI: PCAP 0.5 -> +2,918K (+34.6%), PF +0.05
+    # Tier 2
     max_positions: 1              # マルチペア運用: per_pair=1 に統一
     bonus_score_threshold: 7.5
     base_risk_pct: 0.015          # Tier 2: 1.5%
@@ -321,7 +323,7 @@ symbols:
     max_total_exposure_lot: 3.0   # Tier 2
     signal:
       bca_min_edge: 0.70  # P2結果: 0.70が最良 (Sharpe +0.71 vs 0.60)
-      # VF: T3 (デフォルト値と同一のため明示不要)
+      penalty_cap: 0.5              # WI: +2,918K, WR +0.2pp, PF +0.05
 
 # --- マルチ通貨ペア ポートフォリオ設定 ---
 # ポートフォリオ制約のみ（base_risk_pct/consensus_threshold は個別プリセットの責務）
