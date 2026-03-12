@@ -318,6 +318,9 @@ class PositionManagerConfig:
     early_profit_guard_min_opp_score: float = 4.0
     # 最低保有時間（分、エントリーノイズ排除）
     early_profit_guard_min_hold_minutes: float = 5.0
+    # 最大保有時間の上書き（分）— 全TF共通で適用
+    # None=TFベースのデフォルト値を使用
+    max_holding_minutes_override: float | None = None
     # 指標前ポジション管理
     pre_event_exit_enabled: bool = False
     pre_event_minutes: float = 30.0
@@ -1010,8 +1013,13 @@ class PositionManager:
             getattr(position.plan, "dynamic_entry_tf", None)
             or position.plan.entry_tf
         )
-        max_minutes = get_holding_minutes(entry_tf)
-        elapsed = (current_time - position.entry_time).total_seconds() / 60
+        if self.config.max_holding_minutes_override is not None:
+            max_minutes = self.config.max_holding_minutes_override
+        else:
+            max_minutes = get_holding_minutes(entry_tf)
+        elapsed = (
+            current_time - position.entry_time
+        ).total_seconds() / 60
 
         if elapsed >= max_minutes:
             return ManagementAction.full_close(
