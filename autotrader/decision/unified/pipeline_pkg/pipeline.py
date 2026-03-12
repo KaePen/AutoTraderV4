@@ -972,6 +972,46 @@ class FilterStep:
                 )
                 return ctx
 
+        # TREND方向整合フィルター
+        # TREND regime でシグナル方向とHTF alignmentが
+        # 矛盾する場合にブロック
+        if (
+            bot.config.trend_direction_filter_enabled
+            and regime_result is not None
+            and regime_result.regime
+            == MarketRegime.TREND
+            and consensus.direction
+            != SignalType.HOLD
+        ):
+            _min_align = (
+                bot.config
+                .trend_direction_min_alignment
+            )
+            # BUY: HTFが弱気（alignment < min）→ブロック
+            # SELL: HTFが強気（alignment > -min）→ブロック
+            _dir_mismatch = False
+            if (
+                consensus.direction == SignalType.BUY
+                and htf_alignment < _min_align
+            ):
+                _dir_mismatch = True
+            elif (
+                consensus.direction == SignalType.SELL
+                and htf_alignment > -_min_align
+            ):
+                _dir_mismatch = True
+
+            if _dir_mismatch:
+                ctx.should_abort = True
+                ctx.abort_signal = _filt_hold(
+                    f"TREND方向不整合: "
+                    f"dir={consensus.direction.name}"
+                    f", htf_align="
+                    f"{htf_alignment:.3f}"
+                    f", min={_min_align}"
+                )
+                return ctx
+
         # 高alignment時スコアペナルティ
         if (
             bot.config.high_align_penalty_threshold
