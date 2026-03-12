@@ -940,6 +940,7 @@ class PositionManager:
                         )
                         # 現在SLより有利な場合のみ更新
                         if _new_sl > position.current_sl:
+                            position.current_sl = _new_sl
                             return ManagementAction.update_sl(
                                 new_sl=_new_sl,
                                 reason=(
@@ -957,6 +958,7 @@ class PositionManager:
                         )
                         # 現在SLより有利な場合のみ更新
                         if _new_sl < position.current_sl:
+                            position.current_sl = _new_sl
                             return ManagementAction.update_sl(
                                 new_sl=_new_sl,
                                 reason=(
@@ -1283,6 +1285,7 @@ class PositionManager:
                     + tighten_r * r_value
                 )
                 if new_sl > position.current_sl:
+                    position.current_sl = new_sl
                     return ManagementAction.update_sl(
                         new_sl,
                         f"指標前SL引き締め"
@@ -1294,6 +1297,7 @@ class PositionManager:
                     - tighten_r * r_value
                 )
                 if new_sl < position.current_sl:
+                    position.current_sl = new_sl
                     return ManagementAction.update_sl(
                         new_sl,
                         f"指標前SL引き締め"
