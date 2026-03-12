@@ -940,6 +940,7 @@ class PositionManager:
                         )
                         # 現在SLより有利な場合のみ更新
                         if _new_sl > position.current_sl:
+                            position.current_sl = _new_sl
                             return ManagementAction.update_sl(
                                 new_sl=_new_sl,
                                 reason=(
@@ -957,6 +958,7 @@ class PositionManager:
                         )
                         # 現在SLより有利な場合のみ更新
                         if _new_sl < position.current_sl:
+                            position.current_sl = _new_sl
                             return ManagementAction.update_sl(
                                 new_sl=_new_sl,
                                 reason=(
