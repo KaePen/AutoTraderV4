@@ -307,6 +307,7 @@ symbols:
       volume_filter_enabled: true
       volume_filter_threshold: 1.0   # T2: Profit+220K, DD -1.61pp vs OFF
       volume_filter_penalty: 0.5
+      trend_strength_max: 0.85       # IM-T24: +8.5%(6Y), DD 4.60%
 
   CHFJPY:
     pip_value: 100.0
