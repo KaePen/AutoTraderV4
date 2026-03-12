@@ -226,7 +226,6 @@ symbols:
     signal:
       trend_strength_max: 0.85    # WI: +1,353K, WR +0.3pp vs 0.7
       multi_consensus_threshold: 11.0  # RL-T: CS11+RTT2.0 balanced
-    filter:
       regime_trend_threshold_add: 2.0  # RL-T: TREND DD圧縮
 
   EURJPY:
@@ -250,7 +249,6 @@ symbols:
       volume_filter_penalty: 0.5
       penalty_cap: 0.5              # WI: +764K, WR -1.1pp, PF -0.04
       multi_consensus_threshold: 11.0  # RL-T: CS11+RTT2.0
-    filter:
       regime_trend_threshold_add: 2.0  # RL-T: TREND DD圧縮
 
   GBPJPY:
@@ -275,7 +273,6 @@ symbols:
       trend_strength_max: 0.85       # IM-T30: +9.9%(6Y), DD 5.27%
       m1_micro_reversal_enabled: true  # RL-T20: +450K, WR +0.36pp, DD -0.30pp
       multi_consensus_threshold: 12.0  # RL-T: CS12+M1MR+RTT2.0
-    filter:
       regime_trend_threshold_add: 2.0  # RL-T: TREND DD圧縮
 
   AUDJPY:
@@ -300,7 +297,6 @@ symbols:
       penalty_cap: 0.5              # WI: +2,054K, WR -0.2pp, PF +0.03
       trend_strength_max: 0.85       # IM-T32: +4.6%(6Y), DD 4.20%
       multi_consensus_threshold: 12.0  # RL-T: CS12+RTT2.0
-    filter:
       regime_trend_threshold_add: 2.0  # RL-T: TREND DD圧縮
 
   CADJPY:
@@ -324,7 +320,6 @@ symbols:
       volume_filter_penalty: 0.5
       trend_strength_max: 0.85       # IM-T24: +8.5%(6Y), DD 4.60%
       multi_consensus_threshold: 12.0  # RL-T: CS12+RTT2.0
-    filter:
       regime_trend_threshold_add: 2.0  # RL-T: TREND DD圧縮
 
   CHFJPY:
@@ -346,7 +341,6 @@ symbols:
       penalty_cap: 0.5              # WI: +2,918K, WR +0.2pp, PF +0.05
       trend_strength_max: 0.85       # IM-T31: +4.0%(6Y), DD 5.30%
       multi_consensus_threshold: 11.0  # RL-T: CS11+RTT2.0
-    filter:
       regime_trend_threshold_add: 2.0  # RL-T: TREND DD圧縮
 
 # --- マルチ通貨ペア ポートフォリオ設定 ---
