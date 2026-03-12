@@ -321,6 +321,11 @@ class PositionManagerConfig:
     # 最大保有時間の上書き（分）— 全TF共通で適用
     # None=TFベースのデフォルト値を使用
     max_holding_minutes_override: float | None = None
+    # レジーム別トレーリングATR倍率（None=グローバル値を使用）
+    trailing_trend_atr_multiplier: float | None = None
+    trailing_trend_stage2_atr_multiplier: float | None = None
+    # レジーム別最大保有時間（分）（None=TFベースのデフォルト値を使用）
+    max_holding_minutes_trend: float | None = None
     # 指標前ポジション管理
     pre_event_exit_enabled: bool = False
     pre_event_minutes: float = 30.0
@@ -1015,7 +1020,14 @@ class PositionManager:
             getattr(position.plan, "dynamic_entry_tf", None)
             or position.plan.entry_tf
         )
-        if self.config.max_holding_minutes_override is not None:
+        # レジーム別最大保有時間の解決
+        regime = getattr(position.plan, "regime", None)
+        if (
+            regime == "TREND"
+            and self.config.max_holding_minutes_trend is not None
+        ):
+            max_minutes = self.config.max_holding_minutes_trend
+        elif self.config.max_holding_minutes_override is not None:
             max_minutes = self.config.max_holding_minutes_override
         else:
             max_minutes = get_holding_minutes(entry_tf)
@@ -1700,19 +1712,32 @@ class PositionManager:
         # ATRベースのトレーリング距離（atr=0時は無効化）
         if atr <= 0:
             return None
+        # レジーム別ATR倍率の解決
+        regime = getattr(position.plan, "regime", None)
+        _base_mult = self.config.trailing_atr_multiplier
+        _s2_mult = self.config.trailing_stage2_atr_multiplier
+        if regime == "TREND":
+            if self.config.trailing_trend_atr_multiplier is not None:
+                _base_mult = (
+                    self.config.trailing_trend_atr_multiplier
+                )
+            if (
+                self.config.trailing_trend_stage2_atr_multiplier
+                is not None
+            ):
+                _s2_mult = (
+                    self.config.trailing_trend_stage2_atr_multiplier
+                )
+
         # 2段階トレーリング: highest_rが閾値以上なら引き締め
         if (
             self.config.trailing_stage2_enabled
             and position.highest_r
             >= self.config.trailing_stage2_r
         ):
-            trail_distance = (
-                atr * self.config.trailing_stage2_atr_multiplier
-            )
+            trail_distance = atr * _s2_mult
         else:
-            trail_distance = (
-                atr * self.config.trailing_atr_multiplier
-            )
+            trail_distance = atr * _base_mult
 
         # Phase 2b: ファンダメンタル評価でSL距離調整
         # 低収束時はSLを引き締め（乗数<1.0）

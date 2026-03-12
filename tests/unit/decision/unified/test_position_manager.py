@@ -2375,3 +2375,176 @@ class Test2021RangeImprovements:
         )
         assert action.exit_reason == ExitReason.STAGNATION
         assert "CHOPPY" in action.reason
+
+
+class TestRegimeBasedParameters:
+    """レジーム別パラメータのテスト"""
+
+    def setup_method(self) -> None:
+        """テストセットアップ"""
+        self.entry_time = datetime(2024, 1, 15, 10, 0)
+        self.trend_plan = TradingPlan(
+            mode="UNIVERSAL",
+            primary_tf="M15",
+            entry_tf="M5",
+            confirm_tfs=["H1"],
+            manage_tf="M15",
+            max_holding_bars=24,
+            tp_sl_ratio_range=(1.0, 1.5),
+            regime="TREND",
+        )
+        self.range_plan = TradingPlan(
+            mode="UNIVERSAL",
+            primary_tf="M15",
+            entry_tf="M5",
+            confirm_tfs=["H1"],
+            manage_tf="M15",
+            max_holding_bars=24,
+            tp_sl_ratio_range=(1.0, 1.5),
+            regime="RANGE",
+        )
+
+    def test_trailing_trend_atr_multiplier(self) -> None:
+        """TREND時にtrailing_trend_atr_multiplierが適用される"""
+        config = PositionManagerConfig(
+            trailing_atr_multiplier=2.0,
+            trailing_trend_atr_multiplier=1.2,
+            trailing_stage2_enabled=False,
+            breakeven_at_1r=False,
+            stag_pretighten_enabled=False,
+        )
+        manager = PositionManager(config)
+        # TRENDポジション
+        manager.register_position(
+            "trend1", SignalType.BUY, 150.0,
+            self.entry_time, 149.0, 152.0, 1.0,
+            self.trend_plan,
+        )
+        # 0.6R到達（トレーリング開始=0.5R）
+        t = self.entry_time + timedelta(minutes=5)
+        action = manager.evaluate(
+            "trend1", 150.6, t, atr=0.3,
+        )
+        # TREND: trail_distance = 0.3 * 1.2 = 0.36
+        # new_sl = 150.6 - 0.36 = 150.24 > 149.0
+        assert action.action_type == ManagementActionType.UPDATE_SL
+        pos = manager.get_position("trend1")
+        expected_sl = 150.6 - 0.3 * 1.2
+        assert abs(pos.current_sl - expected_sl) < 0.001
+
+    def test_trailing_range_uses_global_multiplier(self) -> None:
+        """RANGE時はグローバルATR倍率が適用される"""
+        config = PositionManagerConfig(
+            trailing_atr_multiplier=2.0,
+            trailing_trend_atr_multiplier=1.2,
+            trailing_stage2_enabled=False,
+            breakeven_at_1r=False,
+            stag_pretighten_enabled=False,
+        )
+        manager = PositionManager(config)
+        # RANGEポジション
+        manager.register_position(
+            "range1", SignalType.BUY, 150.0,
+            self.entry_time, 149.0, 152.0, 1.0,
+            self.range_plan,
+        )
+        t = self.entry_time + timedelta(minutes=5)
+        action = manager.evaluate(
+            "range1", 150.6, t, atr=0.3,
+        )
+        # RANGE: trail_distance = 0.3 * 2.0 = 0.6
+        # new_sl = 150.6 - 0.6 = 150.0 > 149.0
+        assert action.action_type == ManagementActionType.UPDATE_SL
+        pos = manager.get_position("range1")
+        expected_sl = 150.6 - 0.3 * 2.0
+        assert abs(pos.current_sl - expected_sl) < 0.001
+
+    def test_max_holding_minutes_trend(self) -> None:
+        """TREND時にmax_holding_minutes_trendが適用される"""
+        config = PositionManagerConfig(
+            max_holding_minutes_trend=180.0,
+            stag_pretighten_enabled=False,
+            # STAG無効化（このテストはtime_exitのみ検証）
+            stagnation_exit_minutes=9999.0,
+            stag_trend_minutes=9999.0,
+        )
+        manager = PositionManager(config)
+        manager.register_position(
+            "trend1", SignalType.BUY, 150.0,
+            self.entry_time, 149.0, 152.0, 1.0,
+            self.trend_plan,
+        )
+        # 170分: まだ保持
+        t1 = self.entry_time + timedelta(minutes=170)
+        a1 = manager.evaluate("trend1", 150.0, t1, atr=0.3)
+        assert a1.action_type != ManagementActionType.FULL_CLOSE
+
+        # 185分: TREND 180分制限で決済
+        t2 = self.entry_time + timedelta(minutes=185)
+        a2 = manager.evaluate("trend1", 150.0, t2, atr=0.3)
+        assert a2.action_type == ManagementActionType.FULL_CLOSE
+        assert a2.exit_reason == ExitReason.TIME_EXIT
+
+    def test_max_holding_range_unaffected(self) -> None:
+        """RANGE時はmax_holding_minutes_trendの影響を受けない"""
+        config = PositionManagerConfig(
+            max_holding_minutes_trend=180.0,
+            stag_pretighten_enabled=False,
+            stagnation_exit_minutes=9999.0,
+            stag_range_minutes=9999.0,
+        )
+        manager = PositionManager(config)
+        manager.register_position(
+            "range1", SignalType.BUY, 150.0,
+            self.entry_time, 149.0, 152.0, 1.0,
+            self.range_plan,
+        )
+        # 185分: RANGEなのでTFベースの保有時間を使用
+        t = self.entry_time + timedelta(minutes=185)
+        a = manager.evaluate("range1", 150.0, t, atr=0.3)
+        # M5のデフォルト保有時間は300分なので185分ではまだ保持
+        assert a.action_type != ManagementActionType.FULL_CLOSE
+
+    def test_trailing_trend_stage2_override(self) -> None:
+        """TREND Stage2でtrailing_trend_stage2_atr_multiplier適用"""
+        config = PositionManagerConfig(
+            trailing_atr_multiplier=2.0,
+            trailing_trend_atr_multiplier=1.5,
+            trailing_stage2_enabled=True,
+            trailing_stage2_r=1.5,
+            trailing_stage2_atr_multiplier=1.2,
+            trailing_trend_stage2_atr_multiplier=0.8,
+            breakeven_at_1r=False,
+            stag_pretighten_enabled=False,
+            partial_close_1r_ratio=0.0,
+            partial_close_2r_ratio=0.0,
+            early_profit_guard_enabled=False,
+        )
+        manager = PositionManager(config)
+        # SL=149, TP=155(5R) — TPに到達しない
+        manager.register_position(
+            "trend1", SignalType.BUY, 150.0,
+            self.entry_time, 149.0, 155.0, 1.0,
+            self.trend_plan,
+        )
+        # 段階的に価格を上げてhighest_rを蓄積
+        # 各evaluateは1R/2R部分利確アクションを返すが
+        # ratio=0.0なので実質影響なし
+        for i, p in enumerate([150.6, 151.2, 151.8]):
+            t = self.entry_time + timedelta(minutes=2 + i)
+            manager.evaluate("trend1", p, t, atr=0.3)
+        # 2R部分利確消化後、再度同じ価格で評価
+        # → トレーリングが返る
+        t4 = self.entry_time + timedelta(minutes=5)
+        # 2R partial closeが出るのでもう一度評価
+        manager.evaluate("trend1", 152.0, t4, atr=0.3)
+        t5 = self.entry_time + timedelta(minutes=6)
+        action = manager.evaluate(
+            "trend1", 152.0, t5, atr=0.3,
+        )
+        # TREND Stage2: trail_distance = 0.3 * 0.8 = 0.24
+        # new_sl = 152.0 - 0.24 = 151.76
+        assert action.action_type == ManagementActionType.UPDATE_SL
+        pos = manager.get_position("trend1")
+        expected_sl = 152.0 - 0.3 * 0.8
+        assert abs(pos.current_sl - expected_sl) < 0.001
