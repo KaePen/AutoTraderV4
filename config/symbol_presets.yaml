@@ -94,7 +94,7 @@ defaults:
   max_positions: 1              # マルチペア運用: per_pair=1 に統一
   bonus_max_positions: 0        # 1ペア1ポジションなのでボーナス不要
   bonus_score_threshold: 7.0
-  base_risk_pct: 0.003        # MP-T30 WF検証済み (旧0.015)
+  base_risk_pct: 0.004        # MP-T51 DD2%検証採用 (旧0.003)
   max_lot_per_trade: 1.5      # pip_value修正後DD対策: 2.5 → 1.5
   max_total_exposure_lot: 3.0 # pip_value修正後DD対策: 4.0 → 3.0
   equity_floor_pct: 0.30
@@ -218,7 +218,7 @@ symbols:
     max_positions: 1
     bonus_max_positions: 0
     bonus_score_threshold: 7.0
-    base_risk_pct: 0.003          # MP-T30 WF検証済み (旧0.02)
+    base_risk_pct: 0.004          # MP-T51 DD2%検証採用 (旧0.003)
     max_lot_per_trade: 2.0
     max_total_exposure_lot: 4.0
     equity_floor_pct: 0.30
@@ -238,7 +238,7 @@ symbols:
     # Tier 1 (WR 75%, PF 2.5)
     max_positions: 1              # マルチペア運用: per_pair=1 に統一
     bonus_score_threshold: 7.5
-    base_risk_pct: 0.003          # MP-T30 WF検証済み (旧0.02)
+    base_risk_pct: 0.004          # MP-T51 DD2%検証採用 (旧0.003)
     max_lot_per_trade: 2.0
     max_total_exposure_lot: 4.0
     signal:
@@ -263,7 +263,7 @@ symbols:
     max_positions: 1              # マルチペア運用: per_pair=1 に統一
     bonus_max_positions: 0
     bonus_score_threshold: 8.0
-    base_risk_pct: 0.003          # MP-T30 WF検証済み (旧0.015)
+    base_risk_pct: 0.004          # MP-T51 DD2%検証採用 (旧0.003)
     max_lot_per_trade: 1.5
     max_total_exposure_lot: 3.0
     signal:
@@ -287,7 +287,7 @@ symbols:
     # Tier 2 (WR 73%, PF 2.2)
     max_positions: 1              # マルチペア運用: per_pair=1 に統一
     bonus_score_threshold: 7.0
-    base_risk_pct: 0.003          # MP-T30 WF検証済み (旧0.015)
+    base_risk_pct: 0.004          # MP-T51 DD2%検証採用 (旧0.003)
     max_lot_per_trade: 1.5
     max_total_exposure_lot: 3.0
     signal:
@@ -312,7 +312,7 @@ symbols:
     # Tier 2 (WR 73%, PF 2.4)
     max_positions: 1              # マルチペア運用: per_pair=1 に統一
     bonus_score_threshold: 7.0
-    base_risk_pct: 0.003          # MP-T30 WF検証済み (旧0.015)
+    base_risk_pct: 0.004          # MP-T51 DD2%検証採用 (旧0.003)
     max_lot_per_trade: 1.5
     max_total_exposure_lot: 3.0
     signal:
@@ -335,7 +335,7 @@ symbols:
     # Tier 2 (WR 74%, PF 2.2)
     max_positions: 1              # マルチペア運用: per_pair=1 に統一
     bonus_score_threshold: 7.5
-    base_risk_pct: 0.003          # MP-T30 WF検証済み (旧0.015)
+    base_risk_pct: 0.004          # MP-T51 DD2%検証採用 (旧0.003)
     max_lot_per_trade: 1.5
     max_total_exposure_lot: 3.0
     signal:

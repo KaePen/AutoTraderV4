@@ -170,7 +170,7 @@ class TestSymbolPresetValues:
         assert p.default_tp_pips == 40.0
         assert p.max_positions == 1
         assert p.bonus_max_positions == 0
-        assert p.base_risk_pct == 0.003
+        assert p.base_risk_pct == 0.004
         assert p.max_lot_per_trade == 2.0
         assert p.max_total_exposure_lot == 4.0
         assert p.use_position_manager is True
@@ -184,14 +184,14 @@ class TestSymbolPresetValues:
         assert p.default_sl_pips == 25.0
         assert p.default_tp_pips == 50.0
         assert p.max_positions == 1
-        assert p.base_risk_pct == 0.003
+        assert p.base_risk_pct == 0.004
 
     def test_gbpjpy_preset(self) -> None:
         """GBPJPYプリセット（高スプレッド通貨ペア）"""
         p = get_preset("GBPJPY")
         assert p.spread_pips == 3.0
         assert p.max_positions == 1
-        assert p.base_risk_pct == 0.003
+        assert p.base_risk_pct == 0.004
 
     def test_eurusd_preset(self) -> None:
         """EURUSDプリセット（USDクオート）"""
