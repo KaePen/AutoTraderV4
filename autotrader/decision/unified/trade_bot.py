@@ -571,6 +571,11 @@ class UnifiedTradeBot:
                 if self.config.demo_mode
                 else self.config.consensus_threshold
             ),
+            confirm_group_filter_enabled=(
+                self.config.confirm_group_filter_enabled
+            ),
+            min_macro_aligned=self.config.min_macro_aligned,
+            min_micro_aligned=self.config.min_micro_aligned,
         )
         self.consensus = ModeAwareScoreConsensus(_consensus_cfg)
 
