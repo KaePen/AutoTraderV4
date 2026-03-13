@@ -64,12 +64,6 @@ class ConsensusConfig:
     other_weight: float = 1.0
     threshold: float = 4.5
     enable_counter_signal: bool = True
-    # TFグループフィルタ: マクロ/ミクロTFグループ内の最低一致数
-    confirm_group_filter_enabled: bool = False
-    macro_tfs: tuple[str, ...] = ("H4", "H8", "D1")
-    micro_tfs: tuple[str, ...] = ("M1", "M30")
-    min_macro_aligned: int = 2  # マクロTFグループ最低一致数
-    min_micro_aligned: int = 1  # ミクロTFグループ最低一致数
 
 
 class ModeAwareScoreConsensus:
@@ -202,52 +196,6 @@ class ModeAwareScoreConsensus:
                     reasoning=(
                         f"TF整合率不足: {aligned_count}/{total_tfs}="
                         f"{alignment_ratio:.0%} < 50%"
-                        f"({plan.mode})"
-                    ),
-                    buy_score=buy_score,
-                    sell_score=sell_score,
-                )
-
-        # TFグループフィルタ（マクロ/ミクロ別最低一致数）
-        if (
-            self.config.confirm_group_filter_enabled
-            and direction != SignalType.HOLD
-        ):
-            macro_aligned = sum(
-                1 for tf in aligned_tfs
-                if tf in self.config.macro_tfs
-            )
-            micro_aligned = sum(
-                1 for tf in aligned_tfs
-                if tf in self.config.micro_tfs
-            )
-            if macro_aligned < self.config.min_macro_aligned:
-                return ConsensusResult(
-                    direction=SignalType.HOLD,
-                    score=final_score,
-                    threshold=threshold,
-                    aligned_tfs=aligned_tfs,
-                    reasoning=(
-                        f"マクロTF一致不足: "
-                        f"{macro_aligned}/"
-                        f"{len(self.config.macro_tfs)}"
-                        f" < {self.config.min_macro_aligned}"
-                        f"({plan.mode})"
-                    ),
-                    buy_score=buy_score,
-                    sell_score=sell_score,
-                )
-            if micro_aligned < self.config.min_micro_aligned:
-                return ConsensusResult(
-                    direction=SignalType.HOLD,
-                    score=final_score,
-                    threshold=threshold,
-                    aligned_tfs=aligned_tfs,
-                    reasoning=(
-                        f"ミクロTF一致不足: "
-                        f"{micro_aligned}/"
-                        f"{len(self.config.micro_tfs)}"
-                        f" < {self.config.min_micro_aligned}"
                         f"({plan.mode})"
                     ),
                     buy_score=buy_score,

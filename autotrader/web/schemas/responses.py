@@ -413,8 +413,8 @@ class PositionManagementConfigResponse(BaseModel):
     partial_close_2r_ratio: float = 0.05
     breakeven_at_1r: bool = True
     # トレーリング
-    trailing_start_r: float = 1.5
-    trailing_atr_multiplier: float = 1.5
+    trailing_start_r: float = 0.5
+    trailing_atr_multiplier: float = 2.0
     # 時間決済
     time_exit_enabled: bool = True
     # コスト

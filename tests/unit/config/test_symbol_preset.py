@@ -92,7 +92,7 @@ class TestGetPresetUsdjpy:
     def test_usdjpy_max_positions(self):
         """max_positions が USDJPY 正しい値"""
         preset = get_preset("USDJPY")
-        assert preset.max_positions == 3
+        assert preset.max_positions == 1
 
     def test_usdjpy_bonus_score_threshold(self):
         """bonus_score_threshold が USDJPY 正しい値"""
@@ -328,14 +328,14 @@ class TestTrailingStopDefaults:
         assert preset.use_position_manager is True
 
     def test_trailing_start_r_default(self):
-        """trailing_start_r デフォルト値 1.5"""
+        """trailing_start_r デフォルト値 0.5"""
         preset = SymbolPreset()
-        assert preset.trailing_start_r == 1.5
+        assert preset.trailing_start_r == 0.5
 
     def test_trailing_atr_multiplier_default(self):
-        """trailing_atr_multiplier デフォルト値 1.5"""
+        """trailing_atr_multiplier デフォルト値 2.0"""
         preset = SymbolPreset()
-        assert preset.trailing_atr_multiplier == 1.5
+        assert preset.trailing_atr_multiplier == 2.0
 
     def test_breakeven_at_1r_default_true(self):
         """デフォルトで breakeven_at_1r=True"""
@@ -352,9 +352,10 @@ class TestTrailingStopYamlLoad:
         assert preset.use_position_manager is True
 
     def test_gbpusd_trailing_start_r(self):
-        """GBPUSD の trailing_start_r=1.5"""
+        """GBPUSD SymbolPresetはdefaults値、PM設定はpm_config:経由"""
         preset = get_preset("GBPUSD")
-        assert preset.trailing_start_r == 1.5
+        # SymbolPreset はdefaults値（PM設定はpm_config:サブセクション）
+        assert preset.trailing_start_r == 0.5
 
     def test_gbpusd_trailing_atr_multiplier(self):
         """GBPUSD の trailing_atr_multiplier=2.0"""

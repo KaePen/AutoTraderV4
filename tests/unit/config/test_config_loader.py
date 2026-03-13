@@ -199,21 +199,21 @@ class TestPresetConfig:
         # symbol_presets.yamlのsignal.consensus_threshold
         assert bot.consensus_threshold == 9.0
         # symbol_presets.yamlのsignal.bca_min_edge
-        assert bot.bca_min_edge == 0.55
+        assert bot.bca_min_edge == 0.60
         # USDJPYプリセットのmax_positions
-        assert bot.max_positions == 3
+        assert bot.max_positions == 1
 
     def test_EURJPY通貨ペア別上書き(self) -> None:
         """EURJPYの通貨ペア別signal設定が適用される"""
         loader = ConfigLoader()
         bot, _ = loader.load_preset_config("EURJPY")
 
-        # EURJPY固有: bca_min_edge=0.65
-        assert bot.bca_min_edge == 0.65
+        # EURJPY固有: bca_min_edge=0.70
+        assert bot.bca_min_edge == 0.70
         # 共通デフォルト: consensus_threshold=9.0
         assert bot.consensus_threshold == 9.0
         # EURJPYプリセットのmax_positions
-        assert bot.max_positions == 2
+        assert bot.max_positions == 1
 
     def test_存在しない通貨ペアでフォールバック(self) -> None:
         """未定義シンボルはデフォルト値が使用される"""
@@ -222,7 +222,7 @@ class TestPresetConfig:
 
         # デフォルト値
         assert bot.consensus_threshold == 9.0
-        assert bot.bca_min_edge == 0.55
+        assert bot.bca_min_edge == 0.60
 
     def test_PM設定が読み込まれる(self) -> None:
         """pm_configセクションが正しく読み込まれる"""

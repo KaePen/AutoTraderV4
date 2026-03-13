@@ -97,8 +97,8 @@ class SymbolPreset:
     equity_floor_pct: float = 0.30
     # トレーリングストップ設定
     use_position_manager: bool = True
-    trailing_start_r: float = 1.5
-    trailing_atr_multiplier: float = 1.5
+    trailing_start_r: float = 0.5
+    trailing_atr_multiplier: float = 2.0
     breakeven_at_1r: bool = True
     # 通貨ペア別TFリスト（NoneでデフォルトTF使用）
     timeframes: list[str] | None = None
