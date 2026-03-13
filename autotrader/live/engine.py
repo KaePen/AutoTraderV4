@@ -107,9 +107,10 @@ class LiveTradingEngine:
             symbol=config.symbol,
         )
         self._bot = UnifiedTradeBot(config.bot_config)
+        # pm_config にライブ用 pip_unit を反映
         _live_pip_unit = get_pip_unit(config.symbol)
         self._pm = PositionManager(
-            PositionManagerConfig(pip_unit=_live_pip_unit),
+            dataclasses.replace(config.pm_config, pip_unit=_live_pip_unit),
         )
         self._sizer = PositionSizer(
             self._build_sizer_config(config.bot_config, config.symbol)
