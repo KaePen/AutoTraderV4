@@ -142,10 +142,6 @@ class SignalConfig:
     consensus_confirm_weight: float = 3.0
     consensus_manage_weight: float = 0.5
     consensus_other_weight: float = 1.0
-    # TFグループフィルタ
-    confirm_group_filter_enabled: bool = False
-    min_macro_aligned: int = 2
-    min_micro_aligned: int = 1
     bca_enabled: bool = True
     bca_min_edge: float = 0.60
     bca_penalty_scale: float = 1.0
@@ -238,8 +234,6 @@ class FilterConfig:
     sg_recent_loss_penalty: float = 0.1
     regime_threshold_enabled: bool = True
     regime_trend_threshold_add: float = 1.5
-    low_atr_trend_filter_enabled: bool = False
-    low_atr_trend_ratio_max: float = 0.75
     fundamental_caution_block_level: int = 2
     fundamental_holiday_liquidity_block: float = 0.3
     fundamental_decay_coefficient: float = 2.0
@@ -249,8 +243,6 @@ class FilterConfig:
     fundamental_post_event_lag_seconds: int = 30
     range_filter_consolidated: bool = False
     range_filter_block_threshold: float = 0.6
-    bb_width_trend_filter_enabled: bool = False
-    tokyo_session_filter_enabled: bool = False
     session_transition_wait_enabled: bool = False
     session_transition_wait_minutes: int = 30
     liquidity_based_tp_enabled: bool = False
@@ -262,9 +254,6 @@ class FilterConfig:
     off_hours_high_align_threshold: float = 0.55
     high_align_penalty_threshold: float | None = None
     high_align_penalty_score: float = 1.0
-    # TREND方向整合フィルター
-    trend_direction_filter_enabled: bool = False
-    trend_direction_min_alignment: float = 0.1
     # ボリュームフィルタ
     volume_filter_enabled: bool = True
     volume_filter_threshold: float = 1.5
@@ -363,10 +352,6 @@ class UnifiedBotConfig:
     consensus_confirm_weight: float = 3.0
     consensus_manage_weight: float = 0.5
     consensus_other_weight: float = 1.0
-    # --- TFグループフィルタ ---
-    confirm_group_filter_enabled: bool = False
-    min_macro_aligned: int = 2
-    min_micro_aligned: int = 1
     # --- SoftGuardペナルティ ---
     sg_spread_penalty_rate: float = 0.2
     sg_off_hours_penalty: float = 0.25
@@ -375,10 +360,6 @@ class UnifiedBotConfig:
     # レジーム別閾値調整（TRENDレジームでスコア要求引き上げ）
     regime_threshold_enabled: bool = True
     regime_trend_threshold_add: float = 1.5
-    # 低ATR+TRENDフィルター（低ボラTRENDはWR低下）
-    low_atr_trend_filter_enabled: bool = False
-    # ATR/ATR_MA比率がこの値以下で発動
-    low_atr_trend_ratio_max: float = 0.75
     # HTFスコア最低要件（score_htf=0はWR低下）
     htf_score_filter_enabled: bool = True
     # HTF整合度がこの値以下のとき閾値を追加
@@ -414,10 +395,6 @@ class UnifiedBotConfig:
     # ペナルティスケール係数
     bca_penalty_scale: float = 1.0
     # --- 構造的改善設定 ---
-    # BB_WIDTH TRENDフィルター（TREND+BB_WIDTH>0.06で閾値+1.0）
-    bb_width_trend_filter_enabled: bool = False
-    # TOKYOセッションフィルター（UTC 17-21で閾値+0.5）
-    tokyo_session_filter_enabled: bool = False
     # セッション切替待機フィルター有効化
     session_transition_wait_enabled: bool = False
     # セッション切替後の待機時間（分）
@@ -444,10 +421,6 @@ class UnifiedBotConfig:
     high_align_penalty_threshold: float | None = None
     # 高alignment時のスコアペナルティ量
     high_align_penalty_score: float = 1.0
-    # TREND方向整合フィルター（BUY時HTF弱気/SELL時HTF強気をブロック）
-    trend_direction_filter_enabled: bool = False
-    # HTF alignment最小値（BUY: align>=min, SELL: align<=-min）
-    trend_direction_min_alignment: float = 0.1
     # ADXエントリー上限（None=無効, 例: 35.0で追いかけ防止）
     adx_upper_limit: float | None = None
     # TREND時整合TF上限（None=無効, 例: 6でTF過多ブロック）
@@ -588,11 +561,6 @@ class UnifiedBotConfig:
             consensus_confirm_weight=self.consensus_confirm_weight,
             consensus_manage_weight=self.consensus_manage_weight,
             consensus_other_weight=self.consensus_other_weight,
-            confirm_group_filter_enabled=(
-                self.confirm_group_filter_enabled
-            ),
-            min_macro_aligned=self.min_macro_aligned,
-            min_micro_aligned=self.min_micro_aligned,
             bca_enabled=self.bca_enabled,
             bca_min_edge=self.bca_min_edge,
             bca_penalty_scale=self.bca_penalty_scale,
@@ -654,8 +622,6 @@ class UnifiedBotConfig:
             sg_recent_loss_penalty=self.sg_recent_loss_penalty,
             regime_threshold_enabled=self.regime_threshold_enabled,
             regime_trend_threshold_add=(self.regime_trend_threshold_add),
-            low_atr_trend_filter_enabled=(self.low_atr_trend_filter_enabled),
-            low_atr_trend_ratio_max=self.low_atr_trend_ratio_max,
             fundamental_caution_block_level=(
                 self.fundamental_caution_block_level
             ),
@@ -671,8 +637,6 @@ class UnifiedBotConfig:
             ),
             range_filter_consolidated=(self.range_filter_consolidated),
             range_filter_block_threshold=(self.range_filter_block_threshold),
-            bb_width_trend_filter_enabled=(self.bb_width_trend_filter_enabled),
-            tokyo_session_filter_enabled=(self.tokyo_session_filter_enabled),
             session_transition_wait_enabled=(
                 self.session_transition_wait_enabled
             ),

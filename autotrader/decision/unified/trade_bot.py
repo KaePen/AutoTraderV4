@@ -571,11 +571,6 @@ class UnifiedTradeBot:
                 if self.config.demo_mode
                 else self.config.consensus_threshold
             ),
-            confirm_group_filter_enabled=(
-                self.config.confirm_group_filter_enabled
-            ),
-            min_macro_aligned=self.config.min_macro_aligned,
-            min_micro_aligned=self.config.min_micro_aligned,
         )
         self.consensus = ModeAwareScoreConsensus(_consensus_cfg)
 
@@ -1062,30 +1057,6 @@ class UnifiedTradeBot:
             _base_threshold = (
                 _base_threshold + self.config.regime_trend_threshold_add
             )
-            # TREND + BB_WIDTH > 0.06: 閾値 +1.0（ボラ拡大時の追従強化）
-            # bisect検証: -314K, WR -1.5pp → デフォルトOFF
-            if self.config.bb_width_trend_filter_enabled:
-                _primary_row = self._get_current_row(
-                    plan.primary_tf,
-                    current_time,
-                )
-                if _primary_row is not None:
-                    _bb_w_h4 = _primary_row.get("bb_width_h4")
-                    if _bb_w_h4 is not None and not pd.isna(_bb_w_h4):
-                        if float(_bb_w_h4) > 0.06:
-                            _base_threshold = _base_threshold + 1.0
-
-        # TOKYOセッション最適化（UTC 17-21 = JST 02-06）
-        # 東京深夜は流動性低下→閾値引き上げ
-        # bisect検証: BB_WIDTHと合わせて-314K → デフォルトOFF
-        if self.config.tokyo_session_filter_enabled:
-            _hour_utc_plan = (
-                current_time.hour
-                if hasattr(current_time, "hour")
-                else current_time.to_pydatetime().hour
-            )
-            if 17 <= _hour_utc_plan < 21:
-                _base_threshold = _base_threshold + 0.5
         # HTFスコア不一致フィルター（HTF整合度低→閾値引き上げ）
         if (
             self.config.htf_score_filter_enabled
@@ -1550,18 +1521,6 @@ class UnifiedTradeBot:
                 _macd_slope = _primary_sig.score_breakdown.macd_slope
                 if _macd_slope <= self.config.macd_slope_filter_threshold:
                     return _filt_hold(f"MACDスロープ逆方向: {_macd_slope:.1f}")
-
-            # 低ATR+TRENDフィルター（低ボラTRENDはWR低下）
-            if (
-                self.config.low_atr_trend_filter_enabled
-                and regime_result.regime == MarketRegime.TREND
-                and _atr_ratio <= self.config.low_atr_trend_ratio_max
-            ):
-                return _filt_hold(
-                    f"低ATR+TREND: atr_ratio="
-                    f"{_atr_ratio:.3f}"
-                    f"<={self.config.low_atr_trend_ratio_max}"
-                )
 
         # 高alignment時スコアペナルティ
         if (

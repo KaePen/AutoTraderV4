@@ -41,7 +41,7 @@ class TestUnifiedBotConfigDefaults:
         assert self.config.bca_enabled is True
 
     def test_bca_min_edge(self) -> None:
-        assert self.config.bca_min_edge == 0.55
+        assert self.config.bca_min_edge == 0.60
 
     def test_bca_penalty_scale(self) -> None:
         assert self.config.bca_penalty_scale == 1.0
@@ -106,8 +106,6 @@ class TestUnifiedBotConfigDefaults:
 
     def test_phase3_features_off_by_default(self) -> None:
         """Phase3で劣化を引き起こしたフィーチャーがOFF"""
-        assert self.config.bb_width_trend_filter_enabled is False
-        assert self.config.tokyo_session_filter_enabled is False
         assert self.config.session_transition_wait_enabled is False
         assert self.config.liquidity_based_tp_enabled is False
 
@@ -170,11 +168,11 @@ class TestSymbolPresetValues:
         assert p.slippage_pips == 0.5
         assert p.default_sl_pips == 20.0
         assert p.default_tp_pips == 40.0
-        assert p.max_positions == 3
+        assert p.max_positions == 1
         assert p.bonus_max_positions == 0
         assert p.base_risk_pct == 0.02
         assert p.max_lot_per_trade == 2.0
-        assert p.max_total_exposure_lot == 5.0
+        assert p.max_total_exposure_lot == 4.0
         assert p.use_position_manager is True
 
     def test_eurjpy_preset(self) -> None:
@@ -185,7 +183,7 @@ class TestSymbolPresetValues:
         assert p.slippage_pips == 0.7
         assert p.default_sl_pips == 25.0
         assert p.default_tp_pips == 50.0
-        assert p.max_positions == 2
+        assert p.max_positions == 1
         assert p.base_risk_pct == 0.02
 
     def test_gbpjpy_preset(self) -> None:
@@ -228,7 +226,7 @@ class TestPositionManagerConfigDefaults:
 
     def test_trailing_settings(self) -> None:
         assert self.config.trailing_start_r == 0.5
-        assert self.config.trailing_atr_multiplier == 2.5
+        assert self.config.trailing_atr_multiplier == 2.0
 
     def test_breakeven_settings(self) -> None:
         assert self.config.breakeven_at_1r is True

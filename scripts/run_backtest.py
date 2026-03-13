@@ -489,14 +489,6 @@ def parse_args() -> argparse.Namespace:
         help="[旧] --bot-regime-trend-threshold-add を推奨",
     )
     _legacy.add_argument(
-        "--low-atr-trend-filter", action="store_true",
-        help="[旧] --bot-low-atr-trend-filter-enabled を推奨",
-    )
-    _legacy.add_argument(
-        "--low-atr-trend-ratio", type=float, default=None,
-        help="[旧] --bot-low-atr-trend-ratio-max を推奨",
-    )
-    _legacy.add_argument(
         "--htf-score-filter",
         action=argparse.BooleanOptionalAction, default=None,
         help="[旧] --bot-htf-score-filter-enabled を推奨",
@@ -1141,7 +1133,6 @@ def _collect_legacy_bot_overrides(
         "range_day_score_premium": "range_day_score_premium",
         "weak_hours_premium": "weak_hours_score_premium",
         "regime_trend_add": "regime_trend_threshold_add",
-        "low_atr_trend_ratio": "low_atr_trend_ratio_max",
         "htf_score_threshold_add": "htf_score_filter_threshold_add",
         "bca_min_edge": "bca_min_edge",
         "bca_penalty_scale": "bca_penalty_scale",
@@ -1169,8 +1160,6 @@ def _collect_legacy_bot_overrides(
         m["range_day_score_premium"] = 0.0
     if getattr(args, "no_weak_hours", False):
         m["weak_hours_enabled"] = False
-    if getattr(args, "low_atr_trend_filter", False):
-        m["low_atr_trend_filter_enabled"] = True
     if getattr(args, "off_hours_trend_block", False):
         m["off_hours_trend_block"] = True
     if getattr(args, "off_hours_high_align_block", False):

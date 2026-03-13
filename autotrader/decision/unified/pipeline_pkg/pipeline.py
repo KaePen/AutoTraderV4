@@ -371,32 +371,6 @@ class ConsensusStep:
                 _base_threshold
                 + bot.config.regime_trend_threshold_add
             )
-            # TREND + BB_WIDTH > 0.06
-            if bot.config.bb_width_trend_filter_enabled:
-                _primary_row = bot._get_current_row(
-                    plan.primary_tf, current_time,
-                )
-                if _primary_row is not None:
-                    _bb_w_h4 = _primary_row.get("bb_width_h4")
-                    if (
-                        _bb_w_h4 is not None
-                        and not pd.isna(_bb_w_h4)
-                    ):
-                        if float(_bb_w_h4) > 0.06:
-                            _base_threshold = (
-                                _base_threshold + 1.0
-                            )
-
-        # TOKYOセッション最適化
-        if bot.config.tokyo_session_filter_enabled:
-            _hour_utc_plan = (
-                current_time.hour
-                if hasattr(current_time, 'hour')
-                else current_time.to_pydatetime().hour
-            )
-            if 17 <= _hour_utc_plan < 21:
-                _base_threshold = _base_threshold + 0.5
-
         # HTFスコア不一致フィルター
         if (
             bot.config.htf_score_filter_enabled
@@ -955,62 +929,6 @@ class FilterStep:
                         f"{_macd_slope:.1f}"
                     )
                     return ctx
-
-            # 低ATR+TRENDフィルター
-            if (
-                bot.config.low_atr_trend_filter_enabled
-                and regime_result.regime
-                == MarketRegime.TREND
-                and _atr_ratio
-                <= bot.config.low_atr_trend_ratio_max
-            ):
-                ctx.should_abort = True
-                ctx.abort_signal = _filt_hold(
-                    f"低ATR+TREND: atr_ratio="
-                    f"{_atr_ratio:.3f}"
-                    f"<={bot.config.low_atr_trend_ratio_max}"
-                )
-                return ctx
-
-        # TREND方向整合フィルター
-        # TREND regime でシグナル方向とHTF alignmentが
-        # 矛盾する場合にブロック
-        if (
-            bot.config.trend_direction_filter_enabled
-            and regime_result is not None
-            and regime_result.regime
-            == MarketRegime.TREND
-            and consensus.direction
-            != SignalType.HOLD
-        ):
-            _min_align = (
-                bot.config
-                .trend_direction_min_alignment
-            )
-            # BUY: HTFが弱気（alignment < min）→ブロック
-            # SELL: HTFが強気（alignment > -min）→ブロック
-            _dir_mismatch = False
-            if (
-                consensus.direction == SignalType.BUY
-                and htf_alignment < _min_align
-            ):
-                _dir_mismatch = True
-            elif (
-                consensus.direction == SignalType.SELL
-                and htf_alignment > -_min_align
-            ):
-                _dir_mismatch = True
-
-            if _dir_mismatch:
-                ctx.should_abort = True
-                ctx.abort_signal = _filt_hold(
-                    f"TREND方向不整合: "
-                    f"dir={consensus.direction.name}"
-                    f", htf_align="
-                    f"{htf_alignment:.3f}"
-                    f", min={_min_align}"
-                )
-                return ctx
 
         # 高alignment時スコアペナルティ
         if (
