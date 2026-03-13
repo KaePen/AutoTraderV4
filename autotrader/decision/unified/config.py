@@ -142,6 +142,10 @@ class SignalConfig:
     consensus_confirm_weight: float = 3.0
     consensus_manage_weight: float = 0.5
     consensus_other_weight: float = 1.0
+    # TFグループフィルタ
+    confirm_group_filter_enabled: bool = False
+    min_macro_aligned: int = 2
+    min_micro_aligned: int = 1
     bca_enabled: bool = True
     bca_min_edge: float = 0.60
     bca_penalty_scale: float = 1.0
@@ -359,6 +363,10 @@ class UnifiedBotConfig:
     consensus_confirm_weight: float = 3.0
     consensus_manage_weight: float = 0.5
     consensus_other_weight: float = 1.0
+    # --- TFグループフィルタ ---
+    confirm_group_filter_enabled: bool = False
+    min_macro_aligned: int = 2
+    min_micro_aligned: int = 1
     # --- SoftGuardペナルティ ---
     sg_spread_penalty_rate: float = 0.2
     sg_off_hours_penalty: float = 0.25
@@ -580,6 +588,11 @@ class UnifiedBotConfig:
             consensus_confirm_weight=self.consensus_confirm_weight,
             consensus_manage_weight=self.consensus_manage_weight,
             consensus_other_weight=self.consensus_other_weight,
+            confirm_group_filter_enabled=(
+                self.confirm_group_filter_enabled
+            ),
+            min_macro_aligned=self.min_macro_aligned,
+            min_micro_aligned=self.min_micro_aligned,
             bca_enabled=self.bca_enabled,
             bca_min_edge=self.bca_min_edge,
             bca_penalty_scale=self.bca_penalty_scale,
