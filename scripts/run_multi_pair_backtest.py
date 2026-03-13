@@ -667,6 +667,7 @@ def run_multi_pair_year(
         )
 
         # [FUNDAMENTAL] 重要指標前スキップチェック
+        _fctx = None
         if ctx.fundamental_provider is not None:
             from datetime import timezone as _tz
 
@@ -681,9 +682,16 @@ def run_multi_pair_year(
             _fctx = ctx.fundamental_provider.get_context(
                 _now_utc, sym,
             )
+            # PRE_EVENT: 高インパクト指標30分前は常にスキップ
             if _fctx.has_high_impact_within_30min:
                 continue
-            if _fctx.event_caution_level >= 2:
+            # Phase 2b無効時: caution_levelベースの追加ブロック
+            _bot_cfg = ctx.bot.config
+            if (
+                not _bot_cfg.fundamental_assessor_enabled
+                and _fctx.event_caution_level
+                >= _bot_cfg.fundamental_caution_block_level
+            ):
                 continue
 
         # シグナル生成
@@ -691,6 +699,7 @@ def run_multi_pair_year(
         consolidated = ctx.bot.generate_signal(
             current_time,
             candle,
+            fundamental_ctx=_fctx,
         )
 
         # Signal変換（SL/TPはpips値で格納=ライブと統一）
