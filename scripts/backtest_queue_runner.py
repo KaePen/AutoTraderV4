@@ -1550,6 +1550,17 @@ def _execute_month_single(
         pm_config=PositionManagerConfig(**pm_ovr),
     )
 
+    # ファンダメンタルイベントプロバイダ（高インパクト指標スキップ）
+    from autotrader.backtest.fundamental_utils import (
+        create_fundamental_provider,
+    )
+    _fund_provider = create_fundamental_provider(
+        data_dir=data_dir,
+        symbol=symbol,
+        start_year=year,
+        end_year=year,
+    )
+
     result = run_unified_year(
         runner=runner,
         bot_config=bot_config,
@@ -1557,6 +1568,7 @@ def _execute_month_single(
         year=year,
         market_data=month_data,
         use_m1=True,
+        fundamental_provider=_fund_provider,
         period_start=period_start,
         period_end=period_end,
         emitter=_emitter,
@@ -1685,6 +1697,9 @@ def _execute_month_multi_pair(
     from scripts.run_multi_pair_backtest import (
         _create_runner,
     )
+    from autotrader.backtest.fundamental_utils import (
+        create_fundamental_provider,
+    )
 
     contexts: dict[str, Any] = {}
     for sym in symbols:
@@ -1713,6 +1728,15 @@ def _execute_month_multi_pair(
             spread_multiplier=spread_mult,
         )
         if ctx is not None:
+            # ファンダメンタルイベントプロバイダ注入
+            ctx.fundamental_provider = (
+                create_fundamental_provider(
+                    data_dir=data_dir,
+                    symbol=sym,
+                    start_year=year,
+                    end_year=year,
+                )
+            )
             contexts[sym] = ctx
 
     if not contexts:
