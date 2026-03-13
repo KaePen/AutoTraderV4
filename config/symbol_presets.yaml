@@ -45,7 +45,7 @@ filter:
   weak_hours_enabled: true
   weak_hours_score_premium: 0.5
   sg_spread_penalty_rate: 0.2
-  sg_off_hours_penalty: 0.25
+  sg_off_hours_penalty: 0.5           # MP-T30/T40/T41: WF検証済み (IS+OOS全期間)
   sg_volatility_penalty: 0.05
   sg_recent_loss_penalty: 0.1
   regime_threshold_enabled: true
