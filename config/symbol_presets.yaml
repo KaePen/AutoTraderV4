@@ -13,7 +13,7 @@
 # --- シグナル生成設定（全通貨ペア共通デフォルト）---
 signal:
   consensus_threshold: 9.0            # 単独BT用
-  multi_consensus_threshold: 9.5      # マルチBT・ライブ用
+  multi_consensus_threshold: 17.0     # マルチBT・ライブ用 (MP-T30 WF検証済み)
   consensus_primary_weight: 2.0
   consensus_entry_weight: 1.5
   consensus_confirm_weight: 3.0
@@ -94,7 +94,7 @@ defaults:
   max_positions: 1              # マルチペア運用: per_pair=1 に統一
   bonus_max_positions: 0        # 1ペア1ポジションなのでボーナス不要
   bonus_score_threshold: 7.0
-  base_risk_pct: 0.015        # pip_value修正後DD対策: 0.025 → 0.015
+  base_risk_pct: 0.003        # MP-T30 WF検証済み (旧0.015)
   max_lot_per_trade: 1.5      # pip_value修正後DD対策: 2.5 → 1.5
   max_total_exposure_lot: 3.0 # pip_value修正後DD対策: 4.0 → 3.0
   equity_floor_pct: 0.30
@@ -218,13 +218,13 @@ symbols:
     max_positions: 1
     bonus_max_positions: 0
     bonus_score_threshold: 7.0
-    base_risk_pct: 0.02
+    base_risk_pct: 0.003          # MP-T30 WF検証済み (旧0.02)
     max_lot_per_trade: 2.0
     max_total_exposure_lot: 4.0
     equity_floor_pct: 0.30
     signal:
       trend_strength_max: 0.85    # WI: +1,353K, WR +0.3pp vs 0.7
-      multi_consensus_threshold: 11.0  # RL-T: CS11+RTT2.0 balanced
+      multi_consensus_threshold: 17.0  # MP-T30 WF検証済み (旧CS11)
       regime_trend_threshold_add: 2.0  # RL-T: TREND DD圧縮
 
   EURJPY:
@@ -238,15 +238,15 @@ symbols:
     # Tier 1 (WR 75%, PF 2.5)
     max_positions: 1              # マルチペア運用: per_pair=1 に統一
     bonus_score_threshold: 7.5
-    base_risk_pct: 0.02           # Tier 1: 2.0%
-    max_lot_per_trade: 2.0        # Tier 1
-    max_total_exposure_lot: 4.0   # Tier 1
+    base_risk_pct: 0.003          # MP-T30 WF検証済み (旧0.02)
+    max_lot_per_trade: 2.0
+    max_total_exposure_lot: 4.0
     signal:
       bca_min_edge: 0.70
       volume_filter_enabled: true
       volume_filter_threshold: 1.0   # T2: Profit+330K, DD -0.31pp vs OFF
       volume_filter_penalty: 0.5
-      multi_consensus_threshold: 11.0  # RL-T: CS11+RTT2.0
+      multi_consensus_threshold: 17.0  # MP-T30 WF検証済み (旧CS11)
       regime_trend_threshold_add: 2.0  # RL-T: TREND DD圧縮
     filter:
       penalty_cap: 0.5              # WI: +764K, WR -1.1pp, PF -0.04
@@ -263,15 +263,15 @@ symbols:
     max_positions: 1              # マルチペア運用: per_pair=1 に統一
     bonus_max_positions: 0
     bonus_score_threshold: 8.0
-    base_risk_pct: 0.015          # Tier 2: 1.5%
-    max_lot_per_trade: 1.5        # Tier 2
-    max_total_exposure_lot: 3.0   # Tier 2
+    base_risk_pct: 0.003          # MP-T30 WF検証済み (旧0.015)
+    max_lot_per_trade: 1.5
+    max_total_exposure_lot: 3.0
     signal:
       bca_min_edge: 0.70  # P2結果: 0.70が最良 (DD -1.4pp vs 0.65)
       volume_filter_enabled: false  # P3結果: VF効果なし
       trend_strength_max: 0.85       # IM-T30: +9.9%(6Y), DD 5.27%
       m1_micro_reversal_enabled: true  # RL-T20: +450K, WR +0.36pp, DD -0.30pp
-      multi_consensus_threshold: 12.0  # RL-T: CS12+M1MR+RTT2.0
+      multi_consensus_threshold: 17.0  # MP-T30 WF検証済み (旧CS12)
       regime_trend_threshold_add: 2.0  # RL-T: TREND DD圧縮
     filter:
       penalty_cap: 0.5              # IM-T9/T15: +6.0%(6Y), WR -0.9pp, DD 5.52%
@@ -287,16 +287,16 @@ symbols:
     # Tier 2 (WR 73%, PF 2.2)
     max_positions: 1              # マルチペア運用: per_pair=1 に統一
     bonus_score_threshold: 7.0
-    base_risk_pct: 0.015          # Tier 2: 1.5% (旧0.012)
-    max_lot_per_trade: 1.5        # Tier 2
-    max_total_exposure_lot: 3.0   # Tier 2
+    base_risk_pct: 0.003          # MP-T30 WF検証済み (旧0.015)
+    max_lot_per_trade: 1.5
+    max_total_exposure_lot: 3.0
     signal:
       bca_min_edge: 0.65  # P2結果: 0.65が最良 (PF +0.079 vs 0.55)
       volume_filter_enabled: true
       volume_filter_threshold: 1.0   # T2: Profit+80K, Sharpe +0.18 vs OFF
       volume_filter_penalty: 0.5
       trend_strength_max: 0.85       # IM-T32: +4.6%(6Y), DD 4.20%
-      multi_consensus_threshold: 12.0  # RL-T: CS12+RTT2.0
+      multi_consensus_threshold: 17.0  # MP-T30 WF検証済み (旧CS12)
       regime_trend_threshold_add: 2.0  # RL-T: TREND DD圧縮
     filter:
       penalty_cap: 0.5              # WI: +2,054K, WR -0.2pp, PF +0.03
@@ -312,16 +312,16 @@ symbols:
     # Tier 2 (WR 73%, PF 2.4)
     max_positions: 1              # マルチペア運用: per_pair=1 に統一
     bonus_score_threshold: 7.0
-    base_risk_pct: 0.015          # Tier 2: 1.5% (旧0.012)
-    max_lot_per_trade: 1.5        # Tier 2 (旧1.0)
-    max_total_exposure_lot: 3.0   # Tier 2 (旧2.0)
+    base_risk_pct: 0.003          # MP-T30 WF検証済み (旧0.015)
+    max_lot_per_trade: 1.5
+    max_total_exposure_lot: 3.0
     signal:
       bca_min_edge: 0.70  # P2結果: 0.70が最良 (Sharpe +0.73, WR +0.4pp vs 0.65)
       volume_filter_enabled: true
       volume_filter_threshold: 1.0   # T2: Profit+220K, DD -1.61pp vs OFF
       volume_filter_penalty: 0.5
       trend_strength_max: 0.85       # IM-T24: +8.5%(6Y), DD 4.60%
-      multi_consensus_threshold: 12.0  # RL-T: CS12+RTT2.0
+      multi_consensus_threshold: 17.0  # MP-T30 WF検証済み (旧CS12)
       regime_trend_threshold_add: 2.0  # RL-T: TREND DD圧縮
 
   CHFJPY:
@@ -335,13 +335,13 @@ symbols:
     # Tier 2 (WR 74%, PF 2.2)
     max_positions: 1              # マルチペア運用: per_pair=1 に統一
     bonus_score_threshold: 7.5
-    base_risk_pct: 0.015          # Tier 2: 1.5%
-    max_lot_per_trade: 1.5        # Tier 2
-    max_total_exposure_lot: 3.0   # Tier 2
+    base_risk_pct: 0.003          # MP-T30 WF検証済み (旧0.015)
+    max_lot_per_trade: 1.5
+    max_total_exposure_lot: 3.0
     signal:
       bca_min_edge: 0.70  # P2結果: 0.70が最良 (Sharpe +0.71 vs 0.60)
       trend_strength_max: 0.85       # IM-T31: +4.0%(6Y), DD 5.30%
-      multi_consensus_threshold: 11.0  # RL-T: CS11+RTT2.0
+      multi_consensus_threshold: 17.0  # MP-T30 WF検証済み (旧CS11)
       regime_trend_threshold_add: 2.0  # RL-T: TREND DD圧縮
     filter:
       penalty_cap: 0.5              # WI: +2,918K, WR +0.2pp, PF +0.05
