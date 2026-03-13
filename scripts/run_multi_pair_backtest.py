@@ -337,6 +337,7 @@ class PairContext:
     period_df: pd.DataFrame
     base_tf: Timeframe
     runner: BacktestRunner
+    fundamental_provider: any = None
 
 
 # =============================================================
@@ -664,6 +665,26 @@ def run_multi_pair_year(
             open_buy_count=b_cnt,
             open_sell_count=s_cnt,
         )
+
+        # [FUNDAMENTAL] 重要指標前スキップチェック
+        if ctx.fundamental_provider is not None:
+            from datetime import timezone as _tz
+
+            _now_utc = datetime(
+                bar_time.year,
+                bar_time.month,
+                bar_time.day,
+                bar_time.hour,
+                bar_time.minute,
+                tzinfo=_tz.utc,
+            )
+            _fctx = ctx.fundamental_provider.get_context(
+                _now_utc, sym,
+            )
+            if _fctx.has_high_impact_within_30min:
+                continue
+            if _fctx.event_caution_level >= 2:
+                continue
 
         # シグナル生成
         current_time = pd.Timestamp(bar_time)
