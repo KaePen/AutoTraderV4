@@ -876,43 +876,44 @@ class TradeHistory extends Component {
     const symbols = [...new Set(trades.map(t => t.symbol).filter(Boolean))].sort();
 
     const periods = [
-      { label: '1D', days: 1 },
-      { label: '7D', days: 7 },
-      { label: '30D', days: 30 },
-      { label: 'All', days: null },
+      { label: '全期間', days: null },
+      { label: '1日', days: 1 },
+      { label: '7日', days: 7 },
+      { label: '30日', days: 30 },
     ];
-    const periodBtns = periods.map(p => {
-      const active = this.tradeFilterDays === p.days;
-      const cls = active
-        ? 'bg-blue-600 text-white'
-        : 'bg-gray-700 text-gray-400 hover:bg-gray-600 hover:text-gray-200';
-      return `<button data-days="${p.days}" class="px-2 py-0.5 rounded text-[11px] font-medium transition-colors ${cls}">${p.label}</button>`;
-    }).join('');
+    const periodOptions = periods.map(p =>
+      `<option value="${p.days}" ${this.tradeFilterDays === p.days ? 'selected' : ''}>${p.label}</option>`
+    ).join('');
 
     const symOptions = symbols.map(s =>
       `<option value="${s}" ${s === this.tradeFilterSymbol ? 'selected' : ''}>${s}</option>`
     ).join('');
 
+    const selectCls = 'bg-gray-700 text-gray-300 text-[11px] rounded px-2 py-0.5 border border-gray-600 focus:border-blue-500 focus:outline-none';
+
     container.innerHTML = `
-      <div class="flex items-center gap-2 flex-wrap">
-        <div class="flex gap-1">${periodBtns}</div>
-        <select id="trade-filter-symbol" class="bg-gray-700 text-gray-300 text-[11px] rounded px-2 py-0.5 border border-gray-600 focus:border-blue-500 focus:outline-none">
+      <div class="flex items-center gap-2">
+        <select id="trade-filter-period" class="${selectCls}">
+          ${periodOptions}
+        </select>
+        <select id="trade-filter-symbol" class="${selectCls}">
           <option value="">全通貨</option>
           ${symOptions}
         </select>
       </div>`;
 
-    container.querySelectorAll('button[data-days]').forEach(btn => {
-      btn.addEventListener('click', () => {
-        const v = btn.dataset.days;
+    const periodSel = document.getElementById('trade-filter-period');
+    if (periodSel) {
+      periodSel.addEventListener('change', () => {
+        const v = periodSel.value;
         this.tradeFilterDays = v === 'null' ? null : Number(v);
         this._render();
       });
-    });
-    const sel = document.getElementById('trade-filter-symbol');
-    if (sel) {
-      sel.addEventListener('change', () => {
-        this.tradeFilterSymbol = sel.value || null;
+    }
+    const symSel = document.getElementById('trade-filter-symbol');
+    if (symSel) {
+      symSel.addEventListener('change', () => {
+        this.tradeFilterSymbol = symSel.value || null;
         this._render();
       });
     }
