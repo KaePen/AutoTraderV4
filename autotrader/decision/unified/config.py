@@ -120,7 +120,7 @@ class RiskConfig:
     rapid_dd_pause_duration_minutes: int = 30
     # Layer 6: 連続敗戦サーキットブレーカー
     consecutive_loss_breaker_enabled: bool = True
-    consecutive_loss_breaker_threshold: int = 5
+    consecutive_loss_breaker_threshold: int = 8
     consecutive_loss_breaker_pause_minutes: int = 60
 
 
@@ -540,12 +540,14 @@ class UnifiedBotConfig:
     # HIGH_FEAR時ペナルティ
     macro_regime_high_fear_penalty: float = 0.3
     # --- エッジ検定 ---
-    # エッジ検定有効化
+    # エッジ検定有効化（モニタリング専用、ログ出力のみ）
     edge_validator_enabled: bool = True
+    # CRITICAL時にサーキットブレーカーを自動発動するか（デフォルトOFF）
+    edge_validator_auto_cb: bool = False
     # ローリングウィンドウサイズ
     edge_validator_window: int = 100
-    # 期待勝率（BT基準）
-    edge_validator_expected_wr: float = 0.80
+    # 期待勝率（単体ペア基準: 65-78%の範囲）
+    edge_validator_expected_wr: float = 0.65
     # --- スプレッド分布モデル ---
     # スプレッド分布モデル有効化（バックテスト用）
     spread_model_enabled: bool = False

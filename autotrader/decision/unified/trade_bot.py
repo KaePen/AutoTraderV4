@@ -2684,8 +2684,11 @@ class UnifiedTradeBot:
             edge_status = self._edge_validator.record_trade(
                 trade_record,
             )
-            # CRITICAL → サーキットブレーカー発動
-            if edge_status.alert_level == EdgeAlertLevel.CRITICAL:
+            # CRITICAL → サーキットブレーカー発動（opt-in）
+            if (
+                edge_status.alert_level == EdgeAlertLevel.CRITICAL
+                and self.config.edge_validator_auto_cb
+            ):
                 logger.warning(
                     "エッジCRITICAL → サーキットブレーカー発動",
                 )
