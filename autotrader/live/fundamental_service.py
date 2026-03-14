@@ -92,6 +92,7 @@ class FundamentalService:
                     use_mt5_calendar=(cfg.use_mt5_calendar),
                     use_forex_factory=(cfg.use_forex_factory),
                     use_ff_holidays=(cfg.use_ff_holidays),
+                    use_exchange_calendars=(cfg.use_exchange_calendars),
                 )
             self.fundamental_memory = FundamentalMemoryService(
                 event_guard_minutes=(cfg.event_guard_minutes),
@@ -143,10 +144,12 @@ class FundamentalService:
                     fetch_interval_minutes=60,
                     use_mt5_calendar=True,
                     use_forex_factory=False,
-                    use_ff_holidays=True,
+                    use_ff_holidays=False,
+                    use_exchange_calendars=True,
                 )
             logger.info(
-                "[Calendar] 軽量カレンダー初期化完了（MT5 CSV + FF休日）"
+                "[Calendar] 軽量カレンダー初期化完了"
+                "（MT5 CSV + exchange_calendars休日）"
             )
         except Exception as e:
             logger.error("[Calendar] 軽量初期化失敗: %s", e)

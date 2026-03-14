@@ -13,6 +13,9 @@ from datetime import UTC, datetime, timedelta
 
 logger = logging.getLogger(__name__)
 
+from autotrader.adapters.fundamental.exchange_calendar_provider import (
+    ExchangeCalendarHolidayProvider,
+)
 from autotrader.adapters.fundamental.forex_factory import (
     ForexFactoryClient,
 )
@@ -38,7 +41,8 @@ class FundamentalDataCollector:
         fetch_interval_minutes: 取得間隔（分）
         use_mt5_calendar: MT5カレンダーを使用するか
         use_forex_factory: ForexFactoryを使用するか
-        use_ff_holidays: FF休日データのみ取得するか
+        use_ff_holidays: FF休日データのみ取得するか（非推奨、use_exchange_calendarsに移行）
+        use_exchange_calendars: exchange_calendarsで休日データを取得するか
         currencies: 対象通貨リスト
     """
 
@@ -47,7 +51,8 @@ class FundamentalDataCollector:
         fetch_interval_minutes: int = 60,
         use_mt5_calendar: bool = True,
         use_forex_factory: bool = False,
-        use_ff_holidays: bool = True,
+        use_ff_holidays: bool = False,
+        use_exchange_calendars: bool = True,
         currencies: list[str] | None = None,
         on_update: Callable | None = None,
     ) -> None:
@@ -57,7 +62,8 @@ class FundamentalDataCollector:
             fetch_interval_minutes: 取得間隔（分）
             use_mt5_calendar: MT5カレンダー使用フラグ
             use_forex_factory: ForexFactory使用フラグ
-            use_ff_holidays: FF休日のみ取得フラグ
+            use_ff_holidays: FF休日のみ取得フラグ（非推奨）
+            use_exchange_calendars: exchange_calendarsで休日取得フラグ
             currencies: 対象通貨リスト
             on_update: 収集完了時コールバック
         """
@@ -65,6 +71,11 @@ class FundamentalDataCollector:
         self._use_mt5 = use_mt5_calendar
         self._use_ff = use_forex_factory
         self._use_ff_holidays = use_ff_holidays
+        self._exc_cal_provider = (
+            ExchangeCalendarHolidayProvider()
+            if use_exchange_calendars
+            else None
+        )
         self._currencies = currencies or [
             "USD",
             "JPY",
@@ -241,7 +252,7 @@ class FundamentalDataCollector:
                     "取得エラー: %s", e,
                 )
 
-        # ForexFactory休日取得（MT5では取れない休日データ）
+        # ForexFactory休日取得（非推奨・use_exchange_calendarsが優先）
         if self._use_ff_holidays and not self._use_ff:
             try:
                 holiday_events = (
@@ -259,6 +270,27 @@ class FundamentalDataCollector:
             except Exception as e:
                 logger.debug(
                     "[Collector] FF休日取得エラー: %s",
+                    e,
+                )
+
+        # exchange_calendarsによる休日取得（FF休日の代替）
+        if self._exc_cal_provider is not None:
+            try:
+                cal_holidays = (
+                    self._exc_cal_provider.get_holiday_events(
+                        start=now - timedelta(days=1),
+                        end=now + timedelta(days=7),
+                    )
+                )
+                events.extend(cal_holidays)
+                if cal_holidays:
+                    logger.info(
+                        "[Collector] exchange_calendars休日%d件取得",
+                        len(cal_holidays),
+                    )
+            except Exception as e:
+                logger.warning(
+                    "[Collector] exchange_calendars休日取得エラー: %s",
                     e,
                 )
 
