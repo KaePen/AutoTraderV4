@@ -972,11 +972,22 @@ class LiveTradingEngine:
                 cs.buy_score or 0, cs.sell_score or 0,
             )
             if _score >= base_th and cs.rationale:
-                alerts.append({
-                    "type": "hold_constraint",
-                    "message": cs.rationale,
-                    "severity": "info",
-                })
+                _reason = cs.rationale
+                # ファンダフィルターは指標イベントアラートと重複
+                if _reason == "ファンダフィルター":
+                    pass
+                elif _reason == "primary_tfデータなし":
+                    alerts.append({
+                        "type": "hold_constraint",
+                        "message": _reason,
+                        "severity": "warning",
+                    })
+                else:
+                    alerts.append({
+                        "type": "hold_constraint",
+                        "message": _reason,
+                        "severity": "info",
+                    })
 
         return alerts
 

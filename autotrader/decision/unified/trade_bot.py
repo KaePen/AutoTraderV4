@@ -1150,7 +1150,7 @@ class UnifiedTradeBot:
                     )
                 )
             return self._hold_with_analysis(
-                consensus.reasoning,
+                "スコア不足",
                 plan,
                 tf_signals,
                 consensus,
@@ -1168,7 +1168,7 @@ class UnifiedTradeBot:
             )
             if not _edge_result.passed:
                 return self._hold_with_analysis(
-                    _edge_result.reasoning,
+                    "スコア不足",
                     plan,
                     tf_signals,
                     consensus,
@@ -1193,7 +1193,7 @@ class UnifiedTradeBot:
             )
             if _mr_result.should_filter:
                 return self._hold_with_analysis(
-                    _mr_result.reason,
+                    "スコア不足",
                     plan,
                     tf_signals,
                     consensus,
@@ -1213,7 +1213,7 @@ class UnifiedTradeBot:
             )
             if not _gate_result.passed:
                 return self._hold_with_analysis(
-                    _gate_result.reason,
+                    "スコア不足",
                     plan,
                     tf_signals,
                     consensus,
@@ -1231,11 +1231,7 @@ class UnifiedTradeBot:
             _effective_threshold = consensus.threshold + _fund_adj
             if consensus.score < _effective_threshold:
                 return self._hold_with_analysis(
-                    f"ファンダフィルター: "
-                    f"bias={_fund_assessment.effective_bias:+.2f}"
-                    f", adj={_fund_adj:+.1f}"
-                    f", score={consensus.score:.1f}"
-                    f"<{_effective_threshold:.1f}",
+                    "ファンダフィルター",
                     plan,
                     tf_signals,
                     consensus,
@@ -1371,21 +1367,14 @@ class UnifiedTradeBot:
                             htf_passed=False,
                             htf_direction=consensus.direction.value,
                             final_direction="HOLD",
-                            hold_reason=(
-                                f"HTFトレンド不一致"
-                                f"({consensus.direction.value})"
-                            ),
+                            hold_reason="HTFトレンド不一致",
                         )
                     )
-                return _filt_hold(
-                    f"HTFトレンド不一致({consensus.direction.value})"
-                )
+                return _filt_hold("HTFトレンド不一致")
 
             # SoftGuardペナルティによるブロック（常時有効）
             if sg_result.total_penalty >= 0.8:
-                return _filt_hold(
-                    f"SoftGuardブロック: penalty={sg_result.total_penalty:.2f}"
-                )
+                return _filt_hold("SoftGuardブロック")
 
             # ペナルティ上限フィルター（アダプティブ調整対応）
             _eff_penalty_cap = (
@@ -1395,11 +1384,7 @@ class UnifiedTradeBot:
                 _eff_penalty_cap < 0.8
                 and sg_result.total_penalty >= _eff_penalty_cap
             ):
-                return _filt_hold(
-                    f"ペナルティ上限: "
-                    f"{sg_result.total_penalty:.2f}"
-                    f" >= {_eff_penalty_cap:.2f}"
-                )
+                return _filt_hold("SoftGuardブロック")
 
             # トレンド強度上限フィルター
             if (
@@ -1407,21 +1392,14 @@ class UnifiedTradeBot:
                 and regime_result.trend_strength
                 >= self.config.trend_strength_max
             ):
-                return _filt_hold(
-                    f"トレンド強度過大: "
-                    f"{regime_result.trend_strength:.2f}"
-                    f" >= {self.config.trend_strength_max}"
-                )
+                return _filt_hold("パラメータブロック")
 
             # ADX上限フィルタ（追いかけ防止）
             if (
                 self.config.adx_upper_limit is not None
                 and regime_result.adx > self.config.adx_upper_limit
             ):
-                return _filt_hold(
-                    f"ADX上限: {regime_result.adx:.1f}"
-                    f" > {self.config.adx_upper_limit}"
-                )
+                return _filt_hold("パラメータブロック")
 
             # TREND整合TF上限フィルタ
             if (
@@ -1430,19 +1408,11 @@ class UnifiedTradeBot:
                 and len(consensus.aligned_tfs)
                 > self.config.trend_max_aligned_tfs
             ):
-                return _filt_hold(
-                    f"TREND整合TF過多: "
-                    f"{len(consensus.aligned_tfs)}"
-                    f" > "
-                    f"{self.config.trend_max_aligned_tfs}"
-                )
+                return _filt_hold("パラメータブロック")
 
             # LONDONオフ時間ブロック（hour=7はLONDON境界）
             if hour_utc == 7 and sg_result.total_penalty > 0:
-                return _filt_hold(
-                    f"LONDONオフ時間ブロック: hour={hour_utc}, "
-                    f"penalty={sg_result.total_penalty:.2f}"
-                )
+                return _filt_hold("時間帯ブロック")
 
             # TOKYOオフ時間フィルター（閾値6.6）
             if (
@@ -1450,10 +1420,7 @@ class UnifiedTradeBot:
                 and sg_result.total_penalty > 0
                 and consensus.score < 6.6
             ):
-                return _filt_hold(
-                    f"TOKYOオフ時間フィルター: hour={hour_utc}, "
-                    f"score={consensus.score:.1f}<6.6"
-                )
+                return _filt_hold("時間帯ブロック")
 
             # 東京深夜フィルター（JST 02-06 = UTC 17-21）
             # 東京深夜は流動性低下でトレンド追従が困難
@@ -1462,12 +1429,7 @@ class UnifiedTradeBot:
                 and regime_result.regime == MarketRegime.TREND
                 and consensus.score < consensus.threshold + 0.3
             ):
-                _tn_threshold = consensus.threshold + 0.3
-                return _filt_hold(
-                    f"東京深夜TREND: hour={hour_utc}, "
-                    f"score={consensus.score:.1f}"
-                    f"<{_tn_threshold:.1f}"
-                )
+                return _filt_hold("時間帯ブロック")
 
             # off_hours TREND完全ブロック
             # optimal_hours(UTC 8-17)外のTRENDを全てブロック
@@ -1476,7 +1438,7 @@ class UnifiedTradeBot:
                 and hour_utc not in range(8, 18)
                 and regime_result.regime == MarketRegime.TREND
             ):
-                return _filt_hold(f"OffHoursTRENDBlock: hour={hour_utc}")
+                return _filt_hold("時間帯ブロック")
 
             # off_hours + 高htf_alignment 複合ブロック
             if (
@@ -1485,10 +1447,7 @@ class UnifiedTradeBot:
                 and abs(htf_alignment)
                 >= self.config.off_hours_high_align_threshold
             ):
-                return _filt_hold(
-                    f"OffHoursHighAlignBlock: hour={hour_utc},"
-                    f" |align|={abs(htf_alignment):.2f}"
-                )
+                return _filt_hold("時間帯ブロック")
 
             # RANGE/LOW_VOLフィルタ群
             _range_hold = self._check_range_regime_filter(
@@ -1508,19 +1467,14 @@ class UnifiedTradeBot:
                 and 0 < sg_result.total_penalty <= 0.2
                 and consensus.score < consensus.threshold + 0.2
             ):
-                return _filt_hold(
-                    f"TOKYO低penalty閾値: penalty="
-                    f"{sg_result.total_penalty:.2f}, "
-                    f"score={consensus.score:.1f}"
-                    f"<{consensus.threshold + 0.2:.1f}"
-                )
+                return _filt_hold("SoftGuardブロック")
 
             # MACDスロープ逆方向フィルター
             _primary_sig = tf_signals.get(plan.primary_tf)
             if _primary_sig and _primary_sig.score_breakdown:
                 _macd_slope = _primary_sig.score_breakdown.macd_slope
                 if _macd_slope <= self.config.macd_slope_filter_threshold:
-                    return _filt_hold(f"MACDスロープ逆方向: {_macd_slope:.1f}")
+                    return _filt_hold("レジームブロック")
 
         # 高alignment時スコアペナルティ
         if (
@@ -1546,11 +1500,7 @@ class UnifiedTradeBot:
             )
             # ペナルティ後にスコアが閾値未満ならHOLD
             if consensus.score < consensus.threshold:
-                return _filt_hold(
-                    f"高alignment penalty: score="
-                    f"{consensus.score:.1f}"
-                    f"<{consensus.threshold:.1f}"
-                )
+                return _filt_hold("SoftGuardブロック")
 
         # SL/TP計算（primary_tf由来）
         primary_signal = tf_signals.get(plan.primary_tf)
@@ -1741,7 +1691,7 @@ class UnifiedTradeBot:
             )
             sizing_result = self.position_sizer.calculate(sizing_context)
             if sizing_result.blocked:
-                return _filt_hold(f"資金管理: {sizing_result.reasoning}")
+                return _filt_hold("資金不足")
             lot = sizing_result.lot
 
         rationale = (
@@ -2249,20 +2199,14 @@ class UnifiedTradeBot:
             regime_result.regime == MarketRegime.LOW_VOL
             and consensus.score < consensus.threshold + _lv_margin
         ):
-            return (
-                f"LOW_VOL制限: score={consensus.score:.2f}"
-                f" < threshold+{_lv_margin}="
-                f"{consensus.threshold + _lv_margin:.2f}"
-            )
+            return "レジームブロック"
 
         # RANGE + トレンド弱制限
         if (
             regime_result.regime == MarketRegime.RANGE
             and regime_result.trend_strength < self._WEAK_TREND_THRESHOLD
         ):
-            return (
-                f"RANGE制限: trend_strength={regime_result.trend_strength:.2f}"
-            )
+            return "レジームブロック"
 
         # RANGE ペナルティ+低ボラ制限
         if (
@@ -2277,15 +2221,7 @@ class UnifiedTradeBot:
                 _bb_val is not None
                 and _bb_val < self.config.range_day_bbw_threshold
             ):
-                return (
-                    f"RANGE低ボラ制限: "
-                    f"penalty="
-                    f"{sg_result.total_penalty:.2f}"
-                    f", bb_width="
-                    f"{_bb_val:.4f}"
-                    f"<"
-                    f"{self.config.range_day_bbw_threshold}"
-                )
+                return "レジームブロック"
 
         # Weak Hours RANGEフィルター
         if (
@@ -2295,14 +2231,7 @@ class UnifiedTradeBot:
             and consensus.score
             < consensus.threshold + self.config.weak_hours_score_premium
         ):
-            _wh_threshold = (
-                consensus.threshold + self.config.weak_hours_score_premium
-            )
-            return (
-                f"WeakHours RANGE: hour={hour_utc}, "
-                f"score={consensus.score:.1f}"
-                f"<{_wh_threshold:.1f}"
-            )
+            return "レジームブロック"
 
         # RANGEスコアプレミアム
         _score_premium = self.config.range_day_score_premium
@@ -2311,12 +2240,7 @@ class UnifiedTradeBot:
             and regime_result.regime == MarketRegime.RANGE
             and consensus.score < consensus.threshold + _score_premium
         ):
-            return (
-                f"RANGEスコアプレミアム: "
-                f"score={consensus.score:.1f}"
-                f"<"
-                f"{consensus.threshold + _score_premium:.1f}"
-            )
+            return "レジームブロック"
 
         return None
 

@@ -160,7 +160,7 @@ symbols:
     default_tp_pips: 30.0
     # AUDUSD最適化結果 (2026-03-09, 2023-2025検証, pip_value修正後)
     # +9.7M, WR 72.8%, MaxDD 7.98%, Trades 3,214
-    max_positions: 1              # マルチペア運用: per_pair=1 に統一
+    max_positions: 0              # 不採用ペア: トレード無効化
     bonus_score_threshold: 7.0
     base_risk_pct: 0.01
     max_lot_per_trade: 1.5
@@ -176,7 +176,7 @@ symbols:
     default_tp_pips: 30.0
     # NZDUSD最適化結果 (2026-03-09, 2023-2025検証, pip_value修正後)
     # +3.5M, WR 70.3%, MaxDD 7.29%, Trades 2,204
-    max_positions: 1
+    max_positions: 0              # 不採用ペア: トレード無効化
     bonus_score_threshold: 7.0
     base_risk_pct: 0.01
     max_lot_per_trade: 1.5
@@ -190,7 +190,7 @@ symbols:
     slippage_pips: 0.3
     default_sl_pips: 15.0
     default_tp_pips: 30.0
-    max_positions: 1              # マルチペア運用: per_pair=1 に統一
+    max_positions: 0              # 不採用ペア: トレード無効化
     bonus_score_threshold: 7.0
     base_risk_pct: 0.02
     max_lot_per_trade: 2.0
@@ -203,7 +203,7 @@ symbols:
     slippage_pips: 0.5
     default_sl_pips: 15.0
     default_tp_pips: 30.0
-    max_positions: 1              # マルチペア運用: per_pair=1 に統一
+    max_positions: 0              # 不採用ペア: トレード無効化
     bonus_score_threshold: 7.0
     base_risk_pct: 0.02
     max_lot_per_trade: 2.0
