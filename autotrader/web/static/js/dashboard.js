@@ -1,5 +1,11 @@
 /** ダッシュボードロジック - コンポーネントベース */
 
+// 自動トレード有効ペア（symbol_presets.yaml の 8ペア構成と同期）
+const ACTIVE_TRADE_PAIRS = new Set([
+  'USDJPY', 'EURJPY', 'GBPJPY', 'AUDJPY', 'CADJPY', 'CHFJPY',
+  'EURUSD', 'GBPUSD',
+]);
+
 // ── パネル折りたたみユーティリティ ──
 
 const PanelCollapser = {
@@ -1423,6 +1429,7 @@ class TradingControl extends Component {
 
   async handleDropdownDemoToggle(symbol) {
     if (this.tcBusy) return;
+    if (!ACTIVE_TRADE_PAIRS.has(symbol)) return;
     const m = this._dataFlow.get('tradingMode');
     const symbolDemoStates = (m && m.symbol_demo_mode) || {};
     const currentOn = Object.prototype.hasOwnProperty.call(symbolDemoStates, symbol)
@@ -1451,6 +1458,7 @@ class TradingControl extends Component {
 
   async handleDropdownAutoToggle(symbol) {
     if (this.tcBusy) return;
+    if (!ACTIVE_TRADE_PAIRS.has(symbol)) return;
     const m = this._dataFlow.get('tradingMode');
     const symbolAutoStates = (m && m.symbol_auto_trade) || {};
     const symbolDemoStates = (m && m.symbol_demo_mode) || {};
@@ -1642,22 +1650,28 @@ class TradingControl extends Component {
       const demoOn = Object.prototype.hasOwnProperty.call(symbolDemoStates, pair) ? symbolDemoStates[pair] : false;
 
       let toggleHtml = '';
+      const isActivePair = ACTIVE_TRADE_PAIRS.has(pair);
       if (isConnected) {
         const busy = self.tcBusy;
-        const disabledAttr = busy ? ' disabled' : '';
-        const disabledCls = busy ? ' opacity-50 cursor-not-allowed' : '';
-        const demoCls = demoOn
-          ? 'bg-orange-500/25 text-orange-400 border border-orange-600/50 hover:bg-orange-500/40'
-          : 'bg-gray-700/80 text-gray-500 border border-gray-600/50 hover:bg-gray-600/80 hover:text-gray-300';
-        const autoCls = autoOn
-          ? (demoOn ? 'bg-orange-600 text-white hover:bg-orange-700' : 'bg-red-600 text-white hover:bg-red-700')
-          : 'bg-green-600/90 text-white hover:bg-green-700';
-        const autoLabel = autoOn ? 'ON' : 'OFF';
+        const inactive = !isActivePair;
+        const disabledAttr = (busy || inactive) ? ' disabled' : '';
+        const disabledCls = (busy || inactive) ? ' opacity-50 cursor-not-allowed' : '';
+        const demoCls = inactive
+          ? 'bg-gray-800 text-gray-600 border border-gray-700'
+          : demoOn
+            ? 'bg-orange-500/25 text-orange-400 border border-orange-600/50 hover:bg-orange-500/40'
+            : 'bg-gray-700/80 text-gray-500 border border-gray-600/50 hover:bg-gray-600/80 hover:text-gray-300';
+        const autoCls = inactive
+          ? 'bg-gray-800 text-gray-600 border border-gray-700'
+          : autoOn
+            ? (demoOn ? 'bg-orange-600 text-white hover:bg-orange-700' : 'bg-red-600 text-white hover:bg-red-700')
+            : 'bg-green-600/90 text-white hover:bg-green-700';
+        const autoLabel = inactive ? '—' : (autoOn ? 'ON' : 'OFF');
         toggleHtml = `<div class="flex items-center gap-1 flex-shrink-0 ml-auto">
           <button data-action="demo" data-symbol="${pair}"${disabledAttr}
-                  class="px-1.5 py-0.5 rounded text-[10px] font-bold transition-all min-w-[3rem] text-center ${demoCls}${disabledCls}" title="デモモード">DEMO</button>
+                  class="px-1.5 py-0.5 rounded text-[10px] font-bold transition-all min-w-[3rem] text-center ${demoCls}${disabledCls}" title="${inactive ? '非採用ペア' : 'デモモード'}">DEMO</button>
           <button data-action="auto" data-symbol="${pair}"${disabledAttr}
-                  class="px-1.5 py-0.5 rounded text-[10px] font-bold transition-all min-w-[3rem] text-center ${autoCls}${disabledCls}" title="自動トレード">${autoLabel}</button>
+                  class="px-1.5 py-0.5 rounded text-[10px] font-bold transition-all min-w-[3rem] text-center ${autoCls}${disabledCls}" title="${inactive ? '非採用ペア' : '自動トレード'}">${autoLabel}</button>
         </div>`;
       }
 
@@ -1676,14 +1690,15 @@ class TradingControl extends Component {
 
     list.innerHTML = symbolGroups.map((group, groupIdx) => {
       const divider = groupIdx > 0 ? '<div class="border-t border-gray-700/60 my-1"></div>' : '';
-      // グループ内の状態集計
+      // グループ内のアクティブペアのみで状態集計
+      const activePairs = group.pairs.filter(p => ACTIVE_TRADE_PAIRS.has(p));
       let groupToggleHtml = '';
-      if (isConnected) {
+      if (isConnected && activePairs.length > 0) {
         const busy = self.tcBusy;
         const disabledAttr = busy ? ' disabled' : '';
         const disabledCls = busy ? ' opacity-50 cursor-not-allowed' : '';
-        const allDemo = group.pairs.every(p => symbolDemoStates[p]);
-        const allAuto = group.pairs.every(p => symbolAutoStates[p]);
+        const allDemo = activePairs.every(p => symbolDemoStates[p]);
+        const allAuto = activePairs.every(p => symbolAutoStates[p]);
         const demoCls = allDemo
           ? 'bg-orange-500/25 text-orange-400 border border-orange-600/50 hover:bg-orange-500/40'
           : 'bg-gray-700/80 text-gray-500 border border-gray-600/50 hover:bg-gray-600/80 hover:text-gray-300';
@@ -1692,9 +1707,9 @@ class TradingControl extends Component {
           : 'bg-green-600/90 text-white hover:bg-green-700';
         const autoLabel = allAuto ? 'ALL ON' : 'ALL OFF';
         groupToggleHtml = `<div class="flex items-center gap-1 ml-auto">
-          <button data-group-action="demo" data-group-pairs="${group.pairs.join(',')}"${disabledAttr}
+          <button data-group-action="demo" data-group-pairs="${activePairs.join(',')}"${disabledAttr}
                   class="px-1.5 py-0.5 rounded text-[10px] font-bold transition-all min-w-[3rem] text-center ${demoCls}${disabledCls}">DEMO</button>
-          <button data-group-action="auto" data-group-pairs="${group.pairs.join(',')}"${disabledAttr}
+          <button data-group-action="auto" data-group-pairs="${activePairs.join(',')}"${disabledAttr}
                   class="px-1.5 py-0.5 rounded text-[10px] font-bold transition-all min-w-[3rem] text-center ${autoCls}${disabledCls}">${autoLabel}</button>
         </div>`;
       }
