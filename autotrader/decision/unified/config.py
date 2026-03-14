@@ -52,6 +52,18 @@ class EvaluatorConfig:
     ema_cross_penalty: float | None = (
         None  # EMAクロス矛盾ペナルティ（None=-2.5）
     )
+    # --- MACDスロープスコアリング ---
+    # ATR比デッドゾーン（0.0=無効、0.01=ATR1%未満の変化を無視）
+    macd_slope_deadzone_atr_ratio: float = 0.0
+    # MACDスロープ順方向ボーナス
+    macd_slope_bonus: float = 2.5
+    # MACDスロープ逆方向ペナルティ（正の値、内部で減算）
+    macd_slope_penalty: float = 2.0
+    # --- HTF整合スコアリング ---
+    # HTF強整合ボーナス（2TF以上一致）
+    htf_align_bonus_strong: float = 4.0
+    # HTF弱整合ボーナス（1TF一致）
+    htf_align_bonus_weak: float = 2.0
 
 
 @dataclass(frozen=True)
@@ -519,6 +531,18 @@ class UnifiedBotConfig:
     atr_sizing_threshold: float = 1.5
     # 最大縮小率（0.5=最大50%縮小）
     atr_sizing_max_reduction: float = 0.5
+    # --- MACDスロープスコアリング ---
+    # ATR比デッドゾーン（0.0=無効、0.01=ATR1%未満の変化を無視）
+    macd_slope_deadzone_atr_ratio: float = 0.0
+    # MACDスロープ順方向ボーナス
+    macd_slope_bonus: float = 2.5
+    # MACDスロープ逆方向ペナルティ（正の値、内部で減算）
+    macd_slope_penalty: float = 2.0
+    # --- HTF整合スコアリング ---
+    # HTF強整合ボーナス（2TF以上一致）
+    htf_align_bonus_strong: float = 4.0
+    # HTF弱整合ボーナス（1TF一致）
+    htf_align_bonus_weak: float = 2.0
 
     def get_evaluator_config(self, timeframe: str) -> EvaluatorConfig:
         """時間足別評価器設定を取得
@@ -529,23 +553,31 @@ class UnifiedBotConfig:
         Returns:
             EvaluatorConfig: 評価器設定
         """
+        # ボットレベルの共通パラメータ
+        common = dict(
+            pip_unit=self.pip_unit,
+            macd_slope_deadzone_atr_ratio=(
+                self.macd_slope_deadzone_atr_ratio
+            ),
+            macd_slope_bonus=self.macd_slope_bonus,
+            macd_slope_penalty=self.macd_slope_penalty,
+            htf_align_bonus_strong=self.htf_align_bonus_strong,
+            htf_align_bonus_weak=self.htf_align_bonus_weak,
+        )
         if timeframe in self.evaluator_configs:
             cfg = self.evaluator_configs[timeframe]
-            if cfg.pip_unit != self.pip_unit:
-                # pip_unitをボット設定から伝搬
-                cfg = EvaluatorConfig(
-                    timeframe=cfg.timeframe,
-                    strength_config=cfg.strength_config,
-                    min_score=cfg.min_score,
-                    atr_sl_multiplier=cfg.atr_sl_multiplier,
-                    atr_tp_multiplier=cfg.atr_tp_multiplier,
-                    pip_unit=self.pip_unit,
-                    ema_cross_penalty=cfg.ema_cross_penalty,
-                )
-            return cfg
+            return EvaluatorConfig(
+                timeframe=cfg.timeframe,
+                strength_config=cfg.strength_config,
+                min_score=cfg.min_score,
+                atr_sl_multiplier=cfg.atr_sl_multiplier,
+                atr_tp_multiplier=cfg.atr_tp_multiplier,
+                ema_cross_penalty=cfg.ema_cross_penalty,
+                **common,
+            )
         return EvaluatorConfig(
             timeframe=timeframe,
-            pip_unit=self.pip_unit,
+            **common,
         )
 
     def to_signal_config(self) -> SignalConfig:

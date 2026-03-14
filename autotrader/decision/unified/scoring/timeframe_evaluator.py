@@ -345,20 +345,36 @@ class TimeframeEvaluator:
         if macd_hist_slope is not None and not pd.isna(
             macd_hist_slope
         ):
-            if buy_score > 0 and macd_hist_slope > 0:
-                buy_score += 2.5
-                _bd_macd_slope = 2.5
-                reasons.append("MACD加速↑")
-            elif sell_score > 0 and macd_hist_slope < 0:
-                sell_score += 2.5
-                _bd_macd_slope = 2.5
-                reasons.append("MACD加速↓")
-            elif buy_score > 0 and macd_hist_slope < 0:
-                buy_score -= 2.0
-                _bd_macd_slope = -2.0
-            elif sell_score > 0 and macd_hist_slope > 0:
-                sell_score -= 2.0
-                _bd_macd_slope = -2.0
+            _slope_active = True
+            # デッドゾーン判定（ATR比で微小変化を無視）
+            dz = self.config.macd_slope_deadzone_atr_ratio
+            if dz > 0:
+                atr = row.get("atr_14")
+                if (
+                    atr is not None
+                    and not pd.isna(atr)
+                    and atr > 0
+                    and abs(macd_hist_slope) / atr < dz
+                ):
+                    _slope_active = False
+
+            if _slope_active:
+                _bonus = self.config.macd_slope_bonus
+                _pen = self.config.macd_slope_penalty
+                if buy_score > 0 and macd_hist_slope > 0:
+                    buy_score += _bonus
+                    _bd_macd_slope = _bonus
+                    reasons.append("MACD加速↑")
+                elif sell_score > 0 and macd_hist_slope < 0:
+                    sell_score += _bonus
+                    _bd_macd_slope = _bonus
+                    reasons.append("MACD加速↓")
+                elif buy_score > 0 and macd_hist_slope < 0:
+                    buy_score -= _pen
+                    _bd_macd_slope = -_pen
+                elif sell_score > 0 and macd_hist_slope > 0:
+                    sell_score -= _pen
+                    _bd_macd_slope = -_pen
 
         # ダイバージェンス（逆行はペナルティ）
         bull_div = row.get("is_bullish_div", False)
@@ -736,9 +752,15 @@ class TimeframeEvaluator:
 
         # 整合性に応じたボーナスのみ
         if aligned_count >= 2:
-            return 4.0, f"HTF強整合({aligned_count}TF)"
+            return (
+                self.config.htf_align_bonus_strong,
+                f"HTF強整合({aligned_count}TF)",
+            )
         elif aligned_count >= 1:
-            return 2.0, f"HTF整合({aligned_count}TF)"
+            return (
+                self.config.htf_align_bonus_weak,
+                f"HTF整合({aligned_count}TF)",
+            )
         return 0.0, ""
 
     def _get_htf_row(
