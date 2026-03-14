@@ -11,9 +11,12 @@
 from __future__ import annotations
 
 import dataclasses
+import logging
 from dataclasses import dataclass, field, replace
 from datetime import date, datetime, timedelta
 from typing import TYPE_CHECKING
+
+logger = logging.getLogger(__name__)
 
 import pandas as pd
 
