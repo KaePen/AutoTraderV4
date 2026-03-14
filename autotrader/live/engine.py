@@ -146,6 +146,8 @@ class LiveTradingEngine:
         self._symbol_demo_mode: dict[str, bool] = {}
         # チケット→トレードID マッピング（DB記録用）
         self._open_trades: dict[int, str] = {}
+        # 外部決済検出リトライカウンター（誤検知防止）
+        self._ext_close_retries: dict[int, int] = {}
         # クローズ済みトレード履歴（インメモリ）
         self._closed_trades: list[dict] = []
         # MT5 tick高速ポーリング用（最終tickのms単位時刻）
@@ -320,6 +322,7 @@ class LiveTradingEngine:
         self._last_full_tick_time = 0.0
         self._cached_positions = []
         self._open_trades = {}
+        self._ext_close_retries = {}
 
         # 7. エンジン実行中なら過去データ再読込+ポジション同期
         if self._running:
@@ -1786,16 +1789,38 @@ class LiveTradingEngine:
                 exit_price,
                 profit_loss,
             )
+            # 確定したのでリトライカウンターをクリア
+            self._ext_close_retries.pop(ticket, None)
         else:
-            # 約定履歴取得失敗時はティック価格をフォールバックに使用
+            # 決済約定が見つからない＝まだオープンの可能性
+            # MT5が一時的に空リストを返した場合の誤検知を防止
+            # （_close_ghost_db_recordsと同じ安全ガード）
+            retry = self._ext_close_retries.get(ticket, 0) + 1
+            self._ext_close_retries[ticket] = retry
+            _max_retries = 30  # 約30秒間（1秒tick間隔）
+            if retry < _max_retries:
+                logger.info(
+                    "外部決済の約定履歴未検出: ticket=%d"
+                    " → 確認待機中 (%d/%d)",
+                    ticket,
+                    retry,
+                    _max_retries,
+                )
+                # _open_tradesから除去しない → 次tickで再検出
+                return
+            # 閾値到達: 本当に決済済みと判断
+            logger.warning(
+                "外部決済の約定履歴が%d回連続未検出:"
+                " ticket=%d → フォールバック記録",
+                _max_retries,
+                ticket,
+            )
             exit_price = 0.0
-            # ポジションのシンボルを特定してティックを取得
             _tick_symbol = trade_symbol or self._active_symbol
             try:
                 tick = await self._data_provider.get_tick(_tick_symbol)
                 _bid = float(tick.get("bid", 0))
                 _ask = float(tick.get("ask", 0))
-                # 方向不明のためmid価格をフォールバック
                 if _bid > 0 and _ask > 0:
                     exit_price = (_bid + _ask) / 2
                 elif _bid > 0:
@@ -1804,12 +1829,7 @@ class LiveTradingEngine:
                 pass
             profit_loss = 0.0
             exit_reason = ExitReason.EXTERNAL_CLOSE.value
-            logger.warning(
-                "外部決済の約定履歴取得失敗: ticket=%d"
-                " → フォールバック価格=%.5f で記録",
-                ticket,
-                exit_price,
-            )
+            self._ext_close_retries.pop(ticket, None)
         self._write_close_to_db(ticket, exit_price, exit_reason, profit_loss)
         # ローカルDB管理状態を削除
         self._delete_position_state(str(ticket))
@@ -2040,6 +2060,17 @@ class LiveTradingEngine:
             self._restore_open_trades_from_db(
                 [pos.ticket for pos in positions]
             )
+
+        # MT5に復帰したチケットのリトライカウンターをリセット
+        if self._ext_close_retries:
+            recovered = set(self._ext_close_retries.keys()) & current_tickets
+            for t in recovered:
+                logger.info(
+                    "MT5にポジション復帰: ticket=%d"
+                    " → 外部決済リトライ取消",
+                    t,
+                )
+                self._ext_close_retries.pop(t, None)
 
         # 外部決済（手動/SL/TP）の検出:
         # _open_tradesにあるが現在MT5に存在しないticket
