@@ -566,8 +566,8 @@ class PositionPanel extends Component {
         priceRowHtml = `
           <div class="grid grid-cols-4 text-center gap-1 mb-2">
             <div><div class="text-[9px] text-gray-600 mb-0.5">SL</div><div class="text-[10px] tabular-nums text-red-400">${sl.toFixed(digits)}</div></div>
-            <div><div class="text-[9px] text-gray-600 mb-0.5">Entry</div><div class="text-[10px] tabular-nums text-gray-400">${entry.toFixed(digits)}</div></div>
-            <div><div class="text-[9px] text-gray-600 mb-0.5">Now</div><div class="text-[10px] tabular-nums font-semibold ${pnlColor}">${now.toFixed(digits)}</div></div>
+            <div><div class="text-[9px] text-gray-600 mb-0.5">約定</div><div class="text-[10px] tabular-nums text-gray-400">${entry.toFixed(digits)}</div></div>
+            <div><div class="text-[9px] text-gray-600 mb-0.5">現在</div><div class="text-[10px] tabular-nums font-semibold ${pnlColor}">${now.toFixed(digits)}</div></div>
             <div><div class="text-[9px] text-gray-600 mb-0.5">TP</div><div class="text-[10px] tabular-nums text-green-400">${tp.toFixed(digits)}</div></div>
           </div>`;
 
@@ -592,7 +592,7 @@ class PositionPanel extends Component {
     } else {
       priceRowHtml = `
         <div class="flex items-center gap-2 text-[11px] tabular-nums mb-2">
-          <span class="text-gray-500">Entry</span>
+          <span class="text-gray-500">約定</span>
           <span class="text-gray-400">${p.entry_price.toFixed(digits)}</span>
           <span class="text-gray-600">&rarr;</span>
           <span class="font-semibold ${pnlColor}">${p.current_price.toFixed(digits)}</span>
@@ -998,7 +998,7 @@ class TradeHistory extends Component {
     tableEl.innerHTML = `
       <table class="table">
         <thead class="sticky top-0 bg-gray-800 z-10">
-          <tr><th>Entry日時</th><th>Exit日時</th><th>通貨</th><th>方向</th><th>Lot</th><th>Entry</th><th>Exit</th><th>ステータス</th><th class="text-right">損益</th></tr>
+          <tr><th>約定日時</th><th>決済日時</th><th>通貨</th><th>方向</th><th>数量</th><th>約定価格</th><th>決済価格</th><th>状態</th><th class="text-right">損益</th></tr>
         </thead>
         <tbody>${rows}</tbody>
       </table>`;
