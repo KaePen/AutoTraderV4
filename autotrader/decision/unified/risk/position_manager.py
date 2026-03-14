@@ -332,6 +332,10 @@ class PositionManagerConfig:
     pre_event_profit_close: bool = True
     pre_event_loss_tighten: bool = True
     pre_event_tighten_r: float = -0.3
+    # 週末前ポジション強制クローズ（金曜日の指定時刻UTC以降）
+    weekend_close_enabled: bool = True
+    weekend_close_hour: int = 20
+    weekend_close_minute: int = 30
 
 
 class PositionManager:
@@ -602,7 +606,18 @@ class PositionManager:
                 )
                 return action
 
-        # 3.7 指標前ポジション管理
+        # 3.7 週末前強制クローズ
+        if self.config.weekend_close_enabled:
+            action = self._check_weekend_close(
+                position, current_price, current_time,
+            )
+            if action is not None:
+                self._try_state_transition(
+                    position, action,
+                )
+                return action
+
+        # 3.8 指標前ポジション管理
         if self.config.pre_event_exit_enabled:
             action = self._check_pre_event_exit(
                 position, current_price,
@@ -1316,6 +1331,45 @@ class PositionManager:
                         f" ({mins:.0f}分前)",
                     )
         return None
+
+    def _check_weekend_close(
+        self,
+        position: ManagedPosition,
+        current_price: float,
+        current_time: datetime,
+    ) -> ManagementAction | None:
+        """週末前強制クローズチェック
+
+        金曜日の指定時刻（UTC）以降は全ポジションを強制決済する。
+        週末のギャップリスクによる予期しない損失を防ぐため。
+
+        Args:
+            position: 管理対象ポジション
+            current_price: 現在価格
+            current_time: 現在時刻（UTC）
+
+        Returns:
+            ManagementAction | None: 強制クローズアクション
+        """
+        # 金曜日（weekday=4）の指定時刻以降のみ発動
+        if current_time.weekday() != 4:
+            return None
+        cutoff = (
+            current_time.hour > self.config.weekend_close_hour
+            or (
+                current_time.hour == self.config.weekend_close_hour
+                and current_time.minute >= self.config.weekend_close_minute
+            )
+        )
+        if not cutoff:
+            return None
+
+        return ManagementAction.full_close(
+            f"週末前強制クローズ "
+            f"({current_time.hour:02d}:{current_time.minute:02d} UTC)",
+            exit_reason=ExitReason.WEEKEND_CLOSE,
+            trigger_price=current_price,
+        )
 
     def _check_partial_close(
         self,

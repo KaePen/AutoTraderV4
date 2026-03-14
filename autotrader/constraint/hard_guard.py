@@ -26,6 +26,7 @@ class HardGuardReason(Enum):
     FUNDAMENTAL_CAUTION = "fundamental_caution"
     LOW_LIQUIDITY_HOLIDAY = "low_liquidity_holiday"
     SESSION_TRANSITION = "session_transition"
+    WEEKEND_CUTOFF = "weekend_cutoff"
 
 
 @dataclass(frozen=True)
@@ -41,6 +42,8 @@ class HardGuardConfig:
         fundamental_holiday_liquidity_block: 休日流動性ブロック閾値
         session_transition_wait_enabled: セッション切替待機有効化
         session_transition_wait_minutes: セッション切替待機時間（分）
+        weekend_entry_cutoff_enabled: 週末前エントリー禁止を有効にするか
+        weekend_entry_cutoff_hour: 金曜日のエントリー禁止開始時刻（UTC）
     """
 
     max_daily_loss_pct: float = 5.0
@@ -51,6 +54,9 @@ class HardGuardConfig:
     fundamental_holiday_liquidity_block: float = 0.3
     session_transition_wait_enabled: bool = True
     session_transition_wait_minutes: int = 30
+    # 週末前エントリー禁止（金曜21時UTC以降）
+    weekend_entry_cutoff_enabled: bool = True
+    weekend_entry_cutoff_hour: int = 21
 
 
 @dataclass(frozen=True)
@@ -167,6 +173,40 @@ class HardGuard:
 
         if hour in self.config.blocked_hours:
             return False, f"取引禁止時間帯: {hour}時"
+
+        return True, None
+
+    def check_weekend_cutoff(
+        self, context: dict
+    ) -> tuple[bool, str | None]:
+        """週末前エントリー禁止チェック（エントリー時専用）
+
+        金曜日の指定時刻（UTC）以降は新規エントリーを禁止する。
+        週末のギャップリスクを回避するため。
+
+        Args:
+            context: コンテキスト
+
+        Returns:
+            tuple[bool, str | None]: (OK, 理由)
+        """
+        if not self.config.weekend_entry_cutoff_enabled:
+            return True, None
+
+        current_time: datetime | None = context.get("current_time")
+        if current_time is None:
+            return True, None
+
+        # 金曜日（weekday=4）の指定時刻以降はエントリー禁止
+        if (
+            current_time.weekday() == 4
+            and current_time.hour >= self.config.weekend_entry_cutoff_hour
+        ):
+            return (
+                False,
+                f"週末前カットオフ: 金曜{current_time.hour}時UTC >= "
+                f"{self.config.weekend_entry_cutoff_hour}時UTC",
+            )
 
         return True, None
 
@@ -334,6 +374,10 @@ class HardGuard:
                     (
                         self.check_session_transition,
                         HardGuardReason.SESSION_TRANSITION,
+                    ),
+                    (
+                        self.check_weekend_cutoff,
+                        HardGuardReason.WEEKEND_CUTOFF,
                     ),
                 ]
             )
