@@ -154,6 +154,7 @@ class ExitReason(str, Enum):
     GHOST_CLEANUP = "GHOST_CLEANUP"
     CIRCUIT_BREAKER = "CIRCUIT_BREAKER"
     PRE_EVENT_CLOSE = "PRE_EVENT"
+    WEEKEND_CLOSE = "WEEKEND"
 
 
 class TrendDirection(str, Enum):
