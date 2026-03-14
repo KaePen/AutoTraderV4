@@ -123,6 +123,9 @@ symbols:
     base_risk_pct: 0.01
     max_lot_per_trade: 1.5
     max_total_exposure_lot: 3.0
+    signal:
+      # DZ-T2検証: PF 4.22→4.86, DD 2.48→2.06%, Mo+ 86→92%
+      macd_slope_deadzone_atr_ratio: 0.01
 
   GBPUSD:
     pip_unit: 0.0001
@@ -140,6 +143,9 @@ symbols:
     max_lot_per_trade: 1.5
     max_total_exposure_lot: 2.0
     use_position_manager: true
+    signal:
+      # DZ-R4検証: PF 4.00→4.77, Net +5.3% (3yr)
+      macd_slope_deadzone_atr_ratio: 0.01
     pm_config:
       trailing_start_r: 1.5
       trailing_atr_multiplier: 2.0
@@ -348,7 +354,8 @@ symbols:
 
 # --- マルチ通貨ペア ポートフォリオ設定 ---
 # ポートフォリオ制約のみ（base_risk_pct/consensus_threshold は個別プリセットの責務）
+# 8ペア構成: 6JPY + EURUSD + GBPUSD（信号密度・品質で選定）
 multi_pair:
-  global_max_positions: 6
+  global_max_positions: 8
   per_pair_max_positions: 1
-  global_max_exposure_lot: 10.0
+  global_max_exposure_lot: 12.0
