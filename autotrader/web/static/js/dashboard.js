@@ -1030,20 +1030,8 @@ class AnalysisPanel extends Component {
     }
     panel.classList.remove('hidden');
 
-    // 重要指標発表警告
-    const apEventBanner = document.getElementById('ap-next-event');
-    const apEventText = document.getElementById('ap-next-event-text');
-    if (apEventBanner && apEventText) {
-      const mins = (typeof FundamentalWidget !== 'undefined') ? FundamentalWidget.nextHighImpactMinutes : null;
-      if (mins !== null && mins <= 60 && mins > 0) {
-        apEventText.textContent = '重要指標まで ' + Math.round(mins) + ' 分';
-        apEventBanner.classList.remove('hidden');
-        apEventBanner.classList.add('inline-flex');
-      } else {
-        apEventBanner.classList.add('hidden');
-        apEventBanner.classList.remove('inline-flex');
-      }
-    }
+    // アラート描画（複数通知対応）
+    this._renderAlerts();
 
     const noData = !a || (!a.engine_running && (!a.tf_scores || Object.keys(a.tf_scores).length === 0));
     if (noData) {
@@ -1311,6 +1299,62 @@ class AnalysisPanel extends Component {
       }).join('');
 
       tfEl.innerHTML = `<div class="w-full">${summaryHtml}</div>` + `<div class="grid grid-cols-3 sm:grid-cols-5 lg:grid-cols-9 gap-1.5 mt-2">${cardsHtml}${penaltyCardHtml}</div>`;
+    }
+  }
+
+  /** アラートpillを描画（複数対応） */
+  _renderAlerts() {
+    const container = document.getElementById('ap-alerts-container');
+    if (!container) return;
+    container.innerHTML = '';
+
+    const alerts = [];
+
+    // 1. バックエンドからのアクティブアラート
+    const a = this._dataFlow.get('analysis');
+    if (a && a.active_alerts) {
+      for (const alert of a.active_alerts) {
+        alerts.push(alert);
+      }
+    }
+
+    // 2. 重要指標発表警告（フロントエンド側で生成）
+    const mins = (typeof FundamentalWidget !== 'undefined')
+      ? FundamentalWidget.nextHighImpactMinutes : null;
+    if (mins !== null && mins <= 60 && mins > 0) {
+      alerts.push({
+        type: 'high_impact_event',
+        message: '重要指標まで ' + Math.round(mins) + ' 分',
+        severity: 'danger',
+      });
+    }
+
+    if (alerts.length === 0) return;
+
+    // severity別スタイル
+    const styles = {
+      danger: 'bg-red-900/40 border-red-700/50 text-red-300',
+      warning: 'bg-yellow-900/40 border-yellow-700/50 text-yellow-300',
+      info: 'bg-blue-900/40 border-blue-700/50 text-blue-300',
+    };
+    const dotColors = {
+      danger: 'bg-red-400',
+      warning: 'bg-yellow-400',
+      info: 'bg-blue-400',
+    };
+
+    for (const alert of alerts) {
+      const sev = alert.severity || 'info';
+      const pill = document.createElement('div');
+      pill.className = 'inline-flex items-center gap-1.5 px-2 py-0.5 rounded border text-[11px] ' + (styles[sev] || styles.info);
+      const isPulse = (sev === 'danger') ? ' animate-pulse' : '';
+      const dot = document.createElement('span');
+      dot.className = 'w-1.5 h-1.5 rounded-full flex-shrink-0 ' + (dotColors[sev] || dotColors.info) + isPulse;
+      const text = document.createElement('span');
+      text.textContent = alert.message;
+      pill.appendChild(dot);
+      pill.appendChild(text);
+      container.appendChild(pill);
     }
   }
 }

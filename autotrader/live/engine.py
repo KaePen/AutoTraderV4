@@ -191,6 +191,9 @@ class LiveTradingEngine:
         self._global_max_positions: int = 0
         self._global_max_exposure_lot: float = 0.0
 
+        # エントリースキップ理由（UI通知用）
+        self._last_entry_skip_reason: str | None = None
+
         # ホットリロード関連
         self._entry_blocked: bool = False
         self._reload_lock: asyncio.Lock = asyncio.Lock()
@@ -909,6 +912,9 @@ class LiveTradingEngine:
             for tf in self._bot._market_data:
                 indicators[tf] = self._extract_indicators(tf)
 
+        # --- active_alerts (UI通知用) ---
+        analysis["active_alerts"] = self._build_active_alerts(cs)
+
         return {
             "analysis": analysis,
             "account": account,
@@ -916,6 +922,127 @@ class LiveTradingEngine:
             "radar": radar_serialized,
             "indicators": indicators,
         }
+
+    def _build_active_alerts(
+        self,
+        cs: ConsolidatedSignal | None,
+    ) -> list[dict[str, str]]:
+        """UI通知用のアクティブアラートを構築
+
+        Args:
+            cs: 最新の統合シグナル
+
+        Returns:
+            list[dict[str, str]]: アラートリスト
+                各要素は {type, message, severity} を持つ
+        """
+        alerts: list[dict[str, str]] = []
+
+        # 1. ポジション制限（現在状態をリアルタイムチェック）
+        self._check_position_limit_alerts(alerts)
+
+        # 2. 週末カットオフ接近/発動
+        now = datetime.now(UTC)
+        if now.weekday() == 4:  # 金曜日
+            pm_cfg = self._pm.config
+            cutoff_h = pm_cfg.weekend_close_hour
+            cutoff_m = pm_cfg.weekend_close_minute
+            cutoff_total = cutoff_h * 60 + cutoff_m
+            now_total = now.hour * 60 + now.minute
+            remaining = cutoff_total - now_total
+            if remaining <= 0:
+                alerts.append({
+                    "type": "weekend_cutoff",
+                    "message": "週末カットオフ発動中",
+                    "severity": "danger",
+                })
+            elif remaining <= 120:
+                alerts.append({
+                    "type": "weekend_cutoff",
+                    "message": (
+                        f"週末カットオフまで {remaining} 分"
+                    ),
+                    "severity": "warning",
+                })
+
+        # 3. HOLD理由（スコアがベース閾値以上だが制約でHOLD）
+        if cs is not None and cs.direction.value == "HOLD":
+            base_th = self._bot.config.min_consensus_score
+            _score = max(
+                cs.buy_score or 0, cs.sell_score or 0,
+            )
+            if _score >= base_th and cs.rationale:
+                alerts.append({
+                    "type": "hold_constraint",
+                    "message": cs.rationale,
+                    "severity": "info",
+                })
+
+        return alerts
+
+    def _check_position_limit_alerts(
+        self,
+        alerts: list[dict[str, str]],
+    ) -> None:
+        """ポジション制限の現在状態を即時チェックしてアラート追加
+
+        _cached_positions を使ってリアルタイムに制限状態を判定する。
+        _last_entry_skip_reason のステイル問題を回避する。
+
+        Args:
+            alerts: アラートリスト（in-placeで追加）
+        """
+        # シンボル別ポジション制限
+        cfg = self._bot.config
+        base_max = (
+            cfg.demo_max_positions if cfg.demo_mode else cfg.max_positions
+        )
+        sym_positions = [
+            p for p in self._cached_positions
+            if p.get("symbol") == self._active_symbol
+        ]
+        if base_max > 0 and len(sym_positions) >= base_max:
+            alerts.append({
+                "type": "position_limit_symbol",
+                "message": (
+                    f"ポジション上限 "
+                    f"{len(sym_positions)}/{base_max}"
+                ),
+                "severity": "warning",
+            })
+
+        # グローバルポジション制限
+        if (
+            self._global_max_positions > 0
+            and self._get_global_position_count is not None
+        ):
+            _g_count = self._get_global_position_count()
+            if _g_count >= self._global_max_positions:
+                alerts.append({
+                    "type": "position_limit_global",
+                    "message": (
+                        f"グローバルポジション上限 "
+                        f"{_g_count}/{self._global_max_positions}"
+                    ),
+                    "severity": "warning",
+                })
+
+        # グローバルロット制限
+        if (
+            self._global_max_exposure_lot > 0
+            and self._get_global_exposure_lot is not None
+        ):
+            _g_lot = self._get_global_exposure_lot()
+            if _g_lot >= self._global_max_exposure_lot:
+                alerts.append({
+                    "type": "exposure_limit",
+                    "message": (
+                        f"ロット上限 "
+                        f"{_g_lot:.2f}/"
+                        f"{self._global_max_exposure_lot:.1f}"
+                    ),
+                    "severity": "warning",
+                })
 
     async def get_candles(
         self,
@@ -1190,6 +1317,7 @@ class LiveTradingEngine:
         """
         # ホットリロード中はエントリーをスキップ
         if self._entry_blocked:
+            self._last_entry_skip_reason = "ホットリロード中"
             logger.info("エントリーブロック中（ホットリロード）— スキップ")
             return
 
@@ -1199,6 +1327,7 @@ class LiveTradingEngine:
         )
         # MT5接続エラー時はエントリーを安全にスキップ
         if positions is None:
+            self._last_entry_skip_reason = "MT5接続エラー"
             logger.warning("MT5ポジション取得失敗 — エントリースキップ")
             return
         cfg = self._bot.config
@@ -1216,6 +1345,9 @@ class LiveTradingEngine:
         else:
             max_pos = base_max
         if len(positions) >= max_pos:
+            self._last_entry_skip_reason = (
+                f"ポジション上限 {len(positions)}/{max_pos}"
+            )
             logger.info(
                 "[%s] 既存ポジション上限(%d)、エントリースキップ",
                 self._active_symbol,
@@ -1230,6 +1362,10 @@ class LiveTradingEngine:
         ):
             _g_count = self._get_global_position_count()
             if _g_count >= self._global_max_positions:
+                self._last_entry_skip_reason = (
+                    f"グローバルポジション上限 "
+                    f"{_g_count}/{self._global_max_positions}"
+                )
                 logger.info(
                     "[%s] グローバルポジション上限"
                     "(%d/%d)、エントリースキップ",
@@ -1246,6 +1382,10 @@ class LiveTradingEngine:
         ):
             _g_lot = self._get_global_exposure_lot()
             if _g_lot >= self._global_max_exposure_lot:
+                self._last_entry_skip_reason = (
+                    f"ロット上限 "
+                    f"{_g_lot:.2f}/{self._global_max_exposure_lot:.1f}"
+                )
                 logger.info(
                     "[%s] グローバルロット上限"
                     "(%.2f/%.1f)、エントリースキップ",
@@ -1254,6 +1394,9 @@ class LiveTradingEngine:
                     self._global_max_exposure_lot,
                 )
                 return
+
+        # 全制限チェック通過 → スキップ理由をクリア
+        self._last_entry_skip_reason = None
 
         # ロット計算
         if self._account_info is None:
