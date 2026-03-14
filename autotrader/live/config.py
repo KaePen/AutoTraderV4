@@ -37,7 +37,8 @@ class FundamentalConfig:
         enabled: ファンダメンタル機能の有効/無効（デフォルトOFF）
         use_mt5_calendar: MT5カレンダーを使用するか
         use_forex_factory: ForexFactoryを使用するか（デフォルトOFF）
-        use_ff_holidays: ForexFactoryから休日データのみ取得するか
+        use_ff_holidays: ForexFactoryから休日データのみ取得するか（非推奨）
+        use_exchange_calendars: exchange_calendarsで休日データを取得するか
         fetch_interval_minutes: データ収集間隔（分）
         morning_update_utc_hour: 毎朝LLM市場観更新の時刻（UTC）
         event_guard_minutes: 重要指標前の取引停止分数
@@ -49,7 +50,8 @@ class FundamentalConfig:
     enabled: bool = False
     use_mt5_calendar: bool = True
     use_forex_factory: bool = False
-    use_ff_holidays: bool = True
+    use_ff_holidays: bool = False
+    use_exchange_calendars: bool = True
     fetch_interval_minutes: int = 60
     morning_update_utc_hour: int = 21  # UTC21時=日本時間6時
     event_guard_minutes: int = 30
