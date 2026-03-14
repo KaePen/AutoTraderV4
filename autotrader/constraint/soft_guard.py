@@ -30,6 +30,8 @@ class SoftGuardReason(Enum):
     FUNDAMENTAL_RISK = "fundamental_risk"
     # ボリュームフィルタ
     LOW_VOLUME = "low_volume"
+    # マクロレジーム
+    MACRO_REGIME = "macro_regime"
 
 
 @dataclass(frozen=True)
@@ -171,8 +173,14 @@ class SoftGuard:
         else:
             spread_pips = base_spread
 
-        if spread_pips > self.config.spread_threshold_pips:
-            excess = spread_pips - self.config.spread_threshold_pips
+        # ペア別スプレッド閾値（contextから取得、なければグローバル設定）
+        threshold = context.get(
+            "sg_spread_threshold_pips",
+            self.config.spread_threshold_pips,
+        )
+
+        if spread_pips > threshold:
+            excess = spread_pips - threshold
             penalty = min(
                 self.config.spread_penalty_rate * (1 + excess / 2), 0.5
             )

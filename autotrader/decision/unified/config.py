@@ -118,6 +118,10 @@ class RiskConfig:
     rapid_dd_window_minutes: int = 30
     rapid_dd_threshold_pct: float = 0.02
     rapid_dd_pause_duration_minutes: int = 30
+    # Layer 6: 連続敗戦サーキットブレーカー
+    consecutive_loss_breaker_enabled: bool = True
+    consecutive_loss_breaker_threshold: int = 5
+    consecutive_loss_breaker_pause_minutes: int = 60
 
 
 # ===================================================================
@@ -270,6 +274,15 @@ class FilterConfig:
     volume_filter_enabled: bool = True
     volume_filter_threshold: float = 1.5
     volume_filter_penalty: float = 0.8
+    # ペア別スプレッド閾値
+    sg_spread_threshold_pips: float | None = None
+    # マクロレジームフィルタ
+    macro_regime_enabled: bool = False
+    macro_regime_vix_elevated: float = 20.0
+    macro_regime_vix_high_fear: float = 30.0
+    macro_regime_vix_extreme_fear: float = 40.0
+    macro_regime_elevated_penalty: float = 0.1
+    macro_regime_high_fear_penalty: float = 0.3
 
 
 @dataclass(frozen=True)
@@ -510,6 +523,32 @@ class UnifiedBotConfig:
     volume_filter_threshold: float = 1.5
     # ボリュームフィルタ最大ペナルティ
     volume_filter_penalty: float = 0.8
+    # --- ペア別スプレッド閾値 ---
+    # SoftGuardスプレッド閾値（ペア別、None=SoftGuardConfigデフォルト2.0）
+    sg_spread_threshold_pips: float | None = None
+    # --- マクロレジームフィルタ ---
+    # マクロレジームフィルタ有効化
+    macro_regime_enabled: bool = False
+    # VIX ELEVATED閾値
+    macro_regime_vix_elevated: float = 20.0
+    # VIX HIGH_FEAR閾値
+    macro_regime_vix_high_fear: float = 30.0
+    # VIX EXTREME_FEAR閾値（HardGuardブロック）
+    macro_regime_vix_extreme_fear: float = 40.0
+    # ELEVATED時ペナルティ
+    macro_regime_elevated_penalty: float = 0.1
+    # HIGH_FEAR時ペナルティ
+    macro_regime_high_fear_penalty: float = 0.3
+    # --- エッジ検定 ---
+    # エッジ検定有効化
+    edge_validator_enabled: bool = True
+    # ローリングウィンドウサイズ
+    edge_validator_window: int = 100
+    # 期待勝率（BT基準）
+    edge_validator_expected_wr: float = 0.80
+    # --- スプレッド分布モデル ---
+    # スプレッド分布モデル有効化（バックテスト用）
+    spread_model_enabled: bool = False
     # --- M1モメンタム確認ゲート ---
     # M1モメンタム確認ゲート有効化
     m1_momentum_gate_enabled: bool = False
@@ -689,6 +728,13 @@ class UnifiedBotConfig:
             volume_filter_enabled=self.volume_filter_enabled,
             volume_filter_threshold=self.volume_filter_threshold,
             volume_filter_penalty=self.volume_filter_penalty,
+            sg_spread_threshold_pips=self.sg_spread_threshold_pips,
+            macro_regime_enabled=self.macro_regime_enabled,
+            macro_regime_vix_elevated=self.macro_regime_vix_elevated,
+            macro_regime_vix_high_fear=self.macro_regime_vix_high_fear,
+            macro_regime_vix_extreme_fear=self.macro_regime_vix_extreme_fear,
+            macro_regime_elevated_penalty=self.macro_regime_elevated_penalty,
+            macro_regime_high_fear_penalty=self.macro_regime_high_fear_penalty,
         )
 
     @classmethod

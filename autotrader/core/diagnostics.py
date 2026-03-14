@@ -60,3 +60,10 @@ class SignalStepRecord:
     # 最終結果
     final_direction: str = "HOLD"
     hold_reason: str = ""
+    # エッジ検定
+    edge_alert_level: str = ""
+    edge_rolling_winrate: float = 0.0
+    edge_rolling_pf: float = 0.0
+    # マクロレジーム
+    macro_regime_level: str = ""
+    macro_vix: float | None = None
