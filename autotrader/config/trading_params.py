@@ -100,6 +100,8 @@ class SymbolPreset:
     trailing_start_r: float = 0.5
     trailing_atr_multiplier: float = 2.0
     breakeven_at_1r: bool = True
+    # SoftGuardスプレッド閾値（ペア別、None=グローバルデフォルト2.0）
+    sg_spread_threshold_pips: float | None = None
     # 通貨ペア別TFリスト（NoneでデフォルトTF使用）
     timeframes: list[str] | None = None
 

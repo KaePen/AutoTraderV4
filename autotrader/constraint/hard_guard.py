@@ -27,6 +27,7 @@ class HardGuardReason(Enum):
     LOW_LIQUIDITY_HOLIDAY = "low_liquidity_holiday"
     SESSION_TRANSITION = "session_transition"
     WEEKEND_CUTOFF = "weekend_cutoff"
+    MACRO_REGIME_EXTREME = "macro_regime_extreme"
 
 
 @dataclass(frozen=True)

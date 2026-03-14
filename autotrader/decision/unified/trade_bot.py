@@ -536,6 +536,23 @@ class UnifiedTradeBot:
             else None
         )
 
+        # エッジ検定器
+        from autotrader.decision.unified.adaptive.edge_validator import (
+            EdgeValidator,
+            EdgeValidatorConfig,
+        )
+
+        self._edge_validator: EdgeValidator | None = None
+        if self.config.edge_validator_enabled:
+            self._edge_validator = EdgeValidator(
+                EdgeValidatorConfig(
+                    window_size=self.config.edge_validator_window,
+                    expected_winrate=(
+                        self.config.edge_validator_expected_wr
+                    ),
+                ),
+            )
+
         # Phase 2b: 直近のファンダメンタル評価結果
         self._last_fundamental_assessment: Any = None
 
@@ -1282,7 +1299,7 @@ class UnifiedTradeBot:
             if _vr is not None and not pd.isna(_vr):
                 _vol_ratio = float(_vr)
 
-        sg_context = {
+        sg_context: dict[str, object] = {
             "spread_pips": self._get_spread_pips(current_time),
             "current_time": current_time.to_pydatetime(),
             "atr_ratio": _atr_ratio,
@@ -1303,6 +1320,11 @@ class UnifiedTradeBot:
                 self.config.volume_filter_penalty
             ),
         }
+        # ペア別スプレッド閾値を渡す
+        if self.config.sg_spread_threshold_pips is not None:
+            sg_context["sg_spread_threshold_pips"] = (
+                self.config.sg_spread_threshold_pips
+            )
         sg_result = self.soft_guard.check(
             sg_context,
             is_entry=True,
@@ -2650,6 +2672,40 @@ class UnifiedTradeBot:
             self.state = self.state.with_pnl(pnl)
         if trade_record is not None and self._adaptive_tuner:
             self._adaptive_tuner.record_trade(trade_record)
+        # エッジ検定
+        if trade_record is not None and self._edge_validator:
+            from autotrader.decision.unified.adaptive.edge_validator import (
+                EdgeAlertLevel,
+            )
+
+            edge_status = self._edge_validator.record_trade(
+                trade_record,
+            )
+            # CRITICAL → サーキットブレーカー発動
+            if edge_status.alert_level == EdgeAlertLevel.CRITICAL:
+                logger.warning(
+                    "エッジCRITICAL → サーキットブレーカー発動",
+                )
+                self.risk_manager.trigger_circuit_breaker(
+                    timestamp,
+                )
+        # Layer 6: 連続敗戦サーキットブレーカー
+        if (
+            pnl is not None
+            and pnl < 0
+            and self.config.risk.consecutive_loss_breaker_enabled
+        ):
+            if (
+                self.state.consecutive_losses
+                >= self.config.risk.consecutive_loss_breaker_threshold
+            ):
+                logger.warning(
+                    "%d連敗 → サーキットブレーカー発動",
+                    self.state.consecutive_losses,
+                )
+                self.risk_manager.trigger_circuit_breaker(
+                    timestamp,
+                )
 
     def get_timeframe_signals(
         self,
