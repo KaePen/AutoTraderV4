@@ -339,6 +339,7 @@ def main() -> None:
         host="0.0.0.0",
         port=args.port,
         log_level="warning",
+        ws="wsproto",
     )
 
 

@@ -52,4 +52,4 @@ if __name__ == "__main__":
 
     from autotrader.web.main import app
 
-    uvicorn.run(app, host=args.host, port=args.port)
+    uvicorn.run(app, host=args.host, port=args.port, ws="wsproto")
