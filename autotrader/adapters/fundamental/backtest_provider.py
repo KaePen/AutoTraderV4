@@ -173,6 +173,17 @@ class BacktestFundamentalProvider:
         self._events: list[EconomicEvent] = []
         self._events_sorted_ts: list[float] = []
         self._normalizer = EconomicEventNormalizer()
+        # シンボル別イベントインデックス（高速検索用）
+        self._events_by_symbol: dict[
+            str, list[EconomicEvent]
+        ] = {}
+        self._events_by_symbol_ts: dict[
+            str, list[float]
+        ] = {}
+        # get_context 分単位キャッシュ
+        self._ctx_cache: dict[
+            tuple[str, int], FundamentalContext
+        ] = {}
         self._loaded_files: list[str] = []
 
         # 月次LLMコンテキスト: symbol → (ts一覧, コンテキスト一覧)
@@ -257,6 +268,7 @@ class BacktestFundamentalProvider:
             self._events_sorted_ts = [
                 e.event_time.timestamp() for e in self._events
             ]
+            self._rebuild_symbol_index()
             self._loaded_files.append(str(path))
 
             logger.info(
@@ -602,6 +614,7 @@ class BacktestFundamentalProvider:
             self._events_sorted_ts = [
                 e.event_time.timestamp() for e in self._events
             ]
+            self._rebuild_symbol_index()
             self._loaded_files.append(str(path))
 
             logger.info(
@@ -902,6 +915,33 @@ class BacktestFundamentalProvider:
             )
             self.memory.last_news_date = current_date
 
+    def _rebuild_symbol_index(self) -> None:
+        """シンボル別イベントインデックスを再構築
+
+        全イベントを通貨ペア別に仕分け、
+        bisect検索用のタイムスタンプ配列を構築する。
+        """
+        self._events_by_symbol.clear()
+        self._events_by_symbol_ts.clear()
+        self._ctx_cache.clear()
+
+        for ev in self._events:
+            ccy = ev.currency.upper()
+            # この通貨に関連する全シンボルに登録
+            for sym, (c1, c2) in _SYMBOL_CURRENCIES.items():
+                if ccy == c1 or ccy == c2:
+                    if sym not in self._events_by_symbol:
+                        self._events_by_symbol[sym] = []
+                    self._events_by_symbol[sym].append(ev)
+
+        # 各シンボルのイベントをソート + TS配列構築
+        for sym in self._events_by_symbol:
+            evts = self._events_by_symbol[sym]
+            evts.sort(key=lambda e: e.event_time)
+            self._events_by_symbol_ts[sym] = [
+                e.event_time.timestamp() for e in evts
+            ]
+
     # --------------------------------------------------
     # プライベート: 共通ヘルパー
     # --------------------------------------------------
@@ -913,6 +953,8 @@ class BacktestFundamentalProvider:
     ) -> tuple[list[dict], bool]:
         """直近イベント情報と高インパクトフラグを計算
 
+        シンボル別インデックス + bisect で O(log N) 検索。
+
         Args:
             current_time: 現在時刻
             symbol: 対象シンボル
@@ -920,26 +962,38 @@ class BacktestFundamentalProvider:
         Returns:
             tuple[list[dict], bool]: (upcoming_dicts, high_impact)
         """
-        if not self._events:
+        sym_events = self._events_by_symbol.get(symbol)
+        if not sym_events:
             return [], False
 
-        symbol_events = self._normalizer.filter_by_symbol(self._events, symbol)
-        upcoming = self._normalizer.get_upcoming_events(
-            symbol_events, current_time, window_minutes=60
-        )
-        upcoming_dicts = [
-            {
-                "name": ev.event_name,
-                "minutes_until": ev.minutes_until(current_time),
-                "impact": ev.impact.value,
-            }
-            for ev in upcoming
-        ]
-        high_impact_soon = any(
-            ev.impact == ImpactLevel.HIGH
-            and 0 <= ev.minutes_until(current_time) <= self._guard_minutes
-            for ev in upcoming
-        )
+        sym_ts = self._events_by_symbol_ts[symbol]
+        now_ts = current_time.timestamp()
+        window_ts = now_ts + 60 * 60  # 60分先
+
+        # bisect で [now, now+60min] 範囲のイベントを取得
+        lo = bisect.bisect_left(sym_ts, now_ts)
+        hi = bisect.bisect_right(sym_ts, window_ts)
+
+        upcoming_dicts: list[dict] = []
+        high_impact_soon = False
+        guard_ts = now_ts + self._guard_minutes * 60
+
+        for i in range(lo, hi):
+            ev = sym_events[i]
+            mins = ev.minutes_until(current_time)
+            upcoming_dicts.append(
+                {
+                    "name": ev.event_name,
+                    "minutes_until": mins,
+                    "impact": ev.impact.value,
+                }
+            )
+            if (
+                ev.impact == ImpactLevel.HIGH
+                and sym_ts[i] <= guard_ts
+            ):
+                high_impact_soon = True
+
         return upcoming_dicts, high_impact_soon
 
     # --------------------------------------------------
@@ -1099,8 +1153,8 @@ class BacktestFundamentalProvider:
                 has_high_impact_within_30min=high_impact_soon,
             )
 
-        # シンボル関連イベントにフィルタリング
-        symbol_events = self._normalizer.filter_by_symbol(self._events, symbol)
+        # シンボル関連イベント（インデックス済み）
+        symbol_events = self._events_by_symbol.get(symbol, [])
 
         # 24hマクロバイアス計算
         released_24h = self._get_released_events(
