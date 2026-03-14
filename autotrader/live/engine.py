@@ -74,6 +74,10 @@ class LiveTradingEngine:
         _account_info: 最新の口座情報
     """
 
+    # MT5一時切断時の外部決済誤検知防止リトライ上限
+    # tick回数ベース（tick間隔 ~1秒 × 30回 ≒ 30秒相当）
+    _EXT_CLOSE_MAX_RETRIES: int = 30
+
     def __init__(
         self,
         config: LiveTradingConfig,
@@ -1747,11 +1751,13 @@ class LiveTradingEngine:
         Args:
             ticket: MT5ポジションID
         """
-        logger.info(
-            "[%s] 外部決済検出（手動/SL/TP）: ticket=%d",
-            self._active_symbol,
-            ticket,
-        )
+        # 初回のみログ出力（リトライ中のログスパム防止）
+        if ticket not in self._ext_close_retries:
+            logger.info(
+                "[%s] 外部決済検出（手動/SL/TP）: ticket=%d",
+                self._active_symbol,
+                ticket,
+            )
 
         # DBからポジションのシンボルを確認し、自エンジンと一致しない場合はスキップ
         trade_symbol = self._get_trade_symbol_from_db(ticket)
@@ -1797,14 +1803,13 @@ class LiveTradingEngine:
             # （_close_ghost_db_recordsと同じ安全ガード）
             retry = self._ext_close_retries.get(ticket, 0) + 1
             self._ext_close_retries[ticket] = retry
-            _max_retries = 30  # 約30秒間（1秒tick間隔）
-            if retry < _max_retries:
+            if retry < self._EXT_CLOSE_MAX_RETRIES:
                 logger.info(
                     "外部決済の約定履歴未検出: ticket=%d"
                     " → 確認待機中 (%d/%d)",
                     ticket,
                     retry,
-                    _max_retries,
+                    self._EXT_CLOSE_MAX_RETRIES,
                 )
                 # _open_tradesから除去しない → 次tickで再検出
                 return
@@ -1812,7 +1817,7 @@ class LiveTradingEngine:
             logger.warning(
                 "外部決済の約定履歴が%d回連続未検出:"
                 " ticket=%d → フォールバック記録",
-                _max_retries,
+                self._EXT_CLOSE_MAX_RETRIES,
                 ticket,
             )
             exit_price = 0.0
@@ -2446,6 +2451,12 @@ class LiveTradingEngine:
 
         # DBからopenトレードを復元（再起動対応）
         self._restore_open_trades_from_db([pos.ticket for pos in positions])
+        # 同期後に不要なリトライカウンターを掃除
+        self._ext_close_retries = {
+            k: v
+            for k, v in self._ext_close_retries.items()
+            if k in self._open_trades
+        }
 
         # ローカルDBから管理状態を一括取得
         saved_states = self._load_position_states()
