@@ -967,7 +967,7 @@ class LiveTradingEngine:
 
         # 3. HOLD理由（スコアがベース閾値以上だが制約でHOLD）
         if cs is not None and cs.direction.value == "HOLD":
-            base_th = self._bot.config.min_consensus_score
+            base_th = self._bot.config.consensus_threshold
             _score = max(
                 cs.buy_score or 0, cs.sell_score or 0,
             )
