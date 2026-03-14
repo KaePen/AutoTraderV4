@@ -16,7 +16,7 @@ class TestConsecutiveLossBreakerConfig:
         """デフォルト設定"""
         cfg = RiskConfig()
         assert cfg.consecutive_loss_breaker_enabled is True
-        assert cfg.consecutive_loss_breaker_threshold == 5
+        assert cfg.consecutive_loss_breaker_threshold == 8
         assert cfg.consecutive_loss_breaker_pause_minutes == 60
 
     def test_custom_config(self) -> None:
