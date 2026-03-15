@@ -59,10 +59,12 @@ class CandleArrays:
         lows = df["low"].values.astype(np.float64)
         closes = df["close"].values.astype(np.float64)
         volumes = df["volume"].values.astype(np.float64)
-        # スプレッド列（存在すれば）
+        # スプレッド列（spread_points or spread、キャッシュ形式差異に対応）
         sp = None
         if "spread_points" in df.columns:
             sp = df["spread_points"].values.astype(np.float64)
+        elif "spread" in df.columns:
+            sp = df["spread"].values.astype(np.float64)
 
         return cls(
             times=times,
