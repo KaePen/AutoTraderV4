@@ -496,6 +496,8 @@ class UnifiedBotConfig:
     pip_unit: float = 0.01
     # クォート通貨→口座通貨(JPY)変換レート
     quote_ccy_rate: float = 1.0
+    # 通貨ペアのスプレッド（pips、プリセットから注入）
+    spread_pips: float = 1.5
     # --- レジーム別動的TP比率 ---
     # 動的TP有効化（Falseで従来の固定tp_sl_ratio）
     dynamic_tp_enabled: bool = False

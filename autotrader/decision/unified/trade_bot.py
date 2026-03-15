@@ -1855,7 +1855,10 @@ class UnifiedTradeBot:
         )
 
     def _get_spread_pips(self, current_time: pd.Timestamp) -> float:
-        """スプレッドを取得（簡易版）
+        """スプレッドを取得
+
+        プリセットから注入されたspread_pipsを返す。
+        BT/リアル両方で同じ値を使用。
 
         Args:
             current_time: 現在時刻
@@ -1863,9 +1866,7 @@ class UnifiedTradeBot:
         Returns:
             float: スプレッド（pips）
         """
-        # TODO: 実際のスプレッドデータがあれば使用
-        # ここでは固定値を返す
-        return 1.5
+        return self.config.spread_pips
 
     def _get_current_price(
         self,
