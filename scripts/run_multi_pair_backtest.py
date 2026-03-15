@@ -656,7 +656,11 @@ def run_multi_pair_year(
         candle = ctx.arrays.get_candle(idx, sym, ctx.base_tf)
 
         # 実スプレッドをbotに設定（SoftGuard用）
-        if ctx.arrays.spread_points is not None:
+        # use_actual_spread_data有効時のみ注入
+        if (
+            ctx.simulator.config.use_actual_spread_data
+            and ctx.arrays.spread_points is not None
+        ):
             _sp_pips = float(ctx.arrays.spread_points[idx]) / 10.0
             ctx.bot.set_current_spread_pips(_sp_pips)
 

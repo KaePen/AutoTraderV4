@@ -225,7 +225,11 @@ def run_unified_year(
         )
 
         # 実スプレッドをbotに設定（SoftGuard用）
-        if arrays.spread_points is not None:
+        # use_actual_spread_data有効時のみ注入
+        if (
+            sim_config.use_actual_spread_data
+            and arrays.spread_points is not None
+        ):
             _sp = float(arrays.spread_points[idx])
             # spread_points → pips変換
             # MT5: 10 points = 1 pip（全ペア共通）
