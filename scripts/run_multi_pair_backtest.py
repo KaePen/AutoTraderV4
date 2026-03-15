@@ -455,6 +455,7 @@ def setup_pair_context(
     full_market_data: dict[str, pd.DataFrame] | None = None,
     pm_config_overrides: dict[str, Any] | None = None,
     spread_multiplier: float = 1.0,
+    use_actual_spread_data: bool = False,
 ) -> PairContext | None:
     """ペアごとのBot/Simulator/Arraysを初期化
 
@@ -548,6 +549,7 @@ def setup_pair_context(
         bot_config=bot_config,
         sl_tp_in_pips=True,
         pm_config=pm_cfg,
+        use_actual_spread_data=use_actual_spread_data,
     )
     simulator = TradeSimulator(config=sim_config)
 
@@ -637,6 +639,11 @@ def run_multi_pair_year(
 
         # Candle取得
         candle = ctx.arrays.get_candle(idx, sym, ctx.base_tf)
+
+        # 実スプレッドをbotに設定（SoftGuard用）
+        if ctx.arrays.spread_points is not None:
+            _sp_pips = float(ctx.arrays.spread_points[idx]) / 10.0
+            ctx.bot.set_current_spread_pips(_sp_pips)
 
         # equity同期: 共有equityをシミュレータに反映
         ctx.simulator.state.balance = portfolio.equity
@@ -752,9 +759,18 @@ def run_multi_pair_year(
                 consolidated.buy_score,
                 consolidated.sell_score,
             )
+        # 実スプレッドデータをシミュレーターに渡す
+        _row_data = None
+        if ctx.arrays.spread_points is not None:
+            _row_data = {
+                "spread_points": float(
+                    ctx.arrays.spread_points[idx],
+                ),
+            }
         ctx.simulator.process_candle(
             candle,
             signal,
+            row_data=_row_data,
             consensus_scores=_consensus_scores,
         )
 

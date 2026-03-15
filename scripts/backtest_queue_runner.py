@@ -1685,6 +1685,10 @@ def _execute_month_multi_pair(
     pm_extra.update(overrides.get("pm", {}))
 
     spread_mult = mpc.get("spread_multiplier", 1.0)
+    bt_ovr = overrides.get("backtest", {})
+    _use_actual_spread = bt_ovr.get(
+        "use_actual_spread_data", False,
+    )
 
     # 月ごとに独立PortfolioState
     portfolio = PortfolioState(
@@ -1727,6 +1731,7 @@ def _execute_month_multi_pair(
             full_market_data=month_md,
             pm_config_overrides=pm_extra or None,
             spread_multiplier=spread_mult,
+            use_actual_spread_data=_use_actual_spread,
         )
         if ctx is not None:
             # ファンダメンタルイベントプロバイダ注入
