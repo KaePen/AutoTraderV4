@@ -242,6 +242,11 @@ class TradeSimulator:
         self._current_row_data: dict | None = None
         # ポジションイベントロガー
         self._pos_event_logger: PositionEventLogger | None = None
+        # 次足約定用: pending signal
+        self._pending_signal: Signal | None = None
+        self._pending_consensus: tuple[float, float] | None = None
+        self._pending_fundamental: object | None = None
+        self._pending_trades: list[Trade] = []
         # セッション別スプレッド
         self._use_session_spread = self.config.use_session_spread
         if self._use_session_spread:
@@ -301,6 +306,10 @@ class TradeSimulator:
         self._entry_metrics.clear()
         self._exit_metrics.clear()
         self._consecutive_losses = 0
+        self._pending_signal = None
+        self._pending_consensus = None
+        self._pending_fundamental = None
+        self._pending_trades = []
         if self._pos_event_logger:
             self._pos_event_logger.reset()
 
@@ -333,6 +342,14 @@ class TradeSimulator:
         sig_type = (
             signal.signal_type if signal else None
         )
+
+        # 前足からのpendingエントリーを今足のopenで約定
+        if self._pending_signal is not None:
+            self._execute_pending_entry(candle)
+        # pending決済トレードを回収
+        if self._pending_trades:
+            trades.extend(self._pending_trades)
+            self._pending_trades = []
 
         # 現在足のrow_data・スプレッドを保存
         # _get_entry_price / _get_exit_price でも参照される
@@ -387,11 +404,13 @@ class TradeSimulator:
                         )
                         trades.append(trade)
 
-                # 新規エントリー
+                # 新規エントリー → pending保存（次足openで約定）
                 if not state.open_positions:
-                    position = self._open_position(signal, candle)
-                    if position:
-                        state.open_positions.append(position)
+                    self._pending_signal = signal
+                    self._pending_consensus = consensus_scores
+                    self._pending_fundamental = (
+                        fundamental_assessment
+                    )
         else:
             # 複数ポジション用汎用パス
             positions_to_close = []
@@ -454,10 +473,13 @@ class TradeSimulator:
                     >= self.config.bonus_score_threshold
                 ):
                     _eff_max += self.config.bonus_max_positions
+                # pending保存（次足openで約定）
                 if len(state.open_positions) < _eff_max:
-                    position = self._open_position(signal, candle)
-                    if position:
-                        state.open_positions.append(position)
+                    self._pending_signal = signal
+                    self._pending_consensus = consensus_scores
+                    self._pending_fundamental = (
+                        fundamental_assessment
+                    )
 
         # DD更新
         self._update_drawdown()
@@ -467,12 +489,129 @@ class TradeSimulator:
 
         return trades
 
+    def _execute_pending_entry(self, candle: Candle) -> None:
+        """前足のpendingシグナルを今足openで約定
+
+        Args:
+            candle: 現在の足データ（openで約定）
+        """
+        signal = self._pending_signal
+        self._pending_signal = None
+        self._pending_consensus = None
+        self._pending_fundamental = None
+
+        if signal is None:
+            return
+
+        state = self.state
+
+        # ポジション枠チェック（マルチポジション対応）
+        _eff_max = self.config.max_positions
+        if (
+            self.config.bonus_max_positions > 0
+            and signal.consensus_score is not None
+            and signal.consensus_score
+            >= self.config.bonus_score_threshold
+        ):
+            _eff_max += self.config.bonus_max_positions
+        if len(state.open_positions) < _eff_max:
+            position = self._open_position(
+                signal, candle, at_open=True,
+            )
+            if position:
+                state.open_positions.append(position)
+
+    def _get_exit_price_at_open(
+        self,
+        signal_type: SignalType,
+        candle: Candle,
+    ) -> float:
+        """open価格での決済価格
+
+        Args:
+            signal_type: ポジションのシグナル種別
+            candle: 足データ
+
+        Returns:
+            float: open基準の決済価格
+        """
+        spread = self._get_spread_for_candle(
+            candle, self._current_row_data,
+        )
+        half_spread = spread / 2
+        if signal_type == SignalType.BUY:
+            return candle.open - half_spread
+        else:
+            return candle.open + half_spread
+
     def _check_exit_conditions(
         self,
         position: Position,
         candle: Candle,
     ) -> tuple[float, ExitReason, float] | None:
         """決済条件をチェック（ギャップ約定対応）
+
+        Args:
+            position: ポジション
+            candle: 現在の足データ
+
+        Returns:
+            tuple | None: (fill_price, reason, trigger_price)
+        """
+        sl = position.stop_loss
+        tp = position.take_profit
+        slip = self._slippage_price
+
+        if position.signal_type == SignalType.BUY:
+            if sl and candle.low <= sl:
+                if candle.open < sl:
+                    return (
+                        candle.open - slip,
+                        ExitReason.STOP_LOSS,
+                        sl,
+                    )
+                return sl - slip, ExitReason.STOP_LOSS, sl
+            if tp and candle.high >= tp:
+                if candle.open > tp:
+                    return (
+                        candle.open - slip,
+                        ExitReason.TAKE_PROFIT,
+                        tp,
+                    )
+                return (
+                    tp - slip, ExitReason.TAKE_PROFIT, tp,
+                )
+        else:
+            if sl and candle.high >= sl:
+                if candle.open > sl:
+                    return (
+                        candle.open + slip,
+                        ExitReason.STOP_LOSS,
+                        sl,
+                    )
+                return sl + slip, ExitReason.STOP_LOSS, sl
+            if tp and candle.low <= tp:
+                if candle.open < tp:
+                    return (
+                        candle.open + slip,
+                        ExitReason.TAKE_PROFIT,
+                        tp,
+                    )
+                return (
+                    tp + slip, ExitReason.TAKE_PROFIT, tp,
+                )
+
+        return None
+
+    def _check_intrabar_sl_tp(
+        self,
+        position: Position,
+        candle: Candle,
+    ) -> tuple[float, ExitReason, float] | None:
+        """PM経路用: high/lowでSL/TPブリーチを検出
+
+        _check_exit_conditions と同じロジックだが、
+        PM経路から呼び出される専用メソッド。
 
         Args:
             position: ポジション
@@ -555,6 +694,22 @@ class TradeSimulator:
         managed = self._pm.get_position(position.position_id)
         if managed is None:
             return None
+
+        # intrabar SL/TP判定（high/low使用）
+        intrabar = self._check_intrabar_sl_tp(
+            position, candle,
+        )
+        if intrabar is not None:
+            _fill, _reason, _trigger = intrabar
+            # PMからポジション登録解除
+            self._pm.unregister_position(
+                position.position_id,
+            )
+            # Exit詳細理由を保存
+            self._exit_details[position.position_id] = (
+                f"intrabar_{_reason.value}"
+            )
+            return intrabar
 
         # ATR取得
         atr = 0.002  # デフォルト20pips
@@ -798,6 +953,7 @@ class TradeSimulator:
         signal: Signal,
         candle: Candle,
         strategy_id: str | None = None,
+        at_open: bool = False,
     ) -> Position | None:
         """ポジションをオープン
 
@@ -805,11 +961,14 @@ class TradeSimulator:
             signal: トレードシグナル
             candle: 現在の足データ
             strategy_id: 戦略ID（戦略別追跡用）
+            at_open: Trueなら足openで約定（次足約定用）
 
         Returns:
             Position | None: 作成されたポジション
         """
-        entry_price = self._get_entry_price(signal.signal_type, candle)
+        entry_price = self._get_entry_price(
+            signal.signal_type, candle, at_open=at_open,
+        )
         # 動的サイジングONかつシグナルにlot指定あり→使用
         volume = (
             signal.lot
@@ -1066,6 +1225,7 @@ class TradeSimulator:
         signal_type: SignalType,
         candle: Candle,
         override_price: float | None = None,
+        at_open: bool = False,
     ) -> float:
         """エントリー価格を取得
 
@@ -1073,6 +1233,7 @@ class TradeSimulator:
             signal_type: シグナル種別
             candle: 足データ
             override_price: 上書きエントリー価格（リトレース用）
+            at_open: Trueなら足openで約定（次足約定用）
 
         Returns:
             float: エントリー価格（スプレッド・スリッページ込み）
@@ -1098,12 +1259,13 @@ class TradeSimulator:
             candle, self._current_row_data,
         )
         half_spread = spread / 2
+        base_price = candle.open if at_open else candle.close
         if signal_type == SignalType.BUY:
-            # 買い：Ask価格（Close + スプレッド半分 + スリッページ）
-            return candle.close + half_spread + self._slippage_price
+            # 買い：Ask価格（base + スプレッド半分 + スリッページ）
+            return base_price + half_spread + self._slippage_price
         else:
-            # 売り：Bid価格（Close - スプレッド半分 - スリッページ）
-            return candle.close - half_spread - self._slippage_price
+            # 売り：Bid価格（base - スプレッド半分 - スリッページ）
+            return base_price - half_spread - self._slippage_price
 
     def _get_exit_price(
         self,
@@ -1502,6 +1664,11 @@ class TradeSimulator:
         Returns:
             list[Trade]: 決済されたトレードリスト
         """
+        # pendingシグナルをクリア（年末等で未約定のまま消える）
+        self._pending_signal = None
+        self._pending_consensus = None
+        self._pending_fundamental = None
+
         trades = []
 
         for position in list(self.state.open_positions):
