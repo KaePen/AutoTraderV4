@@ -1539,6 +1539,9 @@ def _execute_month_single(
         quote_ccy_rate=qcr,
         sl_tp_in_pips=True,
         pm_config=PositionManagerConfig(**pm_ovr),
+        use_actual_spread_data=bt_ovr.get(
+            "use_actual_spread_data", False,
+        ),
     )
 
     # ファンダメンタルイベントプロバイダ（高インパクト指標スキップ）
