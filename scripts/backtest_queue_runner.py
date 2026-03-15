@@ -83,7 +83,6 @@ POLL_INTERVAL = 2.0  # キューポーリング間隔（秒）
 # Web UI連携用ファイル
 RUNNER_STATE_FILE = _DATA_ROOT / "runner_state.json"
 RUNNER_CMD_FILE = _DATA_ROOT / "runner_commands.json"
-WORKER_PROGRESS_DIR = _DATA_ROOT / "worker_progress"
 
 
 # ===================================================================
@@ -423,25 +422,6 @@ def cleanup_stale_running(state: QueueState) -> None:
             cleaned,
         )
 
-
-def cleanup_worker_progress() -> None:
-    """起動時にワーカー進捗ファイルを全削除"""
-    if not WORKER_PROGRESS_DIR.exists():
-        return
-    cleaned = 0
-    for path in WORKER_PROGRESS_DIR.glob("*.json"):
-        with contextlib.suppress(OSError):
-            path.unlink()
-            cleaned += 1
-    if cleaned > 0:
-        logger.info(
-            "ワーカー進捗ファイル %d件をクリーンアップ",
-            cleaned,
-        )
-    # 旧形式（_DATA_ROOT直下）も掃除
-    for path in _DATA_ROOT.glob(".worker_progress_*.json"):
-        with contextlib.suppress(OSError):
-            path.unlink()
 
 
 # ===================================================================
@@ -2120,8 +2100,6 @@ def main() -> None:
     state = QueueState.load()
     state.sync_with_queue()
     cleanup_stale_running(state)
-    WORKER_PROGRESS_DIR.mkdir(parents=True, exist_ok=True)
-    cleanup_worker_progress()
 
     # コマンドキュー
     cmd_queue: _q.Queue[str] = _q.Queue()
