@@ -102,8 +102,8 @@ defaults:
   trailing_start_r: 0.5
   trailing_atr_multiplier: 2.0
   breakeven_at_1r: true
-  # SoftGuardスプレッド閾値（ペア別上書き用、デフォルト=平常時×1.5）
-  sg_spread_threshold_pips: 3.0
+  # SoftGuardスプレッド閾値（ペア別上書き用、p95ベース: 通常変動は許容、異常拡大のみブロック）
+  sg_spread_threshold_pips: 4.5
 
 # ------------------------------------------------------------------
 # USD ペア（quote currency = USD: pip_value ≈ $10/lot）
@@ -114,7 +114,7 @@ symbols:
     quote_ccy_rate: 150.0  # USD→JPY概算レート
     pip_value: 10.0        # EUR/USD 1pip=$0.0001×100,000=$10
     spread_pips: 1.0
-    sg_spread_threshold_pips: 1.5  # 1.0 × 1.5
+    sg_spread_threshold_pips: 2.0  # p95ベース
     slippage_pips: 0.3
     default_sl_pips: 15.0
     default_tp_pips: 30.0
@@ -134,7 +134,7 @@ symbols:
     quote_ccy_rate: 150.0
     pip_value: 10.0        # GBP/USD 1pip=$10/lot
     spread_pips: 1.5
-    sg_spread_threshold_pips: 2.3  # 1.5 × 1.5
+    sg_spread_threshold_pips: 3.0  # p95ベース
     slippage_pips: 0.3
     default_sl_pips: 20.0  # GBPは値動きが大きめ
     default_tp_pips: 40.0
@@ -218,7 +218,7 @@ symbols:
   USDJPY:
     pip_value: 100.0       # USD/JPY 1pip=0.01×100,000=1000JPY（標準口座）
     spread_pips: 1.5
-    sg_spread_threshold_pips: 2.3  # 1.5 × 1.5
+    sg_spread_threshold_pips: 3.0  # p95ベース
     slippage_pips: 0.5
     default_sl_pips: 20.0
     default_tp_pips: 40.0
@@ -240,7 +240,7 @@ symbols:
   EURJPY:
     pip_value: 100.0
     spread_pips: 2.0
-    sg_spread_threshold_pips: 3.0  # 2.0 × 1.5
+    sg_spread_threshold_pips: 4.5  # p95ベース
     slippage_pips: 0.7
     default_sl_pips: 25.0
     default_tp_pips: 50.0
@@ -265,7 +265,7 @@ symbols:
   GBPJPY:
     pip_value: 100.0
     spread_pips: 3.0       # GBP/JPYはスプレッドが広め
-    sg_spread_threshold_pips: 4.5  # 3.0 × 1.5
+    sg_spread_threshold_pips: 5.5  # p95ベース
     slippage_pips: 1.0
     default_sl_pips: 30.0
     default_tp_pips: 60.0
@@ -291,7 +291,7 @@ symbols:
   AUDJPY:
     pip_value: 100.0
     spread_pips: 2.0
-    sg_spread_threshold_pips: 3.0  # 2.0 × 1.5
+    sg_spread_threshold_pips: 4.5  # p95ベース
     slippage_pips: 0.7
     default_sl_pips: 20.0
     default_tp_pips: 40.0
@@ -317,7 +317,7 @@ symbols:
   CADJPY:
     pip_value: 100.0
     spread_pips: 2.5
-    sg_spread_threshold_pips: 3.8  # 2.5 × 1.5
+    sg_spread_threshold_pips: 5.5  # p95ベース
     slippage_pips: 0.7
     default_sl_pips: 20.0
     default_tp_pips: 40.0
@@ -341,7 +341,7 @@ symbols:
   CHFJPY:
     pip_value: 100.0
     spread_pips: 2.5
-    sg_spread_threshold_pips: 3.8  # 2.5 × 1.5
+    sg_spread_threshold_pips: 6.0  # p95ベース
     slippage_pips: 0.7
     default_sl_pips: 25.0
     default_tp_pips: 50.0
