@@ -210,9 +210,8 @@ def run_unified_year(
         if arrays.spread_points is not None:
             _sp = float(arrays.spread_points[idx])
             # spread_points → pips変換
-            # MT5のspread_pointsは最小価格単位
-            # pip_unit（JPY=0.01）の1/10がpoint
-            _sp_pips = _sp * sim_config.pip_unit / 10
+            # MT5: 10 points = 1 pip（全ペア共通）
+            _sp_pips = _sp / 10.0
             bot.set_current_spread_pips(_sp_pips)
 
         # What-If: 毎足更新（SL/TP判定）
