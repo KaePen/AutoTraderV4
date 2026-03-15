@@ -1409,7 +1409,7 @@ def run_single_backtest(args: argparse.Namespace):
         "quote_ccy_rate": _quote_ccy_rate,
     })
     # ペア別 signal/filter/risk_mgmt 上書き（プリセット < ペア別 < YAML < CLI）
-    # multi_consensus_threshold はマルチBT専用（単独BTでは不要）
+    # 廃止フィールドの除去（後方互換）
     _sym_signal.pop("multi_consensus_threshold", None)
     _bot_overrides.update(_sym_signal)
     _bot_overrides.update(_sym_filter)

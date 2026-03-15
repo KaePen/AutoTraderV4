@@ -152,7 +152,7 @@ class SignalConfig:
         trend_strength_max: トレンド強度上限
     """
 
-    consensus_threshold: float = 9.0
+    consensus_threshold: float = 17.0
     consensus_primary_weight: float = 2.0
     consensus_entry_weight: float = 1.5
     consensus_confirm_weight: float = 3.0
@@ -338,8 +338,8 @@ class UnifiedBotConfig:
     slippage_buffer_pips: float = 2.0
     # デモモード（閾値を下げて活発にシグナルを発火させる）
     demo_mode: bool = False
-    # コンセンサス閾値
-    consensus_threshold: float = 9.0
+    # コンセンサス閾値（BT・ライブ共通）
+    consensus_threshold: float = 17.0
     # 最大同時ポジション数（ライブ用）
     max_positions: int = 3
     # デモモード時の最大同時ポジション数

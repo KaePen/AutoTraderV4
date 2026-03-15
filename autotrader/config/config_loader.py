@@ -119,9 +119,7 @@ class ConfigLoader:
 
         Args:
             symbol: 通貨ペアシンボル
-            multi_mode: マルチペア/ライブモード。
-                Trueの場合 multi_consensus_threshold を
-                consensus_threshold として適用する。
+            multi_mode: マルチペア/ライブモード（後方互換、現在未使用）。
 
         Returns:
             tuple: (UnifiedBotConfig, PositionManagerConfig)
@@ -152,25 +150,8 @@ class ConfigLoader:
         filter_merged = {**filter_defaults, **sym_filter}
         pm_merged = {**pm_defaults, **sym_pm}
 
-        # multi_mode: multi_consensus_threshold → consensus_threshold
-        if multi_mode:
-            mct = signal_merged.pop(
-                "multi_consensus_threshold",
-                None,
-            )
-            if mct is not None:
-                signal_merged["consensus_threshold"] = mct
-                logger.info(
-                    "%s: multi_mode=True, consensus_threshold=%.1f",
-                    symbol,
-                    mct,
-                )
-        else:
-            # 単独BT: multi_consensus_threshold は不要
-            signal_merged.pop(
-                "multi_consensus_threshold",
-                None,
-            )
+        # 廃止フィールドの除去（後方互換）
+        signal_merged.pop("multi_consensus_threshold", None)
 
         # --- プリセット値（SymbolPreset）---
         preset_bot_defaults = {
