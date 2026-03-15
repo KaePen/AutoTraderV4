@@ -1471,6 +1471,17 @@ def _execute_month_single(
     pm_ovr.update(sym_ovr.get("pm_config", {}))
     pm_ovr.update(overrides.get("pm", {}))
 
+    # プリセットのspread_pipsをbot_configに注入（SoftGuard用）
+    if "spread_pips" not in bot_ovr:
+        bot_ovr["spread_pips"] = preset.spread_pips
+    # プリセットのsg_spread_threshold_pipsもbot_configに注入
+    if (
+        "sg_spread_threshold_pips" not in bot_ovr
+        and preset.sg_spread_threshold_pips is not None
+    ):
+        bot_ovr["sg_spread_threshold_pips"] = (
+            preset.sg_spread_threshold_pips
+        )
     bot_config = UnifiedBotConfig(**bot_ovr)
     PositionManagerConfig(**pm_ovr)  # バリデーション用
 
