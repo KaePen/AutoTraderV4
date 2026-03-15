@@ -725,6 +725,47 @@ class UnifiedTradeBot:
             PendingMomentumEntry | None
         ) = None
 
+        # マクロレジームフィルタ（VIXベース）
+        from autotrader.calculator.features.macro_regime import (
+            MacroRegimeConfig,
+            MacroRegimeFilter,
+        )
+
+        self._macro_regime_filter = MacroRegimeFilter(
+            MacroRegimeConfig(
+                enabled=self.config.macro_regime_enabled,
+                vix_elevated_threshold=(
+                    self.config.macro_regime_vix_elevated
+                ),
+                vix_high_fear_threshold=(
+                    self.config.macro_regime_vix_high_fear
+                ),
+                vix_extreme_fear_threshold=(
+                    self.config.macro_regime_vix_extreme_fear
+                ),
+                elevated_penalty=(
+                    self.config.macro_regime_elevated_penalty
+                ),
+                high_fear_penalty=(
+                    self.config.macro_regime_high_fear_penalty
+                ),
+            )
+        )
+
+    def update_macro_regime(self, vix: float) -> None:
+        """VIX値を更新してマクロレジームを判定
+
+        Args:
+            vix: VIX Close値
+        """
+        level = self._macro_regime_filter.update_vix(vix)
+        if self.config.macro_regime_enabled:
+            logger.debug(
+                "VIX更新: %.1f → %s",
+                vix,
+                level.value,
+            )
+
     def set_market_data(
         self,
         data: dict[str, pd.DataFrame],
@@ -1305,6 +1346,18 @@ class UnifiedTradeBot:
             if _vr is not None and not pd.isna(_vr):
                 _vol_ratio = float(_vr)
 
+        # マクロレジームフィルタ: HardGuardチェック
+        _macro_blocked, _macro_reason = (
+            self._macro_regime_filter.should_block_trade()
+        )
+        if _macro_blocked:
+            return _filt_hold(_macro_reason or "VIXブロック")
+
+        # マクロレジームフィルタ: ペナルティ取得
+        _macro_penalty, _macro_penalty_reason = (
+            self._macro_regime_filter.get_penalty()
+        )
+
         sg_context: dict[str, object] = {
             "spread_pips": self._get_spread_pips(current_time),
             "current_time": current_time.to_pydatetime(),
@@ -1346,6 +1399,15 @@ class UnifiedTradeBot:
             sg_result = dataclasses.replace(
                 sg_result,
                 total_penalty=(sg_result.total_penalty + _bca_penalty),
+            )
+
+        # マクロレジームペナルティをSoftGuard結果に加算
+        if _macro_penalty > 0:
+            sg_result = dataclasses.replace(
+                sg_result,
+                total_penalty=(
+                    sg_result.total_penalty + _macro_penalty
+                ),
             )
 
         # セッションフィルター
