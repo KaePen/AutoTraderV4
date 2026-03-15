@@ -749,6 +749,15 @@ class LiveTradingEngine:
                         fundamental_ctx, sentiment
                     )
 
+        # 3.5. リアルタイムスプレッドをbotに注入（SoftGuard用）
+        try:
+            _spread_pips = await self._data_provider.get_spread_async(
+                self._active_symbol,
+            )
+            self._bot.set_current_spread_pips(_spread_pips)
+        except Exception:
+            pass  # 取得失敗時はプリセット値にフォールバック
+
         # 4. シグナル生成
         current_time = pd.Timestamp.now(tz="UTC")
         signal = self._bot.generate_signal(
