@@ -238,7 +238,8 @@ class TradeSimulator:
         # 連敗カウンター
         self._consecutive_losses: int = 0
         # 処理中candle用スプレッド
-        self._current_candle_spread: float = 0.0
+        self._current_candle_spread: float = self._spread_price
+        self._current_row_data: dict | None = None
         # ポジションイベントロガー
         self._pos_event_logger: PositionEventLogger | None = None
         # セッション別スプレッド
@@ -333,7 +334,9 @@ class TradeSimulator:
             signal.signal_type if signal else None
         )
 
-        # 現在足スプレッド保存（exit_metrics用）
+        # 現在足のrow_data・スプレッドを保存
+        # _get_entry_price / _get_exit_price でも参照される
+        self._current_row_data = row_data
         self._current_candle_spread = (
             self._get_spread_for_candle(candle, row_data)
         )
@@ -1075,7 +1078,9 @@ class TradeSimulator:
             float: エントリー価格（スプレッド・スリッページ込み）
         """
         if override_price is not None:
-            spread = self._get_spread_for_candle(candle)
+            spread = self._get_spread_for_candle(
+                candle, self._current_row_data,
+            )
             half_spread = spread / 2
             if signal_type == SignalType.BUY:
                 return (
@@ -1089,7 +1094,9 @@ class TradeSimulator:
                     - half_spread
                     - self._slippage_price
                 )
-        spread = self._get_spread_for_candle(candle)
+        spread = self._get_spread_for_candle(
+            candle, self._current_row_data,
+        )
         half_spread = spread / 2
         if signal_type == SignalType.BUY:
             # 買い：Ask価格（Close + スプレッド半分 + スリッページ）
@@ -1112,7 +1119,9 @@ class TradeSimulator:
         Returns:
             float: 決済価格
         """
-        spread = self._get_spread_for_candle(candle)
+        spread = self._get_spread_for_candle(
+            candle, self._current_row_data,
+        )
         half_spread = spread / 2
         if signal_type == SignalType.BUY:
             # 買いポジション決済：Bid価格
