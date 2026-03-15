@@ -206,6 +206,15 @@ def run_unified_year(
             open_sell_count=sell_count,
         )
 
+        # 実スプレッドをbotに設定（SoftGuard用）
+        if arrays.spread_points is not None:
+            _sp = float(arrays.spread_points[idx])
+            # spread_points → pips変換
+            # MT5のspread_pointsは最小価格単位
+            # pip_unit（JPY=0.01）の1/10がpoint
+            _sp_pips = _sp * sim_config.pip_unit / 10
+            bot.set_current_spread_pips(_sp_pips)
+
         # What-If: 毎足更新（SL/TP判定）
         if whatif_tracker is not None:
             whatif_tracker.update(
@@ -426,9 +435,16 @@ def run_unified_year(
             "_last_fundamental_assessment",
             None,
         )
+        # 実スプレッドデータをシミュレーターに渡す
+        _row_data = None
+        if arrays.spread_points is not None:
+            _row_data = {
+                "spread_points": float(arrays.spread_points[idx]),
+            }
         simulator.process_candle(
             candle,
             signal,
+            row_data=_row_data,
             consensus_scores=_consensus_scores,
             fundamental_assessment=_fund_assess,
         )
