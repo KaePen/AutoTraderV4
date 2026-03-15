@@ -104,5 +104,3 @@ EURUSDペアの最適化を実施してください。調整に利用してよ�
   Step 3: run_backtest.py --fundamental
            → BacktestFundamentalProvider が自動参照
            → FundamentalContext.macro_bias_score に反映
-
-
