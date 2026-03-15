@@ -118,16 +118,8 @@ def load_signal_overrides(
     # filter/risk_mgmt をマージ
     defaults.update(filter_defaults)
     defaults.update(risk_defaults)
-    # multi_mode: multi_consensus_threshold → consensus_threshold
-    if multi_mode:
-        mct = defaults.pop(
-            "multi_consensus_threshold",
-            None,
-        )
-        if mct is not None:
-            defaults["consensus_threshold"] = mct
-    else:
-        defaults.pop("multi_consensus_threshold", None)
+    # 廃止フィールドの除去（後方互換）
+    defaults.pop("multi_consensus_threshold", None)
     return defaults
 
 

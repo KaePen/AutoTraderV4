@@ -485,6 +485,7 @@ class TestRangeFilterLegacy:
     def setup_method(self) -> None:
         """テストセットアップ"""
         self.config = UnifiedBotConfig(
+            consensus_threshold=8.0,
             range_filter_consolidated=False,
             range_day_bbw_threshold=0.25,
             range_day_score_premium=0.3,
@@ -511,7 +512,7 @@ class TestRangeFilterLegacy:
         )
         # score=9.0 < threshold+1.5=9.5 → ブロック
         assert result is not None
-        assert "LOW_VOL制限" in result
+        assert "レジームブロック" in result
 
     def test_range_weak_trend_blocks(self) -> None:
         """RANGE+弱トレンドでブロック"""
@@ -526,7 +527,7 @@ class TestRangeFilterLegacy:
             current_time=self.time,
         )
         assert result is not None
-        assert "RANGE制限" in result
+        assert "レジームブロック" in result
 
     def test_trend_regime_passes(self) -> None:
         """TRENDレジームは全フィルタ通過"""
@@ -558,7 +559,7 @@ class TestRangeFilterLegacy:
         )
         # score=8.1 < threshold+0.3=8.3 → ブロック
         assert result is not None
-        assert "RANGEスコアプレミアム" in result
+        assert "レジームブロック" in result
 
     def test_fallback_mode_uses_legacy(self) -> None:
         """consolidated=Falseでlegacyが使用される"""
@@ -573,6 +574,6 @@ class TestRangeFilterLegacy:
             current_time=self.time,
         )
         assert result is not None
-        assert "RANGE制限" in result
+        assert "レジームブロック" in result
 
 
