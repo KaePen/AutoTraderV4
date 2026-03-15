@@ -843,7 +843,7 @@ def run_unified_year(
         "non_loss_rate": metrics.non_loss_rate * 100,
         "profit_factor": metrics.profit_factor,
         "net_profit": simulator.state.balance - sim_config.initial_balance,
-        "max_drawdown": metrics.max_drawdown_pct * 100,
+        "max_drawdown": simulator.state.max_drawdown * 100,
         "sharpe": metrics.sharpe_ratio or 0,
         "breakdown": breakdown,
         "monthly_results": _monthly_results,
