@@ -41,6 +41,7 @@ class CandleArrays:
     closes: np.ndarray
     volumes: np.ndarray
     n_rows: int
+    spread_points: np.ndarray | None = None
 
     @classmethod
     def from_dataframe(cls, df: pd.DataFrame) -> CandleArrays:
@@ -58,6 +59,10 @@ class CandleArrays:
         lows = df["low"].values.astype(np.float64)
         closes = df["close"].values.astype(np.float64)
         volumes = df["volume"].values.astype(np.float64)
+        # スプレッド列（存在すれば）
+        sp = None
+        if "spread_points" in df.columns:
+            sp = df["spread_points"].values.astype(np.float64)
 
         return cls(
             times=times,
@@ -67,6 +72,7 @@ class CandleArrays:
             closes=closes,
             volumes=volumes,
             n_rows=len(df),
+            spread_points=sp,
         )
 
     def get_candle(

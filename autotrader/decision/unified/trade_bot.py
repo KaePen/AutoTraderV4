@@ -556,6 +556,9 @@ class UnifiedTradeBot:
                 ),
             )
 
+        # リアルタイムスプレッド（BT: CSV実データ、ライブ: MT5取得値）
+        self._current_spread_pips: float | None = None
+
         # Phase 2b: 直近のファンダメンタル評価結果
         self._last_fundamental_assessment: Any = None
 
@@ -1854,11 +1857,24 @@ class UnifiedTradeBot:
             lot=lot,
         )
 
+    def set_current_spread_pips(
+        self, spread_pips: float,
+    ) -> None:
+        """リアルタイムスプレッドを設定
+
+        BT: CSV実スプレッドデータから毎足更新
+        ライブ: MT5から取得して更新
+
+        Args:
+            spread_pips: 現在のスプレッド（pips）
+        """
+        self._current_spread_pips = spread_pips
+
     def _get_spread_pips(self, current_time: pd.Timestamp) -> float:
         """スプレッドを取得
 
-        プリセットから注入されたspread_pipsを返す。
-        BT/リアル両方で同じ値を使用。
+        リアルタイム値が設定されていれば優先。
+        なければプリセット値にフォールバック。
 
         Args:
             current_time: 現在時刻
@@ -1866,6 +1882,8 @@ class UnifiedTradeBot:
         Returns:
             float: スプレッド（pips）
         """
+        if self._current_spread_pips is not None:
+            return self._current_spread_pips
         return self.config.spread_pips
 
     def _get_current_price(
