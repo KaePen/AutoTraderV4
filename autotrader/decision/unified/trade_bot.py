@@ -1346,14 +1346,8 @@ class UnifiedTradeBot:
             if _vr is not None and not pd.isna(_vr):
                 _vol_ratio = float(_vr)
 
-        # マクロレジームフィルタ: HardGuardチェック
-        _macro_blocked, _macro_reason = (
-            self._macro_regime_filter.should_block_trade()
-        )
-        if _macro_blocked:
-            return _filt_hold(_macro_reason or "VIXブロック")
-
         # マクロレジームフィルタ: ペナルティ取得
+        # HardGuardチェックは_filt_hold定義後に実行
         _macro_penalty, _macro_penalty_reason = (
             self._macro_regime_filter.get_penalty()
         )
@@ -1428,6 +1422,13 @@ class UnifiedTradeBot:
                 htf_alignment,
                 sg_result,
             )
+
+        # マクロレジームフィルタ: HardGuardチェック（EXTREME_FEAR→全停止）
+        _macro_blocked, _macro_reason = (
+            self._macro_regime_filter.should_block_trade()
+        )
+        if _macro_blocked:
+            return _filt_hold(_macro_reason or "VIXブロック")
 
         # デモモード: コンセンサス閾値のみ。追加フィルタースキップ
         if not self.config.demo_mode:
