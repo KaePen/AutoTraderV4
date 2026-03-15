@@ -153,6 +153,11 @@ def run_unified_year(
 
     # numpy配列ベースのループ
     arrays = CandleArrays.from_dataframe(period_df)
+    _log.info(
+        "CandleArrays: spread_points=%s, n_rows=%d",
+        "あり" if arrays.spread_points is not None else "なし",
+        arrays.n_rows,
+    )
     for idx in range(arrays.n_rows):
         candle = arrays.get_candle(idx, runner.config.symbol, tf)
         last_candle = candle

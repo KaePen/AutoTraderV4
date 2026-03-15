@@ -1544,6 +1544,13 @@ def _execute_month_single(
         ),
     )
 
+    logger.info(
+        "SimConfig: use_actual_spread=%s, spread_pips=%.1f, bot.spread_pips=%.1f",
+        sim_config.use_actual_spread_data,
+        sim_config.spread_pips,
+        bot_config.spread_pips,
+    )
+
     # ファンダメンタルイベントプロバイダ（高インパクト指標スキップ）
     from autotrader.backtest.fundamental_utils import (
         create_fundamental_provider,
