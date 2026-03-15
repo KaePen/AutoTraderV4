@@ -575,6 +575,7 @@ def run_multi_pair_year(
     multi_config: MultiPairConfig,
     portfolio: PortfolioState,
     progress_file: str | None = None,
+    vix_data: dict | None = None,
 ) -> dict[str, list[Any]]:
     """1年分のマルチペアインターリーブ実行
 
@@ -584,6 +585,7 @@ def run_multi_pair_year(
         multi_config: テスト設定
         portfolio: 共有ポートフォリオ状態
         progress_file: 進捗書き出しファイルパス（WebUI連携用）
+        vix_data: VIX日次データ（date→float）
 
     Returns:
         dict: ペア別トレードリスト
@@ -619,6 +621,8 @@ def run_multi_pair_year(
 
     # 進捗表示
     _t0 = time.time()
+    # VIX日付追跡（日次更新のため日付変更時のみ全ペア更新）
+    _vix_current_date = None
 
     for bar_num, (bar_time, sym, idx) in enumerate(merged):
         ctx = contexts[sym]
@@ -636,6 +640,17 @@ def run_multi_pair_year(
             )
             current_month = candle_month
             month_start_equity = portfolio.equity
+
+        # VIX日次更新（日付変更時のみ、全ペア共通値）
+        if vix_data:
+            _bar_date = bar_time.date()
+            if _bar_date != _vix_current_date:
+                _vix_current_date = _bar_date
+                _vix_val = vix_data.get(_bar_date)
+                if _vix_val is not None:
+                    # 全ペアのbotにVIX値を更新
+                    for _ctx in contexts.values():
+                        _ctx.bot.update_macro_regime(_vix_val)
 
         # Candle取得
         candle = ctx.arrays.get_candle(idx, sym, ctx.base_tf)

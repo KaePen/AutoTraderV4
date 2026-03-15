@@ -1562,6 +1562,19 @@ def _execute_month_single(
         end_year=year,
     )
 
+    # VIXデータロード（macro_regime_enabled時のみ）
+    _vix_data = None
+    if bot_config.macro_regime_enabled:
+        from autotrader.backtest.vix_loader import (
+            load_vix_year,
+        )
+        _vix_data = load_vix_year(year, data_dir)
+        logger.info(
+            "VIXデータ: %d年 %d日分",
+            year,
+            len(_vix_data),
+        )
+
     result = run_unified_year(
         runner=runner,
         bot_config=bot_config,
@@ -1574,6 +1587,7 @@ def _execute_month_single(
         period_end=period_end,
         emitter=_emitter,
         whatif_tracker=whatif_tracker,
+        vix_data=_vix_data,
     )
 
     if result is None:
@@ -1770,9 +1784,27 @@ def _execute_month_multi_pair(
         )
         return
 
+    # VIXデータロード（いずれかのペアでmacro_regime_enabled時）
+    _vix_data = None
+    _any_macro = any(
+        ctx.bot.config.macro_regime_enabled
+        for ctx in contexts.values()
+    )
+    if _any_macro:
+        from autotrader.backtest.vix_loader import (
+            load_vix_year,
+        )
+        _vix_data = load_vix_year(year, data_dir)
+        logger.info(
+            "VIXデータ(multi): %d年 %d日分",
+            year,
+            len(_vix_data),
+        )
+
     # インターリーブ実行（月データは自動的に1ヶ月分）
     pair_trades = run_multi_pair_year(
         year, contexts, multi_config, portfolio,
+        vix_data=_vix_data,
     )
 
     # 月次結果構築

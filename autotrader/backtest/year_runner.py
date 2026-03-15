@@ -43,6 +43,7 @@ def run_unified_year(
     row_progress_callback: ("Callable[[int, int], None] | None") = None,
     adaptive_config: "TunerConfig | None" = None,
     whatif_tracker: Any = None,
+    vix_data: "dict | None" = None,
 ) -> dict[str, Any] | None:
     """統合ボットで1年分のバックテスト実行（self-contained）
 
@@ -64,6 +65,7 @@ def run_unified_year(
             (completed_rows, total_rows) → None。
             並列実行時にUIへリアルタイム進捗を通知する。
         whatif_tracker: WhatIfTracker（ブロックシグナル仮想追跡）
+        vix_data: VIX日次データ（date→float）
 
     Returns:
         年別結果（monthly_results フィールドを含む）
@@ -150,6 +152,8 @@ def run_unified_year(
     _pos_mode_regime: dict[str, tuple[str, str]] = {}
 
     last_candle = None
+    # VIX日付追跡（日次更新のため日付変更時のみ更新）
+    _vix_current_date = None
 
     # numpy配列ベースのループ
     arrays = CandleArrays.from_dataframe(period_df)
@@ -185,6 +189,15 @@ def run_unified_year(
             current_month = candle_month
             month_start_balance = simulator.state.balance
             month_trades = 0
+
+        # VIX日次更新（日付変更時のみ）
+        if vix_data:
+            _candle_date = candle_time.date()
+            if _candle_date != _vix_current_date:
+                _vix_current_date = _candle_date
+                _vix_val = vix_data.get(_candle_date)
+                if _vix_val is not None:
+                    bot.update_macro_regime(_vix_val)
 
         # 資金管理: botのequityとエクスポージャーを同期
         open_positions = simulator.get_open_positions()
