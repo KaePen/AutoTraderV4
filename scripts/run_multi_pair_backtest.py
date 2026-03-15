@@ -155,8 +155,14 @@ def build_bot_config(
             "equity_floor_pct": preset.equity_floor_pct,
             "pip_unit": _pip_unit,
             "quote_ccy_rate": _qcr,
+            "spread_pips": preset.spread_pips,
         }
     )
+    # ペア別SoftGuardスプレッド閾値を注入
+    if preset.sg_spread_threshold_pips is not None:
+        overrides["sg_spread_threshold_pips"] = (
+            preset.sg_spread_threshold_pips
+        )
     for k, v in signal.items():
         if k in valid_fields:
             overrides[k] = v
