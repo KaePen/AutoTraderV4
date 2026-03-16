@@ -12,7 +12,7 @@
 
 # --- シグナル生成設定（全通貨ペア共通デフォルト）---
 signal:
-  consensus_threshold: 17.0           # MP-T30 WF検証済み（BT・ライブ共通）
+  consensus_threshold: 18.0           # IMP-H1 BT公正性改善後の最適値
   consensus_primary_weight: 2.0
   consensus_entry_weight: 1.5
   consensus_confirm_weight: 3.0
@@ -93,7 +93,7 @@ defaults:
   max_positions: 1              # マルチペア運用: per_pair=1 に統一
   bonus_max_positions: 0        # 1ペア1ポジションなのでボーナス不要
   bonus_score_threshold: 7.0
-  base_risk_pct: 0.004        # MP-T51 DD2%検証採用 (旧0.003)
+  base_risk_pct: 0.005        # IMP-H1 CT18+DD2%目標 (旧0.004)
   max_lot_per_trade: 1.5      # pip_value修正後DD対策: 2.5 → 1.5
   max_total_exposure_lot: 3.0 # pip_value修正後DD対策: 4.0 → 3.0
   equity_floor_pct: 0.30
@@ -228,7 +228,7 @@ symbols:
     max_positions: 1
     bonus_max_positions: 0
     bonus_score_threshold: 7.0
-    base_risk_pct: 0.004          # MP-T51 DD2%検証採用 (旧0.003)
+    base_risk_pct: 0.005          # IMP-H1 CT18+DD2%目標 (旧0.004)
     max_lot_per_trade: 2.0
     max_total_exposure_lot: 4.0
     equity_floor_pct: 0.30
@@ -249,7 +249,7 @@ symbols:
     # Tier 1 (WR 75%, PF 2.5)
     max_positions: 1              # マルチペア運用: per_pair=1 に統一
     bonus_score_threshold: 7.5
-    base_risk_pct: 0.004          # MP-T51 DD2%検証採用 (旧0.003)
+    base_risk_pct: 0.005          # IMP-H1 CT18+DD2%目標 (旧0.004)
     max_lot_per_trade: 2.0
     max_total_exposure_lot: 4.0
     signal:
@@ -275,7 +275,7 @@ symbols:
     max_positions: 1              # マルチペア運用: per_pair=1 に統一
     bonus_max_positions: 0
     bonus_score_threshold: 8.0
-    base_risk_pct: 0.004          # MP-T51 DD2%検証採用 (旧0.003)
+    base_risk_pct: 0.005          # IMP-H1 CT18+DD2%目標 (旧0.004)
     max_lot_per_trade: 1.5
     max_total_exposure_lot: 3.0
     signal:
@@ -300,7 +300,7 @@ symbols:
     # Tier 2 (WR 73%, PF 2.2)
     max_positions: 1              # マルチペア運用: per_pair=1 に統一
     bonus_score_threshold: 7.0
-    base_risk_pct: 0.004          # MP-T51 DD2%検証採用 (旧0.003)
+    base_risk_pct: 0.005          # IMP-H1 CT18+DD2%目標 (旧0.004)
     max_lot_per_trade: 1.5
     max_total_exposure_lot: 3.0
     signal:
@@ -326,7 +326,7 @@ symbols:
     # Tier 2 (WR 73%, PF 2.4)
     max_positions: 1              # マルチペア運用: per_pair=1 に統一
     bonus_score_threshold: 7.0
-    base_risk_pct: 0.004          # MP-T51 DD2%検証採用 (旧0.003)
+    base_risk_pct: 0.005          # IMP-H1 CT18+DD2%目標 (旧0.004)
     max_lot_per_trade: 1.5
     max_total_exposure_lot: 3.0
     signal:
@@ -350,7 +350,7 @@ symbols:
     # Tier 2 (WR 74%, PF 2.2)
     max_positions: 1              # マルチペア運用: per_pair=1 に統一
     bonus_score_threshold: 7.5
-    base_risk_pct: 0.004          # MP-T51 DD2%検証採用 (旧0.003)
+    base_risk_pct: 0.005          # IMP-H1 CT18+DD2%目標 (旧0.004)
     max_lot_per_trade: 1.5
     max_total_exposure_lot: 3.0
     signal:
