@@ -583,6 +583,12 @@ class UnifiedTradeBot:
                 breakout_lookback=(
                     self.config.regime_breakout_lookback
                 ),
+                vol_expanding_threshold=(
+                    self.config.vol_expanding_threshold
+                ),
+                vol_compressing_threshold=(
+                    self.config.vol_compressing_threshold
+                ),
             )
         )
 
@@ -2088,8 +2094,11 @@ class UnifiedTradeBot:
                 reasoning=f"{_regime_tf}データなし",
             )
 
-        # ブレイクアウト特徴量を計算してrowに追加
-        if self.config.regime_breakout_enabled:
+        # ブレイクアウト/ボラ方向の特徴量を計算してrowに追加
+        if (
+            self.config.regime_breakout_enabled
+            or self.config.vol_direction_enabled
+        ):
             row = self._enrich_breakout_features(
                 row, _regime_tf,
             )
