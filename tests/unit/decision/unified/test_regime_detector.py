@@ -303,3 +303,91 @@ class TestBreakoutDetection:
         result = self.detector.detect_from_row(row)
         # ブレイクアウトカラムなし → RANGE
         assert result.regime == MarketRegime.RANGE
+
+
+class TestVolatilityDirection:
+    """ボラティリティ方向検出のテスト"""
+
+    def setup_method(self) -> None:
+        """テストセットアップ"""
+        self.detector = MarketRegimeDetector()
+
+    def test_expanding_detected(self) -> None:
+        """ATR拡大中をexpandingと判定"""
+        result = self.detector.detect(
+            normalized_atr=1.0,
+            adx=15.0,
+            ma_alignment=0.1,
+            atr_change_rate=0.4,  # > 0.3 threshold
+        )
+        assert result.volatility_direction == "expanding"
+
+    def test_compressing_detected(self) -> None:
+        """ATR縮小中をcompressingと判定"""
+        result = self.detector.detect(
+            normalized_atr=1.0,
+            adx=15.0,
+            ma_alignment=0.1,
+            atr_change_rate=-0.3,  # < -0.2 threshold
+        )
+        assert result.volatility_direction == "compressing"
+
+    def test_neutral_detected(self) -> None:
+        """中間域をneutralと判定"""
+        result = self.detector.detect(
+            normalized_atr=1.0,
+            adx=15.0,
+            ma_alignment=0.1,
+            atr_change_rate=0.1,  # between thresholds
+        )
+        assert result.volatility_direction == "neutral"
+
+    def test_neutral_default_no_atr_change(self) -> None:
+        """ATR変化率0はneutral"""
+        result = self.detector.detect(
+            normalized_atr=1.0,
+            adx=15.0,
+            ma_alignment=0.1,
+        )
+        assert result.volatility_direction == "neutral"
+
+    def test_custom_thresholds(self) -> None:
+        """カスタム閾値でのボラ方向判定"""
+        config = RegimeDetectorConfig(
+            vol_expanding_threshold=0.1,
+            vol_compressing_threshold=-0.1,
+        )
+        detector = MarketRegimeDetector(config)
+        result = detector.detect(
+            normalized_atr=1.0,
+            adx=15.0,
+            ma_alignment=0.1,
+            atr_change_rate=0.15,
+        )
+        assert result.volatility_direction == "expanding"
+
+    def test_vol_direction_with_breakout(self) -> None:
+        """BREAKOUTレジームでもボラ方向は設定される"""
+        config = RegimeDetectorConfig(
+            breakout_enabled=True,
+        )
+        detector = MarketRegimeDetector(config)
+        result = detector.detect(
+            normalized_atr=1.0,
+            adx=15.0,
+            ma_alignment=0.1,
+            breakout_up=True,
+            atr_change_rate=0.5,
+        )
+        assert result.regime == MarketRegime.BREAKOUT
+        assert result.volatility_direction == "expanding"
+
+    def test_vol_direction_boundary(self) -> None:
+        """閾値境界でneutral"""
+        result = self.detector.detect(
+            normalized_atr=1.0,
+            adx=15.0,
+            ma_alignment=0.1,
+            atr_change_rate=0.3,  # == threshold → not >
+        )
+        assert result.volatility_direction == "neutral"

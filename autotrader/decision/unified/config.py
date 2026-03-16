@@ -402,6 +402,17 @@ class UnifiedBotConfig:
     regime_breakout_sl_min_pips: float | None = None
     # BREAKOUT時のSL上限（None=sl_max_pipsを使用）
     regime_breakout_sl_max_pips: float | None = None
+    # --- ボラティリティ方向検出設定 ---
+    # ボラ方向検出有効化
+    vol_direction_enabled: bool = True
+    # EXPANDING時のATR変化率閾値
+    vol_expanding_threshold: float = 0.3
+    # COMPRESSING時のATR変化率閾値
+    vol_compressing_threshold: float = -0.2
+    # EXPANDING時のSoftGuardペナルティ
+    vol_expanding_penalty: float = 0.1
+    # EXPANDING時のSL拡大倍率（1.0=変更なし）
+    vol_expanding_sl_multiplier: float = 1.0
     # HTFスコア最低要件（score_htf=0はWR低下）
     htf_score_filter_enabled: bool = True
     # HTF整合度がこの値以下のとき閾値を追加

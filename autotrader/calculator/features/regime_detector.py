@@ -26,6 +26,8 @@ class RegimeResult:
         reasoning: 判定理由
         is_breakout: ブレイクアウト検出フラグ
         atr_change_rate: ATR変化率
+        volatility_direction: ボラ方向
+            ("expanding"/"compressing"/"neutral")
     """
 
     regime: MarketRegime
@@ -36,6 +38,7 @@ class RegimeResult:
     reasoning: str
     is_breakout: bool = False
     atr_change_rate: float = 0.0
+    volatility_direction: str = "neutral"
 
 
 @dataclass(frozen=True)
@@ -59,6 +62,9 @@ class RegimeDetectorConfig:
     ma_alignment_threshold: float = 0.3
     breakout_enabled: bool = False
     breakout_lookback: int = 20
+    # ボラティリティ方向判定閾値
+    vol_expanding_threshold: float = 0.3
+    vol_compressing_threshold: float = -0.2
 
 
 class MarketRegimeDetector:
@@ -135,6 +141,15 @@ class MarketRegimeDetector:
 
         _is_breakout = regime == MarketRegime.BREAKOUT
 
+        # ボラティリティ方向判定
+        cfg = self.config
+        if atr_change_rate > cfg.vol_expanding_threshold:
+            _vol_dir = "expanding"
+        elif atr_change_rate < cfg.vol_compressing_threshold:
+            _vol_dir = "compressing"
+        else:
+            _vol_dir = "neutral"
+
         return RegimeResult(
             regime=regime,
             trend_strength=trend_strength,
@@ -144,6 +159,7 @@ class MarketRegimeDetector:
             reasoning=reasoning,
             is_breakout=_is_breakout,
             atr_change_rate=atr_change_rate,
+            volatility_direction=_vol_dir,
         )
 
     def detect_from_row(self, row: pd.Series) -> RegimeResult:

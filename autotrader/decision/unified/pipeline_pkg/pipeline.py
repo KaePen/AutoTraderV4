@@ -693,6 +693,21 @@ class FilterStep:
                 ),
             )
 
+        # ボラ方向EXPANDING時のペナルティ加算
+        if (
+            bot.config.vol_direction_enabled
+            and regime_result.volatility_direction
+            == "expanding"
+            and bot.config.vol_expanding_penalty > 0
+        ):
+            sg_result = dataclasses.replace(
+                sg_result,
+                total_penalty=(
+                    sg_result.total_penalty
+                    + bot.config.vol_expanding_penalty
+                ),
+            )
+
         # セッションフィルター
         hour_utc = (
             current_time.hour
@@ -1088,6 +1103,18 @@ class SizingStep:
             sl_pips = min(
                 sl_pips,
                 bot.config.regime_breakout_sl_max_pips,
+            )
+        # EXPANDING時のSL拡大
+        if (
+            bot.config.vol_direction_enabled
+            and regime_result.volatility_direction
+            == "expanding"
+            and bot.config.vol_expanding_sl_multiplier
+            != 1.0
+        ):
+            sl_pips = (
+                sl_pips
+                * bot.config.vol_expanding_sl_multiplier
             )
         # レジーム別動的TP比率
         tp_sl_ratio = (
