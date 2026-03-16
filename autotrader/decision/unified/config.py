@@ -415,7 +415,7 @@ class UnifiedBotConfig:
     vol_expanding_sl_multiplier: float = 1.0
     # --- CHOPPY検出設定 ---
     # CHOPPY検出有効化
-    choppy_enabled: bool = False
+    choppy_enabled: bool = True
     # Choppiness Index閾値（61.8=フィボナッチ）
     choppy_ci_threshold: float = 61.8
     # CHOPPY時のコンセンサス閾値上乗せ（実質トレード抑制）
