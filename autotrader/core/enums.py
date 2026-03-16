@@ -185,6 +185,7 @@ class MarketRegime(str, Enum):
     RANGE = "RANGE"
     HIGH_VOL = "HIGH_VOL"
     LOW_VOL = "LOW_VOL"
+    CHOPPY = "CHOPPY"
 
 
 
