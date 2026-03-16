@@ -575,7 +575,16 @@ class UnifiedTradeBot:
             RegimeDetectorConfig,
         )
 
-        self.regime_detector = MarketRegimeDetector(RegimeDetectorConfig())
+        self.regime_detector = MarketRegimeDetector(
+            RegimeDetectorConfig(
+                breakout_enabled=(
+                    self.config.regime_breakout_enabled
+                ),
+                breakout_lookback=(
+                    self.config.regime_breakout_lookback
+                ),
+            )
+        )
 
         # モード選択（UNIVERSAL固定、TradingPlan直接生成）
 
@@ -2079,7 +2088,89 @@ class UnifiedTradeBot:
                 reasoning=f"{_regime_tf}データなし",
             )
 
+        # ブレイクアウト特徴量を計算してrowに追加
+        if self.config.regime_breakout_enabled:
+            row = self._enrich_breakout_features(
+                row, _regime_tf,
+            )
+
         return self.regime_detector.detect_from_row(row)
+
+    def _enrich_breakout_features(
+        self,
+        row: pd.Series,
+        timeframe: str,
+    ) -> pd.Series:
+        """ブレイクアウト特徴量をrowに追加
+
+        直近N足の高値/安値突破とATR変化率を計算。
+
+        Args:
+            row: 現在のデータ行
+            timeframe: 時間足
+
+        Returns:
+            pd.Series: ブレイクアウト特徴量追加済みの行
+        """
+        df = self._market_data.get(timeframe)
+        if df is None or df.empty:
+            return row
+
+        _idx = self._current_indices.get(timeframe, 0)
+        _lookback = self.config.regime_breakout_lookback
+
+        # ルックバック期間分のデータがない場合はスキップ
+        if _idx < _lookback:
+            return row
+
+        # 直近N足の高値/安値（現在足を含まない）
+        _slice = df.iloc[_idx - _lookback:_idx]
+        _high_max = _slice["high"].max()
+        _low_min = _slice["low"].min()
+        _close = row.get("close", 0.0)
+
+        # コピーして追加フィールドを設定
+        row = row.copy()
+        if not pd.isna(_close) and not pd.isna(_high_max):
+            row["breakout_up"] = (
+                1.0 if _close > _high_max else 0.0
+            )
+        else:
+            row["breakout_up"] = 0.0
+
+        if not pd.isna(_close) and not pd.isna(_low_min):
+            row["breakout_down"] = (
+                1.0 if _close < _low_min else 0.0
+            )
+        else:
+            row["breakout_down"] = 0.0
+
+        # ATR変化率: (現在ATR - ATR_MA) / ATR_MA
+        _atr_col = None
+        for _c in ["atr_14", "atr", "ATR"]:
+            if _c in df.columns:
+                _atr_col = _c
+                break
+        if _atr_col is not None and _idx >= _lookback:
+            _atr_slice = df[_atr_col].iloc[
+                _idx - _lookback:_idx + 1
+            ]
+            _atr_ma = _atr_slice.iloc[:-1].mean()
+            _atr_now = _atr_slice.iloc[-1]
+            if (
+                not pd.isna(_atr_ma)
+                and not pd.isna(_atr_now)
+                and _atr_ma > 0
+            ):
+                row["atr_change_rate"] = (
+                    (_atr_now - _atr_ma) / _atr_ma
+                )
+            else:
+                row["atr_change_rate"] = 0.0
+        else:
+            row["atr_change_rate"] = 0.0
+
+        return row
 
     def _get_htf_alignment(
         self,

@@ -8,6 +8,7 @@ from autotrader.core.enums import MarketRegime
 from autotrader.calculator.features.regime_detector import (
     MarketRegimeDetector,
     RegimeDetectorConfig,
+    RegimeResult,
 )
 
 
@@ -163,3 +164,142 @@ class TestMarketRegimeDetector:
                 for ma in [0.0, 0.3, 0.6]:
                     result = self.detector.detect(atr, adx, ma)
                     assert 0.0 <= result.confidence <= 1.0
+
+
+class TestBreakoutDetection:
+    """BREAKOUT検出のテスト"""
+
+    def setup_method(self) -> None:
+        """テストセットアップ（BREAKOUT有効）"""
+        self.detector = MarketRegimeDetector(
+            RegimeDetectorConfig(breakout_enabled=True)
+        )
+
+    def test_breakout_up_detected(self) -> None:
+        """上方ブレイクアウト検出"""
+        result = self.detector.detect(
+            normalized_atr=1.0,
+            adx=15.0,  # TREND閾値未満
+            ma_alignment=0.1,
+            breakout_up=True,
+            atr_change_rate=0.3,  # ATR拡大中
+        )
+        assert result.regime == MarketRegime.BREAKOUT
+        assert result.is_breakout is True
+        assert "上方ブレイクアウト" in result.reasoning
+
+    def test_breakout_down_detected(self) -> None:
+        """下方ブレイクアウト検出"""
+        result = self.detector.detect(
+            normalized_atr=1.0,
+            adx=15.0,
+            ma_alignment=-0.1,
+            breakout_down=True,
+            atr_change_rate=0.2,
+        )
+        assert result.regime == MarketRegime.BREAKOUT
+        assert result.is_breakout is True
+        assert "下方ブレイクアウト" in result.reasoning
+
+    def test_breakout_not_triggered_high_adx(self) -> None:
+        """ADXが高い場合はBREAKOUTではなくTREND"""
+        result = self.detector.detect(
+            normalized_atr=1.0,
+            adx=25.0,  # TREND閾値以上
+            ma_alignment=0.5,
+            breakout_up=True,
+            atr_change_rate=0.3,
+        )
+        # ADX >= 20 + MA整列 → TREND
+        assert result.regime == MarketRegime.TREND
+
+    def test_breakout_not_triggered_atr_shrinking(
+        self,
+    ) -> None:
+        """ATR縮小中はBREAKOUT不成立"""
+        result = self.detector.detect(
+            normalized_atr=1.0,
+            adx=15.0,
+            ma_alignment=0.1,
+            breakout_up=True,
+            atr_change_rate=-0.1,  # ATR縮小中
+        )
+        # ATR拡大なし → RANGE
+        assert result.regime == MarketRegime.RANGE
+
+    def test_breakout_not_triggered_no_price_break(
+        self,
+    ) -> None:
+        """価格ブレイクなしはBREAKOUT不成立"""
+        result = self.detector.detect(
+            normalized_atr=1.0,
+            adx=15.0,
+            ma_alignment=0.1,
+            breakout_up=False,
+            breakout_down=False,
+            atr_change_rate=0.3,
+        )
+        assert result.regime == MarketRegime.RANGE
+
+    def test_breakout_disabled_by_default(self) -> None:
+        """デフォルトではBREAKOUT無効"""
+        detector = MarketRegimeDetector()
+        result = detector.detect(
+            normalized_atr=1.0,
+            adx=15.0,
+            ma_alignment=0.1,
+            breakout_up=True,
+            atr_change_rate=0.3,
+        )
+        # 無効時はRANGE
+        assert result.regime == MarketRegime.RANGE
+
+    def test_breakout_confidence(self) -> None:
+        """BREAKOUT確度計算"""
+        result = self.detector.detect(
+            normalized_atr=1.0,
+            adx=10.0,  # ADX低め → _adx_conf = 0.5
+            ma_alignment=0.1,
+            breakout_up=True,
+            atr_change_rate=0.5,  # _atr_conf = 1.0
+        )
+        assert result.regime == MarketRegime.BREAKOUT
+        # 確度 = (1.0 + 0.5) / 2 = 0.75
+        assert abs(result.confidence - 0.75) < 0.01
+
+    def test_breakout_atr_change_rate_in_result(
+        self,
+    ) -> None:
+        """ATR変化率がRegimeResultに保存される"""
+        result = self.detector.detect(
+            normalized_atr=1.0,
+            adx=15.0,
+            ma_alignment=0.1,
+            breakout_up=True,
+            atr_change_rate=0.25,
+        )
+        assert result.atr_change_rate == 0.25
+
+    def test_breakout_from_row(self) -> None:
+        """detect_from_rowでBREAKOUT検出"""
+        row = pd.Series({
+            "normalized_atr": 1.0,
+            "adx": 15.0,
+            "ma_alignment": 0.1,
+            "breakout_up": 1.0,
+            "breakout_down": 0.0,
+            "atr_change_rate": 0.3,
+        })
+        result = self.detector.detect_from_row(row)
+        assert result.regime == MarketRegime.BREAKOUT
+
+    def test_breakout_from_row_no_columns(self) -> None:
+        """ブレイクアウトカラムなしでも動作"""
+        row = pd.Series({
+            "normalized_atr": 1.0,
+            "adx": 15.0,
+            "ma_alignment": 0.1,
+        })
+        result = self.detector.detect_from_row(row)
+        # ブレイクアウトカラムなし → RANGE
+        assert result.regime == MarketRegime.RANGE
