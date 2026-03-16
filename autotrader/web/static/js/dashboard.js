@@ -1688,37 +1688,43 @@ class TradingControl extends Component {
       </div>`;
     };
 
-    list.innerHTML = symbolGroups.map((group, groupIdx) => {
-      const divider = groupIdx > 0 ? '<div class="border-t border-gray-700/60 my-1"></div>' : '';
-      // グループ内のアクティブペアのみで状態集計
-      const activePairs = group.pairs.filter(p => ACTIVE_TRADE_PAIRS.has(p));
-      let groupToggleHtml = '';
-      if (isConnected && activePairs.length > 0) {
-        const busy = self.tcBusy;
-        const disabledAttr = busy ? ' disabled' : '';
-        const disabledCls = busy ? ' opacity-50 cursor-not-allowed' : '';
-        const allDemo = activePairs.every(p => symbolDemoStates[p]);
-        const allAuto = activePairs.every(p => symbolAutoStates[p]);
-        const demoCls = allDemo
-          ? 'bg-orange-500/25 text-orange-400 border border-orange-600/50 hover:bg-orange-500/40'
-          : 'bg-gray-700/80 text-gray-500 border border-gray-600/50 hover:bg-gray-600/80 hover:text-gray-300';
-        const autoCls = allAuto
-          ? 'bg-red-600 text-white hover:bg-red-700'
-          : 'bg-green-600/90 text-white hover:bg-green-700';
-        const autoLabel = allAuto ? 'ALL ON' : 'ALL OFF';
-        groupToggleHtml = `<div class="flex items-center gap-1 ml-auto">
-          <button data-group-action="demo" data-group-pairs="${activePairs.join(',')}"${disabledAttr}
-                  class="px-1.5 py-0.5 rounded text-[10px] font-bold transition-all min-w-[3rem] text-center ${demoCls}${disabledCls}">DEMO</button>
-          <button data-group-action="auto" data-group-pairs="${activePairs.join(',')}"${disabledAttr}
-                  class="px-1.5 py-0.5 rounded text-[10px] font-bold transition-all min-w-[3rem] text-center ${autoCls}${disabledCls}">${autoLabel}</button>
-        </div>`;
-      }
+    // 全ペア一括トグル行
+    const allActivePairs = [...ACTIVE_TRADE_PAIRS];
+    let allToggleHtml = '';
+    if (isConnected && allActivePairs.length > 0) {
+      const busy = self.tcBusy;
+      const disabledAttr = busy ? ' disabled' : '';
+      const disabledCls = busy ? ' opacity-50 cursor-not-allowed' : '';
+      const allDemo = allActivePairs.every(p => symbolDemoStates[p]);
+      const allAuto = allActivePairs.every(p => symbolAutoStates[p]);
+      const demoCls = allDemo
+        ? 'bg-orange-500/25 text-orange-400 border border-orange-600/50 hover:bg-orange-500/40'
+        : 'bg-gray-700/80 text-gray-500 border border-gray-600/50 hover:bg-gray-600/80 hover:text-gray-300';
+      const autoCls = allAuto
+        ? 'bg-red-600 text-white hover:bg-red-700'
+        : 'bg-green-600/90 text-white hover:bg-green-700';
+      const autoLabel = allAuto ? 'ALL ON' : 'ALL OFF';
+      allToggleHtml = `<div class="flex items-center gap-1 ml-auto">
+        <button data-group-action="demo" data-group-pairs="${allActivePairs.join(',')}"${disabledAttr}
+                class="px-1.5 py-0.5 rounded text-[10px] font-bold transition-all min-w-[3rem] text-center ${demoCls}${disabledCls}">DEMO</button>
+        <button data-group-action="auto" data-group-pairs="${allActivePairs.join(',')}"${disabledAttr}
+                class="px-1.5 py-0.5 rounded text-[10px] font-bold transition-all min-w-[3rem] text-center ${autoCls}${disabledCls}">${autoLabel}</button>
+      </div>`;
+    }
+    const allHeader = `<div class="px-3 pt-1.5 pb-0.5 flex items-center gap-1">
+      <span class="text-[10px] font-semibold text-gray-500 uppercase tracking-wider">All Pairs</span>
+      ${allToggleHtml}
+    </div>`;
+
+    const groupsHtml = symbolGroups.map((group, groupIdx) => {
+      const divider = '<div class="border-t border-gray-700/60 my-1"></div>';
       const header = `<div class="px-3 pt-1.5 pb-0.5 flex items-center gap-1">
         <span class="text-[10px] font-semibold text-gray-500 uppercase tracking-wider">${group.label}</span>
-        ${groupToggleHtml}
       </div>`;
       return divider + header + group.pairs.map(renderPairItem).join('');
     }).join('');
+
+    list.innerHTML = allHeader + groupsHtml;
 
     list.onclick = (e) => {
       // グループ一括ボタン
