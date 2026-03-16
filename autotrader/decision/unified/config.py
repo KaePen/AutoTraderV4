@@ -391,7 +391,7 @@ class UnifiedBotConfig:
     regime_trend_threshold_add: float = 1.5
     # --- BREAKOUT検出設定 ---
     # ブレイクアウト検出有効化
-    regime_breakout_enabled: bool = False
+    regime_breakout_enabled: bool = True
     # ブレイクアウト判定のルックバック期間（足数）
     regime_breakout_lookback: int = 20
     # BREAKOUT時のコンセンサス閾値調整（0.0=追加なし）
