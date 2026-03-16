@@ -391,3 +391,103 @@ class TestVolatilityDirection:
             atr_change_rate=0.3,  # == threshold → not >
         )
         assert result.volatility_direction == "neutral"
+
+
+class TestChoppyDetection:
+    """CHOPPY検出のテスト"""
+
+    def setup_method(self) -> None:
+        """テストセットアップ（CHOPPY有効）"""
+        self.detector = MarketRegimeDetector(
+            RegimeDetectorConfig(choppy_enabled=True)
+        )
+
+    def test_choppy_detected(self) -> None:
+        """CHOPPY条件を全て満たす場合"""
+        result = self.detector.detect(
+            normalized_atr=1.0,
+            adx=15.0,  # < 20
+            ma_alignment=0.1,  # < 0.15
+            choppiness_index=70.0,  # > 61.8
+        )
+        assert result.regime == MarketRegime.CHOPPY
+        assert "チョッピー" in result.reasoning
+
+    def test_choppy_not_triggered_low_ci(self) -> None:
+        """CI低い場合はCHOPPY不成立"""
+        result = self.detector.detect(
+            normalized_atr=1.0,
+            adx=15.0,
+            ma_alignment=0.1,
+            choppiness_index=50.0,  # < 61.8
+        )
+        assert result.regime != MarketRegime.CHOPPY
+
+    def test_choppy_not_triggered_high_adx(self) -> None:
+        """ADX高い場合はCHOPPY不成立"""
+        result = self.detector.detect(
+            normalized_atr=1.0,
+            adx=25.0,  # >= 20
+            ma_alignment=0.5,
+            choppiness_index=70.0,
+        )
+        # ADX高+MA整列→TREND
+        assert result.regime == MarketRegime.TREND
+
+    def test_choppy_not_triggered_high_alignment(
+        self,
+    ) -> None:
+        """MA整列度が高い場合はCHOPPY不成立"""
+        result = self.detector.detect(
+            normalized_atr=1.0,
+            adx=15.0,
+            ma_alignment=0.3,  # >= 0.15
+            choppiness_index=70.0,
+        )
+        assert result.regime != MarketRegime.CHOPPY
+
+    def test_choppy_disabled_by_default(self) -> None:
+        """デフォルトではCHOPPY無効"""
+        detector = MarketRegimeDetector()
+        result = detector.detect(
+            normalized_atr=1.0,
+            adx=15.0,
+            ma_alignment=0.1,
+            choppiness_index=70.0,
+        )
+        assert result.regime != MarketRegime.CHOPPY
+
+    def test_choppy_confidence(self) -> None:
+        """CHOPPY確度計算"""
+        result = self.detector.detect(
+            normalized_atr=1.0,
+            adx=15.0,
+            ma_alignment=0.1,
+            choppiness_index=81.8,  # 20 over threshold
+        )
+        assert result.regime == MarketRegime.CHOPPY
+        # 確度 = min(20.0 / 20.0, 1.0) = 1.0
+        assert abs(result.confidence - 1.0) < 0.01
+
+    def test_choppy_from_row(self) -> None:
+        """detect_from_rowでCHOPPY検出"""
+        row = pd.Series({
+            "normalized_atr": 1.0,
+            "adx": 15.0,
+            "ma_alignment": 0.1,
+            "choppiness_index": 70.0,
+        })
+        result = self.detector.detect_from_row(row)
+        assert result.regime == MarketRegime.CHOPPY
+
+    def test_high_vol_takes_priority_over_choppy(
+        self,
+    ) -> None:
+        """HIGH_VOLはCHOPPYより優先"""
+        result = self.detector.detect(
+            normalized_atr=2.0,  # HIGH_VOL条件
+            adx=15.0,
+            ma_alignment=0.1,
+            choppiness_index=70.0,
+        )
+        assert result.regime == MarketRegime.HIGH_VOL

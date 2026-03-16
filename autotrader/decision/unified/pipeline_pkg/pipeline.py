@@ -380,6 +380,15 @@ class ConsensusStep:
                 _base_threshold
                 + bot.config.regime_breakout_threshold_add
             )
+        # CHOPPY時の閾値大幅上乗せ（実質トレード抑制）
+        if (
+            bot.config.choppy_enabled
+            and regime_result.regime == MarketRegime.CHOPPY
+        ):
+            _base_threshold = (
+                _base_threshold
+                + bot.config.choppy_threshold_add
+            )
         # HTFスコア不一致フィルター
         if (
             bot.config.htf_score_filter_enabled

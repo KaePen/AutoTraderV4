@@ -589,6 +589,12 @@ class UnifiedTradeBot:
                 vol_compressing_threshold=(
                     self.config.vol_compressing_threshold
                 ),
+                choppy_enabled=(
+                    self.config.choppy_enabled
+                ),
+                choppy_ci_threshold=(
+                    self.config.choppy_ci_threshold
+                ),
             )
         )
 
@@ -2094,10 +2100,11 @@ class UnifiedTradeBot:
                 reasoning=f"{_regime_tf}データなし",
             )
 
-        # ブレイクアウト/ボラ方向の特徴量を計算してrowに追加
+        # ブレイクアウト/ボラ方向/CHOPPYの特徴量を計算
         if (
             self.config.regime_breakout_enabled
             or self.config.vol_direction_enabled
+            or self.config.choppy_enabled
         ):
             row = self._enrich_breakout_features(
                 row, _regime_tf,
@@ -2110,17 +2117,20 @@ class UnifiedTradeBot:
         row: pd.Series,
         timeframe: str,
     ) -> pd.Series:
-        """ブレイクアウト特徴量をrowに追加
+        """ブレイクアウト/ボラ方向/CHOPPY特徴量をrowに追加
 
-        直近N足の高値/安値突破とATR変化率を計算。
+        直近N足の高値/安値突破、ATR変化率、
+        Choppiness Indexを計算。
 
         Args:
             row: 現在のデータ行
             timeframe: 時間足
 
         Returns:
-            pd.Series: ブレイクアウト特徴量追加済みの行
+            pd.Series: 特徴量追加済みの行
         """
+        import math
+
         df = self._market_data.get(timeframe)
         if df is None or df.empty:
             return row
@@ -2178,6 +2188,38 @@ class UnifiedTradeBot:
                 row["atr_change_rate"] = 0.0
         else:
             row["atr_change_rate"] = 0.0
+
+        # Choppiness Index（14期間）
+        # CI = 100 * log10(sum(ATR,N)/(high_N-low_N))
+        #      / log10(N)
+        _ci_period = 14
+        if (
+            self.config.choppy_enabled
+            and _atr_col is not None
+            and _idx >= _ci_period
+        ):
+            _ci_slice = df.iloc[
+                _idx - _ci_period + 1:_idx + 1
+            ]
+            _atr_sum = _ci_slice[_atr_col].sum()
+            _h_max = _ci_slice["high"].max()
+            _l_min = _ci_slice["low"].min()
+            _range = _h_max - _l_min
+            if (
+                _range > 0
+                and _atr_sum > 0
+                and not pd.isna(_atr_sum)
+                and not pd.isna(_range)
+            ):
+                row["choppiness_index"] = (
+                    100.0
+                    * math.log10(_atr_sum / _range)
+                    / math.log10(_ci_period)
+                )
+            else:
+                row["choppiness_index"] = 0.0
+        else:
+            row["choppiness_index"] = 0.0
 
         return row
 

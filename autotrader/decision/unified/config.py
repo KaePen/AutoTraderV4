@@ -413,6 +413,13 @@ class UnifiedBotConfig:
     vol_expanding_penalty: float = 0.1
     # EXPANDING時のSL拡大倍率（1.0=変更なし）
     vol_expanding_sl_multiplier: float = 1.0
+    # --- CHOPPY検出設定 ---
+    # CHOPPY検出有効化
+    choppy_enabled: bool = False
+    # Choppiness Index閾値（61.8=フィボナッチ）
+    choppy_ci_threshold: float = 61.8
+    # CHOPPY時のコンセンサス閾値上乗せ（実質トレード抑制）
+    choppy_threshold_add: float = 3.0
     # HTFスコア最低要件（score_htf=0はWR低下）
     htf_score_filter_enabled: bool = True
     # HTF整合度がこの値以下のとき閾値を追加
