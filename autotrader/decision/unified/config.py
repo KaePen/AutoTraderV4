@@ -49,6 +49,10 @@ class EvaluatorConfig:
     atr_sl_multiplier: float = 1.5
     atr_tp_multiplier: float = 2.0
     pip_unit: float = 0.01
+    # SL最小値（pips）: UnifiedBotConfig.sl_min_pipsから伝搬
+    sl_min_pips: float = 20.0
+    # SL最大値（pips）: UnifiedBotConfig.sl_max_pips_defaultから伝搬
+    sl_max_pips: float = 50.0
     ema_cross_penalty: float | None = (
         None  # EMAクロス矛盾ペナルティ（None=-2.5）
     )
@@ -599,6 +603,8 @@ class UnifiedBotConfig:
         # ボットレベルの共通パラメータ
         common = dict(
             pip_unit=self.pip_unit,
+            sl_min_pips=self.sl_min_pips,
+            sl_max_pips=self.sl_max_pips_default,
             macd_slope_deadzone_atr_ratio=(
                 self.macd_slope_deadzone_atr_ratio
             ),
