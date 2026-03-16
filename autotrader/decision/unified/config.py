@@ -156,7 +156,7 @@ class SignalConfig:
         trend_strength_max: トレンド強度上限
     """
 
-    consensus_threshold: float = 17.0
+    consensus_threshold: float = 18.0
     consensus_primary_weight: float = 2.0
     consensus_entry_weight: float = 1.5
     consensus_confirm_weight: float = 3.0
@@ -211,7 +211,7 @@ class RiskManagementConfig:
     bonus_score_threshold: float = 7.0
     max_lot_per_trade: float = 5.0
     max_total_exposure_lot: float = 10.0
-    base_risk_pct: float = 0.04
+    base_risk_pct: float = 0.05
     max_risk_pct_absolute: float = 0.07
     equity_floor_pct: float = 0.30
     equity_caution_pct: float = 0.50
@@ -334,7 +334,7 @@ class UnifiedBotConfig:
     # 資金管理パラメータ（PositionSizerConfigに渡す）
     max_lot_per_trade: float = 5.0
     max_total_exposure_lot: float = 10.0
-    base_risk_pct: float = 0.04
+    base_risk_pct: float = 0.05
     max_risk_pct_absolute: float = 0.07
     equity_floor_pct: float = 0.30
     equity_caution_pct: float = 0.50
@@ -343,7 +343,7 @@ class UnifiedBotConfig:
     # デモモード（閾値を下げて活発にシグナルを発火させる）
     demo_mode: bool = False
     # コンセンサス閾値（BT・ライブ共通）
-    consensus_threshold: float = 17.0
+    consensus_threshold: float = 18.0
     # 最大同時ポジション数（ライブ用）
     max_positions: int = 3
     # デモモード時の最大同時ポジション数
