@@ -921,9 +921,13 @@ class TimeframeEvaluator:
         # SL計算
         sl_pips = atr_pips * sl_mult
 
-        # 最低/最大制限（TF別SL上限を使用）
-        _sl_max = get_sl_max_pips(self.timeframe)
-        sl_pips = max(20.0, min(sl_pips, _sl_max))
+        # 最低/最大制限（config値を優先、TF別上限でキャップ）
+        _sl_min = self.config.sl_min_pips
+        _sl_max = min(
+            self.config.sl_max_pips,
+            get_sl_max_pips(self.timeframe),
+        )
+        sl_pips = max(_sl_min, min(sl_pips, _sl_max))
 
         # TF別デフォルトTP/SL比率（レジストリから補間付き取得）
         tp_ratio = get_default_tp_ratio(self.timeframe)
