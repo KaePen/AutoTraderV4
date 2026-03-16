@@ -1504,6 +1504,7 @@ class TradingControl extends Component {
     this.renderSymbolDropdown(true);
 
     this.tcBusy = true;
+    this._pendingDemoStates = { ...newDemoStates };
     try {
       // 順次実行で中間状態の干渉を防止
       for (const p of pairs) {
@@ -1511,12 +1512,14 @@ class TradingControl extends Component {
       }
     } catch (e) {
       this._dataFlow.publish('tradingMode', m);
+      this._pendingDemoStates = null;
       console.error('グループDEMO切替エラー:', e);
     } finally {
       this.tcBusy = false;
       // 最終状態をサーバーから取得して確定
       this._onFetchTradingMode();
       this._onFetchAnalysis();
+      setTimeout(() => { this._pendingDemoStates = null; }, 3000);
     }
   }
 
@@ -1543,17 +1546,22 @@ class TradingControl extends Component {
     this.renderSymbolDropdown(true);
 
     this.tcBusy = true;
+    // 楽観的状態を保持（サーバー応答とマージ用）
+    this._pendingAutoStates = { ...newAutoStates };
     try {
       for (const p of pairs) {
         await toggleSymbolAutoTrade(p, nextOn);
       }
     } catch (e) {
       this._dataFlow.publish('tradingMode', m);
+      this._pendingAutoStates = null;
       console.error('グループ自動トレード切替エラー:', e);
     } finally {
       this.tcBusy = false;
       // 最終状態をサーバーから取得して確定
       this._onFetchTradingMode();
+      // 3秒後にpending状態をクリア（サーバー反映完了見込み）
+      setTimeout(() => { this._pendingAutoStates = null; }, 3000);
     }
   }
 
@@ -2017,6 +2025,14 @@ const DashboardApp = {
   async fetchTradingMode() {
     try {
       const mode = await getTradingMode();
+      // pending状態がある場合はマージ（エンジン起動遅延対策）
+      const tc = this.tradingControl;
+      if (tc && tc._pendingAutoStates && mode && mode.symbol_auto_trade) {
+        mode.symbol_auto_trade = { ...mode.symbol_auto_trade, ...tc._pendingAutoStates };
+      }
+      if (tc && tc._pendingDemoStates && mode && mode.symbol_demo_mode) {
+        mode.symbol_demo_mode = { ...mode.symbol_demo_mode, ...tc._pendingDemoStates };
+      }
       this.dataFlow.publish('tradingMode', mode);
     } catch (e) {
       this.dataFlow.publish('tradingMode', null);
