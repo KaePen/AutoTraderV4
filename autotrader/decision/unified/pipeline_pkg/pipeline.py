@@ -371,6 +371,15 @@ class ConsensusStep:
                 _base_threshold
                 + bot.config.regime_trend_threshold_add
             )
+        # BREAKOUT時の閾値調整
+        if (
+            bot.config.regime_breakout_enabled
+            and regime_result.regime == MarketRegime.BREAKOUT
+        ):
+            _base_threshold = (
+                _base_threshold
+                + bot.config.regime_breakout_threshold_add
+            )
         # HTFスコア不一致フィルター
         if (
             bot.config.htf_score_filter_enabled
@@ -1058,6 +1067,28 @@ class SizingStep:
             sl_pips = min(
                 sl_pips, bot.config.trend_sl_max_pips,
             )
+        # BREAKOUT時のSL下限上書き
+        if (
+            bot.config.regime_breakout_sl_min_pips
+            is not None
+            and regime_result.regime
+            == MarketRegime.BREAKOUT
+        ):
+            sl_pips = max(
+                sl_pips,
+                bot.config.regime_breakout_sl_min_pips,
+            )
+        # BREAKOUT時のSL上限キャップ
+        if (
+            bot.config.regime_breakout_sl_max_pips
+            is not None
+            and regime_result.regime
+            == MarketRegime.BREAKOUT
+        ):
+            sl_pips = min(
+                sl_pips,
+                bot.config.regime_breakout_sl_max_pips,
+            )
         # レジーム別動的TP比率
         tp_sl_ratio = (
             plan.get_recommended_tp_sl_ratio()
@@ -1075,11 +1106,27 @@ class SizingStep:
                     _dyn = (
                         bot.config.dynamic_tp_high_vol
                     )
+                elif _r == MarketRegime.BREAKOUT:
+                    _dyn = (
+                        bot.config
+                        .regime_breakout_tp_multiplier
+                    )
                 else:
                     _dyn = (
                         bot.config.dynamic_tp_low_vol
                     )
                 tp_sl_ratio = tp_sl_ratio * _dyn
+        # BREAKOUT時はdynamic_tp無効でもTP倍率を適用
+        if (
+            bot.config.regime_breakout_enabled
+            and not bot.config.dynamic_tp_enabled
+            and regime_result.regime
+            == MarketRegime.BREAKOUT
+        ):
+            tp_sl_ratio = (
+                tp_sl_ratio
+                * bot.config.regime_breakout_tp_multiplier
+            )
         tp_pips = sl_pips * tp_sl_ratio
 
         # ポジションサイジング

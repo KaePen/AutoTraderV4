@@ -389,6 +389,19 @@ class UnifiedBotConfig:
     # レジーム別閾値調整（TRENDレジームでスコア要求引き上げ）
     regime_threshold_enabled: bool = True
     regime_trend_threshold_add: float = 1.5
+    # --- BREAKOUT検出設定 ---
+    # ブレイクアウト検出有効化
+    regime_breakout_enabled: bool = False
+    # ブレイクアウト判定のルックバック期間（足数）
+    regime_breakout_lookback: int = 20
+    # BREAKOUT時のコンセンサス閾値調整（0.0=追加なし）
+    regime_breakout_threshold_add: float = 0.0
+    # BREAKOUT時のTP倍率（利益を伸ばす）
+    regime_breakout_tp_multiplier: float = 1.5
+    # BREAKOUT時のSL下限（None=sl_min_pipsを使用）
+    regime_breakout_sl_min_pips: float | None = None
+    # BREAKOUT時のSL上限（None=sl_max_pipsを使用）
+    regime_breakout_sl_max_pips: float | None = None
     # HTFスコア最低要件（score_htf=0はWR低下）
     htf_score_filter_enabled: bool = True
     # HTF整合度がこの値以下のとき閾値を追加

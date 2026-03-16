@@ -296,6 +296,8 @@ class PositionManagerConfig:
     # レジーム別stagnation時間の上書き（None=ハードコード値を使用）
     stag_trend_minutes: float | None = None
     stag_range_minutes: float | None = None
+    # BREAKOUT時のstagnation時間（None=TREND値を使用）
+    stag_breakout_minutes: float | None = None
     # STAGNATION予防的SL引き締め
     stag_pretighten_enabled: bool = True
     # stag時間の何%で発動するか
@@ -933,10 +935,10 @@ class PositionManager:
                     trigger_price=current_price,
                 )
 
-        # STAGNATION予防的SL引き締め（TREND限定）
+        # STAGNATION予防的SL引き締め（TREND/BREAKOUT）
         if (
             self.config.stag_pretighten_enabled
-            and regime == "TREND"
+            and regime in ("TREND", "BREAKOUT")
         ):
             _stag_min = (
                 self.config.stag_trend_minutes
@@ -990,7 +992,8 @@ class PositionManager:
                             )
 
         # レジームベース動的STAGNATION時間
-        # TREND: 90分、RANGE: 120分、CHOPPY/その他: 120分
+        # BREAKOUT: TREND値+30分（猶予延長）、TREND: 90分、
+        # RANGE: 120分、CHOPPY/その他: 120分
         _trend_min = (
             self.config.stag_trend_minutes
             if self.config.stag_trend_minutes is not None
@@ -1001,7 +1004,14 @@ class PositionManager:
             if self.config.stag_range_minutes is not None
             else 120.0
         )
+        _breakout_min = (
+            self.config.stag_breakout_minutes
+            if self.config.stag_breakout_minutes
+            is not None
+            else _trend_min + 30.0
+        )
         regime_stag_minutes = {
+            "BREAKOUT": _breakout_min,
             "TREND": _trend_min,
             "RANGE": _range_min,
             "CHOPPY": self.config.stagnation_exit_minutes,
@@ -1038,7 +1048,7 @@ class PositionManager:
         # レジーム別最大保有時間の解決
         regime = getattr(position.plan, "regime", None)
         if (
-            regime == "TREND"
+            regime in ("TREND", "BREAKOUT")
             and self.config.max_holding_minutes_trend is not None
         ):
             max_minutes = self.config.max_holding_minutes_trend
@@ -1770,7 +1780,7 @@ class PositionManager:
         regime = getattr(position.plan, "regime", None)
         _base_mult = self.config.trailing_atr_multiplier
         _s2_mult = self.config.trailing_stage2_atr_multiplier
-        if regime == "TREND":
+        if regime in ("TREND", "BREAKOUT"):
             if self.config.trailing_trend_atr_multiplier is not None:
                 _base_mult = (
                     self.config.trailing_trend_atr_multiplier

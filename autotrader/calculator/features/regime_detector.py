@@ -1,6 +1,7 @@
 """マーケットレジーム検出モジュール
 
 ADX、正規化ATR、MA整列度から相場レジームを判定する。
+BREAKOUT検出: 直近N足の高値/安値を突破 + ボラ拡大中。
 """
 
 from __future__ import annotations
@@ -23,6 +24,8 @@ class RegimeResult:
         adx: ADX値
         confidence: 判定確度（0-1）
         reasoning: 判定理由
+        is_breakout: ブレイクアウト検出フラグ
+        atr_change_rate: ATR変化率
     """
 
     regime: MarketRegime
@@ -31,6 +34,8 @@ class RegimeResult:
     adx: float
     confidence: float
     reasoning: str
+    is_breakout: bool = False
+    atr_change_rate: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -43,6 +48,8 @@ class RegimeDetectorConfig:
         trend_adx_threshold: トレンド判定ADX閾値
         strong_trend_adx_threshold: 強トレンド判定ADX閾値
         ma_alignment_threshold: MA整列判定閾値
+        breakout_enabled: ブレイクアウト検出有効化
+        breakout_lookback: ブレイクアウト判定のルックバック期間
     """
 
     high_vol_atr_threshold: float = 1.5
@@ -50,6 +57,8 @@ class RegimeDetectorConfig:
     trend_adx_threshold: float = 20.0
     strong_trend_adx_threshold: float = 30.0
     ma_alignment_threshold: float = 0.3
+    breakout_enabled: bool = False
+    breakout_lookback: int = 20
 
 
 class MarketRegimeDetector:
@@ -58,13 +67,16 @@ class MarketRegimeDetector:
     ADX、正規化ATR、MA整列度からレジームを判定する。
 
     判定ロジック（優先度順）:
-    1. TREND: ADX >= 20 かつ MA整列
+    0. BREAKOUT: 直近N足の高値/安値を突破 + ボラ拡大（有効時）
+    1. TREND: ADXが高く、MA整列（最優先）
     2. HIGH_VOL: 正規化ATR > 1.5 かつ ADX < 20（方向性なし）
     3. LOW_VOL: 正規化ATR < 0.7
     4. RANGE: その他
     """
 
-    def __init__(self, config: RegimeDetectorConfig | None = None) -> None:
+    def __init__(
+        self, config: RegimeDetectorConfig | None = None,
+    ) -> None:
         """初期化
 
         Args:
@@ -77,6 +89,10 @@ class MarketRegimeDetector:
         normalized_atr: float,
         adx: float,
         ma_alignment: float,
+        *,
+        breakout_up: bool = False,
+        breakout_down: bool = False,
+        atr_change_rate: float = 0.0,
     ) -> RegimeResult:
         """レジームを検出
 
@@ -84,12 +100,19 @@ class MarketRegimeDetector:
             normalized_atr: 正規化ATR
             adx: ADX値
             ma_alignment: MA整列度（-1から1）
+            breakout_up: 上方ブレイクアウト発生
+            breakout_down: 下方ブレイクアウト発生
+            atr_change_rate: ATR変化率
 
         Returns:
             RegimeResult: レジーム判定結果
         """
         # NaN対策
-        if pd.isna(normalized_atr) or pd.isna(adx) or pd.isna(ma_alignment):
+        if (
+            pd.isna(normalized_atr)
+            or pd.isna(adx)
+            or pd.isna(ma_alignment)
+        ):
             return RegimeResult(
                 regime=MarketRegime.RANGE,
                 trend_strength=0.0,
@@ -104,8 +127,13 @@ class MarketRegimeDetector:
 
         # 判定ロジック（優先度順）
         regime, confidence, reasoning = self._determine_regime(
-            normalized_atr, adx, ma_alignment
+            normalized_atr, adx, ma_alignment,
+            breakout_up=breakout_up,
+            breakout_down=breakout_down,
+            atr_change_rate=atr_change_rate,
         )
+
+        _is_breakout = regime == MarketRegime.BREAKOUT
 
         return RegimeResult(
             regime=regime,
@@ -114,6 +142,8 @@ class MarketRegimeDetector:
             adx=adx,
             confidence=confidence,
             reasoning=reasoning,
+            is_breakout=_is_breakout,
+            atr_change_rate=atr_change_rate,
         )
 
     def detect_from_row(self, row: pd.Series) -> RegimeResult:
@@ -128,13 +158,37 @@ class MarketRegimeDetector:
         # カラム名の候補リスト
         atr_cols = ["normalized_atr", "norm_atr", "atr_norm"]
         adx_cols = ["adx", "ADX", "adx_14"]
-        ma_cols = ["ma_alignment", "ma_align", "trend_alignment"]
+        ma_cols = [
+            "ma_alignment", "ma_align", "trend_alignment",
+        ]
 
-        normalized_atr = self._get_value(row, atr_cols, default=1.0)
+        normalized_atr = self._get_value(
+            row, atr_cols, default=1.0,
+        )
         adx = self._get_value(row, adx_cols, default=20.0)
-        ma_alignment = self._get_value(row, ma_cols, default=0.0)
+        ma_alignment = self._get_value(
+            row, ma_cols, default=0.0,
+        )
 
-        return self.detect(normalized_atr, adx, ma_alignment)
+        # ブレイクアウト関連フィールド
+        breakout_up = bool(
+            self._get_value(row, ["breakout_up"], default=0.0)
+        )
+        breakout_down = bool(
+            self._get_value(
+                row, ["breakout_down"], default=0.0,
+            )
+        )
+        atr_change_rate = self._get_value(
+            row, ["atr_change_rate"], default=0.0,
+        )
+
+        return self.detect(
+            normalized_atr, adx, ma_alignment,
+            breakout_up=breakout_up,
+            breakout_down=breakout_down,
+            atr_change_rate=atr_change_rate,
+        )
 
     def detect_series(
         self,
@@ -167,13 +221,19 @@ class MarketRegimeDetector:
                 "confidence": result.confidence,
             })
 
-        return pd.DataFrame(results, index=normalized_atr.index)
+        return pd.DataFrame(
+            results, index=normalized_atr.index,
+        )
 
     def _determine_regime(
         self,
         normalized_atr: float,
         adx: float,
         ma_alignment: float,
+        *,
+        breakout_up: bool = False,
+        breakout_down: bool = False,
+        atr_change_rate: float = 0.0,
     ) -> tuple[MarketRegime, float, str]:
         """レジームを判定
 
@@ -181,11 +241,35 @@ class MarketRegimeDetector:
             normalized_atr: 正規化ATR
             adx: ADX値
             ma_alignment: MA整列度
+            breakout_up: 上方ブレイクアウト発生
+            breakout_down: 下方ブレイクアウト発生
+            atr_change_rate: ATR変化率
 
         Returns:
             tuple[MarketRegime, float, str]: (レジーム, 確度, 理由)
         """
         cfg = self.config
+
+        # 0. BREAKOUT: 直近N足の高値/安値を突破 + ボラ拡大中
+        # TREND判定より優先（BREAKOUTはTRENDの前駆状態）
+        if cfg.breakout_enabled and (breakout_up or breakout_down):
+            # ADXがまだTREND閾値未満 かつ ATR拡大中
+            if (
+                adx < cfg.trend_adx_threshold
+                and atr_change_rate > 0.0
+            ):
+                _dir = "上方" if breakout_up else "下方"
+                # 確度: ATR変化率とADXの組合せ
+                _atr_conf = min(atr_change_rate / 0.5, 1.0)
+                _adx_conf = adx / cfg.trend_adx_threshold
+                confidence = (_atr_conf + _adx_conf) / 2.0
+                return (
+                    MarketRegime.BREAKOUT,
+                    min(confidence, 1.0),
+                    f"{_dir}ブレイクアウト"
+                    f"(ADX={adx:.1f},"
+                    f" ATR変化={atr_change_rate:.2f})",
+                )
 
         # 1. TREND: ADXが高く、MA整列（最優先）
         is_aligned = abs(ma_alignment) > cfg.ma_alignment_threshold
@@ -196,14 +280,20 @@ class MarketRegimeDetector:
                 return (
                     MarketRegime.TREND,
                     confidence,
-                    f"強トレンド(ADX={adx:.1f}, MA整列={ma_alignment:.2f})",
+                    f"強トレンド"
+                    f"(ADX={adx:.1f},"
+                    f" MA整列={ma_alignment:.2f})",
                 )
             else:
-                confidence = (adx - cfg.trend_adx_threshold) / 20.0
+                confidence = (
+                    adx - cfg.trend_adx_threshold
+                ) / 20.0
                 return (
                     MarketRegime.TREND,
                     confidence,
-                    f"トレンド(ADX={adx:.1f}, MA整列={ma_alignment:.2f})",
+                    f"トレンド"
+                    f"(ADX={adx:.1f},"
+                    f" MA整列={ma_alignment:.2f})",
                 )
 
         # 2. HIGH_VOL: 高ボラティリティ（方向性なし）
@@ -213,17 +303,22 @@ class MarketRegimeDetector:
             and adx < cfg.trend_adx_threshold
         ):
             confidence = min(
-                (normalized_atr - cfg.high_vol_atr_threshold) / 0.5, 1.0
+                (normalized_atr - cfg.high_vol_atr_threshold)
+                / 0.5,
+                1.0,
             )
             return (
                 MarketRegime.HIGH_VOL,
                 confidence,
-                f"高ボラ(ATR={normalized_atr:.2f})で方向性なし(ADX={adx:.1f})",
+                f"高ボラ(ATR={normalized_atr:.2f})"
+                f"で方向性なし(ADX={adx:.1f})",
             )
 
         # 3. LOW_VOL: 低ボラティリティ
         if normalized_atr < cfg.low_vol_atr_threshold:
-            confidence = (cfg.low_vol_atr_threshold - normalized_atr) / 0.3
+            confidence = (
+                cfg.low_vol_atr_threshold - normalized_atr
+            ) / 0.3
             return (
                 MarketRegime.LOW_VOL,
                 min(confidence, 1.0),
@@ -234,7 +329,8 @@ class MarketRegimeDetector:
         return (
             MarketRegime.RANGE,
             0.5,
-            f"レンジ(ADX={adx:.1f}, ATR={normalized_atr:.2f})",
+            f"レンジ(ADX={adx:.1f},"
+            f" ATR={normalized_atr:.2f})",
         )
 
     def _get_value(

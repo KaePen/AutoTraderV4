@@ -177,9 +177,10 @@ class MarketSession(str, Enum):
 class MarketRegime(str, Enum):
     """相場レジーム
 
-    相場の「型」を4分類し、適切な戦略を選択するために使用。
+    相場の「型」を分類し、適切な戦略を選択するために使用。
     """
 
+    BREAKOUT = "BREAKOUT"
     TREND = "TREND"
     RANGE = "RANGE"
     HIGH_VOL = "HIGH_VOL"
