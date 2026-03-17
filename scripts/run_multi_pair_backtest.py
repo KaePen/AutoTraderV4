@@ -462,6 +462,7 @@ def setup_pair_context(
     pm_config_overrides: dict[str, Any] | None = None,
     spread_multiplier: float = 1.0,
     use_actual_spread_data: bool = False,
+    bt_overrides: dict[str, Any] | None = None,
 ) -> PairContext | None:
     """ペアごとのBot/Simulator/Arraysを初期化
 
@@ -474,6 +475,7 @@ def setup_pair_context(
         full_market_data: 全期間market_data（年フィルタ前）
         pm_config_overrides: PM設定オーバーライド
         spread_multiplier: スプレッド倍率（ストレステスト用）
+        bt_overrides: バックテスト設定オーバーライド
 
     Returns:
         PairContext | None: コンテキスト（データなしならNone）
@@ -538,6 +540,7 @@ def setup_pair_context(
             pm_cfg_dict.update(pm_config_overrides)
         pm_cfg = PositionManagerConfig(**pm_cfg_dict)
 
+    _bt_ovr = bt_overrides or {}
     sim_config = SimulatorConfig(
         initial_balance=initial_balance,
         spread_pips=_spread,
@@ -556,6 +559,12 @@ def setup_pair_context(
         sl_tp_in_pips=True,
         pm_config=pm_cfg,
         use_actual_spread_data=use_actual_spread_data,
+        sl_exit_spread_enabled=_bt_ovr.get(
+            "sl_exit_spread_enabled", False,
+        ),
+        sl_exit_spread_factor=_bt_ovr.get(
+            "sl_exit_spread_factor", 0.5,
+        ),
     )
     simulator = TradeSimulator(config=sim_config)
 
