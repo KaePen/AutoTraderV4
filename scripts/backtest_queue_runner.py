@@ -1623,6 +1623,7 @@ def _execute_continuous_multi_pair(
                 pm_config_overrides=pm_extra or None,
                 spread_multiplier=spread_mult,
                 use_actual_spread_data=_use_actual_spread,
+                bt_overrides=bt_ovr,
             )
             if ctx is not None:
                 # ファンダメンタルイベントプロバイダ注入
@@ -2410,6 +2411,12 @@ def _execute_month_single(
         use_actual_spread_data=bt_ovr.get(
             "use_actual_spread_data", False,
         ),
+        sl_exit_spread_enabled=bt_ovr.get(
+            "sl_exit_spread_enabled", False,
+        ),
+        sl_exit_spread_factor=bt_ovr.get(
+            "sl_exit_spread_factor", 0.5,
+        ),
     )
 
     logger.info(
@@ -2614,6 +2621,7 @@ def _execute_month_multi_pair(
             pm_config_overrides=pm_extra or None,
             spread_multiplier=spread_mult,
             use_actual_spread_data=_use_actual_spread,
+            bt_overrides=bt_ovr,
         )
         if ctx is not None:
             # ファンダメンタルイベントプロバイダ注入
