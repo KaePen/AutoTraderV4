@@ -116,6 +116,7 @@ class Job:
         default_factory=dict,
     )
     code_dir: str = ""  # 指定時はそのディレクトリのコードで実行
+    compound_replay: bool = False  # 通年コンパウンドリプレイ
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> Job:
@@ -134,6 +135,9 @@ class Job:
                 {},
             ),
             code_dir=d.get("code_dir", ""),
+            compound_replay=d.get(
+                "compound_replay", False,
+            ),
         )
 
 
@@ -1092,6 +1096,55 @@ def _aggregate_job_single(
         result_id,
     )
 
+    # compound replay後処理（single BT）
+    _compound_metrics: dict[str, Any] = {}
+    if job.compound_replay and all_trade_rows:
+        import pandas as _pd
+        from autotrader.backtest.compound_replay import (
+            CompoundReplayConfig as _CRC,
+            replay_compound as _replay,
+        )
+        _bt_ovr = job.overrides.get("backtest", {})
+        _init_eq = _bt_ovr.get(
+            "initial_balance", 1_000_000.0,
+        )
+        _cr_cfg = _CRC(initial_equity=_init_eq)
+        _cr_df = _pd.DataFrame(all_trade_rows)
+        _cr_res = _replay(_cr_df, _cr_cfg)
+        _compound_metrics = {
+            "initial_equity": _cr_res.initial_equity,
+            "final_equity": _cr_res.final_equity,
+            "total_trades": _cr_res.total_trades,
+            "net_profit": _cr_res.net_profit,
+            "win_rate": _cr_res.win_rate,
+            "profit_factor": _cr_res.profit_factor,
+            "max_drawdown_pct": (
+                _cr_res.max_drawdown_pct
+            ),
+            "sharpe_ratio": _cr_res.sharpe_ratio,
+            "monthly_plus_rate": (
+                _cr_res.monthly_plus_rate
+            ),
+            "yearly_details": _cr_res.yearly_details,
+        }
+        (result_dir / "compound_result.json").write_text(
+            json.dumps(
+                _compound_metrics,
+                indent=2,
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+        logger.info(
+            "compound replay(single): "
+            "equity %.0f → %.0f (%.1f%%)",
+            _cr_res.initial_equity,
+            _cr_res.final_equity,
+            _cr_res.net_profit
+            / _cr_res.initial_equity
+            * 100,
+        )
+
     result = JobResult(
         job_id=result_id,
         status="completed",
@@ -1175,6 +1228,90 @@ def _aggregate_job_multi_pair(
                 "contribution_pct": pm["contribution"],
             })
 
+    # trade_rows収集（compound replay用）
+    all_trade_rows: list[dict] = []
+    for yr in range(start_year, end_year + 1):
+        for mr in _load_month_results(result_id, yr):
+            all_trade_rows.extend(
+                mr.get("trade_rows", []),
+            )
+    all_trade_rows.sort(
+        key=lambda r: r.get("entry_time", ""),
+    )
+
+    # trades.csv出力
+    result_dir = RESULTS_DIR / result_id
+    result_dir.mkdir(parents=True, exist_ok=True)
+    if all_trade_rows:
+        _cols = list(all_trade_rows[0].keys())
+        _write_csv(
+            result_dir / "trades.csv",
+            _cols, all_trade_rows,
+        )
+        logger.info(
+            "multi_pair trades.csv: %d行 → %s/",
+            len(all_trade_rows), result_id,
+        )
+
+    # compound replay後処理
+    compound_metrics: dict[str, Any] = {}
+    if job.compound_replay and all_trade_rows:
+        import pandas as pd
+        from autotrader.backtest.compound_replay import (
+            CompoundReplayConfig,
+            replay_compound,
+        )
+        _bt_ovr = job.overrides.get("backtest", {})
+        _init_eq = _bt_ovr.get(
+            "initial_balance", 1_000_000.0,
+        )
+        _mpc = job.multi_pair_config
+        _max_exp = _mpc.get(
+            "global_max_exposure_lot", 12.0,
+        )
+        cr_config = CompoundReplayConfig(
+            initial_equity=_init_eq,
+            global_max_exposure_lot=_max_exp,
+        )
+        cr_df = pd.DataFrame(all_trade_rows)
+        cr_result = replay_compound(cr_df, cr_config)
+
+        # compound_result.json出力
+        compound_metrics = {
+            "initial_equity": cr_result.initial_equity,
+            "final_equity": cr_result.final_equity,
+            "total_trades": cr_result.total_trades,
+            "net_profit": cr_result.net_profit,
+            "win_rate": cr_result.win_rate,
+            "profit_factor": cr_result.profit_factor,
+            "max_drawdown_pct": (
+                cr_result.max_drawdown_pct
+            ),
+            "sharpe_ratio": cr_result.sharpe_ratio,
+            "monthly_plus_rate": (
+                cr_result.monthly_plus_rate
+            ),
+            "yearly_details": cr_result.yearly_details,
+            "pair_details": cr_result.pair_details,
+        }
+        (result_dir / "compound_result.json").write_text(
+            json.dumps(
+                compound_metrics,
+                indent=2,
+                ensure_ascii=False,
+            ),
+            encoding="utf-8",
+        )
+        logger.info(
+            "compound replay: equity %.0f → %.0f "
+            "(%.1f%%)",
+            cr_result.initial_equity,
+            cr_result.final_equity,
+            cr_result.net_profit
+            / cr_result.initial_equity
+            * 100,
+        )
+
     result = JobResult(
         job_id=result_id,
         status="completed",
@@ -1203,6 +1340,7 @@ def _aggregate_job_multi_pair(
             "blocked_per_pair": agg["blocked_per_pair"],
             "blocked_exposure": agg["blocked_exposure"],
             "final_equity": agg["final_equity"],
+            "compound_metrics": compound_metrics,
         },
         overrides_used=job.overrides,
     )
@@ -2541,8 +2679,17 @@ def _execute_month_multi_pair(
     year_pnl = portfolio.equity - INITIAL_EQUITY
     year_trades = sum(len(t) for t in pair_trades.values())
 
-    # ペア別サマリー
+    # pip_unit参照テーブル（sl_pips計算用）
+    from autotrader.config.trading_params import (
+        get_preset,
+    )
+    _pip_units: dict[str, float] = {}
+    for _sym in pair_trades:
+        _pip_units[_sym] = get_preset(_sym).pip_unit
+
+    # ペア別サマリー + trade_rows（compound replay用）
     pair_summaries: dict[str, dict[str, Any]] = {}
+    trade_rows: list[dict[str, Any]] = []
     for sym, trades in pair_trades.items():
         wins = 0
         gp = 0.0
@@ -2556,6 +2703,45 @@ def _execute_month_multi_pair(
                 gp += pnl
             else:
                 gl += abs(pnl)
+            # compound replay用のトレード行
+            trade_rows.append({
+                "trade_id": trade.trade_id,
+                "symbol": trade.symbol,
+                "direction": (
+                    trade.signal_type.value
+                    if trade.signal_type
+                    else ""
+                ),
+                "entry_time": str(trade.opened_at),
+                "exit_time": str(trade.closed_at),
+                "entry_price": trade.entry_price,
+                "exit_price": trade.exit_price,
+                "lot": trade.volume,
+                "pips": trade.profit_loss_pips or 0.0,
+                "profit_loss": pnl,
+                "sl_pips": (
+                    abs(
+                        trade.entry_price
+                        - trade.stop_loss
+                    )
+                    / _pip_units.get(
+                        trade.symbol, 0.01,
+                    )
+                    if trade.stop_loss is not None
+                    else 0.0
+                ),
+                "exit_reason": (
+                    trade.exit_reason.value
+                    if trade.exit_reason
+                    else ""
+                ),
+                "regime": trade.regime or "",
+                "consensus_score": (
+                    trade.consensus_score or 0.0
+                ),
+                "mfe_pips": trade.mfe_pips or 0.0,
+                "mae_pips": trade.mae_pips or 0.0,
+            })
         pair_summaries[sym] = {
             "trades": len(trades),
             "wins": wins,
@@ -2582,6 +2768,7 @@ def _execute_month_multi_pair(
         "max_dd_pct": portfolio.max_dd_pct,
         "monthly_pnl": monthly_pnl_str,
         "pair_summaries": pair_summaries,
+        "trade_rows": trade_rows,
         "blocked_global": portfolio.blocked_global,
         "blocked_per_pair": portfolio.blocked_per_pair,
         "blocked_exposure": portfolio.blocked_exposure,
