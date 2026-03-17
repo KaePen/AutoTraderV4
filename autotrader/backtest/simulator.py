@@ -97,6 +97,10 @@ class SimulatorConfig:
     use_actual_spread_data: bool = False
     # SL/TPがpips値で渡される（ライブ統一形式）
     sl_tp_in_pips: bool = True
+    # SL決済時のスプレッド不利約定有効化
+    sl_exit_spread_enabled: bool = False
+    # SL決済時のスプレッド適用係数（0.5=半額適用）
+    sl_exit_spread_factor: float = 0.5
 
     @classmethod
     def from_preset(
@@ -561,16 +565,27 @@ class TradeSimulator:
         sl = position.stop_loss
         tp = position.take_profit
         slip = self._slippage_price
+        # SL約定時スプレッド不利分
+        _sl_spread = (
+            self._current_candle_spread / 2
+            * self.config.sl_exit_spread_factor
+            if self.config.sl_exit_spread_enabled
+            else 0.0
+        )
 
         if position.signal_type == SignalType.BUY:
             if sl and candle.low <= sl:
                 if candle.open < sl:
                     return (
-                        candle.open - slip,
+                        candle.open - slip - _sl_spread,
                         ExitReason.STOP_LOSS,
                         sl,
                     )
-                return sl - slip, ExitReason.STOP_LOSS, sl
+                return (
+                    sl - slip - _sl_spread,
+                    ExitReason.STOP_LOSS,
+                    sl,
+                )
             if tp and candle.high >= tp:
                 if candle.open > tp:
                     return (
@@ -585,11 +600,15 @@ class TradeSimulator:
             if sl and candle.high >= sl:
                 if candle.open > sl:
                     return (
-                        candle.open + slip,
+                        candle.open + slip + _sl_spread,
                         ExitReason.STOP_LOSS,
                         sl,
                     )
-                return sl + slip, ExitReason.STOP_LOSS, sl
+                return (
+                    sl + slip + _sl_spread,
+                    ExitReason.STOP_LOSS,
+                    sl,
+                )
             if tp and candle.low <= tp:
                 if candle.open < tp:
                     return (
@@ -623,16 +642,27 @@ class TradeSimulator:
         sl = position.stop_loss
         tp = position.take_profit
         slip = self._slippage_price
+        # SL約定時スプレッド不利分
+        _sl_spread = (
+            self._current_candle_spread / 2
+            * self.config.sl_exit_spread_factor
+            if self.config.sl_exit_spread_enabled
+            else 0.0
+        )
 
         if position.signal_type == SignalType.BUY:
             if sl and candle.low <= sl:
                 if candle.open < sl:
                     return (
-                        candle.open - slip,
+                        candle.open - slip - _sl_spread,
                         ExitReason.STOP_LOSS,
                         sl,
                     )
-                return sl - slip, ExitReason.STOP_LOSS, sl
+                return (
+                    sl - slip - _sl_spread,
+                    ExitReason.STOP_LOSS,
+                    sl,
+                )
             if tp and candle.high >= tp:
                 if candle.open > tp:
                     return (
@@ -647,11 +677,15 @@ class TradeSimulator:
             if sl and candle.high >= sl:
                 if candle.open > sl:
                     return (
-                        candle.open + slip,
+                        candle.open + slip + _sl_spread,
                         ExitReason.STOP_LOSS,
                         sl,
                     )
-                return sl + slip, ExitReason.STOP_LOSS, sl
+                return (
+                    sl + slip + _sl_spread,
+                    ExitReason.STOP_LOSS,
+                    sl,
+                )
             if tp and candle.low <= tp:
                 if candle.open < tp:
                     return (
@@ -1326,10 +1360,20 @@ class TradeSimulator:
             return self._get_exit_price(signal_type, candle)
         # 指値/逆指値決済
         slip = self._slippage_price
+        # SL理由の場合: スプレッド不利分を追加
+        _sl_spread = 0.0
+        if (
+            self.config.sl_exit_spread_enabled
+            and exit_reason == ExitReason.STOP_LOSS
+        ):
+            _sl_spread = (
+                self._current_candle_spread / 2
+                * self.config.sl_exit_spread_factor
+            )
         if signal_type == SignalType.BUY:
-            fill = trigger_price - slip
+            fill = trigger_price - slip - _sl_spread
         else:
-            fill = trigger_price + slip
+            fill = trigger_price + slip + _sl_spread
 
         # ガード: 異常値検出（非JPY系通貨ペアも含む正値チェック）
         if fill <= 0.0:

@@ -1148,3 +1148,169 @@ class TestPMIntrabarSLTP:
         )
         result = simulator._check_intrabar_sl_tp(pos, candle)
         assert result is None
+
+
+def _make_position(
+    signal_type: SignalType,
+    entry_price: float,
+    stop_loss: float,
+    take_profit: float,
+) -> "Position":
+    """テスト用Position生成ヘルパー"""
+    from autotrader.core.entities import Position
+    return Position(
+        position_id=str(uuid4()),
+        symbol="USDJPY",
+        signal_type=signal_type,
+        volume=0.1,
+        entry_price=entry_price,
+        stop_loss=stop_loss,
+        take_profit=take_profit,
+        opened_at=datetime(2023, 6, 1, 10, 0),
+    )
+
+
+class TestSlExitSpread:
+    """SL約定時スプレッド不利分のテスト"""
+
+    def _make_simulator(
+        self, *, enabled: bool, factor: float = 0.5,
+    ) -> TradeSimulator:
+        """SL exit spread設定付きシミュレーター"""
+        config = SimulatorConfig(
+            initial_balance=1_000_000.0,
+            spread_pips=2.0,
+            pip_value=100.0,
+            pip_unit=0.01,
+            max_positions=1,
+            default_volume=0.1,
+            slippage_pips=0.5,
+            use_position_manager=False,
+            sl_exit_spread_enabled=enabled,
+            sl_exit_spread_factor=factor,
+        )
+        return TradeSimulator(config)
+
+    def test_sl_exit_spread_disabled(self):
+        """OFF時はSL fillにスプレッド不利分なし"""
+        sim = self._make_simulator(enabled=False)
+        pos = _make_position(
+            signal_type=SignalType.BUY,
+            entry_price=140.00,
+            stop_loss=139.50,
+            take_profit=141.00,
+        )
+        candle = _make_candle(
+            time=datetime(2023, 6, 1, 10, 15),
+            open=139.60, high=139.60,
+            low=139.40, close=139.45,
+        )
+        sim._current_candle_spread = 0.02  # 2pips
+        result = sim._check_exit_conditions(pos, candle)
+        assert result is not None
+        fill, reason, trigger = result
+        assert reason == ExitReason.STOP_LOSS
+        # fill = sl - slip のみ（spread不利なし）
+        expected = 139.50 - 0.005  # sl - slippage
+        assert abs(fill - expected) < 1e-6
+
+    def test_sl_exit_spread_buy_enabled(self):
+        """BUY SL: fill = sl - slip - half_spread*factor"""
+        sim = self._make_simulator(
+            enabled=True, factor=0.5,
+        )
+        pos = _make_position(
+            signal_type=SignalType.BUY,
+            entry_price=140.00,
+            stop_loss=139.50,
+            take_profit=141.00,
+        )
+        candle = _make_candle(
+            time=datetime(2023, 6, 1, 10, 15),
+            open=139.60, high=139.60,
+            low=139.40, close=139.45,
+        )
+        sim._current_candle_spread = 0.02  # 2pips
+        result = sim._check_exit_conditions(pos, candle)
+        assert result is not None
+        fill, reason, trigger = result
+        assert reason == ExitReason.STOP_LOSS
+        # fill = sl - slip - (half_spread * factor)
+        # = 139.50 - 0.005 - (0.01 * 0.5)
+        expected = 139.50 - 0.005 - 0.005
+        assert abs(fill - expected) < 1e-6
+
+    def test_sl_exit_spread_sell_enabled(self):
+        """SELL SL: fill = sl + slip + half_spread*factor"""
+        sim = self._make_simulator(
+            enabled=True, factor=0.5,
+        )
+        pos = _make_position(
+            signal_type=SignalType.SELL,
+            entry_price=140.00,
+            stop_loss=140.50,
+            take_profit=139.00,
+        )
+        candle = _make_candle(
+            time=datetime(2023, 6, 1, 10, 15),
+            open=140.40, high=140.60,
+            low=140.30, close=140.55,
+        )
+        sim._current_candle_spread = 0.02  # 2pips
+        result = sim._check_exit_conditions(pos, candle)
+        assert result is not None
+        fill, reason, trigger = result
+        assert reason == ExitReason.STOP_LOSS
+        # fill = sl + slip + (half_spread * factor)
+        # = 140.50 + 0.005 + (0.01 * 0.5)
+        expected = 140.50 + 0.005 + 0.005
+        assert abs(fill - expected) < 1e-6
+
+    def test_tp_not_affected(self):
+        """TP約定にはスプレッド不利分が加算されない"""
+        sim = self._make_simulator(
+            enabled=True, factor=0.5,
+        )
+        pos = _make_position(
+            signal_type=SignalType.BUY,
+            entry_price=140.00,
+            stop_loss=139.50,
+            take_profit=141.00,
+        )
+        candle = _make_candle(
+            time=datetime(2023, 6, 1, 10, 15),
+            open=140.90, high=141.10,
+            low=140.80, close=141.05,
+        )
+        sim._current_candle_spread = 0.02  # 2pips
+        result = sim._check_exit_conditions(pos, candle)
+        assert result is not None
+        fill, reason, trigger = result
+        assert reason == ExitReason.TAKE_PROFIT
+        # fill = tp - slip のみ（spread不利なし）
+        expected = 141.00 - 0.005
+        assert abs(fill - expected) < 1e-6
+
+    def test_intrabar_sl_spread(self):
+        """_check_intrabar_sl_tp でも同様にスプレッド不利"""
+        sim = self._make_simulator(
+            enabled=True, factor=0.5,
+        )
+        pos = _make_position(
+            signal_type=SignalType.BUY,
+            entry_price=140.00,
+            stop_loss=139.50,
+            take_profit=141.00,
+        )
+        candle = _make_candle(
+            time=datetime(2023, 6, 1, 10, 15),
+            open=139.60, high=139.60,
+            low=139.40, close=139.45,
+        )
+        sim._current_candle_spread = 0.02
+        result = sim._check_intrabar_sl_tp(pos, candle)
+        assert result is not None
+        fill, reason, trigger = result
+        assert reason == ExitReason.STOP_LOSS
+        expected = 139.50 - 0.005 - 0.005
+        assert abs(fill - expected) < 1e-6
