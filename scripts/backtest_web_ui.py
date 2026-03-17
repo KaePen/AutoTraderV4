@@ -65,6 +65,29 @@ def _read_json(path: Path) -> dict[str, Any]:
         return {}
 
 
+def _merge_compound_result(
+    result_dir: Path,
+    data: dict[str, Any],
+) -> None:
+    """compound_result.jsonが存在すればportfolio_metricsに統合"""
+    pm = data.get("portfolio_metrics")
+    if isinstance(pm, dict) and pm.get("compound_metrics"):
+        return  # すでにcompound_metricsが含まれている
+    cr_path = result_dir / "compound_result.json"
+    if not cr_path.exists():
+        return
+    try:
+        cr = json.loads(
+            cr_path.read_text(encoding="utf-8"),
+        )
+    except (json.JSONDecodeError, OSError):
+        return
+    if not isinstance(pm, dict):
+        data["portfolio_metrics"] = {}
+        pm = data["portfolio_metrics"]
+    pm["compound_metrics"] = cr
+
+
 def _list_result_files() -> list[dict[str, Any]]:
     """完了済み結果ファイル一覧を読み取り（新旧両形式対応）"""
     if not _RESULTS_DIR.exists():
@@ -84,6 +107,8 @@ def _list_result_files() -> list[dict[str, Any]]:
                     rp.read_text(encoding="utf-8"),
                 )
                 data["_file"] = f"{d.name}/result.json"
+                # compound_result.json統合
+                _merge_compound_result(d, data)
                 results.append(data)
                 seen.add(d.name)
             except (json.JSONDecodeError, OSError):
