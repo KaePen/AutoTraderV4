@@ -3239,7 +3239,7 @@ def main() -> None:
                         f" (残り{_remain}件)"
                     )
 
-                elif cmd == "quit":
+                elif cmd in ("quit", "shutdown"):
                     if running_tasks:
                         logger.info(
                             ">>> 全タスク停止中...",

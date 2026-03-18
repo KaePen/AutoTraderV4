@@ -12,7 +12,8 @@ from __future__ import annotations
 import argparse
 import json
 import logging
-import sys
+import threading
+import time
 import webbrowser
 from pathlib import Path
 from typing import Any
@@ -27,6 +28,7 @@ _QUEUE_FILE = _DATA_ROOT / "backtest_queue.json"
 _STATE_FILE = _DATA_ROOT / "runner_state.json"
 _CMD_FILE = _DATA_ROOT / "runner_commands.json"
 _RESULTS_DIR = _DATA_ROOT / "backtest_results"
+_BT_WEBUI_CMD_FILE = _DATA_ROOT / "bt_webui_commands.json"
 _TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"
 
 logging.basicConfig(
@@ -346,11 +348,17 @@ def main() -> None:
 
     import uvicorn
 
-    if not args.no_browser:
-        import threading
+    # コマンドファイル監視スレッド起動（supervisor連携）
+    from autotrader.ipc import command_watcher
 
+    threading.Thread(
+        target=command_watcher,
+        args=(_BT_WEBUI_CMD_FILE, logger),
+        daemon=True,
+    ).start()
+
+    if not args.no_browser:
         def _open() -> None:
-            import time
             time.sleep(1.5)
             webbrowser.open(f"http://localhost:{args.port}")
 
@@ -358,7 +366,7 @@ def main() -> None:
             target=_open, daemon=True,
         ).start()
 
-    print(f"Web UI: http://localhost:{args.port}")
+    logger.info("Web UI: http://localhost:%d", args.port)
     uvicorn.run(
         app,
         host="0.0.0.0",
