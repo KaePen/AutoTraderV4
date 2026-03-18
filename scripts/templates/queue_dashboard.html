@@ -630,7 +630,23 @@ function renderCompoundSection(cm) {
   return html;
 }
 
-function renderQueue(queueData, completedIds) {
+// ジョブ設定からハッシュ生成（バックエンドの_compute_job_hashと同じロジック）
+async function computeJobHash(j) {
+  const keyFields = {
+    type: j.type || 'single',
+    symbol: j.symbol || 'USDJPY',
+    symbols: (j.symbols || []).slice().sort(),
+    years: j.years || '2023-2025',
+    overrides: j.overrides || {},
+    multi_pair_config: j.multi_pair_config || {},
+    compound_replay: j.compound_replay || false,
+  };
+  const raw = JSON.stringify(keyFields, Object.keys(keyFields).sort());
+  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(raw));
+  return Array.from(new Uint8Array(buf)).map(b => b.toString(16).padStart(2, '0')).join('').slice(0, 8);
+}
+
+async function renderQueue(queueData, completedIds) {
   const el = document.getElementById('queue-list');
   const jobs = queueData?.jobs || [];
   if (jobs.length === 0) {
@@ -640,19 +656,27 @@ function renderQueue(queueData, completedIds) {
 
   const doneSet = new Set(completedIds || []);
 
+  // 各ジョブのIDを解決（id指定 or ハッシュ自動生成）
+  const resolved = await Promise.all(jobs.map(async j => {
+    const resolvedId = j.id || await computeJobHash(j);
+    return { ...j, _resolvedId: resolvedId };
+  }));
+
   el.innerHTML = `
     <div class="card px-5 py-3">
       <div class="space-y-1">
-        ${jobs.map(j => {
-          const done = doneSet.has(j.id);
+        ${resolved.map(j => {
+          const done = doneSet.has(j._resolvedId);
           const icon = done ? '✓' : '○';
           const cls = done ? 'text-green-500' : 'text-slate-500';
           const textCls = done ? 'text-slate-500 line-through' : 'text-slate-300';
+          const label = j.description || j.symbol || j._resolvedId;
+          const idTag = `<span class="text-slate-600 text-xs">${j._resolvedId}</span>`;
           return `
             <div class="flex items-center gap-3 py-1 text-sm">
               <span class="${cls} text-base">${icon}</span>
-              <span class="mono font-medium ${textCls}">${j.id}</span>
-              <span class="text-slate-500">${j.description || ''}</span>
+              <span class="font-medium ${textCls}">${label}</span>
+              ${idTag}
             </div>
           `;
         }).join('')}
@@ -719,7 +743,7 @@ async function pollResults() {
     lastResults = await resResults.json();
     const queueData = await resQueue.json();
     renderCompletedJobs(lastResults);
-    renderQueue(queueData, lastStatus?.completed_ids || []);
+    await renderQueue(queueData, lastStatus?.completed_ids || []);
   } catch(e) {
     // 無視
   }
