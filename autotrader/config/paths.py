@@ -7,19 +7,10 @@ worktree作業時でも同一パスを参照可能にする。
     AutoTraderV4_data/
     ├── data/               マーケットデータ（29GB）
     ├── backtest/           BT出力を集約
-    │   ├── results/        バックテスト結果JSON
-    │   ├── month_results/  月別チェックポイント
-    │   ├── logs/           バックテストログ
-    │   └── worker_progress/ ワーカー進捗
+    │   ├── results/        結果+月別チェックポイント（1ジョブ=1フォルダ）
+    │   │   └── {7桁通番}/  result.json, trades.csv, 月別JSON/LOG等
+    │   └── worker_progress/ ワーカー進捗（エフェメラル）
     └── state/              ランタイムJSON集約
-        ├── backtest_queue.json
-        ├── backtest_queue_state.json
-        ├── runner_state.json
-        ├── runner_commands.json
-        ├── bt_webui_commands.json
-        ├── live_webui_commands.json
-        ├── supervisor_state.json
-        └── supervisor_events.json
 """
 from __future__ import annotations
 
@@ -117,24 +108,6 @@ def get_results_dir() -> Path:
     if new.exists():
         return new
     old = get_data_root() / "backtest_results"
-    if old.exists():
-        return old
-    return new
-
-
-def get_month_results_dir() -> Path:
-    """月別チェックポイントディレクトリ。
-
-    新パス (backtest/month_results/) → 旧パス
-    (month_results/) の順でフォールバックする。
-
-    Returns:
-        Path: 月別結果ディレクトリパス
-    """
-    new = get_backtest_dir() / "month_results"
-    if new.exists():
-        return new
-    old = get_data_root() / "month_results"
     if old.exists():
         return old
     return new

@@ -73,7 +73,6 @@ logger = logging.getLogger("queue_runner")
 # パス定数（paths.py に集約）
 from autotrader.config.paths import (
     get_data_dir as _get_data_dir,
-    get_month_results_dir,
     get_queue_file,
     get_queue_state_file,
     get_results_dir,
@@ -85,7 +84,6 @@ from autotrader.config.paths import (
 QUEUE_FILE = get_queue_file()
 STATE_FILE = get_queue_state_file()
 RESULTS_DIR = get_results_dir()
-MONTH_RESULTS_DIR = get_month_results_dir()
 DEFAULT_DATA_DIR = _get_data_dir()
 
 POLL_INTERVAL = 2.0  # キューポーリング間隔（秒）
@@ -107,13 +105,11 @@ class Job:
     type が "single" の場合は1通貨ペア、
     "multi_pair" の場合は時系列インターリーブ方式で
     複数ペアを共有エクイティプールで同時実行する。
-    "multi_pair_continuous" の場合は月リセットなしで
-    equity を年またぎで引き継ぐ通年コンパウンドBT。
-    後方互換のため "portfolio" も "multi_pair" として処理する。
+後方互換のため "portfolio" も "multi_pair" として処理する。
     """
 
     id: str
-    type: str = "single"  # "single" / "multi_pair" / "multi_pair_continuous"
+    type: str = "single"  # "single" / "multi_pair"
     symbol: str = "USDJPY"  # single用
     symbols: list[str] = field(
         default_factory=list,
@@ -209,15 +205,12 @@ class MonthTask:
 # ジョブタイプ別CPUコスト
 CPU_COST_SINGLE: float = 1.2
 CPU_COST_MULTI_PAIR: float = 1.5
-CPU_COST_CONTINUOUS: float = 4.0
 
 
 def _cpu_cost_for_type(job_type: str) -> float:
     """ジョブタイプからCPUコストを返す"""
     if job_type == "multi_pair":
         return CPU_COST_MULTI_PAIR
-    if job_type == "multi_pair_continuous":
-        return CPU_COST_CONTINUOUS
     return CPU_COST_SINGLE
 
 
@@ -305,6 +298,10 @@ class QueueState:
     completed_ids: list[str] = field(default_factory=list)
     job_counter: int = 0
     queue_hash: str = ""
+    # job_id → result_id マッピング（再起動時の再開用）
+    running_jobs: dict[str, str] = field(
+        default_factory=dict,
+    )
 
     def sync_with_queue(self) -> None:
         """キュー変更を検知し、削除されたジョブのみ除去"""
@@ -320,6 +317,7 @@ class QueueState:
             if removed:
                 for cid in removed:
                     self.completed_ids.remove(cid)
+                    self.running_jobs.pop(cid, None)
                 logger.info(
                     "キュー変更検知: 削除済み%d件を除去 %s",
                     len(removed),
@@ -373,6 +371,10 @@ class QueueState:
                 queue_hash=data.get(
                     "queue_hash",
                     "",
+                ),
+                running_jobs=data.get(
+                    "running_jobs",
+                    {},
                 ),
             )
         return cls()
@@ -583,7 +585,7 @@ def _get_completed_months(
     Returns:
         完了月のセット {(year, month), ...}
     """
-    result_dir = MONTH_RESULTS_DIR / result_id
+    result_dir = RESULTS_DIR / result_id
     completed: set[tuple[int, int]] = set()
     if not result_dir.exists():
         return completed
@@ -616,25 +618,6 @@ def generate_pending_months(
     Returns:
         未完了の月タスクリスト（年月順）
     """
-    # 通年コンパウンドBT: 全年を1タスクとして扱う
-    if job.type == "multi_pair_continuous":
-        start_year, end_year = parse_years(job.years)
-        # ジョブ完了チェック: 結果ファイルが存在すれば完了
-        result_path = RESULTS_DIR / result_id / "result.json"
-        if result_path.exists():
-            return []
-        return [
-            MonthTask(
-                job_id=job.id,
-                result_id=result_id,
-                job_type=job.type,
-                year=start_year,
-                month=0,  # センチネル: 通年ジョブ
-                job_dict=asdict(job),
-                cpu_cost=_cpu_cost_for_type(job.type),
-            )
-        ]
-
     start_year, end_year = parse_years(job.years)
     completed = _get_completed_months(result_id)
 
@@ -675,20 +658,14 @@ def _is_job_complete(
     月完了と年集約ファイル書出しにタイムラグがあるため、
     年集約ファイルの存在も確認して集約の早期実行を防ぐ。
 
-    通年コンパウンドBTは結果ファイルの存在で判定する。
     """
-    # 通年コンパウンドBT: 結果ファイルで完了判定
-    if job.type == "multi_pair_continuous":
-        result_path = RESULTS_DIR / result_id / "result.json"
-        return result_path.exists()
-
     start_year, end_year = parse_years(job.years)
     for yr in range(start_year, end_year + 1):
         if not _is_year_complete(result_id, yr):
             return False
         # 年集約ファイルも存在するか確認
         year_path = (
-            MONTH_RESULTS_DIR / result_id
+            RESULTS_DIR / result_id
             / f"year_{yr}.json"
         )
         if not year_path.exists():
@@ -714,7 +691,7 @@ def _load_month_results(
     Returns:
         月結果リスト（月順ソート済み）
     """
-    result_dir = MONTH_RESULTS_DIR / result_id
+    result_dir = RESULTS_DIR / result_id
     results: list[dict[str, Any]] = []
     for mo in range(1, 13):
         path = result_dir / f"{year}_{mo:02d}.json"
@@ -771,7 +748,7 @@ def _aggregate_year_single(
 
     # 年集約結果を保存
     year_path = (
-        MONTH_RESULTS_DIR / result_id / f"year_{year}.json"
+        RESULTS_DIR / result_id / f"year_{year}.json"
     )
     year_path.write_text(
         json.dumps(
@@ -879,7 +856,7 @@ def _aggregate_year_multi_pair(
 
     # 年集約結果を保存
     year_path = (
-        MONTH_RESULTS_DIR / result_id / f"year_{year}.json"
+        RESULTS_DIR / result_id / f"year_{year}.json"
     )
     year_path.write_text(
         json.dumps(
@@ -903,13 +880,7 @@ def aggregate_year(
     year: int,
     job_type: str,
 ) -> dict[str, Any] | None:
-    """年集約（タイプ振り分け）
-
-    通年コンパウンドBTは独自の集約を行うためここでは処理しない。
-    """
-    if job_type == "multi_pair_continuous":
-        # 通年BTは _execute_continuous_multi_pair 内で集約
-        return None
+    """年集約（タイプ振り分け）"""
     if job_type in ("multi_pair", "portfolio"):
         return _aggregate_year_multi_pair(result_id, year)
     return _aggregate_year_single(result_id, year)
@@ -930,7 +901,7 @@ def _aggregate_job_single(
 
     for yr in range(start_year, end_year + 1):
         year_path = (
-            MONTH_RESULTS_DIR / result_id / f"year_{yr}.json"
+            RESULTS_DIR / result_id / f"year_{yr}.json"
         )
         if year_path.exists():
             try:
@@ -1196,7 +1167,7 @@ def _aggregate_job_multi_pair(
     year_results: list[dict[str, Any]] = []
     for yr in range(start_year, end_year + 1):
         year_path = (
-            MONTH_RESULTS_DIR / result_id / f"year_{yr}.json"
+            RESULTS_DIR / result_id / f"year_{yr}.json"
         )
         if year_path.exists():
             try:
@@ -1361,689 +1332,10 @@ def aggregate_job(
     job: Job,
     result_id: str,
 ) -> JobResult:
-    """ジョブ全体集約（タイプ振り分け）
-
-    通年コンパウンドBTは _execute_continuous_multi_pair 内で
-    直接結果を保存するため、ここでは保存済み結果を読み込む。
-    """
-    if job.type == "multi_pair_continuous":
-        return _aggregate_job_continuous(job, result_id)
+    """ジョブ全体集約（タイプ振り分け）"""
     if job.type in ("multi_pair", "portfolio"):
         return _aggregate_job_multi_pair(job, result_id)
     return _aggregate_job_single(job, result_id)
-
-
-def _aggregate_job_continuous(
-    job: Job,
-    result_id: str,
-) -> JobResult:
-    """通年コンパウンドBTジョブの集約
-
-    _execute_continuous_multi_pair が result.json を直接保存するため、
-    ここではそのファイルを読み込んで JobResult に変換する。
-    """
-    result_path = RESULTS_DIR / result_id / "result.json"
-    if not result_path.exists():
-        return JobResult(
-            job_id=result_id,
-            status="completed",
-            job_type="multi_pair_continuous",
-            symbol=",".join(job.symbols) if job.symbols else "",
-            years=job.years,
-            description=job.description,
-        )
-
-    data = json.loads(
-        result_path.read_text(encoding="utf-8"),
-    )
-    return JobResult(
-        job_id=data.get("job_id", result_id),
-        status=data.get("status", "completed"),
-        job_type="multi_pair_continuous",
-        symbol=data.get("symbol", ""),
-        years=data.get("years", job.years),
-        description=data.get("description", job.description),
-        net_profit=data.get("net_profit", 0.0),
-        trades=data.get("trades", 0),
-        win_rate=data.get("win_rate", 0.0),
-        profit_factor=data.get("profit_factor", 0.0),
-        max_drawdown=data.get("max_drawdown", 0.0),
-        sharpe_ratio=data.get("sharpe_ratio", 0.0),
-        monthly_plus_rate=data.get("monthly_plus_rate", 0.0),
-        yearly_details=data.get("yearly_details", []),
-        pair_details=data.get("pair_details", []),
-        portfolio_metrics=data.get("portfolio_metrics", {}),
-        overrides_used=data.get("overrides_used", {}),
-        elapsed_seconds=data.get("elapsed_seconds", 0.0),
-        started_at=data.get("started_at", ""),
-        finished_at=data.get("finished_at", ""),
-    )
-
-
-# ===================================================================
-# 通年コンパウンドBT実行
-# ===================================================================
-
-
-def _get_completed_continuous_years(
-    result_id: str,
-) -> dict[int, dict[str, Any]]:
-    """通年BTの完了年チェックポイントを読み込み
-
-    Args:
-        result_id: 結果ID
-
-    Returns:
-        完了年→チェックポイントデータ
-    """
-    result_dir = MONTH_RESULTS_DIR / result_id
-    completed: dict[int, dict[str, Any]] = {}
-    if not result_dir.exists():
-        return completed
-    for path in result_dir.glob("cont_*.json"):
-        name = path.stem  # cont_2023
-        parts = name.split("_", 1)
-        if len(parts) == 2:
-            try:
-                yr = int(parts[1])
-                data = json.loads(
-                    path.read_text(encoding="utf-8"),
-                )
-                completed[yr] = data
-            except (ValueError, json.JSONDecodeError, OSError):
-                continue
-    return completed
-
-
-def _execute_continuous_multi_pair(
-    job_dict: dict[str, Any],
-    result_path: str,
-    data_dir: str,
-) -> None:
-    """通年コンパウンドBT実行（月リセットなし）
-
-    全年を順次実行し、equity を年またぎで引き継ぐ。
-    各年完了時にチェックポイントを保存し、中断再開可能。
-
-    Args:
-        job_dict: ジョブ定義辞書
-        result_path: 最終結果の保存先パス
-        data_dir: データディレクトリ
-    """
-    import gc
-    import math
-
-    import numpy as np
-
-    from autotrader.backtest.fundamental_utils import (
-        create_fundamental_provider,
-    )
-    from scripts.run_multi_pair_backtest import (
-        MultiPairConfig,
-        PortfolioState,
-        build_bot_config,
-        load_all_pair_data,
-        run_multi_pair_year,
-        setup_pair_context,
-    )
-
-    job = Job.from_dict(job_dict)
-    _default_symbols = [
-        "USDJPY", "EURJPY", "GBPJPY",
-        "AUDJPY", "CADJPY", "CHFJPY",
-    ]
-    symbols = job.symbols or _default_symbols
-    overrides = job.overrides or {}
-    mpc = job.multi_pair_config
-    bt_ovr = overrides.get("backtest", {})
-
-    initial_equity = bt_ovr.get(
-        "initial_balance", 1_000_000.0,
-    )
-    spread_mult = mpc.get("spread_multiplier", 1.0)
-    _use_actual_spread = bt_ovr.get(
-        "use_actual_spread_data", False,
-    )
-
-    # MultiPairConfig構築
-    from scripts.run_multi_pair_backtest import TEST_MATRIX
-    test_name = mpc.get("test_name", "")
-    if test_name and test_name in TEST_MATRIX:
-        multi_config = TEST_MATRIX[test_name]
-    else:
-        multi_config = MultiPairConfig(
-            name=mpc.get("name", job.id),
-            global_max_positions=mpc.get(
-                "global_max_positions", 6,
-            ),
-            per_pair_max_positions=mpc.get(
-                "per_pair_max_positions", 1,
-            ),
-            global_max_exposure_lot=mpc.get(
-                "global_max_exposure_lot", 10.0,
-            ),
-        )
-
-    # bot/pm追加オーバーライド
-    bot_extra: dict[str, Any] = {}
-    if "base_risk_pct" in mpc:
-        bot_extra["base_risk_pct"] = mpc["base_risk_pct"]
-    if "consensus_threshold" in mpc:
-        bot_extra["consensus_threshold"] = mpc[
-            "consensus_threshold"
-        ]
-    bot_extra.update(overrides.get("bot", {}))
-
-    pm_extra: dict[str, Any] = {}
-    pm_extra.update(overrides.get("pm", {}))
-
-    start_year, end_year = parse_years(job.years)
-
-    # result_id をパスから推定
-    result_dir = Path(result_path).parent
-    result_id = result_dir.name
-
-    # チェックポイントディレクトリ
-    checkpoint_dir = MONTH_RESULTS_DIR / result_id
-    checkpoint_dir.mkdir(parents=True, exist_ok=True)
-
-    # 完了年のチェックポイント読み込み（中断再開用）
-    completed_years = _get_completed_continuous_years(
-        result_id,
-    )
-
-    # 最終完了年のequityを引き継ぐ
-    current_equity = initial_equity
-    if completed_years:
-        max_completed_year = max(completed_years.keys())
-        last_cp = completed_years[max_completed_year]
-        current_equity = last_cp.get(
-            "final_equity", initial_equity,
-        )
-        logger.info(
-            "[%s] チェックポイント復元: %d年まで完了,"
-            " equity=%.0f",
-            result_id,
-            max_completed_year,
-            current_equity,
-        )
-
-    # 全年の結果を蓄積
-    all_year_results: list[dict[str, Any]] = []
-    # 完了年の結果を復元
-    for yr in sorted(completed_years.keys()):
-        all_year_results.append(completed_years[yr])
-
-    # 通年DD追跡（全期間）
-    peak_equity = current_equity
-    max_dd_pct = 0.0
-    # 完了年のDD復元
-    for cp in all_year_results:
-        _cp_dd = cp.get("max_dd_pct", 0.0)
-        if _cp_dd > max_dd_pct:
-            max_dd_pct = _cp_dd
-
-    t0 = time.time()
-
-    for year in range(start_year, end_year + 1):
-        # 完了済み年はスキップ
-        if year in completed_years:
-            continue
-
-        logger.info(
-            "[%s] %d年 開始 (equity=%.0f)",
-            result_id, year, current_equity,
-        )
-
-        # データロード（対象年のみ）
-        year_t0 = time.time()
-        runners = load_all_pair_data(
-            symbols,
-            data_dir,
-            max_workers=min(6, len(symbols)),
-            needed_years=[year],
-        )
-
-        # PortfolioState: 前年のequityを引き継ぐ
-        portfolio = PortfolioState(
-            equity=current_equity,
-            initial_equity=initial_equity,
-            peak_equity=peak_equity,
-            max_dd_pct=max_dd_pct,
-        )
-
-        # ペアコンテキスト構築
-        contexts: dict[str, Any] = {}
-        for sym in symbols:
-            if sym not in runners:
-                continue
-            runner, full_md = runners[sym]
-            bot_config = build_bot_config(
-                sym,
-                extra_overrides=bot_extra or None,
-                multi_mode=True,
-            )
-            ctx = setup_pair_context(
-                sym,
-                runner,
-                year,
-                bot_config,
-                current_equity,
-                full_market_data=full_md,
-                pm_config_overrides=pm_extra or None,
-                spread_multiplier=spread_mult,
-                use_actual_spread_data=_use_actual_spread,
-                bt_overrides=bt_ovr,
-            )
-            if ctx is not None:
-                # ファンダメンタルイベントプロバイダ注入
-                ctx.fundamental_provider = (
-                    create_fundamental_provider(
-                        data_dir=data_dir,
-                        symbol=sym,
-                        start_year=year,
-                        end_year=year,
-                    )
-                )
-                contexts[sym] = ctx
-
-        if not contexts:
-            logger.warning(
-                "[%s] %d年: データなし、スキップ",
-                result_id, year,
-            )
-            continue
-
-        # VIXデータロード（macro_regime_enabled時のみ）
-        _vix_data = None
-        _any_macro = any(
-            ctx.bot.config.macro_regime_enabled
-            for ctx in contexts.values()
-        )
-        if _any_macro:
-            from autotrader.backtest.vix_loader import (
-                load_vix_year,
-            )
-            _vix_data = load_vix_year(year, data_dir)
-            logger.info(
-                "[%s] VIX: %d年 %d日分",
-                result_id, year, len(_vix_data),
-            )
-
-        # 進捗ファイル
-        _pg_dir = get_worker_progress_dir()
-        _pg_dir.mkdir(parents=True, exist_ok=True)
-        _pg_file = str(
-            _pg_dir / f"{job.id}_{year}.json"
-        )
-
-        # インターリーブ実行
-        pair_trades = run_multi_pair_year(
-            year,
-            contexts,
-            multi_config,
-            portfolio,
-            progress_file=_pg_file,
-            vix_data=_vix_data,
-        )
-
-        year_elapsed = time.time() - year_t0
-        year_pnl = portfolio.equity - current_equity
-        year_trades = sum(
-            len(t) for t in pair_trades.values()
-        )
-
-        # DD追跡（通年）
-        peak_equity = portfolio.peak_equity
-        max_dd_pct = portfolio.max_dd_pct
-
-        # ペア別サマリー
-        pair_summaries: dict[str, dict[str, Any]] = {}
-        for sym, trades in pair_trades.items():
-            wins = 0
-            gp = 0.0
-            gl = 0.0
-            np_ = 0.0
-            for trade in trades:
-                pnl = trade.profit_loss or 0.0
-                np_ += pnl
-                if pnl > 0:
-                    wins += 1
-                    gp += pnl
-                else:
-                    gl += abs(pnl)
-            pair_summaries[sym] = {
-                "trades": len(trades),
-                "wins": wins,
-                "gross_profit": gp,
-                "gross_loss": gl,
-                "net_profit": np_,
-            }
-
-        # monthly_pnlをstring key化
-        monthly_pnl_str: dict[str, float] = {}
-        for key, pnl in portfolio.monthly_pnl.items():
-            if isinstance(key, tuple):
-                monthly_pnl_str[
-                    f"{key[0]:04d}-{key[1]:02d}"
-                ] = pnl
-            else:
-                monthly_pnl_str[str(key)] = pnl
-
-        year_result = {
-            "year": year,
-            "year_pnl": year_pnl,
-            "year_trades": year_trades,
-            "initial_equity": current_equity,
-            "final_equity": portfolio.equity,
-            "max_dd_pct": portfolio.max_dd_pct,
-            "monthly_pnl": monthly_pnl_str,
-            "pair_summaries": pair_summaries,
-            "blocked_global": portfolio.blocked_global,
-            "blocked_per_pair": portfolio.blocked_per_pair,
-            "blocked_exposure": portfolio.blocked_exposure,
-            "elapsed_seconds": round(year_elapsed, 1),
-        }
-        all_year_results.append(year_result)
-
-        # equityを次年に引き継ぐ
-        current_equity = portfolio.equity
-
-        # チェックポイント保存
-        cp_path = checkpoint_dir / f"cont_{year}.json"
-        cp_path.write_text(
-            json.dumps(
-                year_result,
-                indent=2,
-                ensure_ascii=False,
-                default=str,
-            ),
-            encoding="utf-8",
-        )
-
-        logger.info(
-            "[%s] %d年 完了:"
-            " PnL=%+.0f, Trades=%d,"
-            " Equity=%.0f, DD=%.2f%%"
-            " (%.0fs)",
-            result_id,
-            year,
-            year_pnl,
-            year_trades,
-            portfolio.equity,
-            portfolio.max_dd_pct,
-            year_elapsed,
-        )
-
-        # メモリ解放
-        del contexts, runners, pair_trades
-        gc.collect()
-
-    # ====== 全体集約 ======
-    total_elapsed = time.time() - t0
-
-    if not all_year_results:
-        # データなし
-        _empty_result = {
-            "job_id": result_id,
-            "status": "completed",
-            "job_type": "multi_pair_continuous",
-            "symbol": ",".join(symbols),
-            "years": job.years,
-            "description": job.description,
-            "net_profit": 0.0,
-            "trades": 0,
-            "win_rate": 0.0,
-            "profit_factor": 0.0,
-            "max_drawdown": 0.0,
-            "sharpe_ratio": 0.0,
-            "monthly_plus_rate": 0.0,
-            "initial_equity": initial_equity,
-            "final_equity": initial_equity,
-            "yearly_details": [],
-            "pair_details": [],
-            "portfolio_metrics": {},
-            "overrides_used": overrides,
-            "elapsed_seconds": round(total_elapsed, 1),
-        }
-        Path(result_path).parent.mkdir(
-            parents=True, exist_ok=True,
-        )
-        Path(result_path).write_text(
-            json.dumps(
-                _empty_result,
-                indent=2,
-                ensure_ascii=False,
-                default=str,
-            ),
-            encoding="utf-8",
-        )
-        return
-
-    # 全年の結果を集約
-    total_profit = sum(
-        yr["year_pnl"] for yr in all_year_results
-    )
-    total_trades = sum(
-        yr["year_trades"] for yr in all_year_results
-    )
-    final_equity = current_equity
-
-    # 月次PnLを結合
-    all_monthly: dict[str, float] = {}
-    for yr in all_year_results:
-        for key, pnl in yr["monthly_pnl"].items():
-            all_monthly[key] = (
-                all_monthly.get(key, 0.0) + pnl
-            )
-
-    sorted_months = sorted(all_monthly.keys())
-    monthly_pnl_list = [
-        all_monthly[m] for m in sorted_months
-    ]
-
-    # Sharpe（月次リターン率ベース）
-    if len(monthly_pnl_list) > 1:
-        # 通年複利: 月次リターン率を初期equityで正規化
-        _arr = np.array(monthly_pnl_list)
-        _returns = _arr / initial_equity
-        _mean = float(np.mean(_returns))
-        _std = float(np.std(_returns, ddof=1))
-        sharpe = (
-            _mean / _std * math.sqrt(12)
-            if _std > 0
-            else 0.0
-        )
-    else:
-        sharpe = 0.0
-
-    # 月間プラス率
-    if monthly_pnl_list:
-        plus_months = sum(
-            1 for p in monthly_pnl_list if p > 0
-        )
-        monthly_plus = (
-            plus_months / len(monthly_pnl_list) * 100
-        )
-    else:
-        monthly_plus = 0.0
-
-    # ペア別メトリクス集約
-    total_wins = 0
-    total_gp = 0.0
-    total_gl = 0.0
-    pair_metrics: dict[str, dict[str, Any]] = {}
-
-    for sym in symbols:
-        n = 0
-        wins = 0
-        gp = 0.0
-        gl = 0.0
-        np_ = 0.0
-        for yr in all_year_results:
-            ps = yr["pair_summaries"].get(sym, {})
-            n += ps.get("trades", 0)
-            wins += ps.get("wins", 0)
-            gp += ps.get("gross_profit", 0.0)
-            gl += ps.get("gross_loss", 0.0)
-            np_ += ps.get("net_profit", 0.0)
-        total_wins += wins
-        total_gp += gp
-        total_gl += gl
-
-        wr = wins / n * 100 if n > 0 else 0.0
-        pf = gp / gl if gl > 0 else float("inf")
-        pair_metrics[sym] = {
-            "trades": n,
-            "profit": np_,
-            "wr": wr,
-            "pf": pf,
-            "contribution": 0.0,
-        }
-
-    # 寄与率
-    for sym in symbols:
-        pm = pair_metrics[sym]
-        pm["contribution"] = (
-            pm["profit"] / total_profit * 100
-            if total_profit > 0
-            else 0.0
-        )
-
-    wr = (
-        total_wins / total_trades * 100
-        if total_trades > 0
-        else 0.0
-    )
-    pf = total_gp / total_gl if total_gl > 0 else 999.99
-
-    # blocked合計
-    blocked_global = sum(
-        yr["blocked_global"] for yr in all_year_results
-    )
-    blocked_per_pair = sum(
-        yr["blocked_per_pair"] for yr in all_year_results
-    )
-    blocked_exposure = sum(
-        yr["blocked_exposure"] for yr in all_year_results
-    )
-
-    # yearly_details
-    yearly_details = [
-        {
-            "year": yr["year"],
-            "pnl": yr["year_pnl"],
-            "trades": yr["year_trades"],
-            "initial_equity": yr["initial_equity"],
-            "final_equity": yr["final_equity"],
-            "max_dd_pct": yr["max_dd_pct"],
-            "return_pct": (
-                yr["year_pnl"] / yr["initial_equity"] * 100
-                if yr["initial_equity"] > 0
-                else 0.0
-            ),
-        }
-        for yr in sorted(
-            all_year_results,
-            key=lambda x: x["year"],
-        )
-    ]
-
-    # pair_details
-    pair_details = []
-    for sym in symbols:
-        pm = pair_metrics.get(sym, {})
-        if pm.get("trades", 0) > 0:
-            pair_details.append({
-                "symbol": sym,
-                "net_profit": pm["profit"],
-                "trades": pm["trades"],
-                "win_rate": pm["wr"],
-                "profit_factor": pm["pf"],
-                "contribution_pct": pm["contribution"],
-            })
-
-    # 年間収益率（複利ベース: 各年の開始equity基準）
-    year_return_pcts = []
-    for yr in all_year_results:
-        _init = yr.get("initial_equity", initial_equity)
-        if _init > 0:
-            year_return_pcts.append(
-                yr["year_pnl"] / _init * 100,
-            )
-    annual_return = (
-        sum(year_return_pcts) / len(year_return_pcts)
-        if year_return_pcts
-        else 0.0
-    )
-
-    # 最終結果構築
-    final_result = {
-        "job_id": result_id,
-        "status": "completed",
-        "job_type": "multi_pair_continuous",
-        "symbol": ",".join(symbols),
-        "years": job.years,
-        "description": job.description,
-        "net_profit": total_profit,
-        "trades": total_trades,
-        "win_rate": wr,
-        "profit_factor": pf,
-        "max_drawdown": max_dd_pct,
-        "sharpe_ratio": sharpe,
-        "monthly_plus_rate": monthly_plus,
-        "initial_equity": initial_equity,
-        "final_equity": final_equity,
-        "yearly_details": yearly_details,
-        "pair_details": pair_details,
-        "portfolio_metrics": {
-            "total_profit": total_profit,
-            "annual_return_pct": annual_return,
-            "max_dd_pct": max_dd_pct,
-            "sharpe_ratio": sharpe,
-            "portfolio_wr": wr,
-            "portfolio_pf": pf,
-            "monthly_win_rate": monthly_plus,
-            "blocked_global": blocked_global,
-            "blocked_per_pair": blocked_per_pair,
-            "blocked_exposure": blocked_exposure,
-            "initial_equity": initial_equity,
-            "final_equity": final_equity,
-        },
-        "overrides_used": overrides,
-        "elapsed_seconds": round(total_elapsed, 1),
-    }
-
-    Path(result_path).parent.mkdir(
-        parents=True, exist_ok=True,
-    )
-    Path(result_path).write_text(
-        json.dumps(
-            final_result,
-            indent=2,
-            ensure_ascii=False,
-            default=str,
-        ),
-        encoding="utf-8",
-    )
-
-    logger.info(
-        "[%s] 通年コンパウンドBT完了:"
-        " profit=%.0f, WR=%.1f%%,"
-        " PF=%.2f, DD=%.2f%%,"
-        " Sharpe=%.2f,"
-        " equity=%.0f→%.0f"
-        " (%.0fs)",
-        result_id,
-        total_profit,
-        wr,
-        pf,
-        max_dd_pct,
-        sharpe,
-        initial_equity,
-        final_equity,
-        total_elapsed,
-    )
 
 
 # ===================================================================
@@ -2067,20 +1359,12 @@ def _launch_month_subprocess(
         _project_root
     )
 
-    # 通年コンパウンドBT: result_pathはRESULTS_DIR
-    if task.job_type == "multi_pair_continuous":
-        _cont_result_dir = RESULTS_DIR / task.result_id
-        _cont_result_dir.mkdir(parents=True, exist_ok=True)
-        result_path = str(
-            _cont_result_dir / "result.json"
-        )
-    else:
-        # 月結果ディレクトリ作成
-        result_dir = MONTH_RESULTS_DIR / task.result_id
-        result_dir.mkdir(parents=True, exist_ok=True)
-        result_path = str(
-            result_dir / f"{task.year}_{task.month:02d}.json"
-        )
+    # 月結果ディレクトリ作成
+    result_dir = RESULTS_DIR / task.result_id
+    result_dir.mkdir(parents=True, exist_ok=True)
+    result_path = str(
+        result_dir / f"{task.year}_{task.month:02d}.json"
+    )
 
     # 月タスク情報を一時ファイルに保存
     task_data = {
@@ -2113,13 +1397,8 @@ def _launch_month_subprocess(
     ]
 
     # ログファイルにリダイレクト（パイプデッドロック防止）
-    if task.job_type == "multi_pair_continuous":
-        _log_dir = RESULTS_DIR / task.result_id
-        _log_dir.mkdir(parents=True, exist_ok=True)
-        log_path = _log_dir / "continuous.log"
-    else:
-        _log_dir = MONTH_RESULTS_DIR / task.result_id
-        log_path = _log_dir / f"{task.year}_{task.month:02d}.log"
+    _log_dir = RESULTS_DIR / task.result_id
+    log_path = _log_dir / f"{task.year}_{task.month:02d}.log"
     log_file = open(  # noqa: SIM115
         log_path, "w", encoding="utf-8", errors="replace",
     )
@@ -2821,12 +2100,7 @@ def _execute_month_from_file(task_file: str) -> None:
     job_type = job_dict.get("type", "single")
 
     try:
-        if job_type == "multi_pair_continuous":
-            # 通年コンパウンドBT: 全年を一括実行
-            _execute_continuous_multi_pair(
-                job_dict, result_path, data_dir,
-            )
-        elif job_type in ("multi_pair", "portfolio"):
+        if job_type in ("multi_pair", "portfolio"):
             _execute_month_multi_pair(
                 job_dict, year, month, result_path, data_dir,
             )
@@ -2874,7 +2148,7 @@ def _execute_job_from_file(job_file: str) -> None:
     start_year, end_year = parse_years(job.years)
     for yr in range(start_year, end_year + 1):
         for mo in range(1, 13):
-            result_dir = MONTH_RESULTS_DIR / rid
+            result_dir = RESULTS_DIR / rid
             result_dir.mkdir(parents=True, exist_ok=True)
             rp = str(result_dir / f"{yr}_{mo:02d}.json")
             if Path(rp).exists():
@@ -3061,13 +2335,11 @@ def main() -> None:
     print("=" * 60)
     print(f"  キューファイル: {QUEUE_FILE}")
     print(f"  結果ディレクトリ: {RESULTS_DIR}")
-    print(f"  月結果ディレクトリ: {MONTH_RESULTS_DIR}")
     print(f"  ポーリング間隔: {POLL_INTERVAL}s")
     print(
         f"  CPUスレッド: {cpu_threads}"
         f" (シングル={CPU_COST_SINGLE}CPU,"
-        f" マルチ={CPU_COST_MULTI_PAIR}CPU,"
-        f" 通年={CPU_COST_CONTINUOUS}CPU)",
+        f" マルチ={CPU_COST_MULTI_PAIR}CPU)",
     )
     print()
     print("  コマンド:")
@@ -3080,7 +2352,6 @@ def main() -> None:
     print("=" * 60)
 
     RESULTS_DIR.mkdir(parents=True, exist_ok=True)
-    MONTH_RESULTS_DIR.mkdir(parents=True, exist_ok=True)
 
     # 状態読み込み + クリーンアップ
     state = QueueState.load()
@@ -3143,6 +2414,7 @@ def main() -> None:
                         running_tasks.clear()
                         # 全リセット
                         state.completed_ids.clear()
+                        state.running_jobs.clear()
                         state.save()
                         job_progress.clear()
                         active_jobs.clear()
@@ -3297,7 +2569,7 @@ def main() -> None:
             if rc != 0:
                 # ログファイルからエラー内容を取得
                 _log_path = (
-                    MONTH_RESULTS_DIR / rid
+                    RESULTS_DIR / rid
                     / f"{t.year}_{t.month:02d}.log"
                 )
                 _err_tail = ""
@@ -3324,14 +2596,7 @@ def main() -> None:
                 # 次回再実行される
                 continue
 
-            if t.job_type == "multi_pair_continuous":
-                logger.info(
-                    "[%s] 通年BT完了 (%.0fs)",
-                    rid,
-                    time.time() - rt.started_at,
-                )
-            else:
-                logger.info(
+            logger.info(
                     "[%s] %d/%02d 完了 (%.0fs)",
                     rid,
                     t.year,
@@ -3343,62 +2608,6 @@ def main() -> None:
             if rid in job_progress:
                 jp = job_progress[rid]
                 jp.completed_months.add((t.year, t.month))
-
-                # 通年コンパウンドBT: 単一タスク完了=ジョブ完了
-                if t.job_type == "multi_pair_continuous":
-                    if rid in active_jobs:
-                        job = active_jobs[rid]
-                        result = aggregate_job(job, rid)
-                        elapsed = (
-                            time.time() - jp.started_at
-                            if jp.started_at > 0
-                            else 0.0
-                        )
-                        result.elapsed_seconds = round(
-                            elapsed, 1,
-                        )
-                        result.started_at = (
-                            datetime.fromtimestamp(
-                                jp.started_at,
-                            ).isoformat()
-                            if jp.started_at > 0
-                            else ""
-                        )
-                        result.finished_at = (
-                            datetime.now().isoformat()
-                        )
-                        # result.json は既に
-                        # _execute_continuous_multi_pair で保存済み
-                        # → _save_result は上書きになるが問題なし
-                        _save_result(result)
-
-                        logger.info(
-                            "[%s] 通年コンパウンドBT完了:"
-                            " profit=%.0f,"
-                            " WR=%.1f%%,"
-                            " PF=%.2f,"
-                            " DD=%.2f%%,"
-                            " Sharpe=%.2f"
-                            " (%.0fs)",
-                            result.job_id,
-                            result.net_profit,
-                            result.win_rate,
-                            result.profit_factor,
-                            result.max_drawdown,
-                            result.sharpe_ratio,
-                            result.elapsed_seconds,
-                        )
-
-                        _orig_id = job.id
-                        if _orig_id not in state.completed_ids:
-                            state.completed_ids.append(
-                                _orig_id,
-                            )
-                        state.save()
-                        _remove_job_from_queue(_orig_id)
-                        jp.status = "completed"
-                        del active_jobs[rid]
-                    continue
 
                 # 年完了チェック（重複防止ガード付き）
                 _year_key = (rid, t.year)
@@ -3483,6 +2692,9 @@ def main() -> None:
                             state.completed_ids.append(
                                 _orig_id,
                             )
+                        state.running_jobs.pop(
+                            _orig_id, None,
+                        )
                         state.save()
                         _remove_job_from_queue(_orig_id)
 
@@ -3545,23 +2757,29 @@ def main() -> None:
 
                 if existing_jp:
                     rid = existing_jp.result_id
+                elif job.id in state.running_jobs:
+                    # 再起動後: 永続化された紐付けから再開
+                    rid = state.running_jobs[job.id]
+                    logger.info(
+                        "再開: job=%s → result_id=%s",
+                        job.id, rid,
+                    )
                 else:
                     # 新ジョブ登録: 未完了月が十分なら不要
                     if _active_pending_months >= cpu_threads:
                         break
                     _cnt = state.next_counter()
-                    rid = f"{_cnt:03d}_{job.id}"
+                    rid = f"{_cnt:07d}"
+                    # 紐付けを永続化
+                    state.running_jobs[job.id] = rid
+                    state.save()
 
                     start_year, end_year = parse_years(
                         job.years,
                     )
-                    # 通年コンパウンドBT: 1タスク=全年
-                    if job.type == "multi_pair_continuous":
-                        total_months = 1
-                    else:
-                        total_months = (
-                            (end_year - start_year + 1) * 12
-                        )
+                    total_months = (
+                        (end_year - start_year + 1) * 12
+                    )
                     _sym_label = (
                         ",".join(job.symbols)
                         if job.symbols
@@ -3585,18 +2803,7 @@ def main() -> None:
                     active_jobs[rid] = job
                     _active_pending_months += total_months
 
-                    if job.type == "multi_pair_continuous":
-                        logger.info(
-                            "[%s] 開始(通年BT): %s %s %s"
-                            " (CPU=%.1f)",
-                            rid,
-                            _sym_label,
-                            job.years,
-                            job.description,
-                            CPU_COST_CONTINUOUS,
-                        )
-                    else:
-                        logger.info(
+                    logger.info(
                             "[%s] 開始: %s %s %s"
                             " (全%d月, CPU=%d)",
                             rid,
