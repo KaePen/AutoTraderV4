@@ -417,9 +417,11 @@ function renderResultRow(r) {
     : r.status === 'failed' ? '失敗' : 'キャンセル';
 
   const hasPairs = r.pair_details && r.pair_details.length > 0;
+  const hasYearly = r.yearly_details && r.yearly_details.length > 0;
   const cm = r.portfolio_metrics?.compound_metrics || null;
   const jc = r.job_config || null;
-  const hasDetail = hasPairs || cm || jc;
+  const hasOverrides = jc?.overrides && Object.keys(jc.overrides).length > 0;
+  const hasDetail = hasPairs || hasYearly || cm || hasOverrides;
   const detailId = 'detail-' + (r.job_id || '').replace(/[^a-zA-Z0-9]/g, '_');
 
   // ジョブIDセル: result_id + description
@@ -464,7 +466,8 @@ function renderResultRow(r) {
     row += `
       <tr id="${detailId}" class="hidden">
         <td colspan="11" class="px-4 py-2 bg-slate-900/50">
-          ${jc ? renderJobConfig(jc) : ''}
+          ${hasOverrides ? renderJobConfig(jc) : ''}
+          ${hasYearly ? renderYearlyDetails(r.yearly_details) : ''}
           ${hasPairs ? renderPairDetails(r.pair_details) : ''}
           ${cm ? renderCompoundSection(cm) : ''}
         </td>
@@ -476,21 +479,58 @@ function renderResultRow(r) {
 }
 
 function renderJobConfig(jc) {
-  // 表示不要な内部フィールドを除外
-  const exclude = new Set(['_auto_id', '_result_id', 'id', 'max_year_workers']);
-  const entries = Object.entries(jc).filter(([k]) => !exclude.has(k));
-  if (entries.length === 0) return '';
+  // overrides のみ表示（他はメイン行で確認可能）
+  const ov = jc.overrides || {};
+  const sections = Object.entries(ov).filter(([, v]) => v && Object.keys(v).length > 0);
+  if (sections.length === 0) return '';
 
-  // overrides は展開表示
-  const rows = entries.map(([k, v]) => {
-    const val = typeof v === 'object' ? `<pre class="whitespace-pre-wrap">${JSON.stringify(v, null, 1)}</pre>` : String(v);
-    return `<tr class="border-b border-slate-800/50"><td class="px-3 py-1 text-slate-400">${k}</td><td class="px-3 py-1 text-slate-300">${val}</td></tr>`;
+  const rows = sections.map(([section, params]) => {
+    const paramRows = Object.entries(params).map(([k, v]) =>
+      `<span class="text-slate-400">${k}:</span> <span class="text-slate-200">${v}</span>`
+    ).join(', ');
+    return `<tr class="border-b border-slate-800/50"><td class="px-3 py-1 text-slate-500 font-medium">${section}</td><td class="px-3 py-1 text-slate-300 text-xs">${paramRows}</td></tr>`;
   }).join('');
 
   return `
     <div class="mb-3">
-      <div class="text-xs text-slate-400 font-semibold mb-1">Job Config</div>
+      <div class="text-xs text-slate-400 font-semibold mb-1">Overrides</div>
       <table class="w-full text-xs">${rows}</table>
+    </div>
+  `;
+}
+
+function renderYearlyDetails(years) {
+  return `
+    <div class="mb-3">
+      <div class="text-xs text-slate-400 font-semibold mb-1">年別</div>
+      <table class="w-full text-xs">
+        <thead>
+          <tr class="text-slate-500">
+            <th class="px-3 py-1 text-left">年</th>
+            <th class="px-3 py-1 text-right">損益</th>
+            <th class="px-3 py-1 text-right">WR</th>
+            <th class="px-3 py-1 text-right">PF</th>
+            <th class="px-3 py-1 text-right">DD</th>
+            <th class="px-3 py-1 text-right">Sharpe</th>
+            <th class="px-3 py-1 text-right">月間+</th>
+            <th class="px-3 py-1 text-right">トレード</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${years.map(y => `
+            <tr class="border-b border-slate-800/50">
+              <td class="px-3 py-1 mono text-slate-300">${y.year || '-'}</td>
+              <td class="px-3 py-1 text-right">${fmtProfit(y.net_profit)}</td>
+              <td class="px-3 py-1 text-right mono">${fmtPct(y.win_rate)}</td>
+              <td class="px-3 py-1 text-right mono">${fmtNum(y.profit_factor, 2)}</td>
+              <td class="px-3 py-1 text-right mono">${fmtPct(y.max_drawdown)}</td>
+              <td class="px-3 py-1 text-right mono">${fmtNum(y.sharpe_ratio, 2)}</td>
+              <td class="px-3 py-1 text-right mono">${fmtPct(y.monthly_plus_rate)}</td>
+              <td class="px-3 py-1 text-right mono">${fmtNum(y.trades)}</td>
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
     </div>
   `;
 }
