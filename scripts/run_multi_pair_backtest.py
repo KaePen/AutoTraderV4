@@ -1080,9 +1080,10 @@ def _run_year_worker(args: tuple) -> dict[str, Any] | None:
     # 進捗ファイルパス（WebUI連携用）
     _pg_file = ""
     if _job_id:
-        _pg_dir = _Path(
-            "D:/Projects/AutoTraderV4_data/worker_progress",
+        from autotrader.config.paths import (
+            get_worker_progress_dir as _get_wp_dir,
         )
+        _pg_dir = _get_wp_dir()
         _pg_dir.mkdir(parents=True, exist_ok=True)
         _pg_file = str(
             _pg_dir / f"{_job_id}_{year}.json"

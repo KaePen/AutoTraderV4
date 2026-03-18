@@ -10,8 +10,9 @@ from pathlib import Path
 import pandas as pd
 
 # データディレクトリ自動検出
-_DATA_DIR = Path("D:/Projects/AutoTraderV4_data")
-_RESULTS_DIR = _DATA_DIR / "backtest_results"
+from autotrader.config.paths import get_results_dir
+
+_RESULTS_DIR = get_results_dir()
 _REPORTS_DIR = Path(__file__).resolve().parent.parent / "reports"
 
 # 全対象ペア
