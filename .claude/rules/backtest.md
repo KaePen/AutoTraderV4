@@ -16,7 +16,7 @@
 
 ## キュー形式
 
-キューファイル: `D:\Projects\AutoTraderV4_data\backtest_queue.json`
+キューファイル: `D:\Projects\AutoTraderV4_data\state\backtest_queue.json`
 
 ### シングルペアジョブ
 
@@ -159,16 +159,16 @@ uv run python scripts/backtest_queue_runner.py --cpu-threads 12
 | `cpu N` | CPUスレッド数を動的変更 |
 | `quit` | 全タスク停止してランナー終了 |
 
-Web UI経由でも `runner_commands.json` にコマンド書き込みで同じ操作が可能。
+Web UI経由でも `state/runner_commands.json` にコマンド書き込みで同じ操作が可能。
 
 ## 結果出力
 
 | パス | 内容 |
 |------|------|
-| `backtest_results/{result_id}.json` | ジョブ集約結果（全年統合） |
-| `month_results/{result_id}/` | 月別チェックポイント |
-| `backtest_queue_state.json` | キュー実行状態 |
-| `worker_progress/` | ワーカー進捗 |
+| `backtest/results/{result_id}.json` | ジョブ集約結果（全年統合） |
+| `backtest/month_results/{result_id}/` | 月別チェックポイント |
+| `state/backtest_queue_state.json` | キュー実行状態 |
+| `backtest/worker_progress/` | ワーカー進捗 |
 
 `result_id` は `"{counter:03d}_{job_id}"` 形式（例: `074_QI2-T1-USDJPY`）。
 

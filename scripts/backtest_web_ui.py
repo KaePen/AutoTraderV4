@@ -22,13 +22,20 @@ from fastapi import FastAPI
 from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel
 
-# パス設定
-_DATA_ROOT = Path("D:/Projects/AutoTraderV4_data")
-_QUEUE_FILE = _DATA_ROOT / "backtest_queue.json"
-_STATE_FILE = _DATA_ROOT / "runner_state.json"
-_CMD_FILE = _DATA_ROOT / "runner_commands.json"
-_RESULTS_DIR = _DATA_ROOT / "backtest_results"
-_BT_WEBUI_CMD_FILE = _DATA_ROOT / "bt_webui_commands.json"
+# パス設定（paths.py に集約）
+from autotrader.config.paths import (
+    get_bt_webui_cmd_file,
+    get_queue_file,
+    get_results_dir,
+    get_runner_cmd_file,
+    get_runner_state_file,
+)
+
+_QUEUE_FILE = get_queue_file()
+_STATE_FILE = get_runner_state_file()
+_CMD_FILE = get_runner_cmd_file()
+_RESULTS_DIR = get_results_dir()
+_BT_WEBUI_CMD_FILE = get_bt_webui_cmd_file()
 _TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"
 
 logging.basicConfig(

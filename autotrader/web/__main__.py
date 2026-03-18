@@ -9,7 +9,6 @@ import argparse
 import logging
 import os
 import threading
-from pathlib import Path
 
 import uvicorn
 
@@ -21,8 +20,9 @@ logging.basicConfig(
 )
 logger = logging.getLogger("live_webui")
 
-_DATA_ROOT = Path("D:/Projects/AutoTraderV4_data")
-_LIVE_WEBUI_CMD_FILE = _DATA_ROOT / "live_webui_commands.json"
+from autotrader.config.paths import get_live_webui_cmd_file
+
+_LIVE_WEBUI_CMD_FILE = get_live_webui_cmd_file()
 
 
 def parse_args() -> argparse.Namespace:

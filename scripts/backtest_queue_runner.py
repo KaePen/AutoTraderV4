@@ -70,19 +70,29 @@ logging.basicConfig(
 )
 logger = logging.getLogger("queue_runner")
 
-# パス定数（データ専用ディレクトリに出力）
-_DATA_ROOT = Path("D:/Projects/AutoTraderV4_data")
-QUEUE_FILE = _DATA_ROOT / "backtest_queue.json"
-STATE_FILE = _DATA_ROOT / "backtest_queue_state.json"
-RESULTS_DIR = _DATA_ROOT / "backtest_results"
-MONTH_RESULTS_DIR = _DATA_ROOT / "month_results"
-DEFAULT_DATA_DIR = str(_DATA_ROOT / "data")
+# パス定数（paths.py に集約）
+from autotrader.config.paths import (
+    get_data_dir as _get_data_dir,
+    get_month_results_dir,
+    get_queue_file,
+    get_queue_state_file,
+    get_results_dir,
+    get_runner_cmd_file,
+    get_runner_state_file,
+    get_worker_progress_dir,
+)
+
+QUEUE_FILE = get_queue_file()
+STATE_FILE = get_queue_state_file()
+RESULTS_DIR = get_results_dir()
+MONTH_RESULTS_DIR = get_month_results_dir()
+DEFAULT_DATA_DIR = _get_data_dir()
 
 POLL_INTERVAL = 2.0  # キューポーリング間隔（秒）
 
 # Web UI連携用ファイル
-RUNNER_STATE_FILE = _DATA_ROOT / "runner_state.json"
-RUNNER_CMD_FILE = _DATA_ROOT / "runner_commands.json"
+RUNNER_STATE_FILE = get_runner_state_file()
+RUNNER_CMD_FILE = get_runner_cmd_file()
 
 
 # ===================================================================
@@ -1661,9 +1671,7 @@ def _execute_continuous_multi_pair(
             )
 
         # 進捗ファイル
-        _pg_dir = Path(
-            "D:/Projects/AutoTraderV4_data/worker_progress",
-        )
+        _pg_dir = get_worker_progress_dir()
         _pg_dir.mkdir(parents=True, exist_ok=True)
         _pg_file = str(
             _pg_dir / f"{job.id}_{year}.json"

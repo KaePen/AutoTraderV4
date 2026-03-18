@@ -52,12 +52,18 @@ logger = logging.getLogger("supervisor")
 # 定数
 # ===================================================================
 
+from autotrader.config.paths import (
+    get_state_dir,
+    get_supervisor_events_file,
+    get_supervisor_state_file,
+)
+
 PROJECT_DIR = Path("D:/Projects/AutoTraderV4")
-DATA_DIR = Path("D:/Projects/AutoTraderV4_data")
 TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"
 
-STATE_FILE = DATA_DIR / "supervisor_state.json"
-EVENTS_FILE = DATA_DIR / "supervisor_events.json"
+STATE_FILE = get_supervisor_state_file()
+EVENTS_FILE = get_supervisor_events_file()
+_STATE_DIR = get_state_dir()
 
 SUPERVISOR_PORT = 8899
 GIT_POLL_INTERVAL = 60  # 秒
@@ -330,7 +336,7 @@ class Supervisor:
         command: str,
     ) -> None:
         """コマンドファイル経由でプロセスに指示を送信"""
-        cmd_path = DATA_DIR / config.cmd_file
+        cmd_path = _STATE_DIR / config.cmd_file
         data = {"commands": [command]}
         try:
             cmd_path.write_text(
