@@ -104,6 +104,11 @@ const API = '';
 let lastStatus = null;
 let lastResults = null;
 
+// 展開中の詳細行IDを保持（ポーリング再描画でも維持）
+const expandedDetails = new Set();
+// 前回描画データのハッシュ（変更がなければ再描画スキップ）
+let lastResultsHash = '';
+
 // ===================================================================
 // ユーティリティ
 // ===================================================================
@@ -329,14 +334,21 @@ function renderCompletedJobs(results) {
   const el = document.getElementById('completed-jobs');
   if (!results || results.length === 0) {
     el.innerHTML = '<div class="card px-5 py-4 text-slate-500 text-sm">結果なし</div>';
+    lastResultsHash = '';
     return;
   }
 
   const completed = results.filter(r => r.status === 'completed' || r.status === 'failed' || r.status === 'cancelled');
   if (completed.length === 0) {
     el.innerHTML = '<div class="card px-5 py-4 text-slate-500 text-sm">結果なし</div>';
+    lastResultsHash = '';
     return;
   }
+
+  // データ未変更なら再描画スキップ（展開状態を壊さない）
+  const hash = JSON.stringify(completed.map(r => [r.job_id, r.status, r.net_profit, r.trades]));
+  if (hash === lastResultsHash) return;
+  lastResultsHash = hash;
 
   // 最新10件に制限
   const recent = completed.slice(0, 10);
@@ -370,12 +382,29 @@ function renderCompletedJobs(results) {
     </div>
   `;
 
+  // 展開状態を復元 + クリックハンドラ登録
   document.querySelectorAll('.expand-btn').forEach(btn => {
+    const targetId = btn.dataset.target;
+    // 前回展開していた行を復元
+    if (expandedDetails.has(targetId)) {
+      const target = document.getElementById(targetId);
+      if (target) {
+        target.classList.remove('hidden');
+        btn.textContent = '▼';
+      }
+    }
     btn.addEventListener('click', () => {
-      const target = document.getElementById(btn.dataset.target);
+      const target = document.getElementById(targetId);
       if (target) {
         target.classList.toggle('hidden');
-        btn.textContent = target.classList.contains('hidden') ? '▶' : '▼';
+        const isHidden = target.classList.contains('hidden');
+        btn.textContent = isHidden ? '▶' : '▼';
+        // 展開状態を記憶
+        if (isHidden) {
+          expandedDetails.delete(targetId);
+        } else {
+          expandedDetails.add(targetId);
+        }
       }
     });
   });
