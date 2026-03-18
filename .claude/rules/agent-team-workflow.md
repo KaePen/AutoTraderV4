@@ -5,23 +5,20 @@
 ```
 worktree (feat/xxx, fix/xxx)
   ↓ PR → セッションがマージ → main
-main（開発・検証）
-  ↓ /deploy-live
-live（本番トレード）
+main（開発・検証・本番）
 ```
 
 | ブランチ | 用途 | 直接コミット | PR元 |
 |---------|------|------------|------|
 | worktree | セッション作業用 | ○ | → main |
-| main | 開発・検証のベース | ✕ | ← worktree |
-| live | リアルトレード本番 | ✕ | ← main のみ |
+| main | 開発・検証・本番のベース | ✕ | ← worktree |
 
 ## 1 Session = 1 Worktree ポリシー
 
 - セッション開始時に `EnterWorktree` で1つのworktreeを作成する
 - セッション内の全変更はそのworktree内で直接行う
 - サブエージェントは `isolation` なしで起動し、同じworktree内で作業する
-- main / live ブランチへの直接コミットは禁止
+- main ブランチへの直接コミットは禁止
 
 ## サブエージェントの使い方
 
@@ -142,11 +139,10 @@ worktree内で直接実行。`isolation: "worktree"` は使わない。
 
 - `isolation: "worktree"` の使用（全面禁止 — ネストworktreeの原因）
 - worktree内での `EnterWorktree` 実行
-- main / live への直接コミット・プッシュ
-- `live` ブランチへの worktree からの直接マージ（必ず main 経由）
+- main への直接コミット・プッシュ
 - `git commit --amend` による公開済みコミットの書き換え
 - `--no-verify` によるフックスキップ
-- `git push --force` を main/master/live に実行
+- `git push --force` を main/master に実行
 
 ## スタンドアロンセッション（エージェントチーム未使用時）
 

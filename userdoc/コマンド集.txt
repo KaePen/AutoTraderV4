@@ -18,6 +18,8 @@ uv run python scripts/backtest_web_ui.py --port 8888
 .venv\Scripts\python.exe -m autotrader.web --show-mt5
 .venv\Scripts\python.exe -m autotrader.web
 
+D:\Projects\AutoTraderV4_live\.venv\Scripts\python.exe -m autotrader.web
+
 ■WebClaudeマネージャー起動
 cloudcli
 

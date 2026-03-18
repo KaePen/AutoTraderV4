@@ -100,14 +100,14 @@ class ProcessConfig:
 MANAGED_PROCESSES: list[ProcessConfig] = [
     ProcessConfig(
         name="queue_runner",
-        label="バックテストキューランナー",
+        label="BT Runner",
         command=[
             "uv", "run", "python",
             "scripts/backtest_queue_runner.py",
-            "--cpu-threads", "12",
+            "--cpu-threads", "24",
         ],
         cwd=str(PROJECT_DIR),
-        restart_on_update=True,
+        restart_on_update=False,
         cmd_file="runner_commands.json",
         stop_command="shutdown",
         detect_pattern="backtest_queue_runner.py",
@@ -123,7 +123,7 @@ MANAGED_PROCESSES: list[ProcessConfig] = [
             "--port", "8888", "--no-browser",
         ],
         cwd=str(PROJECT_DIR),
-        restart_on_update=True,
+        restart_on_update=False,
         cmd_file="bt_webui_commands.json",
         stop_command="shutdown",
         detect_pattern="backtest_web_ui.py",
