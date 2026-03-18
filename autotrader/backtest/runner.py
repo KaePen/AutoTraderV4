@@ -186,7 +186,7 @@ class BacktestRunner:
         data_dir: str | Path | None = None,
         config: BacktestConfig | None = None,
         verbose: bool = True,
-        log_to_file: bool = True,
+        log_to_file: bool = False,
         log_dir: str | Path | None = None,
     ) -> None:
         """初期化

@@ -50,7 +50,7 @@ from autotrader.backtest.simulator import (  # noqa: E402
     SimulatorConfig,
     TradeSimulator,
 )
-from autotrader.config.paths import get_data_dir, get_log_dir  # noqa: E402
+from autotrader.config.paths import get_data_dir  # noqa: E402
 from autotrader.config.trading_params import (  # noqa: E402
     get_pip_unit,
     get_preset,
@@ -1943,46 +1943,6 @@ def generate_report(
     print(f"\nレポート出力: {output_path}")
 
 
-def save_trades_csv(
-    results: dict[str, dict[str, Any]],
-    log_dir: Path,
-) -> None:
-    """全テストのトレードを統合CSVに出力
-
-    Args:
-        results: テスト結果辞書
-        log_dir: ログディレクトリ
-    """
-    log_dir.mkdir(parents=True, exist_ok=True)
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    summary_path = log_dir / f"summary_{timestamp}.log"
-
-    # サマリーログ
-    lines: list[str] = []
-    lines.append("=== マルチ通貨ペアバックテスト サマリー ===\n")
-    for name, r in results.items():
-        lines.append(f"--- {name} ---")
-        lines.append(f"総利益: {r['total_profit']:+,.0f}")
-        lines.append(f"年間収益率: {r['annual_return_pct']:.1f}%")
-        lines.append(f"最大DD: {r['max_dd_pct']:.2f}%")
-        lines.append(f"Sharpe: {r['sharpe']:.2f}")
-        lines.append(f"WR: {r['wr']:.1f}%")
-        lines.append(f"PF: {r['pf']:.2f}")
-        lines.append(f"月間勝率: {r['monthly_wr']:.1f}%")
-        lines.append(f"Trades: {r['total_trades']}")
-        lines.append(
-            f"制限発動: global={r['blocked_global']}, "
-            f"per_pair={r['blocked_per_pair']}, "
-            f"exposure={r['blocked_exposure']}"
-        )
-        lines.append("")
-
-    with open(summary_path, "w", encoding="utf-8") as f:
-        f.write("\n".join(lines))
-
-    print(f"サマリーログ: {summary_path}")
-
-
 # =============================================================
 # メイン
 # =============================================================
@@ -2125,10 +2085,6 @@ def main() -> None:
     # レポート生成
     output_path = Path(args.output)
     generate_report(results, available, output_path)
-
-    # ログ出力
-    log_dir = Path(get_log_dir()) / "multi_pair"
-    save_trades_csv(results, log_dir)
 
     # 最終サマリー
     print(f"\n{'=' * 80}")
