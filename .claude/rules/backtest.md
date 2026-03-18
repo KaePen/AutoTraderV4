@@ -24,7 +24,6 @@
 {
   "jobs": [
     {
-      "id": "QI4-T1-USDJPY",
       "symbol": "USDJPY",
       "years": "2020-2025",
       "description": "B1ボリュームフィルタ検証",
@@ -47,7 +46,7 @@
 
 | フィールド | 型 | 必須 | 説明 |
 |-----------|-----|------|------|
-| `id` | `str` | ○ | ジョブID（結果ファイル名に使用） |
+| `id` | `str` | - | ジョブID（省略推奨。省略時は設定ハッシュから自動生成） |
 | `symbol` | `str` | △ | 通貨ペア（シングルジョブ時。デフォルト: `"USDJPY"`） |
 | `years` | `str` | △ | `"YYYY"` or `"YYYY-YYYY"` 形式（デフォルト: `"2023-2025"`） |
 | `description` | `str` | - | ジョブ説明 |
@@ -81,7 +80,6 @@
 {
   "jobs": [
     {
-      "id": "multi-6jpy-R1",
       "type": "multi_pair",
       "symbols": ["USDJPY", "EURJPY", "GBPJPY", "AUDJPY", "CADJPY", "CHFJPY"],
       "years": "2023-2025",
@@ -166,10 +164,12 @@ Web UI経由でも `state/runner_commands.json` にコマンド書き込みで�
 | パス | 内容 |
 |------|------|
 | `backtest/results/{result_id}/` | 1ジョブ=1フォルダ（結果+月別CP+ログ） |
+| `backtest/results/{result_id}/job_config.json` | ジョブ設定（何をテストしたか） |
 | `state/backtest_queue_state.json` | キュー実行状態 |
 | `backtest/worker_progress/` | ワーカー進捗（エフェメラル） |
 
 `result_id` は7桁通番（例: `0000074`）。
+ジョブID（`id`）は省略可。省略時はジョブ設定のハッシュ（8文字）が自動付与される。
 
 ## コミットルール
 

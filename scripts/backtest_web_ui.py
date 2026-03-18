@@ -97,6 +97,25 @@ def _merge_compound_result(
     pm["compound_metrics"] = cr
 
 
+def _merge_job_config(
+    result_dir: Path,
+    data: dict[str, Any],
+) -> None:
+    """job_config.jsonが存在すればjob_configフィールドに統合"""
+    if data.get("job_config"):
+        return
+    cfg_path = result_dir / "job_config.json"
+    if not cfg_path.exists():
+        return
+    try:
+        cfg = json.loads(
+            cfg_path.read_text(encoding="utf-8"),
+        )
+        data["job_config"] = cfg
+    except (json.JSONDecodeError, OSError):
+        return
+
+
 def _list_result_files() -> list[dict[str, Any]]:
     """完了済み結果ファイル一覧を読み取り（新旧両形式対応）"""
     if not _RESULTS_DIR.exists():
@@ -118,6 +137,8 @@ def _list_result_files() -> list[dict[str, Any]]:
                 data["_file"] = f"{d.name}/result.json"
                 # compound_result.json統合
                 _merge_compound_result(d, data)
+                # job_config.json統合
+                _merge_job_config(d, data)
                 results.append(data)
                 seen.add(d.name)
             except (json.JSONDecodeError, OSError):
