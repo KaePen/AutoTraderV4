@@ -98,6 +98,26 @@ RUNNER_CMD_FILE = get_runner_cmd_file()
 # ===================================================================
 
 
+def _compute_job_hash(d: dict[str, Any]) -> str:
+    """ジョブ設定からハッシュを生成（ID自動付与用）
+
+    id, description, code_dir は内容に影響しないため除外。
+    """
+    key_fields = {
+        "type": d.get("type", "single"),
+        "symbol": d.get("symbol", "USDJPY"),
+        "symbols": sorted(d.get("symbols", [])),
+        "years": d.get("years", "2023-2025"),
+        "overrides": d.get("overrides", {}),
+        "multi_pair_config": d.get("multi_pair_config", {}),
+        "compound_replay": d.get("compound_replay", False),
+    }
+    raw = json.dumps(
+        key_fields, sort_keys=True, ensure_ascii=False,
+    )
+    return hashlib.sha256(raw.encode()).hexdigest()[:8]
+
+
 @dataclass
 class Job:
     """バックテストジョブ
@@ -105,7 +125,9 @@ class Job:
     type が "single" の場合は1通貨ペア、
     "multi_pair" の場合は時系列インターリーブ方式で
     複数ペアを共有エクイティプールで同時実行する。
-後方互換のため "portfolio" も "multi_pair" として処理する。
+    後方互換のため "portfolio" も "multi_pair" として処理する。
+
+    id は省略可。省略時はジョブ設定のハッシュから自動生成。
     """
 
     id: str
@@ -123,12 +145,16 @@ class Job:
     )
     code_dir: str = ""  # 指定時はそのディレクトリのコードで実行
     compound_replay: bool = False  # 通年コンパウンドリプレイ
+    _raw_dict: dict[str, Any] = field(
+        default_factory=dict, repr=False,
+    )  # 元のJSON（job_config.json保存用）
 
     @classmethod
     def from_dict(cls, d: dict[str, Any]) -> Job:
-        """dictからJob生成"""
+        """dictからJob生成（id省略時はハッシュで自動付与）"""
+        job_id = d.get("id", "") or _compute_job_hash(d)
         return cls(
-            id=d["id"],
+            id=job_id,
             type=d.get("type", "single"),
             symbol=d.get("symbol", "USDJPY"),
             symbols=d.get("symbols", []),
@@ -144,6 +170,7 @@ class Job:
             compound_replay=d.get(
                 "compound_replay", False,
             ),
+            _raw_dict=d,
         )
 
 
@@ -259,7 +286,10 @@ class JobProgress:
 
 
 def _get_queue_job_ids() -> set[str]:
-    """キューファイルのジョブID一覧を取得"""
+    """キューファイルのジョブID一覧を取得
+
+    id 未指定のジョブはハッシュから自動生成されたIDを返す。
+    """
     if not QUEUE_FILE.exists():
         return set()
     try:
@@ -267,7 +297,7 @@ def _get_queue_job_ids() -> set[str]:
             QUEUE_FILE.read_text(encoding="utf-8"),
         )
         return {
-            j.get("id", "")
+            j.get("id", "") or _compute_job_hash(j)
             for j in data.get("jobs", [])
         }
     except (json.JSONDecodeError, KeyError):
@@ -465,6 +495,11 @@ def load_queue() -> list[Job]:
         return []
 
 
+def _resolve_queue_job_id(j: dict[str, Any]) -> str:
+    """キューエントリからジョブIDを解決（id未指定ならハッシュ）"""
+    return j.get("id", "") or _compute_job_hash(j)
+
+
 def _remove_job_from_queue(job_id: str) -> None:
     """完了ジョブをキューファイルから除去"""
     if not QUEUE_FILE.exists():
@@ -477,7 +512,7 @@ def _remove_job_from_queue(job_id: str) -> None:
         before = len(jobs_raw)
         data["jobs"] = [
             j for j in jobs_raw
-            if j.get("id", "") != job_id
+            if _resolve_queue_job_id(j) != job_id
         ]
         if len(data["jobs"]) < before:
             QUEUE_FILE.write_text(
@@ -519,6 +554,47 @@ def _save_result(result: JobResult) -> None:
     path.write_text(
         json.dumps(
             asdict(result),
+            indent=2,
+            ensure_ascii=False,
+            default=str,
+        ),
+        encoding="utf-8",
+    )
+
+
+def _save_job_config(
+    result_id: str,
+    job: Job,
+) -> None:
+    """ジョブ設定を結果フォルダに保存
+
+    何をテストしたか後から追跡できるようにする。
+    """
+    result_dir = RESULTS_DIR / result_id
+    result_dir.mkdir(parents=True, exist_ok=True)
+    config_path = result_dir / "job_config.json"
+    # 元のキュー定義を保存
+    config_data: dict[str, Any] = (
+        dict(job._raw_dict) if job._raw_dict else {}
+    )
+    if not config_data:
+        # _raw_dictが空の場合のフォールバック
+        config_data = {
+            "type": job.type,
+            "symbol": job.symbol,
+            "symbols": job.symbols,
+            "years": job.years,
+            "description": job.description,
+            "overrides": job.overrides,
+            "multi_pair_config": job.multi_pair_config,
+            "compound_replay": job.compound_replay,
+        }
+    # メタ情報を追記
+    config_data["_auto_id"] = job.id
+    config_data["_result_id"] = result_id
+    config_path.write_text(
+        json.dumps(
+            config_data,
             indent=2,
             ensure_ascii=False,
             default=str,
@@ -633,7 +709,10 @@ def generate_pending_months(
                     job_type=job.type,
                     year=yr,
                     month=mo,
-                    job_dict=asdict(job),
+                    job_dict={
+                        k: v for k, v in asdict(job).items()
+                        if k != "_raw_dict"
+                    },
                     cpu_cost=_cpu_cost_for_type(job.type),
                 )
             )
@@ -2773,6 +2852,9 @@ def main() -> None:
                     # 紐付けを永続化
                     state.running_jobs[job.id] = rid
                     state.save()
+
+                    # ジョブ設定を結果フォルダに保存
+                    _save_job_config(rid, job)
 
                     start_year, end_year = parse_years(
                         job.years,

@@ -418,8 +418,16 @@ function renderResultRow(r) {
 
   const hasPairs = r.pair_details && r.pair_details.length > 0;
   const cm = r.portfolio_metrics?.compound_metrics || null;
-  const hasDetail = hasPairs || cm;
+  const jc = r.job_config || null;
+  const hasDetail = hasPairs || cm || jc;
   const detailId = 'detail-' + (r.job_id || '').replace(/[^a-zA-Z0-9]/g, '_');
+
+  // ジョブIDセル: result_id + description
+  const displayId = r.job_id || '-';
+  const desc = r.description || jc?.description || '';
+  const idLabel = desc
+    ? `<span class="text-slate-500 text-xs">${displayId}</span> ${desc}`
+    : displayId;
 
   // 損益セル: 通常BT + compound
   let profitCell = fmtProfit(r.net_profit);
@@ -437,7 +445,7 @@ function renderResultRow(r) {
     <tr class="border-b border-slate-800 hover:bg-slate-800/50">
       <td class="px-4 py-3 font-medium text-white">
         ${hasDetail ? `<button class="expand-btn mr-1 text-slate-500 hover:text-white" data-target="${detailId}">▶</button>` : ''}
-        ${r.job_id || '-'}
+        ${idLabel}
       </td>
       <td class="px-4 py-3 text-slate-400">${typeCell}</td>
       <td class="px-4 py-3 text-right">${profitCell}</td>
@@ -456,6 +464,7 @@ function renderResultRow(r) {
     row += `
       <tr id="${detailId}" class="hidden">
         <td colspan="11" class="px-4 py-2 bg-slate-900/50">
+          ${jc ? renderJobConfig(jc) : ''}
           ${hasPairs ? renderPairDetails(r.pair_details) : ''}
           ${cm ? renderCompoundSection(cm) : ''}
         </td>
@@ -464,6 +473,26 @@ function renderResultRow(r) {
   }
 
   return row;
+}
+
+function renderJobConfig(jc) {
+  // 表示不要な内部フィールドを除外
+  const exclude = new Set(['_auto_id', '_result_id', 'id', 'max_year_workers']);
+  const entries = Object.entries(jc).filter(([k]) => !exclude.has(k));
+  if (entries.length === 0) return '';
+
+  // overrides は展開表示
+  const rows = entries.map(([k, v]) => {
+    const val = typeof v === 'object' ? `<pre class="whitespace-pre-wrap">${JSON.stringify(v, null, 1)}</pre>` : String(v);
+    return `<tr class="border-b border-slate-800/50"><td class="px-3 py-1 text-slate-400">${k}</td><td class="px-3 py-1 text-slate-300">${val}</td></tr>`;
+  }).join('');
+
+  return `
+    <div class="mb-3">
+      <div class="text-xs text-slate-400 font-semibold mb-1">Job Config</div>
+      <table class="w-full text-xs">${rows}</table>
+    </div>
+  `;
 }
 
 function renderPairDetails(pairs) {
