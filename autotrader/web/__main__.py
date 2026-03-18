@@ -8,6 +8,8 @@ from __future__ import annotations
 import argparse
 import logging
 import os
+import threading
+from pathlib import Path
 
 import uvicorn
 
@@ -17,6 +19,10 @@ logging.basicConfig(
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     datefmt="%H:%M:%S",
 )
+logger = logging.getLogger("live_webui")
+
+_DATA_ROOT = Path("D:/Projects/AutoTraderV4_data")
+_LIVE_WEBUI_CMD_FILE = _DATA_ROOT / "live_webui_commands.json"
 
 
 def parse_args() -> argparse.Namespace:
@@ -49,6 +55,15 @@ if __name__ == "__main__":
     # MT5ウィンドウ表示/非表示を環境変数で伝搬
     if args.show_mt5:
         os.environ["MT5_SHOW_WINDOW"] = "1"
+
+    # コマンドファイル監視スレッド起動（supervisor連携）
+    from autotrader.ipc import command_watcher
+
+    threading.Thread(
+        target=command_watcher,
+        args=(_LIVE_WEBUI_CMD_FILE, logger),
+        daemon=True,
+    ).start()
 
     from autotrader.web.main import app
 
