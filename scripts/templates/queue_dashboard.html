@@ -421,7 +421,7 @@ function renderResultRow(r) {
   const cm = r.portfolio_metrics?.compound_metrics || null;
   const jc = r.job_config || null;
   const hasOverrides = jc?.overrides && Object.keys(jc.overrides).length > 0;
-  const hasDetail = hasPairs || hasYearly || cm || hasOverrides;
+  const hasDetail = hasPairs || hasYearly || cm || jc;
   const detailId = 'detail-' + (r.job_id || '').replace(/[^a-zA-Z0-9]/g, '_');
 
   // ジョブIDセル: 7桁IDのみ
@@ -462,7 +462,7 @@ function renderResultRow(r) {
     row += `
       <tr id="${detailId}" class="hidden">
         <td colspan="11" class="px-4 py-2 bg-slate-900/50">
-          ${hasOverrides ? renderJobConfig(jc) : ''}
+          ${jc ? renderJobConfig(jc, r) : ''}
           ${hasYearly ? renderYearlyDetails(r.yearly_details) : ''}
           ${hasPairs ? renderPairDetails(r.pair_details) : ''}
           ${cm ? renderCompoundSection(cm) : ''}
@@ -474,25 +474,37 @@ function renderResultRow(r) {
   return row;
 }
 
-function renderJobConfig(jc) {
-  // overrides のみ表示（他はメイン行で確認可能）
+function renderJobConfig(jc, r) {
+  // 通貨ペア・期間・descriptionは常に表示
+  const symbol = jc.symbol || (jc.symbols && jc.symbols.join(', ')) || r?.symbol || '-';
+  const years = jc.years || r?.years || '-';
+  const desc = jc.description || r?.description || '';
+
+  let html = `
+    <div class="mb-3">
+      <div class="text-xs text-slate-400 font-semibold mb-1">Job Info</div>
+      <div class="flex flex-wrap gap-x-6 gap-y-1 text-xs mb-1">
+        <span><span class="text-slate-500">通貨ペア:</span> <span class="text-slate-200">${symbol}</span></span>
+        <span><span class="text-slate-500">期間:</span> <span class="text-slate-200">${years}</span></span>
+        ${desc ? `<span><span class="text-slate-500">説明:</span> <span class="text-slate-200">${desc}</span></span>` : ''}
+      </div>
+  `;
+
+  // overrides があれば追加表示
   const ov = jc.overrides || {};
   const sections = Object.entries(ov).filter(([, v]) => v && Object.keys(v).length > 0);
-  if (sections.length === 0) return '';
+  if (sections.length > 0) {
+    const rows = sections.map(([section, params]) => {
+      const paramRows = Object.entries(params).map(([k, v]) =>
+        `<span class="text-slate-400">${k}:</span> <span class="text-slate-200">${v}</span>`
+      ).join(', ');
+      return `<tr class="border-b border-slate-800/50"><td class="px-3 py-1 text-slate-500 font-medium">${section}</td><td class="px-3 py-1 text-slate-300 text-xs">${paramRows}</td></tr>`;
+    }).join('');
+    html += `<table class="w-full text-xs">${rows}</table>`;
+  }
 
-  const rows = sections.map(([section, params]) => {
-    const paramRows = Object.entries(params).map(([k, v]) =>
-      `<span class="text-slate-400">${k}:</span> <span class="text-slate-200">${v}</span>`
-    ).join(', ');
-    return `<tr class="border-b border-slate-800/50"><td class="px-3 py-1 text-slate-500 font-medium">${section}</td><td class="px-3 py-1 text-slate-300 text-xs">${paramRows}</td></tr>`;
-  }).join('');
-
-  return `
-    <div class="mb-3">
-      <div class="text-xs text-slate-400 font-semibold mb-1">Overrides</div>
-      <table class="w-full text-xs">${rows}</table>
-    </div>
-  `;
+  html += '</div>';
+  return html;
 }
 
 function renderYearlyDetails(years) {
