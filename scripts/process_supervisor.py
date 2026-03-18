@@ -283,46 +283,35 @@ class Supervisor:
     # ---------------------------------------------------------------
 
     def _find_existing_processes(self) -> dict[str, int]:
-        """PowerShellで既存プロセスを検出しPIDを返す"""
+        """psutilで既存プロセスを検出しPIDを返す。
+
+        PowerShell/WMI はプロセス数が多いとタイムアウト
+        するため、psutil で直接取得する（~30ms）。
+        """
+        import psutil
+
         found: dict[str, int] = {}
         try:
-            # PowerShell経由でPythonプロセスのコマンドラインを取得
-            ps_cmd = (
-                "Get-CimInstance Win32_Process"
-                " -Filter \"name='python.exe'\""
-                " | Select-Object ProcessId,CommandLine"
-                " | ConvertTo-Csv -NoTypeInformation"
-            )
-            result = subprocess.run(
-                [
-                    "powershell", "-NoProfile",
-                    "-Command", ps_cmd,
-                ],
-                capture_output=True,
-                text=True,
-                timeout=10,
-                encoding="utf-8",
-                errors="replace",
-            )
-            for line in result.stdout.strip().splitlines():
-                line = line.strip()
-                # ヘッダー行・空行スキップ
-                if (
-                    not line
-                    or line.startswith('"ProcessId"')
+            for proc in psutil.process_iter(
+                ["pid", "name", "cmdline"],
+            ):
+                try:
+                    info = proc.info
+                    name = info.get("name") or ""
+                    if "python" not in name.lower():
+                        continue
+                    cmdline = " ".join(
+                        info.get("cmdline") or [],
+                    )
+                    for cfg in MANAGED_PROCESSES:
+                        if cfg.detect_pattern in cmdline:
+                            found[cfg.name] = info["pid"]
+                except (
+                    psutil.NoSuchProcess,
+                    psutil.AccessDenied,
                 ):
                     continue
-                for cfg in MANAGED_PROCESSES:
-                    if cfg.detect_pattern in line:
-                        # CSV: "PID","CommandLine"
-                        # PIDは最初のカラム
-                        parts = line.strip('"').split('"', 1)
-                        pid_str = parts[0].strip(
-                            ',"',
-                        )
-                        if pid_str.isdigit():
-                            found[cfg.name] = int(pid_str)
-        except (subprocess.TimeoutExpired, OSError) as e:
+        except Exception as e:
             logger.warning("プロセス検出エラー: %s", e)
         return found
 
