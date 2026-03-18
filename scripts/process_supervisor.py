@@ -599,22 +599,35 @@ class Supervisor:
         for name in targets:
             self.stop_process(name, wait=True)
 
-        # 2. git pull
+        # 2. git fetch + reset（mainへの直接コミット禁止のため常に安全）
         self.event_log.add("pull_start", "git pull開始")
-        r = self._git_cmd("pull", "--ff-only", "origin", "main")
+        r = self._git_cmd("fetch", "origin", "main")
         if r.returncode != 0:
             err = r.stderr.strip() or r.stdout.strip()
             self.event_log.add(
-                "pull_failed", f"git pull失敗: {err}",
+                "pull_failed", f"git fetch失敗: {err}",
             )
             result["error"] = err
-
-            # 失敗時: 停止したプロセスを旧コードで再起動
             for name in targets:
                 self.start_process(name)
             self.event_log.add(
                 "rollback",
-                "pull失敗のため旧コードで再起動",
+                "fetch失敗のため旧コードで再起動",
+            )
+            return result
+
+        r = self._git_cmd("reset", "--hard", "origin/main")
+        if r.returncode != 0:
+            err = r.stderr.strip() or r.stdout.strip()
+            self.event_log.add(
+                "pull_failed", f"git reset失敗: {err}",
+            )
+            result["error"] = err
+            for name in targets:
+                self.start_process(name)
+            self.event_log.add(
+                "rollback",
+                "reset失敗のため旧コードで再起動",
             )
             return result
 
