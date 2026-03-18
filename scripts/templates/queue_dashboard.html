@@ -424,12 +424,8 @@ function renderResultRow(r) {
   const hasDetail = hasPairs || hasYearly || cm || hasOverrides;
   const detailId = 'detail-' + (r.job_id || '').replace(/[^a-zA-Z0-9]/g, '_');
 
-  // ジョブIDセル: result_id + description
-  const displayId = r.job_id || '-';
-  const desc = r.description || jc?.description || '';
-  const idLabel = desc
-    ? `<span class="text-slate-500 text-xs">${displayId}</span> ${desc}`
-    : displayId;
+  // ジョブIDセル: 7桁IDのみ
+  const idLabel = r.job_id || '-';
 
   // 損益セル: 通常BT + compound
   let profitCell = fmtProfit(r.net_profit);
