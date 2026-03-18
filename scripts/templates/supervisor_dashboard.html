@@ -82,6 +82,22 @@
     </div>
   </div>
 
+  <!-- Process Logs -->
+  <div id="log-panel" class="bg-gray-900 rounded-xl border border-gray-800 p-5 mb-5 hidden">
+    <div class="flex items-center justify-between mb-3">
+      <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wider">
+        Process Logs — <span id="log-panel-label" class="text-white"></span>
+      </h2>
+      <div class="flex gap-2">
+        <button id="log-prev-btn" onclick="loadLogs(currentLogProcess, true)" class="px-2 py-1 text-xs rounded bg-gray-700 text-gray-300 hover:bg-gray-600">前回ログ</button>
+        <button onclick="loadLogs(currentLogProcess, false)" class="px-2 py-1 text-xs rounded bg-gray-700 text-gray-300 hover:bg-gray-600">更新</button>
+        <button onclick="closeLogPanel()" class="px-2 py-1 text-xs rounded bg-gray-700 text-gray-300 hover:bg-gray-600">閉じる</button>
+      </div>
+    </div>
+    <div id="log-info" class="text-xs text-gray-500 mb-2"></div>
+    <pre id="log-content" class="bg-black/50 rounded p-3 text-xs font-mono text-gray-300 max-h-96 overflow-y-auto whitespace-pre-wrap break-all"></pre>
+  </div>
+
   <!-- Event Log -->
   <div class="bg-gray-900 rounded-xl border border-gray-800 p-5">
     <h2 class="text-sm font-semibold text-gray-400 uppercase tracking-wider mb-3">Event Log</h2>
@@ -160,7 +176,10 @@ function renderProcessCard(name, p) {
           </div>
         </div>
       </div>
-      <div class="flex gap-2">${buttons}</div>
+      <div class="flex gap-2">
+        <button onclick="openLogPanel('${name}', '${escHtml(p.label)}')" class="btn btn-gray text-xs">Logs</button>
+        ${buttons}
+      </div>
     </div>
   `;
 }
@@ -247,6 +266,50 @@ async function pullRestart() {
   if (!confirm('origin/mainからpullして対象プロセスを再起動しますか？')) return;
   await apiPost('/api/pull-restart');
   fetchStatus();
+}
+
+// ===================================================================
+// ログビューア
+// ===================================================================
+
+let currentLogProcess = '';
+
+async function loadLogs(name, prev = false) {
+  const el = document.getElementById('log-content');
+  const info = document.getElementById('log-info');
+  el.textContent = '読み込み中...';
+  try {
+    const qs = prev ? '?prev=true&lines=500' : '?lines=500';
+    const res = await fetch(API + `/api/process/${name}/logs${qs}`);
+    const data = await res.json();
+    if (!data.ok) {
+      el.textContent = 'エラー: ' + (data.error || '不明');
+      return;
+    }
+    if (data.lines.length === 0) {
+      el.textContent = 'ログなし';
+      info.textContent = data.file;
+      return;
+    }
+    el.textContent = data.lines.join('\n');
+    info.textContent = `${data.file} (${data.total}行中 末尾${data.lines.length}行)`;
+    // 自動スクロール末尾
+    el.scrollTop = el.scrollHeight;
+  } catch (err) {
+    el.textContent = '取得失敗: ' + err.message;
+  }
+}
+
+function openLogPanel(name, label) {
+  currentLogProcess = name;
+  document.getElementById('log-panel').classList.remove('hidden');
+  document.getElementById('log-panel-label').textContent = label;
+  loadLogs(name, false);
+}
+
+function closeLogPanel() {
+  document.getElementById('log-panel').classList.add('hidden');
+  currentLogProcess = '';
 }
 
 // 初回読み込み + 3秒間隔ポーリング

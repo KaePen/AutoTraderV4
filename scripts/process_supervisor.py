@@ -9,6 +9,7 @@ origin/main の更新を自動検知し、管理プロセスを安全に再起�
 """
 from __future__ import annotations
 
+import contextlib
 import io
 import json
 import logging
@@ -70,6 +71,10 @@ GIT_POLL_INTERVAL = 60  # 秒
 HEALTH_CHECK_INTERVAL = 5  # 秒
 STATE_WRITE_INTERVAL = 3  # 秒
 MAX_EVENTS = 100
+
+# ログディレクトリ
+LOG_DIR = _STATE_DIR.parent / "logs"
+LOG_DIR.mkdir(parents=True, exist_ok=True)
 
 # graceful shutdown待機（秒）
 GRACEFUL_TIMEOUT_LONG = 30  # queue_runner用
@@ -160,6 +165,9 @@ class ProcessState:
     started_at: str | None = None
     restart_count: int = 0
     status: str = "stopped"  # running / stopped / stopping
+    _log_file: Any = field(
+        default=None, repr=False,
+    )  # ログファイルハンドル
 
     def to_dict(self) -> dict[str, Any]:
         """API応答用辞書"""
@@ -362,11 +370,22 @@ class Supervisor:
 
             cfg = ps.config
             try:
+                # ログローテーション
+                log_path = LOG_DIR / f"{cfg.name}.log"
+                prev_path = LOG_DIR / f"{cfg.name}.prev.log"
+                if log_path.exists():
+                    with contextlib.suppress(OSError):
+                        prev_path.unlink(missing_ok=True)
+                        log_path.rename(prev_path)
+
+                log_fh = open(  # noqa: SIM115
+                    log_path, "w", encoding="utf-8",
+                )
                 proc = subprocess.Popen(
                     cfg.command,
                     cwd=cfg.cwd,
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
+                    stdout=log_fh,
+                    stderr=subprocess.STDOUT,
                     creationflags=(
                         subprocess.CREATE_NEW_PROCESS_GROUP
                         if sys.platform == "win32"
@@ -377,6 +396,7 @@ class Supervisor:
                 ps.pid = proc.pid
                 ps.started_at = datetime.now().isoformat()
                 ps.status = "running"
+                ps._log_file = log_fh
                 self.event_log.add(
                     "started",
                     f"{cfg.label} 起動 (PID: {proc.pid})",
@@ -427,6 +447,7 @@ class Supervisor:
                         ps.status = "stopped"
                         ps.process = None
                         ps.pid = None
+                    self._close_log(ps)
                     return True
                 time.sleep(1)
 
@@ -445,6 +466,7 @@ class Supervisor:
                     with self._lock:
                         ps.status = "stopped"
                         ps.pid = None
+                    self._close_log(ps)
                     return True
                 time.sleep(1)
 
@@ -454,7 +476,16 @@ class Supervisor:
 
         with self._lock:
             ps.status = "stopped"
+        self._close_log(ps)
         return True
+
+    @staticmethod
+    def _close_log(ps: ProcessState) -> None:
+        """ログファイルハンドルを閉じる"""
+        if ps._log_file:
+            with contextlib.suppress(OSError):
+                ps._log_file.close()
+            ps._log_file = None
 
     def _force_kill(self, ps: ProcessState) -> None:
         """強制終了"""
@@ -479,6 +510,7 @@ class Supervisor:
             ps.status = "stopped"
             ps.process = None
             ps.pid = None
+        self._close_log(ps)
 
     def restart_process(self, name: str) -> bool:
         """プロセスを再起動"""
@@ -685,6 +717,7 @@ class Supervisor:
                         ps.process = None
                         old_pid = ps.pid
                         ps.pid = None
+                    self._close_log(ps)
                     self.event_log.add(
                         "crashed",
                         f"{ps.config.label} が停止を検出"
@@ -869,6 +902,50 @@ async def api_pull_restart() -> JSONResponse:
 
     threading.Thread(target=_run, daemon=True).start()
     return JSONResponse({"ok": True, "status": "pulling"})
+
+
+@app.get("/api/process/{name}/logs")
+async def api_logs(
+    name: str,
+    lines: int = 200,
+    prev: bool = False,
+) -> JSONResponse:
+    """プロセスログ末尾を取得
+
+    Args:
+        name: プロセス名
+        lines: 取得行数（デフォルト200）
+        prev: Trueなら前回ログ (.prev.log)
+    """
+    if name not in sv.processes:
+        return JSONResponse(
+            {"ok": False, "error": "不明なプロセス"},
+            status_code=404,
+        )
+    suffix = ".prev.log" if prev else ".log"
+    log_path = LOG_DIR / f"{name}{suffix}"
+    if not log_path.exists():
+        return JSONResponse({
+            "ok": True, "lines": [],
+            "file": str(log_path.name),
+        })
+    try:
+        # 末尾N行を効率的に取得
+        content = log_path.read_text(
+            encoding="utf-8", errors="replace",
+        )
+        all_lines = content.splitlines()
+        tail = all_lines[-lines:] if len(all_lines) > lines else all_lines
+        return JSONResponse({
+            "ok": True,
+            "lines": tail,
+            "total": len(all_lines),
+            "file": str(log_path.name),
+        })
+    except OSError as e:
+        return JSONResponse({
+            "ok": False, "error": str(e),
+        })
 
 
 @app.post("/api/check-updates")
