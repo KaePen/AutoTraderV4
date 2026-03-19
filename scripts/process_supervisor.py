@@ -695,9 +695,11 @@ class Supervisor:
                 logger.exception("git poll エラー: %s", e)
 
     def _health_monitor_loop(self) -> None:
-        """子プロセス生存確認"""
+        """子プロセス生存確認 + 停止プロセスの再検出"""
         while True:
             time.sleep(HEALTH_CHECK_INTERVAL)
+
+            # 1. 稼働中プロセスの生存確認
             for ps in self.processes.values():
                 with self._lock:
                     if ps.status != "running":
@@ -723,6 +725,31 @@ class Supervisor:
                         f"{ps.config.label} が停止を検出"
                         f" (PID: {old_pid})",
                     )
+
+            # 2. 停止中プロセスの再検出
+            #    外部から再起動された場合に新PIDを拾う
+            stopped_names = [
+                name for name, ps in self.processes.items()
+                if ps.status == "stopped"
+            ]
+            if stopped_names:
+                found = self._find_existing_processes()
+                for name in stopped_names:
+                    new_pid = found.get(name)
+                    if new_pid:
+                        ps = self.processes[name]
+                        with self._lock:
+                            ps.pid = new_pid
+                            ps.process = None
+                            ps.started_at = (
+                                datetime.now().isoformat()
+                            )
+                            ps.status = "running"
+                        self.event_log.add(
+                            "discovered",
+                            f"{ps.config.label} 再検出"
+                            f" (PID: {new_pid})",
+                        )
 
     def _state_writer_loop(self) -> None:
         """状態ファイル定期書き出し"""
