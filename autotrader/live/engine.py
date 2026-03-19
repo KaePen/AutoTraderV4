@@ -1141,7 +1141,7 @@ class LiveTradingEngine:
                         f"{mgr.current_dd_pct:.2f}% "
                         f"(>= 5%) — 全決済済・エントリー停止中"
                     ),
-                    "severity": "critical",
+                    "severity": "danger",
                 })
             elif mgr.dd_warning_active:
                 alerts.append({
