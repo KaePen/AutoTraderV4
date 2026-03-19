@@ -751,43 +751,22 @@ class Supervisor:
                 logger.exception("git poll エラー: %s", e)
 
     def _health_monitor_loop(self) -> None:
-        """子プロセス生存確認 + 停止プロセスの再検出"""
+        """子プロセス生存確認 + 再検出 + 重複チェック
+
+        psutil パターンマッチで統一的に判定する。
+        proc.poll() は uv 等のラッパーPIDと実PIDのずれで
+        誤検出するため使用しない。
+        """
         while True:
             time.sleep(HEALTH_CHECK_INTERVAL)
 
-            # 1. 稼働中プロセスの生存確認
-            for ps in self.processes.values():
-                with self._lock:
-                    if ps.status != "running":
-                        continue
-                    proc = ps.process
-                    pid = ps.pid
-
-                alive = False
-                if proc:
-                    alive = proc.poll() is None
-                elif pid:
-                    alive = self._is_pid_alive(pid)
-
-                if not alive:
-                    with self._lock:
-                        ps.status = "stopped"
-                        ps.process = None
-                        old_pid = ps.pid
-                        ps.pid = None
-                    self._close_log(ps)
-                    self.event_log.add(
-                        "crashed",
-                        f"{ps.config.label} が停止を検出"
-                        f" (PID: {old_pid})",
-                    )
-
-            # 2. プロセス再検出 + 重複チェック
+            # psutilで全管理プロセスを一括スキャン
             found = self._find_existing_processes()
+
             for name, ps in self.processes.items():
                 pids = found.get(name, [])
 
-                # 重複検出（稼働中・停止中どちらでも）
+                # --- 重複チェック ---
                 if len(pids) > 1:
                     with self._lock:
                         if ps.duplicate_pids != pids:
@@ -798,12 +777,33 @@ class Supervisor:
                                 f" PIDs: {pids}",
                             )
                 elif ps.duplicate_pids:
-                    # 重複が解消された
                     with self._lock:
                         ps.duplicate_pids = []
 
-                # 停止中プロセスの再検出
-                if ps.status == "stopped" and pids:
+                # --- 稼働中プロセスの生存確認 ---
+                if ps.status == "running":
+                    if not pids:
+                        # psutilで見つからない → 停止
+                        with self._lock:
+                            old_pid = ps.pid
+                            ps.status = "stopped"
+                            ps.process = None
+                            ps.pid = None
+                        self._close_log(ps)
+                        self.event_log.add(
+                            "crashed",
+                            f"{ps.config.label} が停止を検出"
+                            f" (PID: {old_pid})",
+                        )
+                    elif ps.pid not in pids:
+                        # PIDが変わった（プロセス再起動）
+                        # → 新PIDに追従
+                        with self._lock:
+                            ps.pid = pids[0]
+                            ps.process = None
+
+                # --- 停止中プロセスの再検出 ---
+                elif ps.status == "stopped" and pids:
                     with self._lock:
                         ps.pid = pids[0]
                         ps.process = None
