@@ -76,6 +76,9 @@ class EngineManager:
         self._dd_emergency_at: datetime | None = None
         self._emergency_close_done: bool = False
 
+        # デバッグ用アラート注入リスト
+        self._debug_alerts: list[dict[str, str]] = []
+
     @property
     def connected(self) -> bool:
         """MT5接続状態"""
