@@ -133,6 +133,8 @@ const EVENT_COLORS = {
   rollback: 'text-orange-400',
   supervisor_start: 'text-blue-400',
   discovered: 'text-blue-400',
+  duplicate: 'text-red-400',
+  duplicate_resolve: 'text-green-400',
 };
 
 function escHtml(s) {
@@ -150,8 +152,12 @@ function renderProcessCard(name, p) {
     ? '<span class="text-xs px-1.5 py-0.5 rounded bg-green-900/50 text-green-400">auto-update</span>'
     : '<span class="text-xs px-1.5 py-0.5 rounded bg-gray-800 text-gray-500">manual</span>';
 
+  const hasDuplicates = p.duplicate_pids && p.duplicate_pids.length > 1;
+
   let buttons = '';
-  if (p.status === 'running') {
+  if (hasDuplicates) {
+    buttons = `<button onclick="resolveDuplicates('${name}')" class="btn btn-red text-xs">全停止して再起動</button>`;
+  } else if (p.status === 'running') {
     buttons = `
       <button onclick="stopProc('${name}')" class="btn btn-red text-xs">Stop</button>
       <button onclick="restartProc('${name}')" class="btn btn-blue text-xs">Restart</button>
@@ -162,24 +168,33 @@ function renderProcessCard(name, p) {
     buttons = `<button disabled class="btn btn-gray text-xs">処理中...</button>`;
   }
 
+  const dupWarning = hasDuplicates
+    ? `<div class="mt-1 px-2 py-1 rounded bg-red-900/50 border border-red-700 text-red-300 text-xs">
+         ⚠ 重複検出: ${p.duplicate_pids.length}プロセス稼働中 (PIDs: ${p.duplicate_pids.join(', ')})
+       </div>`
+    : '';
+
   return `
-    <div class="flex items-center justify-between p-3 rounded-lg bg-gray-800/50 border border-gray-700/50">
-      <div class="flex items-center gap-3">
-        <span class="w-2.5 h-2.5 rounded-full ${sc.dot}"></span>
-        <div>
-          <div class="flex items-center gap-2">
-            <span class="font-medium text-white">${escHtml(p.label)}</span>
-            ${autoTag}
-          </div>
-          <div class="text-xs text-gray-500 mt-0.5">
-            ${p.pid ? 'PID:' + p.pid : ''}${portStr}${uptimeStr}${restartStr}
+    <div class="p-3 rounded-lg ${hasDuplicates ? 'bg-red-900/20 border border-red-800/50' : 'bg-gray-800/50 border border-gray-700/50'}">
+      <div class="flex items-center justify-between">
+        <div class="flex items-center gap-3">
+          <span class="w-2.5 h-2.5 rounded-full ${sc.dot}"></span>
+          <div>
+            <div class="flex items-center gap-2">
+              <span class="font-medium text-white">${escHtml(p.label)}</span>
+              ${autoTag}
+            </div>
+            <div class="text-xs text-gray-500 mt-0.5">
+              ${p.pid ? 'PID:' + p.pid : ''}${portStr}${uptimeStr}${restartStr}
+            </div>
           </div>
         </div>
+        <div class="flex gap-2">
+          <button onclick="openLogPanel('${name}', '${escHtml(p.label)}')" class="btn btn-gray text-xs">Logs</button>
+          ${buttons}
+        </div>
       </div>
-      <div class="flex gap-2">
-        <button onclick="openLogPanel('${name}', '${escHtml(p.label)}')" class="btn btn-gray text-xs">Logs</button>
-        ${buttons}
-      </div>
+      ${dupWarning}
     </div>
   `;
 }
@@ -261,6 +276,11 @@ async function apiPost(url) {
 async function startProc(name) { await apiPost(`/api/process/${name}/start`); fetchStatus(); }
 async function stopProc(name) { await apiPost(`/api/process/${name}/stop`); fetchStatus(); }
 async function restartProc(name) { await apiPost(`/api/process/${name}/restart`); fetchStatus(); }
+async function resolveDuplicates(name) {
+  if (!confirm('重複プロセスを全停止して1つだけ再起動します。よろしいですか？')) return;
+  await apiPost(`/api/process/${name}/resolve-duplicates`);
+  fetchStatus();
+}
 async function checkUpdates() { await apiPost('/api/check-updates'); fetchStatus(); }
 async function pullRestart() {
   if (!confirm('origin/mainからpullして対象プロセスを再起動しますか？')) return;
