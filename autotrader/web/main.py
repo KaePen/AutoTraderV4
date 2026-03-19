@@ -42,6 +42,12 @@ from autotrader.web.websocket.handlers import (
 # 起動時刻
 _start_time: float = 0.0
 
+# 自動トレード対象ペア（最適化で採用された8ペア）
+_ACTIVE_TRADE_PAIRS = frozenset({
+    "USDJPY", "EURJPY", "GBPJPY", "AUDJPY", "CADJPY", "CHFJPY",
+    "EURUSD", "GBPUSD",
+})
+
 # パス
 _WEB_DIR = Path(__file__).resolve().parent
 _TEMPLATES_DIR = _WEB_DIR / "templates"
@@ -102,11 +108,11 @@ def build_engine_config(symbol: str) -> object:
         bot_config=bot_config,
         mt5_config=mt5_config,
         pm_config=pm_config,
-        enable_auto_trade=os.environ.get(
-            "AUTOTRADER_AUTO_TRADE",
-            "",
-        ).lower()
-        in ("1", "true", "yes"),
+        enable_auto_trade=(
+            os.environ.get("AUTOTRADER_AUTO_TRADE", "").lower()
+            in ("1", "true", "yes")
+            and symbol in _ACTIVE_TRADE_PAIRS
+        ),
     )
 
 
