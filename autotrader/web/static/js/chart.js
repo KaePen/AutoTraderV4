@@ -73,8 +73,8 @@ const ChartManager = {
       wickDownColor: '#ef4444',
       priceFormat: {
         type: 'price',
-        precision: 3,
-        minMove: 0.001,
+        precision: this._getPricePrecision(),
+        minMove: this._getPricePrecision() === 3 ? 0.001 : 0.00001,
       },
     });
 
