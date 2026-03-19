@@ -621,6 +621,9 @@ class LiveTradingEngine:
                 ):
                     await self._tick()
                     self._last_full_tick_time = now
+                    # _tick()の早期リターン（重要指標スキップ等）
+                    # に関係なく、最新価格をチャートに配信する
+                    await self._publish_cached_price()
                 else:
                     await self._tick_price_update()
             except Exception as e:
@@ -832,25 +835,30 @@ class LiveTradingEngine:
             self._background_tasks.discard,
         )
 
-        # 6. チャート用price_update: _tick_price_update()はtick間の
-        # 高頻度更新だが、新tickがない場合スキップされる。
-        # _tick()完了時にも最新価格を配信し、最低1秒毎の更新を保証。
-        if self._last_tick_data:
-            bid = float(self._last_tick_data.get("bid", 0.0))
-            ask = float(self._last_tick_data.get("ask", 0.0))
-            tick_ms = int(
-                self._last_tick_data.get("time_msc", 0),
+    async def _publish_cached_price(self) -> None:
+        """キャッシュ済みtick価格をチャートに配信
+
+        _tick()の結果に関係なく（早期リターンでも）、
+        最新の既知価格をフロントエンドに送信する。
+        _main_loop()から_tick()の後に常に呼ばれる。
+        """
+        if not self._last_tick_data:
+            return
+        bid = float(self._last_tick_data.get("bid", 0.0))
+        ask = float(self._last_tick_data.get("ask", 0.0))
+        tick_ms = int(
+            self._last_tick_data.get("time_msc", 0),
+        )
+        if bid > 0:
+            await get_event_bus().publish(
+                "price.updated",
+                {
+                    "symbol": self._active_symbol,
+                    "bid": bid,
+                    "ask": ask,
+                    "time_ms": tick_ms,
+                },
             )
-            if bid > 0:
-                await get_event_bus().publish(
-                    "price.updated",
-                    {
-                        "symbol": self._active_symbol,
-                        "bid": bid,
-                        "ask": ask,
-                        "time_ms": tick_ms,
-                    },
-                )
 
     async def _broadcast_tick_update(self) -> None:
         """tick完了後に全UIデータをダッシュボードへ一括配信
