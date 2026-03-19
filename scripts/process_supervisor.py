@@ -165,6 +165,9 @@ class ProcessState:
     started_at: str | None = None
     restart_count: int = 0
     status: str = "stopped"  # running / stopped / stopping
+    duplicate_pids: list[int] = field(
+        default_factory=list,
+    )  # 重複検出されたPID一覧
     _log_file: Any = field(
         default=None, repr=False,
     )  # ログファイルハンドル
@@ -194,6 +197,7 @@ class ProcessState:
             "restart_count": self.restart_count,
             "port": self.config.port,
             "restart_on_update": self.config.restart_on_update,
+            "duplicate_pids": self.duplicate_pids,
         }
 
 
@@ -290,15 +294,17 @@ class Supervisor:
     # プロセス発見（コマンドライン解析）
     # ---------------------------------------------------------------
 
-    def _find_existing_processes(self) -> dict[str, int]:
-        """psutilで既存プロセスを検出しPIDを返す。
+    def _find_existing_processes(
+        self,
+    ) -> dict[str, list[int]]:
+        """psutilで既存プロセスを検出しPIDリストを返す。
 
-        PowerShell/WMI はプロセス数が多いとタイムアウト
-        するため、psutil で直接取得する（~30ms）。
+        同一パターンに複数プロセスが一致した場合も
+        全PIDを返す（重複検出用）。
         """
         import psutil
 
-        found: dict[str, int] = {}
+        found: dict[str, list[int]] = {}
         try:
             for proc in psutil.process_iter(
                 ["pid", "name", "cmdline"],
@@ -313,7 +319,9 @@ class Supervisor:
                     )
                     for cfg in MANAGED_PROCESSES:
                         if cfg.detect_pattern in cmdline:
-                            found[cfg.name] = info["pid"]
+                            found.setdefault(
+                                cfg.name, [],
+                            ).append(info["pid"])
                 except (
                     psutil.NoSuchProcess,
                     psutil.AccessDenied,
@@ -523,6 +531,54 @@ class Supervisor:
             ps.restart_count += 1
         return result
 
+    def resolve_duplicates(self, name: str) -> bool:
+        """重複プロセスを全停止して1つだけ再起動"""
+        ps = self.processes.get(name)
+        if not ps:
+            return False
+
+        pids = list(ps.duplicate_pids)
+        if not pids:
+            # 重複なし: 通常の再起動
+            return self.restart_process(name)
+
+        cfg = ps.config
+        self.event_log.add(
+            "duplicate_resolve",
+            f"{cfg.label} 重複解消開始"
+            f" — {len(pids)}プロセスを停止",
+        )
+
+        # 全PIDを強制終了
+        for pid in pids:
+            try:
+                subprocess.run(
+                    ["taskkill", "/PID", str(pid), "/F"],
+                    capture_output=True,
+                    timeout=5,
+                )
+            except (subprocess.TimeoutExpired, OSError):
+                pass
+
+        # 少し待ってプロセス終了を確認
+        time.sleep(2)
+
+        with self._lock:
+            ps.status = "stopped"
+            ps.process = None
+            ps.pid = None
+            ps.duplicate_pids = []
+        self._close_log(ps)
+
+        # 1つだけ再起動
+        result = self.start_process(name)
+        self.event_log.add(
+            "duplicate_resolve",
+            f"{cfg.label} 重複解消完了"
+            f" — 再起動{'成功' if result else '失敗'}",
+        )
+        return result
+
     @staticmethod
     def _is_pid_alive(pid: int) -> bool:
         """PIDのプロセスが生存しているか確認"""
@@ -726,30 +782,42 @@ class Supervisor:
                         f" (PID: {old_pid})",
                     )
 
-            # 2. 停止中プロセスの再検出
-            #    外部から再起動された場合に新PIDを拾う
-            stopped_names = [
-                name for name, ps in self.processes.items()
-                if ps.status == "stopped"
-            ]
-            if stopped_names:
-                found = self._find_existing_processes()
-                for name in stopped_names:
-                    new_pid = found.get(name)
-                    if new_pid:
-                        ps = self.processes[name]
-                        with self._lock:
-                            ps.pid = new_pid
-                            ps.process = None
-                            ps.started_at = (
-                                datetime.now().isoformat()
+            # 2. プロセス再検出 + 重複チェック
+            found = self._find_existing_processes()
+            for name, ps in self.processes.items():
+                pids = found.get(name, [])
+
+                # 重複検出（稼働中・停止中どちらでも）
+                if len(pids) > 1:
+                    with self._lock:
+                        if ps.duplicate_pids != pids:
+                            ps.duplicate_pids = pids
+                            self.event_log.add(
+                                "duplicate",
+                                f"{ps.config.label} 重複検出"
+                                f" PIDs: {pids}",
                             )
-                            ps.status = "running"
-                        self.event_log.add(
-                            "discovered",
-                            f"{ps.config.label} 再検出"
-                            f" (PID: {new_pid})",
+                elif ps.duplicate_pids:
+                    # 重複が解消された
+                    with self._lock:
+                        ps.duplicate_pids = []
+
+                # 停止中プロセスの再検出
+                if ps.status == "stopped" and pids:
+                    with self._lock:
+                        ps.pid = pids[0]
+                        ps.process = None
+                        ps.started_at = (
+                            datetime.now().isoformat()
                         )
+                        ps.status = "running"
+                        if len(pids) == 1:
+                            ps.duplicate_pids = []
+                    self.event_log.add(
+                        "discovered",
+                        f"{ps.config.label} 再検出"
+                        f" (PID: {pids[0]})",
+                    )
 
     def _state_writer_loop(self) -> None:
         """状態ファイル定期書き出し"""
@@ -796,14 +864,27 @@ class Supervisor:
 
         # 既存プロセスの検出
         existing = self._find_existing_processes()
-        for name, pid in existing.items():
+        for name, pids in existing.items():
             ps = self.processes[name]
-            ps.pid = pid
-            ps.status = "running"
-            self.event_log.add(
-                "discovered",
-                f"{ps.config.label} 検出 (PID: {pid})",
-            )
+            if len(pids) == 1:
+                ps.pid = pids[0]
+                ps.status = "running"
+                self.event_log.add(
+                    "discovered",
+                    f"{ps.config.label} 検出"
+                    f" (PID: {pids[0]})",
+                )
+            else:
+                # 重複検出: 最初のPIDを暫定管理対象とし
+                # 全PIDを警告として記録
+                ps.pid = pids[0]
+                ps.status = "running"
+                ps.duplicate_pids = pids
+                self.event_log.add(
+                    "duplicate",
+                    f"{ps.config.label} 重複検出"
+                    f" PIDs: {pids} — 解消してください",
+                )
 
         # バックグラウンドスレッド起動
         for target in (
@@ -919,6 +1000,22 @@ async def api_restart(name: str) -> JSONResponse:
         daemon=True,
     ).start()
     return JSONResponse({"ok": True, "status": "restarting"})
+
+
+@app.post("/api/process/{name}/resolve-duplicates")
+async def api_resolve_duplicates(name: str) -> JSONResponse:
+    """重複プロセスを全停止して1つだけ再起動"""
+    if name not in sv.processes:
+        return JSONResponse(
+            {"ok": False, "error": "不明なプロセス"},
+            status_code=404,
+        )
+    threading.Thread(
+        target=sv.resolve_duplicates,
+        args=(name,),
+        daemon=True,
+    ).start()
+    return JSONResponse({"ok": True, "status": "resolving"})
 
 
 @app.post("/api/pull-restart")
