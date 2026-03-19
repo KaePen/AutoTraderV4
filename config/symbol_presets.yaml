@@ -365,6 +365,6 @@ symbols:
 # ポートフォリオ制約のみ（base_risk_pct/consensus_threshold は個別プリセットの責務）
 # 8ペア構成: 6JPY + EURUSD + GBPUSD（信号密度・品質で選定）
 multi_pair:
-  global_max_positions: 8
+  global_max_positions: 4
   per_pair_max_positions: 1
-  global_max_exposure_lot: 12.0
+  global_max_exposure_lot: 5.0

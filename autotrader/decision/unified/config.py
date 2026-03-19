@@ -249,7 +249,7 @@ class FilterConfig:
     weak_hours_enabled: bool = True
     weak_hours_score_premium: float = 0.5
     sg_spread_penalty_rate: float = 0.2
-    sg_off_hours_penalty: float = 0.25
+    sg_off_hours_penalty: float = 0.5
     sg_volatility_penalty: float = 0.05
     sg_recent_loss_penalty: float = 0.1
     regime_threshold_enabled: bool = True
@@ -383,7 +383,7 @@ class UnifiedBotConfig:
     consensus_other_weight: float = 1.0
     # --- SoftGuardペナルティ ---
     sg_spread_penalty_rate: float = 0.2
-    sg_off_hours_penalty: float = 0.25
+    sg_off_hours_penalty: float = 0.5
     sg_volatility_penalty: float = 0.05
     sg_recent_loss_penalty: float = 0.1
     # レジーム別閾値調整（TRENDレジームでスコア要求引き上げ）
@@ -594,7 +594,7 @@ class UnifiedBotConfig:
     spread_cost_ratio_block: float = 0.25
     # --- SL約定時スプレッド考慮 ---
     # SL決済時のスプレッド不利約定有効化
-    sl_exit_spread_enabled: bool = False
+    sl_exit_spread_enabled: bool = True
     # SL決済時のスプレッド適用係数（0.5=半額適用）
     sl_exit_spread_factor: float = 0.5
     # --- スプレッド分布モデル ---
