@@ -1165,40 +1165,6 @@ class SizingStep:
             )
         tp_pips = sl_pips * tp_sl_ratio
 
-        # スプレッドコスト比フィルタ
-        if (
-            bot.config.spread_cost_ratio_enabled
-            and tp_pips > 0
-        ):
-            _spread = bot._get_spread_pips(
-                current_time,
-            )
-            _ratio = _spread / tp_pips
-            if _ratio >= bot.config.spread_cost_ratio_block:
-                ctx.should_abort = True
-                ctx.abort_signal = bot._hold_with_analysis(
-                    f"スプレッドコスト比過大: "
-                    f"{_ratio:.1%} >= "
-                    f"{bot.config.spread_cost_ratio_block:.0%}",
-                    plan, tf_signals, consensus,
-                    regime_result, htf_alignment,
-                    sg_result,
-                )
-                return ctx
-            if _ratio >= bot.config.spread_cost_ratio_max:
-                _penalty = (
-                    (_ratio
-                     - bot.config.spread_cost_ratio_max)
-                    * 2.0
-                )
-                sg_result = dataclasses.replace(
-                    sg_result,
-                    total_penalty=(
-                        sg_result.total_penalty + _penalty
-                    ),
-                )
-                ctx.sg_result = sg_result
-
         # ポジションサイジング
         lot = 0.01
         if bot.config.enable_position_sizing:

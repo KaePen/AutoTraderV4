@@ -585,13 +585,6 @@ class UnifiedBotConfig:
     edge_validator_window: int = 100
     # 期待勝率（単体ペア基準: 65-78%の範囲）
     edge_validator_expected_wr: float = 0.65
-    # --- スプレッドコスト比フィルタ ---
-    # スプレッドコスト比フィルタ有効化
-    spread_cost_ratio_enabled: bool = False
-    # コスト比率ペナルティ閾値（超過でペナルティ加算）
-    spread_cost_ratio_max: float = 0.15
-    # コスト比率ブロック閾値（超過で完全ブロック）
-    spread_cost_ratio_block: float = 0.25
     # --- SL約定時スプレッド考慮 ---
     # SL決済時のスプレッド不利約定有効化
     sl_exit_spread_enabled: bool = True
