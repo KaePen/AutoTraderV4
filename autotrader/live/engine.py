@@ -836,27 +836,32 @@ class LiveTradingEngine:
         )
 
     async def _publish_cached_price(self) -> None:
-        """キャッシュ済みtick価格をチャートに配信
+        """MT5から最新tick価格を取得してチャートに配信
 
         _tick()の結果に関係なく（早期リターンでも）、
-        最新の既知価格をフロントエンドに送信する。
-        _main_loop()から_tick()の後に常に呼ばれる。
+        最新の価格をフロントエンドに送信する。
+        time_ms=0で送信し、既存バーのclose更新のみ行う
+        （新しい足の生成は_tick_price_update()に任せる）。
         """
-        if not self._last_tick_data:
+        try:
+            tick = await self._data_provider.get_tick_fast(
+                self._active_symbol,
+            )
+        except Exception:
             return
-        bid = float(self._last_tick_data.get("bid", 0.0))
-        ask = float(self._last_tick_data.get("ask", 0.0))
-        tick_ms = int(
-            self._last_tick_data.get("time_msc", 0),
-        )
+        if not tick:
+            return
+        bid = float(tick.get("bid", 0.0))
         if bid > 0:
+            # time_ms=0: フロントエンドはcloseのみ更新し
+            # 新足生成をスキップする
             await get_event_bus().publish(
                 "price.updated",
                 {
                     "symbol": self._active_symbol,
                     "bid": bid,
-                    "ask": ask,
-                    "time_ms": tick_ms,
+                    "ask": float(tick.get("ask", 0.0)),
+                    "time_ms": 0,
                 },
             )
 
