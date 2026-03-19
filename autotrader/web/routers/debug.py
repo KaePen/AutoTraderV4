@@ -75,7 +75,7 @@ async def simulate_dd(
     # DD関連のデバッグアラートをクリア
     mgr._debug_alerts = [
         a for a in mgr._debug_alerts
-        if a.get("type", "").startswith("portfolio_dd") is False
+        if not a.get("type", "").startswith("portfolio_dd")
     ]
 
     if pct <= 0:
