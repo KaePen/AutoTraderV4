@@ -1924,6 +1924,9 @@ def _execute_month_multi_pair(
             global_max_exposure_lot=mpc.get(
                 "global_max_exposure_lot", 10.0,
             ),
+            max_same_direction_jpy=mpc.get(
+                "max_same_direction_jpy", 0,
+            ),
         )
 
     # bot追加オーバーライド
