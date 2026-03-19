@@ -2865,10 +2865,44 @@ def main() -> None:
                     rid = existing_jp.result_id
                 elif job.id in state.running_jobs:
                     # 再起動後: 永続化された紐付けから再開
+                    # job_progress / active_jobs を復元する
                     rid = state.running_jobs[job.id]
+                    start_year, end_year = parse_years(
+                        job.years,
+                    )
+                    total_months = (
+                        (end_year - start_year + 1) * 12
+                    )
+                    _sym_label = (
+                        ",".join(job.symbols)
+                        if job.symbols
+                        else job.symbol
+                    )
+                    _completed = _get_completed_months(rid)
+                    jp_resumed = JobProgress(
+                        job_id=job.id,
+                        result_id=rid,
+                        job_type=job.type,
+                        symbol=_sym_label,
+                        years=job.years,
+                        description=job.description,
+                        total_months=total_months,
+                        completed_months=_completed,
+                        status="in_progress",
+                        started_at=time.time(),
+                    )
+                    job_progress[rid] = jp_resumed
+                    active_jobs[rid] = job
+                    _active_pending_months += (
+                        total_months - len(_completed)
+                    )
                     logger.info(
-                        "再開: job=%s → result_id=%s",
-                        job.id, rid,
+                        "再開: job=%s → result_id=%s"
+                        " (完了%d/%d月)",
+                        job.id,
+                        rid,
+                        len(_completed),
+                        total_months,
                     )
                 else:
                     # 新ジョブ登録: 未完了月が十分なら不要
