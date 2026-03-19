@@ -879,6 +879,18 @@ def run_multi_pair_year(
             portfolio.global_exposure_lot = sum(
                 portfolio.per_pair_exposure.values(),
             )
+            # JPY方向カウント再計算
+            _jpy_b = 0
+            _jpy_s = 0
+            for _sym, _ctx in contexts.items():
+                if _sym.endswith("JPY"):
+                    for _p in _ctx.simulator.get_open_positions():
+                        if _p.signal_type == SignalType.BUY:
+                            _jpy_b += 1
+                        else:
+                            _jpy_s += 1
+            portfolio.jpy_buy_count = _jpy_b
+            portfolio.jpy_sell_count = _jpy_s
 
         # 決済時: bot.on_trade_executed呼び出し
         closed_trades = ctx.simulator.state.closed_trades
@@ -944,18 +956,28 @@ def run_multi_pair_year(
         )
 
     # ポジション更新（年末強制決済後）
+    _jpy_b_end = 0
+    _jpy_s_end = 0
     for sym, ctx in contexts.items():
         positions = ctx.simulator.state.open_positions
         n = len(positions)
         lot = sum(p.volume for p in positions)
         portfolio.per_pair_positions[sym] = n
         portfolio.per_pair_exposure[sym] = lot
+        if sym.endswith("JPY"):
+            for p in positions:
+                if p.signal_type == SignalType.BUY:
+                    _jpy_b_end += 1
+                else:
+                    _jpy_s_end += 1
     portfolio.global_open_positions = sum(
         portfolio.per_pair_positions.values(),
     )
     portfolio.global_exposure_lot = sum(
         portfolio.per_pair_exposure.values(),
     )
+    portfolio.jpy_buy_count = _jpy_b_end
+    portfolio.jpy_sell_count = _jpy_s_end
 
     elapsed = time.time() - _t0
     print(
