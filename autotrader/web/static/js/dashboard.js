@@ -6,6 +6,11 @@ const ACTIVE_TRADE_PAIRS = new Set([
   'EURUSD', 'GBPUSD',
 ]);
 
+/** シンボル名から価格の小数点桁数を返す */
+function _getSymbolDigits(symbol) {
+  return symbol && symbol.includes('JPY') ? 3 : 5;
+}
+
 // ── パネル折りたたみユーティリティ ──
 
 const PanelCollapser = {
@@ -547,7 +552,7 @@ class PositionPanel extends Component {
     const pnlColor = isProfit ? 'text-green-400' : 'text-red-400';
     const pnlBg = isProfit ? 'bg-green-500/10' : 'bg-red-500/10';
     const pnlSign = isProfit ? '+' : '';
-    const digits = p.entry_price > 20 ? 3 : 5;
+    const digits = _getSymbolDigits(p.symbol);
 
     let priceRowHtml = '';
     let progressHtml = '';
@@ -995,8 +1000,8 @@ class TradeHistory extends Component {
         <td class="text-xs text-gray-300 whitespace-nowrap">${t.symbol || ''}</td>
         <td><span class="text-xs font-bold ${dirColor}">${t.signal_type}</span></td>
         <td class="text-xs ${rowTextClr} tabular-nums">${t.volume.toFixed(2)}</td>
-        <td class="text-xs ${rowTextClr} tabular-nums">${t.entry_price.toFixed(3)}</td>
-        <td class="text-xs ${rowTextClr} tabular-nums">${t.exit_price !== null ? t.exit_price.toFixed(3) : '-'}</td>
+        <td class="text-xs ${rowTextClr} tabular-nums">${t.entry_price.toFixed(_getSymbolDigits(t.symbol))}</td>
+        <td class="text-xs ${rowTextClr} tabular-nums">${t.exit_price !== null ? t.exit_price.toFixed(_getSymbolDigits(t.symbol)) : '-'}</td>
         <td>${reasonHtml}</td>
         <td class="text-right text-xs font-bold tabular-nums ${rowTextClr}">${pnlText}</td>
       </tr>`;
