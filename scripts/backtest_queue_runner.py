@@ -110,7 +110,7 @@ def _compute_job_hash(d: dict[str, Any]) -> str:
         "years": d.get("years", "2023-2025"),
         "overrides": d.get("overrides", {}),
         "multi_pair_config": d.get("multi_pair_config", {}),
-        "compound_replay": d.get("compound_replay", False),
+        "compound_replay": d.get("compound_replay", True),
     }
     raw = json.dumps(
         key_fields, sort_keys=True, ensure_ascii=False,
@@ -144,7 +144,7 @@ class Job:
         default_factory=dict,
     )
     code_dir: str = ""  # 指定時はそのディレクトリのコードで実行
-    compound_replay: bool = False  # 通年コンパウンドリプレイ
+    compound_replay: bool = True  # 通年コンパウンドリプレイ（デフォルトON）
     _raw_dict: dict[str, Any] = field(
         default_factory=dict, repr=False,
     )  # 元のJSON（job_config.json保存用）
@@ -168,7 +168,7 @@ class Job:
             ),
             code_dir=d.get("code_dir", ""),
             compound_replay=d.get(
-                "compound_replay", False,
+                "compound_replay", True,
             ),
             _raw_dict=d,
         )
