@@ -87,19 +87,14 @@ async def simulate_dd(
         mgr._emergency_close_done = False
         return {"action": "reset", "dd_status": mgr.dd_status}
 
-    # DD状態を上書き
+    # DD数値のみ上書き（状態フラグは変えない→本番ロジック非発火）
     mgr._current_dd_pct = pct
     from autotrader.live.engine_manager import (
         DD_EMERGENCY_PCT,
         DD_WARNING_PCT,
     )
-    mgr._dd_warning_active = pct >= DD_WARNING_PCT
+    # デバッグアラートのみ注入（表示確認用）
     if pct >= DD_EMERGENCY_PCT:
-        from datetime import datetime, timezone
-        mgr._dd_emergency_active = True
-        mgr._dd_emergency_at = datetime.now(
-            tz=timezone.utc,
-        )
         mgr._debug_alerts.append({
             "type": "portfolio_dd_emergency",
             "message": (
@@ -110,16 +105,11 @@ async def simulate_dd(
             "severity": "danger",
         })
     elif pct >= DD_WARNING_PCT:
-        mgr._dd_emergency_active = False
-        mgr._dd_emergency_at = None
         mgr._debug_alerts.append({
             "type": "portfolio_dd_warning",
             "message": f"DD警告 {pct:.2f}% (>= {DD_WARNING_PCT}%)",
             "severity": "warning",
         })
-    else:
-        mgr._dd_emergency_active = False
-        mgr._dd_emergency_at = None
 
     # ピーク未設定なら仮の値をセット
     if mgr._peak_equity <= 0:
