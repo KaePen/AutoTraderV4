@@ -6,6 +6,8 @@ WebSocketクライアントへ配信する。
 
 from __future__ import annotations
 
+import logging
+from collections import defaultdict
 from typing import Any
 
 from autotrader.core.event_bus import get_event_bus
@@ -14,9 +16,15 @@ from autotrader.web.websocket.manager import (
     manager,
 )
 
+logger = logging.getLogger(__name__)
+
+# 診断カウンター（EventBus側の受信数）
+bridge_event_counts: dict[str, int] = defaultdict(int)
+
 
 async def _on_price_updated(data: dict[str, Any]) -> None:
     """価格更新 -> dashboard"""
+    bridge_event_counts["price.updated"] += 1
     await manager.broadcast(
         EventType.PRICE_UPDATE, data, "dashboard"
     )
@@ -38,6 +46,7 @@ async def _on_tick_completed(
     data: dict[str, Any],
 ) -> None:
     """tick完了 -> dashboard"""
+    bridge_event_counts["tick.completed"] += 1
     await manager.broadcast(
         EventType.TICK_UPDATE, data, "dashboard"
     )

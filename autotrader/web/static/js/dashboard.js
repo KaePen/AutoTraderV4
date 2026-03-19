@@ -1876,15 +1876,20 @@ const DashboardApp = {
 
     // WebSocket
     this.dashWs = createWebSocketClient('/ws/dashboard');
+    // 診断カウンター
+    this._wsDiag = { price: 0, tick: 0, matched: 0 };
     this.dashWs.on('price_update', (msg) => {
       this.wsActive = true;
+      this._wsDiag.price++;
       const { symbol, bid, time_ms } = msg.data;
       if (bid > 0 && symbol === df.get('symbol')) {
+        this._wsDiag.matched++;
         ChartManager.updateLastBar(bid, time_ms);
       }
     });
     this.dashWs.on('tick_update', (msg) => {
       this.wsActive = true;
+      this._wsDiag.tick++;
       this._applyTickUpdate(msg.data);
     });
     this.dashWs.on('position_update', () => {
@@ -1899,8 +1904,31 @@ const DashboardApp = {
     });
     this.dashWs.onStateChange((state) => {
       if (state === 'disconnected' || state === 'error') this.wsActive = false;
+      this._updateWsDiagBadge();
     });
     this.dashWs.connect();
+
+    // 診断バッジ更新（5秒毎）
+    setInterval(() => this._updateWsDiagBadge(), 5000);
+  },
+
+  _updateWsDiagBadge() {
+    let el = document.getElementById('ws-diag-badge');
+    if (!el) {
+      el = document.createElement('div');
+      el.id = 'ws-diag-badge';
+      el.style.cssText = 'position:fixed;bottom:4px;right:4px;'
+        + 'font-size:11px;font-family:monospace;padding:2px 6px;'
+        + 'border-radius:4px;z-index:9999;opacity:0.8;'
+        + 'background:#1f2937;color:#9ca3af;border:1px solid #374151;';
+      document.body.appendChild(el);
+    }
+    const d = this._wsDiag || {};
+    const st = this.dashWs ? this.dashWs.state : '?';
+    const color = st === 'connected' ? '#22c55e' : '#ef4444';
+    el.innerHTML = `WS:<span style="color:${color}">${st}</span>`
+      + ` | tick:${d.tick||0} price:${d.price||0}`
+      + ` match:${d.matched||0}`;
   },
 
   // ── tick_update 一括適用 ──

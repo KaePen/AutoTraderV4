@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import time as _time
+from collections import defaultdict
 from datetime import datetime
 from enum import Enum
 from typing import Any
@@ -43,6 +45,12 @@ class ConnectionManager:
         self._all_connections: list[WebSocket] = []
         # ロック
         self._lock = asyncio.Lock()
+        # 診断カウンター
+        self._broadcast_counts: dict[str, int] = defaultdict(
+            int,
+        )
+        self._last_broadcast_time: dict[str, float] = {}
+        self._send_errors: int = 0
 
     async def connect(
         self, websocket: WebSocket, channel: str | None = None
@@ -97,6 +105,11 @@ class ConnectionManager:
         }
         message_json = json.dumps(message, default=str)
 
+        # 診断カウンター更新
+        key = event_type.value
+        self._broadcast_counts[key] += 1
+        self._last_broadcast_time[key] = _time.monotonic()
+
         async with self._lock:
             if channel and channel in self._connections:
                 targets = self._connections[channel]
@@ -108,6 +121,7 @@ class ConnectionManager:
                 try:
                     await connection.send_text(message_json)
                 except Exception:
+                    self._send_errors += 1
                     disconnected.append(connection)
 
             # 切断された接続を削除
@@ -138,7 +152,9 @@ class ConnectionManager:
         except Exception:
             await self.disconnect(websocket)
 
-    def get_connection_count(self, channel: str | None = None) -> int:
+    def get_connection_count(
+        self, channel: str | None = None,
+    ) -> int:
         """接続数を取得
 
         Args:
@@ -150,6 +166,27 @@ class ConnectionManager:
         if channel and channel in self._connections:
             return len(self._connections[channel])
         return len(self._all_connections)
+
+    def get_stats(self) -> dict[str, Any]:
+        """診断統計を取得
+
+        Returns:
+            dict[str, Any]: 接続数・イベントカウント等
+        """
+        now = _time.monotonic()
+        channels = {}
+        for ch, conns in self._connections.items():
+            channels[ch] = len(conns)
+        last_seen: dict[str, float | None] = {}
+        for evt, t in self._last_broadcast_time.items():
+            last_seen[evt] = round(now - t, 1)
+        return {
+            "total_connections": len(self._all_connections),
+            "channels": channels,
+            "broadcast_counts": dict(self._broadcast_counts),
+            "last_broadcast_ago_sec": last_seen,
+            "send_errors": self._send_errors,
+        }
 
 
 # シングルトンインスタンス
