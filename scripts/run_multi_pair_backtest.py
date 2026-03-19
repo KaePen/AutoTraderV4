@@ -218,6 +218,8 @@ class MultiPairConfig:
     global_max_positions: int = 6
     per_pair_max_positions: int = 1
     global_max_exposure_lot: float = 10.0
+    # JPY同方向制限（0=無制限）
+    max_same_direction_jpy: int = 0
 
 
 @dataclass
@@ -249,20 +251,26 @@ class PortfolioState:
     blocked_global: int = 0
     blocked_per_pair: int = 0
     blocked_exposure: int = 0
+    blocked_direction: int = 0
     monthly_pnl: dict[tuple[int, int], float] = field(
         default_factory=dict,
     )
+    # JPYペアの方向別オープンポジション数
+    jpy_buy_count: int = 0
+    jpy_sell_count: int = 0
 
     def can_open_position(
         self,
         symbol: str,
         config: MultiPairConfig,
+        signal_direction: str = "",
     ) -> bool:
         """新規ポジションを開けるかチェック
 
         Args:
             symbol: 通貨ペア名
             config: テスト設定
+            signal_direction: シグナル方向 ("BUY"/"SELL")
 
         Returns:
             bool: 開ける場合True
@@ -280,6 +288,18 @@ class PortfolioState:
         if self.global_exposure_lot >= config.global_max_exposure_lot:
             self.blocked_exposure += 1
             return False
+        # JPY同方向制限
+        if (
+            config.max_same_direction_jpy > 0
+            and symbol.endswith("JPY")
+        ):
+            limit = config.max_same_direction_jpy
+            if signal_direction == "BUY" and self.jpy_buy_count >= limit:
+                self.blocked_direction += 1
+                return False
+            if signal_direction == "SELL" and self.jpy_sell_count >= limit:
+                self.blocked_direction += 1
+                return False
         return True
 
     def update_positions(
@@ -293,6 +313,8 @@ class PortfolioState:
         """
         total_pos = 0
         total_lot = 0.0
+        jpy_buy = 0
+        jpy_sell = 0
         for sym, ctx in contexts.items():
             positions = ctx.simulator.get_open_positions()
             n = len(positions)
@@ -301,8 +323,17 @@ class PortfolioState:
             self.per_pair_exposure[sym] = lot
             total_pos += n
             total_lot += lot
+            # JPY方向カウント
+            if sym.endswith("JPY"):
+                for p in positions:
+                    if p.signal_type.value == "BUY":
+                        jpy_buy += 1
+                    else:
+                        jpy_sell += 1
         self.global_open_positions = total_pos
         self.global_exposure_lot = total_lot
+        self.jpy_buy_count = jpy_buy
+        self.jpy_sell_count = jpy_sell
 
     def update_peak(self) -> None:
         """ピーク更新＆バーレベルDD追跡"""
@@ -775,9 +806,10 @@ def run_multi_pair_year(
             )
 
         # グローバル制限チェック（シグナルありの場合のみ）
-        if (
-            signal is not None
-            and not portfolio.can_open_position(sym, multi_config)
+        if signal is not None and not portfolio.can_open_position(
+            sym,
+            multi_config,
+            signal.signal_type.value,
         ):
             signal = None  # エントリーブロック
 
@@ -1153,6 +1185,7 @@ def _run_year_worker(args: tuple) -> dict[str, Any] | None:
         "blocked_global": portfolio.blocked_global,
         "blocked_per_pair": portfolio.blocked_per_pair,
         "blocked_exposure": portfolio.blocked_exposure,
+        "blocked_direction": portfolio.blocked_direction,
         "pair_summaries": pair_summaries,
     }
 
@@ -1279,6 +1312,9 @@ def aggregate_year_results(
     blocked_global = sum(yr["blocked_global"] for yr in year_results)
     blocked_per_pair = sum(yr["blocked_per_pair"] for yr in year_results)
     blocked_exposure = sum(yr["blocked_exposure"] for yr in year_results)
+    blocked_direction = sum(
+        yr.get("blocked_direction", 0) for yr in year_results
+    )
 
     # yearly_results構築
     yearly_results = [
@@ -1316,6 +1352,7 @@ def aggregate_year_results(
         "blocked_global": blocked_global,
         "blocked_per_pair": blocked_per_pair,
         "blocked_exposure": blocked_exposure,
+        "blocked_direction": blocked_direction,
         "final_equity": final_equity,
     }
 
@@ -1434,6 +1471,7 @@ def run_test_case(
                 "blocked_global": 0,
                 "blocked_per_pair": 0,
                 "blocked_exposure": 0,
+                "blocked_direction": 0,
                 "final_equity": INITIAL_EQUITY,
             }
 
@@ -1455,6 +1493,7 @@ def run_test_case(
     total_blocked_global = 0
     total_blocked_per_pair = 0
     total_blocked_exposure = 0
+    total_blocked_direction = 0
 
     for year in range(start_year, end_year + 1):
         _t_year = time.time()
@@ -1556,6 +1595,7 @@ def run_test_case(
         total_blocked_global += portfolio.blocked_global
         total_blocked_per_pair += portfolio.blocked_per_pair
         total_blocked_exposure += portfolio.blocked_exposure
+        total_blocked_direction += portfolio.blocked_direction
 
         yearly_results_seq.append(
             {
@@ -1598,6 +1638,7 @@ def run_test_case(
         blocked_global=total_blocked_global,
         blocked_per_pair=total_blocked_per_pair,
         blocked_exposure=total_blocked_exposure,
+        blocked_direction=total_blocked_direction,
     )
     agg_portfolio.monthly_pnl = all_monthly_pnl
 
@@ -1742,6 +1783,7 @@ def aggregate_results(
         "blocked_global": portfolio.blocked_global,
         "blocked_per_pair": portfolio.blocked_per_pair,
         "blocked_exposure": portfolio.blocked_exposure,
+        "blocked_direction": portfolio.blocked_direction,
         "final_equity": portfolio.equity,
     }
 
@@ -1760,7 +1802,8 @@ def _print_result_summary(result: dict[str, Any]) -> None:
     print(
         f"  制限発動: global={result['blocked_global']}, "
         f"per_pair={result['blocked_per_pair']}, "
-        f"exposure={result['blocked_exposure']}"
+        f"exposure={result['blocked_exposure']}, "
+        f"direction={result.get('blocked_direction', 0)}"
     )
 
     print("\n  ペア別:")
