@@ -307,20 +307,26 @@ class Supervisor:
     ) -> dict[str, list[int]]:
         """psutilで既存プロセスを検出しPIDリストを返す。
 
-        同一パターンに複数プロセスが一致した場合も
-        全PIDを返す（重複検出用）。
+        uv run python は uv→.venv/python→system/python と
+        3段のプロセスツリーを作るため、同一ツリー内の
+        PIDは1つにまとめて返す（ルートPIDのみ）。
+        ツリー外に同一パターンのプロセスがあれば重複として返す。
         """
         import psutil
 
-        found: dict[str, list[int]] = {}
+        # 第1パス: cmdlineでマッチする全PIDを収集
+        raw: dict[str, list[int]] = {}
         try:
             for proc in psutil.process_iter(
                 ["pid", "name", "cmdline"],
             ):
                 try:
                     info = proc.info
-                    name = info.get("name") or ""
-                    if "python" not in name.lower():
+                    pname = (info.get("name") or "").lower()
+                    if (
+                        "python" not in pname
+                        and "uv" not in pname
+                    ):
                         continue
                     cmdline = " ".join(
                         info.get("cmdline") or [],
@@ -328,13 +334,12 @@ class Supervisor:
                     for cfg in MANAGED_PROCESSES:
                         if cfg.detect_pattern not in cmdline:
                             continue
-                        # サブプロセス除外
                         if any(
                             ep in cmdline
                             for ep in cfg.exclude_patterns
                         ):
                             continue
-                        found.setdefault(
+                        raw.setdefault(
                             cfg.name, [],
                         ).append(info["pid"])
                 except (
@@ -344,6 +349,27 @@ class Supervisor:
                     continue
         except Exception as e:
             logger.warning("プロセス検出エラー: %s", e)
+
+        # 第2パス: 親子関係で重複排除
+        # 同一ツリー内のPIDはルートのみ残す
+        found: dict[str, list[int]] = {}
+        for cfg_name, pids in raw.items():
+            if len(pids) <= 1:
+                found[cfg_name] = pids
+                continue
+            pid_set = set(pids)
+            roots: list[int] = []
+            for pid in pids:
+                try:
+                    ppid = psutil.Process(pid).ppid()
+                    if ppid not in pid_set:
+                        roots.append(pid)
+                except (
+                    psutil.NoSuchProcess,
+                    psutil.AccessDenied,
+                ):
+                    roots.append(pid)
+            found[cfg_name] = roots if roots else pids
         return found
 
     # ---------------------------------------------------------------
