@@ -368,3 +368,4 @@ multi_pair:
   global_max_positions: 4
   per_pair_max_positions: 1
   global_max_exposure_lot: 5.0
+  max_same_direction_jpy: 3

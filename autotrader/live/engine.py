@@ -198,6 +198,8 @@ class LiveTradingEngine:
         self._get_global_exposure_lot = None
         self._global_max_positions: int = 0
         self._global_max_exposure_lot: float = 0.0
+        self._get_jpy_direction_count = None
+        self._max_same_direction_jpy: int = 0
         # EngineManager参照（ポートフォリオDD監視用）
         self._engine_manager = None
 
@@ -446,6 +448,8 @@ class LiveTradingEngine:
         get_global_exposure_lot,
         global_max_positions: int = 0,
         global_max_exposure_lot: float = 0.0,
+        get_jpy_direction_count=None,
+        max_same_direction_jpy: int = 0,
     ) -> None:
         """グローバルポジション/エクスポージャー制限を設定
 
@@ -458,6 +462,10 @@ class LiveTradingEngine:
                 取得コールバック
             global_max_positions: 最大ポジション数（0=無制限）
             global_max_exposure_lot: 最大ロット数（0.0=無制限）
+            get_jpy_direction_count: JPYペア方向別カウント
+                取得コールバック
+            max_same_direction_jpy: JPY同方向の最大数
+                （0=無制限）
         """
         self._get_global_position_count = (
             get_global_position_count
@@ -467,12 +475,17 @@ class LiveTradingEngine:
         )
         self._global_max_positions = global_max_positions
         self._global_max_exposure_lot = global_max_exposure_lot
+        self._get_jpy_direction_count = (
+            get_jpy_direction_count
+        )
+        self._max_same_direction_jpy = max_same_direction_jpy
         logger.info(
             "[%s] グローバル制限設定: "
-            "max_pos=%d, max_lot=%.1f",
+            "max_pos=%d, max_lot=%.1f, max_dir_jpy=%d",
             self._active_symbol,
             global_max_positions,
             global_max_exposure_lot,
+            max_same_direction_jpy,
         )
 
     @staticmethod
@@ -1137,6 +1150,25 @@ class LiveTradingEngine:
                     "severity": "warning",
                 })
 
+        # JPY同方向制限
+        if (
+            self._max_same_direction_jpy > 0
+            and self._get_jpy_direction_count is not None
+            and self._active_symbol.endswith("JPY")
+        ):
+            for _dir in ("BUY", "SELL"):
+                _cnt = self._get_jpy_direction_count(_dir)
+                if _cnt >= self._max_same_direction_jpy:
+                    alerts.append({
+                        "type": f"jpy_direction_{_dir.lower()}",
+                        "message": (
+                            f"JPY {_dir}上限 "
+                            f"{_cnt}/"
+                            f"{self._max_same_direction_jpy}"
+                        ),
+                        "severity": "warning",
+                    })
+
         # ポートフォリオDD警告・緊急停止
         if self._engine_manager is not None:
             mgr = self._engine_manager
@@ -1520,6 +1552,30 @@ class LiveTradingEngine:
                     self._active_symbol,
                     _g_lot,
                     self._global_max_exposure_lot,
+                )
+                return
+
+        # JPY同方向制限チェック
+        if (
+            self._max_same_direction_jpy > 0
+            and self._get_jpy_direction_count is not None
+            and self._active_symbol.endswith("JPY")
+        ):
+            _dir = signal.signal_type.value
+            _dir_count = self._get_jpy_direction_count(_dir)
+            if _dir_count >= self._max_same_direction_jpy:
+                self._last_entry_skip_reason = (
+                    f"JPY {_dir}上限 "
+                    f"{_dir_count}/"
+                    f"{self._max_same_direction_jpy}"
+                )
+                logger.info(
+                    "[%s] JPY %s方向上限"
+                    "(%d/%d)、エントリースキップ",
+                    self._active_symbol,
+                    _dir,
+                    _dir_count,
+                    self._max_same_direction_jpy,
                 )
                 return
 
