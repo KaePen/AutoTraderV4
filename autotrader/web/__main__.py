@@ -1,7 +1,7 @@
 """WebUIサーバー起動エントリーポイント
 
 使用方法:
-    python -m autotrader.web [--show-mt5]
+    python -m autotrader.web [--show-mt5] [--auto-trade]
 """
 from __future__ import annotations
 
@@ -36,6 +36,12 @@ def parse_args() -> argparse.Namespace:
         help="MT5ウィンドウを表示する（デフォルト: 非表示）",
     )
     parser.add_argument(
+        "--auto-trade",
+        action="store_true",
+        default=False,
+        help="起動時に全採用ペアの自動トレードをONにする",
+    )
+    parser.add_argument(
         "--host",
         default="0.0.0.0",
         help="バインドホスト（デフォルト: 0.0.0.0）",
@@ -51,6 +57,10 @@ def parse_args() -> argparse.Namespace:
 
 if __name__ == "__main__":
     args = parse_args()
+
+    # CLIフラグ → 環境変数で既存ロジックに伝搬
+    if args.auto_trade:
+        os.environ["AUTOTRADER_AUTO_TRADE"] = "1"
 
     # MT5ウィンドウ表示/非表示を環境変数で伝搬
     if args.show_mt5:
