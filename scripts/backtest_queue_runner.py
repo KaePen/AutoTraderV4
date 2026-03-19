@@ -334,35 +334,59 @@ class QueueState:
     )
 
     def sync_with_queue(self) -> None:
-        """キュー変更を検知し、削除されたジョブのみ除去"""
+        """キューとstateの整合性を検証・修復
+
+        起動時に必ず呼ばれ、以下を実行する:
+        1. キューに存在しないcompleted_idsを除去
+        2. キューに存在しないrunning_jobsを除去
+        3. queue_hashを更新
+        """
         current_hash = _compute_queue_hash()
         if not current_hash:
             return
-        if self.queue_hash and self.queue_hash != current_hash:
-            current_ids = _get_queue_job_ids()
-            removed = [
-                cid for cid in self.completed_ids
-                if cid not in current_ids
-            ]
-            if removed:
-                for cid in removed:
-                    self.completed_ids.remove(cid)
-                    self.running_jobs.pop(cid, None)
+        current_ids = _get_queue_job_ids()
+        changed = False
+
+        # completed_idsの孤立エントリを除去
+        orphan_completed = [
+            cid for cid in self.completed_ids
+            if cid not in current_ids
+        ]
+        if orphan_completed:
+            for cid in orphan_completed:
+                self.completed_ids.remove(cid)
+            logger.info(
+                "state掃除: completed_ids から"
+                "キュー外%d件を除去 %s",
+                len(orphan_completed),
+                orphan_completed,
+            )
+            changed = True
+
+        # running_jobsの孤立エントリを除去
+        orphan_running = [
+            jid for jid in self.running_jobs
+            if jid not in current_ids
+        ]
+        if orphan_running:
+            for jid in orphan_running:
+                rid = self.running_jobs.pop(jid)
                 logger.info(
-                    "キュー変更検知: 削除済み%d件を除去 %s",
-                    len(removed),
-                    removed,
+                    "state掃除: running_jobs から"
+                    "キュー外 %s (result=%s) を除去",
+                    jid,
+                    rid,
                 )
-            else:
-                logger.info(
-                    "キュー変更検知: ジョブ追加のみ"
-                    "（完了記録%d件を保持）",
-                    len(self.completed_ids),
-                )
+            changed = True
+
+        if self.queue_hash != current_hash:
             self.queue_hash = current_hash
-            self.save()
+            changed = True
         elif not self.queue_hash:
             self.queue_hash = current_hash
+            changed = True
+
+        if changed:
             self.save()
 
     def next_counter(self) -> int:
