@@ -118,6 +118,11 @@ class DashboardResponse(BaseModel):
         open_positions: オープンポジション数
         today_trades: 本日のトレード数
         win_rate: 勝率
+        portfolio_dd_pct: ポートフォリオDD(%)
+        portfolio_dd_warning: DD>=3%警告
+        portfolio_dd_emergency: DD>=5%緊急停止
+        portfolio_dd_emergency_at: 緊急停止発動日時
+        portfolio_peak_equity: ピーク有効証拠金
     """
 
     account: AccountInfoResponse
@@ -131,6 +136,12 @@ class DashboardResponse(BaseModel):
     open_positions: int = 0
     today_trades: int = 0
     win_rate: float = 0.0
+    # ポートフォリオDD状態
+    portfolio_dd_pct: float = 0.0
+    portfolio_dd_warning: bool = False
+    portfolio_dd_emergency: bool = False
+    portfolio_dd_emergency_at: str | None = None
+    portfolio_peak_equity: float = 0.0
 
 
 class SignalResponse(BaseModel):

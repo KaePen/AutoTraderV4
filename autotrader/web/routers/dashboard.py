@@ -98,4 +98,22 @@ async def get_dashboard(
     dashboard_data = service.get_dashboard(
         account_override=live_account
     )
+
+    # ポートフォリオDD状態を注入
+    if mgr is not None:
+        dd = mgr.dd_status
+        dashboard_data.portfolio_dd_pct = dd["current_dd_pct"]
+        dashboard_data.portfolio_dd_warning = dd[
+            "dd_warning_active"
+        ]
+        dashboard_data.portfolio_dd_emergency = dd[
+            "dd_emergency_active"
+        ]
+        dashboard_data.portfolio_dd_emergency_at = dd[
+            "dd_emergency_at"
+        ]
+        dashboard_data.portfolio_peak_equity = dd[
+            "peak_equity"
+        ]
+
     return ApiResponse(data=dashboard_data)

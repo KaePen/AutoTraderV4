@@ -2,11 +2,13 @@
 
 シンボルごとに独立した LiveTradingEngine インスタンスを管理し、
 MT5接続とデータプロバイダを全エンジンで共有する。
+ポートフォリオレベルのDD監視・サーキットブレーカーを担う。
 """
 
 from __future__ import annotations
 
 import logging
+from datetime import datetime, timezone
 from typing import Any
 
 from autotrader.adapters.mt5.config import MT5Config
@@ -21,6 +23,10 @@ from autotrader.live.config import LiveTradingConfig
 from autotrader.live.engine import LiveTradingEngine
 
 logger = logging.getLogger(__name__)
+
+# ポートフォリオDD閾値
+DD_WARNING_PCT = 3.0    # 警告表示
+DD_EMERGENCY_PCT = 5.0  # 全決済+エントリー停止
 
 
 class EngineManager:
@@ -61,6 +67,14 @@ class EngineManager:
         # 共有コレクター（最初のエンジン起動時に初期化）
         self._shared_fundamental_collector = None
         self._shared_rss_collector = None
+
+        # ポートフォリオDD監視
+        self._peak_equity: float = 0.0
+        self._current_dd_pct: float = 0.0
+        self._dd_warning_active: bool = False  # DD >= 3%
+        self._dd_emergency_active: bool = False  # DD >= 5%
+        self._dd_emergency_at: datetime | None = None
+        self._emergency_close_done: bool = False
 
     @property
     def connected(self) -> bool:
@@ -166,6 +180,8 @@ class EngineManager:
                 self._global_max_exposure_lot
             ),
         )
+        # ポートフォリオDD監視用にマネージャー参照を注入
+        engine._engine_manager = self
         self._engines[symbol] = engine
         logger.info("エンジン追加: %s", symbol)
 
@@ -278,6 +294,151 @@ class EngineManager:
         for engine in self._engines.values():
             result.extend(engine.trade_history)
         return result
+
+    # =========================================================
+    # ポートフォリオDD監視
+    # =========================================================
+
+    @property
+    def dd_warning_active(self) -> bool:
+        """DD >= 3% 警告状態"""
+        return self._dd_warning_active
+
+    @property
+    def dd_emergency_active(self) -> bool:
+        """DD >= 5% 緊急停止状態"""
+        return self._dd_emergency_active
+
+    @property
+    def current_dd_pct(self) -> float:
+        """現在のポートフォリオDD(%)"""
+        return self._current_dd_pct
+
+    @property
+    def peak_equity(self) -> float:
+        """ピーク有効証拠金"""
+        return self._peak_equity
+
+    @property
+    def dd_status(self) -> dict[str, Any]:
+        """DD状態の辞書（WebUI用）"""
+        return {
+            "current_dd_pct": round(self._current_dd_pct, 3),
+            "peak_equity": round(self._peak_equity, 0),
+            "dd_warning_active": self._dd_warning_active,
+            "dd_emergency_active": self._dd_emergency_active,
+            "dd_emergency_at": (
+                self._dd_emergency_at.isoformat()
+                if self._dd_emergency_at
+                else None
+            ),
+        }
+
+    def update_portfolio_dd(
+        self, equity: float,
+    ) -> None:
+        """ポートフォリオDDを更新しサーキットブレーカーを判定
+
+        各エンジンのtickループから呼ばれる。
+
+        Args:
+            equity: 現在の口座有効証拠金
+        """
+        if equity <= 0:
+            return
+
+        # 緊急停止済みなら更新のみ（再発動しない）
+        if self._dd_emergency_active:
+            return
+
+        # ピーク更新
+        if equity > self._peak_equity:
+            self._peak_equity = equity
+
+        # DD計算
+        if self._peak_equity > 0:
+            self._current_dd_pct = (
+                (self._peak_equity - equity)
+                / self._peak_equity
+                * 100
+            )
+        else:
+            self._current_dd_pct = 0.0
+
+        # 3% 警告
+        self._dd_warning_active = (
+            self._current_dd_pct >= DD_WARNING_PCT
+        )
+
+        # 5% 緊急停止
+        if self._current_dd_pct >= DD_EMERGENCY_PCT:
+            self._dd_emergency_active = True
+            self._dd_emergency_at = datetime.now(
+                tz=timezone.utc
+            )
+            logger.critical(
+                "ポートフォリオDD %.2f%% >= %.1f%% — "
+                "緊急停止発動: 全ポジション決済+エントリー停止",
+                self._current_dd_pct,
+                DD_EMERGENCY_PCT,
+            )
+
+    async def emergency_close_all(self) -> int:
+        """全エンジンの全ポジションを緊急決済
+
+        Returns:
+            int: 決済したポジション数
+        """
+        if self._emergency_close_done:
+            return 0
+
+        closed = 0
+        for symbol, engine in self._engines.items():
+            positions = engine.cached_positions
+            for pos_dict in positions:
+                ticket = pos_dict.get("ticket")
+                if ticket is None:
+                    continue
+                try:
+                    # MT5ポジション取得
+                    mt5_positions = (
+                        await engine._executor
+                        .get_open_positions_async(symbol)
+                    )
+                    if mt5_positions is None:
+                        continue
+                    for p in mt5_positions:
+                        result = (
+                            await engine._executor
+                            .close_position_async(
+                                p, "DD緊急決済"
+                            )
+                        )
+                        if result.success:
+                            closed += 1
+                            logger.info(
+                                "緊急決済: %s #%s",
+                                symbol,
+                                p.ticket,
+                            )
+                        else:
+                            logger.error(
+                                "緊急決済失敗: %s #%s: %s",
+                                symbol,
+                                p.ticket,
+                                result.message,
+                            )
+                except Exception as e:
+                    logger.error(
+                        "緊急決済エラー: %s: %s",
+                        symbol, e,
+                    )
+
+        self._emergency_close_done = True
+        logger.critical(
+            "緊急決済完了: %d ポジション決済", closed
+        )
+        return closed
 
     async def reload_trade_logic(
         self,

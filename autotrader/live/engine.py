@@ -198,6 +198,8 @@ class LiveTradingEngine:
         self._get_global_exposure_lot = None
         self._global_max_positions: int = 0
         self._global_max_exposure_lot: float = 0.0
+        # EngineManager参照（ポートフォリオDD監視用）
+        self._engine_manager = None
 
         # エントリースキップ理由（UI通知用）
         self._last_entry_skip_reason: str | None = None
@@ -675,6 +677,22 @@ class LiveTradingEngine:
         # 1. 口座情報更新
         self._account_info = await self._data_provider.get_account_info()
 
+        # 1.5. ポートフォリオDD監視
+        if (
+            self._engine_manager is not None
+            and self._account_info is not None
+        ):
+            mgr = self._engine_manager
+            mgr.update_portfolio_dd(
+                self._account_info.equity,
+            )
+            # 緊急停止: 全ポジション決済
+            if (
+                mgr.dd_emergency_active
+                and not mgr._emergency_close_done
+            ):
+                await mgr.emergency_close_all()
+
         # 2. 最新ローソク足データ取得・設定
         await self._update_market_data()
 
@@ -1112,6 +1130,30 @@ class LiveTradingEngine:
                     "severity": "warning",
                 })
 
+        # ポートフォリオDD警告・緊急停止
+        if self._engine_manager is not None:
+            mgr = self._engine_manager
+            if mgr.dd_emergency_active:
+                alerts.append({
+                    "type": "portfolio_dd_emergency",
+                    "message": (
+                        f"DD緊急停止 "
+                        f"{mgr.current_dd_pct:.2f}% "
+                        f"(>= 5%) — 全決済済・エントリー停止中"
+                    ),
+                    "severity": "critical",
+                })
+            elif mgr.dd_warning_active:
+                alerts.append({
+                    "type": "portfolio_dd_warning",
+                    "message": (
+                        f"DD警告 "
+                        f"{mgr.current_dd_pct:.2f}% "
+                        f"(>= 3%)"
+                    ),
+                    "severity": "warning",
+                })
+
     async def get_candles(
         self,
         symbol: str,
@@ -1383,6 +1425,17 @@ class LiveTradingEngine:
         Args:
             signal: トレードシグナル
         """
+        # ポートフォリオDD緊急停止チェック
+        if (
+            self._engine_manager is not None
+            and self._engine_manager.dd_emergency_active
+        ):
+            self._last_entry_skip_reason = (
+                f"DD緊急停止 "
+                f"{self._engine_manager.current_dd_pct:.1f}%"
+            )
+            return
+
         # ホットリロード中はエントリーをスキップ
         if self._entry_blocked:
             self._last_entry_skip_reason = "ホットリロード中"
