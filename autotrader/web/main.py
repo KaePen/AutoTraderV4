@@ -141,18 +141,22 @@ def _create_engine_manager():
     global_max_exp = mp.get(
         "global_max_exposure_lot", 10.0,
     )
+    max_dir_jpy = mp.get("max_same_direction_jpy", 0)
 
     logger.info(
         "EngineManager: global_max_positions=%d,"
-        " global_max_exposure_lot=%.1f",
+        " global_max_exposure_lot=%.1f,"
+        " max_same_direction_jpy=%d",
         global_max_pos,
         global_max_exp,
+        max_dir_jpy,
     )
 
     return EngineManager(
         mt5_config,
         global_max_positions=global_max_pos,
         global_max_exposure_lot=global_max_exp,
+        max_same_direction_jpy=max_dir_jpy,
     )
 
 

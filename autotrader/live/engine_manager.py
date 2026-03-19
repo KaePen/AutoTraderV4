@@ -47,6 +47,7 @@ class EngineManager:
         mt5_config: MT5Config,
         global_max_positions: int = 0,
         global_max_exposure_lot: float = 0.0,
+        max_same_direction_jpy: int = 0,
     ) -> None:
         """初期化
 
@@ -56,6 +57,8 @@ class EngineManager:
                 （0=無制限）
             global_max_exposure_lot: 全ペア合計の最大ロット数
                 （0.0=無制限）
+            max_same_direction_jpy: JPYペア同方向の最大数
+                （0=無制限）
         """
         self._mt5_config = mt5_config
         self._conn = MT5ConnectionManager(mt5_config)
@@ -64,6 +67,7 @@ class EngineManager:
         # グローバルポジション/エクスポージャー制限
         self._global_max_positions = global_max_positions
         self._global_max_exposure_lot = global_max_exposure_lot
+        self._max_same_direction_jpy = max_same_direction_jpy
         # 共有コレクター（最初のエンジン起動時に初期化）
         self._shared_fundamental_collector = None
         self._shared_rss_collector = None
@@ -182,6 +186,12 @@ class EngineManager:
             global_max_exposure_lot=(
                 self._global_max_exposure_lot
             ),
+            get_jpy_direction_count=(
+                self.get_jpy_direction_count
+            ),
+            max_same_direction_jpy=(
+                self._max_same_direction_jpy
+            ),
         )
         # ポートフォリオDD監視用にマネージャー参照を注入
         engine._engine_manager = self
@@ -264,6 +274,26 @@ class EngineManager:
             for pos in engine.cached_positions:
                 total += pos.get("volume", 0.0)
         return total
+
+    def get_jpy_direction_count(
+        self, direction: str,
+    ) -> int:
+        """JPYペアの指定方向ポジション数を取得
+
+        Args:
+            direction: "BUY" or "SELL"
+
+        Returns:
+            int: 該当方向のJPYペアポジション数
+        """
+        count = 0
+        for engine in self._engines.values():
+            for pos in engine.cached_positions:
+                sym = pos.get("symbol", "")
+                sig = pos.get("signal_type", "")
+                if sym.endswith("JPY") and sig == direction:
+                    count += 1
+        return count
 
     @property
     def all_cached_positions(self) -> list[dict]:

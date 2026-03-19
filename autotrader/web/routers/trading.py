@@ -703,10 +703,15 @@ async def switch_account(
             _old_mgr._global_max_exposure_lot
             if _old_mgr else 10.0
         )
+        _g_dir_jpy = (
+            _old_mgr._max_same_direction_jpy
+            if _old_mgr else 0
+        )
         new_mgr = EngineManager(
             mt5_config,
             global_max_positions=_g_pos,
             global_max_exposure_lot=_g_lot,
+            max_same_direction_jpy=_g_dir_jpy,
         )
         request.app.state.engine_manager = new_mgr
 
