@@ -160,6 +160,8 @@ class LiveTradingEngine:
         self._last_tick_data: dict | None = None
         # フル処理（ローソク足+指標+シグナル）最終実行時刻
         self._last_full_tick_time: float = 0.0
+        # fire-and-forget タスクの強参照保持（GC防止）
+        self._background_tasks: set[asyncio.Task[None]] = set()
 
         # ファンダメンタル関連（FundamentalConfig.enabled=Trueのみ初期化）
         self._fundamental_memory = None
@@ -822,7 +824,33 @@ class LiveTradingEngine:
                 self._tick_optimizer.reset()
 
         # 5. tick完了: 全UIデータをWebSocketで一括配信
-        asyncio.create_task(self._broadcast_tick_update())
+        task = asyncio.create_task(
+            self._broadcast_tick_update(),
+        )
+        self._background_tasks.add(task)
+        task.add_done_callback(
+            self._background_tasks.discard,
+        )
+
+        # 6. チャート用price_update: _tick_price_update()はtick間の
+        # 高頻度更新だが、新tickがない場合スキップされる。
+        # _tick()完了時にも最新価格を配信し、最低1秒毎の更新を保証。
+        if self._last_tick_data:
+            bid = float(self._last_tick_data.get("bid", 0.0))
+            ask = float(self._last_tick_data.get("ask", 0.0))
+            tick_ms = int(
+                self._last_tick_data.get("time_msc", 0),
+            )
+            if bid > 0:
+                await get_event_bus().publish(
+                    "price.updated",
+                    {
+                        "symbol": self._active_symbol,
+                        "bid": bid,
+                        "ask": ask,
+                        "time_ms": tick_ms,
+                    },
+                )
 
     async def _broadcast_tick_update(self) -> None:
         """tick完了後に全UIデータをダッシュボードへ一括配信

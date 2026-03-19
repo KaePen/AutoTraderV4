@@ -43,6 +43,10 @@ class EventBus:
         self._typed_handlers: dict[
             type, dict[str, TypedEventHandler]
         ] = defaultdict(dict)
+        # fire-and-forget タスクの強参照保持
+        # Python 3.12+ ではイベントループがタスクを弱参照で
+        # 保持するため、強参照がないとGCで消失する
+        self._background_tasks: set[asyncio.Task[None]] = set()
 
     # === 既存API（後方互換） ===
 
@@ -93,13 +97,22 @@ class EventBus:
     ) -> None:
         """トピックにデータを発行（create_taskで非ブロッキング）
 
+        タスクの強参照を _background_tasks に保持し、
+        完了時に自動削除する（Python 3.12+ GC対策）。
+
         Args:
             topic (str): トピック名
             data (dict[str, Any]): イベントデータ
         """
         try:
             loop = asyncio.get_running_loop()
-            loop.create_task(self.publish(topic, data))
+            task = loop.create_task(
+                self.publish(topic, data),
+            )
+            self._background_tasks.add(task)
+            task.add_done_callback(
+                self._background_tasks.discard,
+            )
         except RuntimeError:
             pass  # イベントループなし（テスト時等）
 
