@@ -344,6 +344,13 @@ def create_app() -> FastAPI:
         prefix="/api/v1",
         tags=["fundamental"],
     )
+    from autotrader.web.routers import debug as debug_router
+
+    app.include_router(
+        debug_router.router,
+        prefix="/api/v1",
+        tags=["debug"],
+    )
 
     # ヘルスチェック
     @app.get(
