@@ -1064,6 +1064,13 @@ class LiveTradingEngine:
                         "severity": "info",
                     })
 
+        # デバッグアラート注入
+        if (
+            self._engine_manager is not None
+            and self._engine_manager._debug_alerts
+        ):
+            alerts.extend(self._engine_manager._debug_alerts)
+
         return alerts
 
     def _check_position_limit_alerts(
