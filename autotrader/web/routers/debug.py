@@ -72,6 +72,12 @@ async def simulate_dd(
     if mgr is None:
         return {"error": "EngineManager未初期化"}
 
+    # DD関連のデバッグアラートをクリア
+    mgr._debug_alerts = [
+        a for a in mgr._debug_alerts
+        if a.get("type", "").startswith("portfolio_dd") is False
+    ]
+
     if pct <= 0:
         # リセット
         mgr._current_dd_pct = 0.0
@@ -94,6 +100,23 @@ async def simulate_dd(
         mgr._dd_emergency_at = datetime.now(
             tz=timezone.utc,
         )
+        mgr._debug_alerts.append({
+            "type": "portfolio_dd_emergency",
+            "message": (
+                f"DD緊急停止 {pct:.2f}% "
+                f"(>= {DD_EMERGENCY_PCT}%) "
+                f"— 全決済済・エントリー停止中"
+            ),
+            "severity": "danger",
+        })
+    elif pct >= DD_WARNING_PCT:
+        mgr._dd_emergency_active = False
+        mgr._dd_emergency_at = None
+        mgr._debug_alerts.append({
+            "type": "portfolio_dd_warning",
+            "message": f"DD警告 {pct:.2f}% (>= {DD_WARNING_PCT}%)",
+            "severity": "warning",
+        })
     else:
         mgr._dd_emergency_active = False
         mgr._dd_emergency_at = None
