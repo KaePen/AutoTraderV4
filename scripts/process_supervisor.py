@@ -100,6 +100,10 @@ class ProcessConfig:
     detect_pattern: str
     port: int | None
     graceful_timeout: int = GRACEFUL_TIMEOUT_SHORT
+    # サブプロセス除外パターン（これを含むcmdlineは検出対象外）
+    exclude_patterns: list[str] = field(
+        default_factory=list,
+    )
 
 
 MANAGED_PROCESSES: list[ProcessConfig] = [
@@ -118,6 +122,10 @@ MANAGED_PROCESSES: list[ProcessConfig] = [
         detect_pattern="backtest_queue_runner.py",
         port=None,
         graceful_timeout=GRACEFUL_TIMEOUT_LONG,
+        exclude_patterns=[
+            "--execute-month",
+            "--execute-job",
+        ],
     ),
     ProcessConfig(
         name="bt_webui",
@@ -318,10 +326,17 @@ class Supervisor:
                         info.get("cmdline") or [],
                     )
                     for cfg in MANAGED_PROCESSES:
-                        if cfg.detect_pattern in cmdline:
-                            found.setdefault(
-                                cfg.name, [],
-                            ).append(info["pid"])
+                        if cfg.detect_pattern not in cmdline:
+                            continue
+                        # サブプロセス除外
+                        if any(
+                            ep in cmdline
+                            for ep in cfg.exclude_patterns
+                        ):
+                            continue
+                        found.setdefault(
+                            cfg.name, [],
+                        ).append(info["pid"])
                 except (
                     psutil.NoSuchProcess,
                     psutil.AccessDenied,
