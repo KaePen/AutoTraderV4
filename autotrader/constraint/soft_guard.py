@@ -57,6 +57,9 @@ class SoftGuardConfig:
     optimal_hours: tuple[int, ...] = tuple(range(8, 18))
     off_hours_penalty: float = 0.15
     reject_hours: tuple[int, ...] = (22, 23, 0, 1, 2, 3)
+    # 最適時間内だがペナルティを加算する時間帯（UTC）
+    penalty_hours: tuple[int, ...] = ()
+    penalty_hours_value: float = 0.0
     min_volatility_atr_ratio: float = 0.5
     max_volatility_atr_ratio: float = 2.0
     volatility_penalty: float = 0.1
@@ -208,6 +211,16 @@ class SoftGuard:
 
         if hour not in self.config.optimal_hours:
             return self.config.off_hours_penalty, f"オフタイム取引: {hour}時"
+
+        # 最適時間内のペナルティ時間帯（例: NY Open直後）
+        if (
+            self.config.penalty_hours
+            and hour in self.config.penalty_hours
+        ):
+            return (
+                self.config.penalty_hours_value,
+                f"ペナルティ時間帯: {hour}時",
+            )
         return 0.0, None
 
     def check_volatility(self, context: dict) -> tuple[float, str | None]:
