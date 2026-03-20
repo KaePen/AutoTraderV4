@@ -252,6 +252,8 @@ class FilterConfig:
     sg_off_hours_penalty: float = 0.5
     sg_volatility_penalty: float = 0.05
     sg_recent_loss_penalty: float = 0.1
+    sg_penalty_hours: tuple[int, ...] = ()
+    sg_penalty_hours_value: float = 0.3
     regime_threshold_enabled: bool = True
     regime_trend_threshold_add: float = 1.5
     fundamental_caution_block_level: int = 2
@@ -386,6 +388,9 @@ class UnifiedBotConfig:
     sg_off_hours_penalty: float = 0.5
     sg_volatility_penalty: float = 0.05
     sg_recent_loss_penalty: float = 0.1
+    # ペナルティ時間帯（UTC、最適時間内だがペナルティ加算）
+    sg_penalty_hours: tuple[int, ...] = ()
+    sg_penalty_hours_value: float = 0.3
     # レジーム別閾値調整（TRENDレジームでスコア要求引き上げ）
     regime_threshold_enabled: bool = True
     regime_trend_threshold_add: float = 1.5
@@ -737,6 +742,8 @@ class UnifiedBotConfig:
             sg_off_hours_penalty=self.sg_off_hours_penalty,
             sg_volatility_penalty=self.sg_volatility_penalty,
             sg_recent_loss_penalty=self.sg_recent_loss_penalty,
+            sg_penalty_hours=self.sg_penalty_hours,
+            sg_penalty_hours_value=self.sg_penalty_hours_value,
             regime_threshold_enabled=self.regime_threshold_enabled,
             regime_trend_threshold_add=(self.regime_trend_threshold_add),
             fundamental_caution_block_level=(

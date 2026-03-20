@@ -664,6 +664,8 @@ class UnifiedTradeBot:
                 off_hours_penalty=self.config.sg_off_hours_penalty,
                 volatility_penalty=self.config.sg_volatility_penalty,
                 recent_loss_penalty=self.config.sg_recent_loss_penalty,
+                penalty_hours=self.config.sg_penalty_hours,
+                penalty_hours_value=self.config.sg_penalty_hours_value,
             )
         )
 
