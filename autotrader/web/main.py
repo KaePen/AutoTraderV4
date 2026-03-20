@@ -289,29 +289,32 @@ async def lifespan(app: FastAPI):
         "MT5_SHOW_WINDOW", "",
     ).lower() not in ("1", "true", "yes")
     if hide_mt5:
+        import subprocess
         import threading
 
         def _hide_mt5_delayed() -> None:
             import time
             time.sleep(5)
             try:
-                import win32con
-                import win32gui
-
-                def _cb(hwnd: int, _: object) -> None:
-                    title = win32gui.GetWindowText(hwnd)
-                    if "MetaTrader" in title or "MT5" in title:
-                        win32gui.ShowWindow(
-                            hwnd, win32con.SW_HIDE,
-                        )
-                        logger.info(
-                            "MT5ウィンドウ非表示: %s", title,
-                        )
-
-                win32gui.EnumWindows(_cb, None)
+                subprocess.run(
+                    [
+                        "python", "-c",
+                        "import win32gui,win32con\n"
+                        "def cb(h,_):\n"
+                        " t=win32gui.GetWindowText(h)\n"
+                        " if 'MetaTrader' in t or 'MT5' in t:\n"
+                        "  win32gui.ShowWindow(h,win32con.SW_HIDE)\n"
+                        "  print(f'Hidden: {t[:50]}')\n"
+                        "win32gui.EnumWindows(cb,None)\n",
+                    ],
+                    timeout=10,
+                    capture_output=True,
+                    text=True,
+                )
+                logger.info("MT5ウィンドウ非表示処理完了")
             except Exception as e:
-                logger.debug(
-                    "MT5ウィンドウ制御スキップ: %s", e,
+                logger.warning(
+                    "MT5ウィンドウ制御失敗: %s", e,
                 )
 
         threading.Thread(
