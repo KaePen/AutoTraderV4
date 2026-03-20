@@ -174,7 +174,10 @@ class ManagedPosition:
             # SELL: lowest_priceで最安値を追跡
             if self.lowest_price <= 0.0:
                 self.lowest_price = current_price
-            self.lowest_price = min(self.lowest_price, current_price)
+            else:
+                self.lowest_price = min(
+                    self.lowest_price, current_price,
+                )
             self.current_r = (
                 (self.entry_price - current_price) / self.r_value
                 if self.r_value > 0 else 0.0

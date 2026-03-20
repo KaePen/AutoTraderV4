@@ -267,9 +267,6 @@ class FilterConfig:
     range_filter_block_threshold: float = 0.6
     session_transition_wait_enabled: bool = False
     session_transition_wait_minutes: int = 30
-    liquidity_based_tp_enabled: bool = False
-    liquidity_tp_margin_pct: float = 0.01
-    liquidity_tp_default_rr: float = 1.5
     use_actual_spread_data: bool = False
     off_hours_trend_block: bool = False
     off_hours_high_align_block: bool = False
@@ -464,12 +461,6 @@ class UnifiedBotConfig:
     session_transition_wait_enabled: bool = False
     # セッション切替後の待機時間（分）
     session_transition_wait_minutes: int = 30
-    # 流動性ゾーン連動TP有効化
-    liquidity_based_tp_enabled: bool = False
-    # 流動性ゾーン手前のマージン（%）
-    liquidity_tp_margin_pct: float = 0.01
-    # デフォルトリスクリワード比（流動性TPフォールバック用）
-    liquidity_tp_default_rr: float = 1.5
     # 実スプレッドデータ使用（CSVの<SPREAD>列）
     use_actual_spread_data: bool = False
     # --- 改善検証パラメータ ---
@@ -767,9 +758,6 @@ class UnifiedBotConfig:
             session_transition_wait_minutes=(
                 self.session_transition_wait_minutes
             ),
-            liquidity_based_tp_enabled=(self.liquidity_based_tp_enabled),
-            liquidity_tp_margin_pct=self.liquidity_tp_margin_pct,
-            liquidity_tp_default_rr=self.liquidity_tp_default_rr,
             use_actual_spread_data=self.use_actual_spread_data,
             off_hours_trend_block=self.off_hours_trend_block,
             off_hours_high_align_block=(self.off_hours_high_align_block),
