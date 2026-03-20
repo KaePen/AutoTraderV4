@@ -1851,10 +1851,6 @@ const DashboardApp = {
 
     // パネル折りたたみ初期化
     PanelCollapser.setup(
-      'metrics', 'metrics-toggle',
-      'metrics-chevron', 'metrics-strip'
-    );
-    PanelCollapser.setup(
       'analysis', 'analysis-toggle',
       'analysis-chevron', 'analysis-content'
     );
