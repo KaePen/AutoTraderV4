@@ -289,16 +289,34 @@ async def lifespan(app: FastAPI):
         "MT5_SHOW_WINDOW", "",
     ).lower() not in ("1", "true", "yes")
     if hide_mt5:
-        import asyncio
+        import threading
 
-        async def _hide_mt5_delayed() -> None:
-            await asyncio.sleep(3)
-            from autotrader.adapters.mt5.connection import (
-                _set_mt5_window_visibility,
-            )
-            await _set_mt5_window_visibility(visible=False)
+        def _hide_mt5_delayed() -> None:
+            import time
+            time.sleep(5)
+            try:
+                import win32con
+                import win32gui
 
-        asyncio.create_task(_hide_mt5_delayed())
+                def _cb(hwnd: int, _: object) -> None:
+                    title = win32gui.GetWindowText(hwnd)
+                    if "MetaTrader" in title or "MT5" in title:
+                        win32gui.ShowWindow(
+                            hwnd, win32con.SW_HIDE,
+                        )
+                        logger.info(
+                            "MT5ウィンドウ非表示: %s", title,
+                        )
+
+                win32gui.EnumWindows(_cb, None)
+            except Exception as e:
+                logger.debug(
+                    "MT5ウィンドウ制御スキップ: %s", e,
+                )
+
+        threading.Thread(
+            target=_hide_mt5_delayed, daemon=True,
+        ).start()
 
     yield
 
