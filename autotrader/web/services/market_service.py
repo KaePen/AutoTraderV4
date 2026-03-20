@@ -126,8 +126,14 @@ class MarketService:
         )
 
         # 週間・月間・全履歴の損益集計（JST基準）
-        week_start = today - timedelta(
-            days=_now_jst.weekday(),
+        # FX市場は月曜早朝〜金曜深夜が1週間
+        # 土日決済分を前週に含めないよう月曜7:00 JST起点
+        _dow = _now_jst.weekday()  # 0=Mon
+        _days_back = _dow if _dow < 5 else _dow
+        week_start = _now_jst.replace(
+            hour=7, minute=0, second=0, microsecond=0,
+        ).astimezone(timezone.utc) - timedelta(
+            days=_days_back,
         )
         month_start = _now_jst.replace(
             day=1, hour=0, minute=0, second=0,
