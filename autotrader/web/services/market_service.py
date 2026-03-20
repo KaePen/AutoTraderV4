@@ -74,10 +74,13 @@ class MarketService:
             equity=1_000_000.0,
         )
 
-        # 本日のトレード集計
-        today = datetime.now(timezone.utc).replace(
-            hour=0, minute=0, second=0, microsecond=0
-        )
+        # JST基準で本日の開始時刻を計算
+        _jst = timezone(timedelta(hours=9))
+        _now_jst = datetime.now(_jst)
+        today = _now_jst.replace(
+            hour=0, minute=0, second=0, microsecond=0,
+        ).astimezone(timezone.utc)
+
         today_trades = (
             self._db.query(TradeRecord)
             .filter(
@@ -90,15 +93,46 @@ class MarketService:
         daily_pnl = sum(
             t.profit_loss or 0.0 for t in today_trades
         )
-        wins = sum(
-            1 for t in today_trades if (t.profit_loss or 0) > 0
+        daily_wins = sum(
+            1
+            for t in today_trades
+            if (t.profit_loss or 0) > 0
         )
-        total = len(today_trades)
-        win_rate = (wins / total * 100) if total > 0 else 0.0
+        daily_total = len(today_trades)
+        daily_win_rate = (
+            (daily_wins / daily_total * 100)
+            if daily_total > 0
+            else 0.0
+        )
 
-        # 週間・月間・全履歴の損益集計
-        week_start = today - timedelta(days=today.weekday())
-        month_start = today.replace(day=1)
+        # 全体勝率
+        all_closed = (
+            self._db.query(TradeRecord)
+            .filter(TradeRecord.is_open.is_(False))
+            .count()
+        )
+        all_wins = (
+            self._db.query(TradeRecord)
+            .filter(
+                TradeRecord.is_open.is_(False),
+                TradeRecord.profit_loss > 0,
+            )
+            .count()
+        )
+        total_win_rate = (
+            (all_wins / all_closed * 100)
+            if all_closed > 0
+            else 0.0
+        )
+
+        # 週間・月間・全履歴の損益集計（JST基準）
+        week_start = today - timedelta(
+            days=_now_jst.weekday(),
+        )
+        month_start = _now_jst.replace(
+            day=1, hour=0, minute=0, second=0,
+            microsecond=0,
+        ).astimezone(timezone.utc)
 
         weekly_pnl = self._db.query(
             func.coalesce(func.sum(TradeRecord.profit_loss), 0.0)
@@ -144,8 +178,9 @@ class MarketService:
             total_trades=int(total_trades_count),
             active_signals=0,
             open_positions=open_count,
-            today_trades=total,
-            win_rate=win_rate,
+            today_trades=daily_total,
+            win_rate=daily_win_rate,
+            total_win_rate=total_win_rate,
         )
 
     def get_positions(

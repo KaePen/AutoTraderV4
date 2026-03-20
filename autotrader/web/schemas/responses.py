@@ -117,7 +117,8 @@ class DashboardResponse(BaseModel):
         active_signals: アクティブシグナル数
         open_positions: オープンポジション数
         today_trades: 本日のトレード数
-        win_rate: 勝率
+        win_rate: 本日の勝率
+        total_win_rate: 全期間勝率
         portfolio_dd_pct: ポートフォリオDD(%)
         portfolio_dd_warning: DD>=3%警告
         portfolio_dd_emergency: DD>=5%緊急停止
@@ -136,6 +137,7 @@ class DashboardResponse(BaseModel):
     open_positions: int = 0
     today_trades: int = 0
     win_rate: float = 0.0
+    total_win_rate: float = 0.0
     # ポートフォリオDD状態
     portfolio_dd_pct: float = 0.0
     portfolio_dd_warning: bool = False
