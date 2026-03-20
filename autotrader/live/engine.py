@@ -1771,14 +1771,19 @@ class LiveTradingEngine:
         """
         # エントリー価格（実際のask/bid価格）
         is_buy = signal.signal_type == SignalType.BUY
+        entry_price = 0.0
         if entry_tick:
             entry_price = float(
                 entry_tick.get("ask", 0)
                 if is_buy
                 else entry_tick.get("bid", 0)
             )
-        else:
-            entry_price = 0.0
+        if entry_price <= 0:
+            logger.warning(
+                "[%s] entry_price取得失敗、PM登録スキップ",
+                self._active_symbol,
+            )
+            return
 
         # signal.stop_loss/take_profitはpips値 → 価格レベルに変換
         pip_size = self._get_pip_size(signal.symbol)
