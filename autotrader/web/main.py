@@ -284,6 +284,22 @@ async def lifespan(app: FastAPI):
     setup_event_bridge()
     logger.info("EventBus → WebSocketブリッジ登録完了")
 
+    # MT5ウィンドウ非表示（エンジン起動完了後に遅延実行）
+    hide_mt5 = os.environ.get(
+        "MT5_SHOW_WINDOW", "",
+    ).lower() not in ("1", "true", "yes")
+    if hide_mt5:
+        import asyncio
+
+        async def _hide_mt5_delayed() -> None:
+            await asyncio.sleep(3)
+            from autotrader.adapters.mt5.connection import (
+                _set_mt5_window_visibility,
+            )
+            await _set_mt5_window_visibility(visible=False)
+
+        asyncio.create_task(_hide_mt5_delayed())
+
     yield
 
     # シャットダウン
