@@ -26,9 +26,13 @@ MANIFEST
 venv/
 env/
 ENV/
+
+# 添付ファイル
 .venv
 .serena
+.taskmaster
 .ruff_cache
+.claude/worktrees/*
 
 # テスト・カバレッジ
 .pytest_cache/
@@ -51,7 +55,6 @@ logs/
 tmp/
 *.tmp
 *_done.txt
-.claude/worktrees/*
 
 # バックテスト結果
 results/
