@@ -5,10 +5,13 @@
 
 from __future__ import annotations
 
+from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Any
 from uuid import uuid4
+
+import numpy as np
 
 from autotrader.backtest.position_event_logger import (
     PositionEventLogger,
@@ -101,6 +104,24 @@ class SimulatorConfig:
     sl_exit_spread_enabled: bool = False
     # SL決済時のスプレッド適用係数（0.5=半額適用）
     sl_exit_spread_factor: float = 0.5
+
+    # --- ストレステスト用パラメータ（デフォルト無効） ---
+    # ① 約定系ストレス
+    # 追加固定スリッページ(pips)
+    slippage_extra_pips: float = 0.0
+    # ランダムスリッページ上限(pips)
+    slippage_random_max_pips: float = 0.0
+    # 約定失敗率(0.0~1.0)
+    fill_failure_rate: float = 0.0
+    # 部分約定率(0.0~1.0、1.0=全量約定)
+    partial_fill_ratio: float = 1.0
+    # ② 入力ノイズ
+    # エントリー追加遅延(本数)
+    entry_delay_bars: int = 0
+    # 価格ランダムノイズ(pips)
+    price_noise_pips: float = 0.0
+    # シグナルランダムスキップ率(0.0~1.0)
+    signal_skip_rate: float = 0.0
 
     @classmethod
     def from_preset(
@@ -251,6 +272,22 @@ class TradeSimulator:
         self._pending_consensus: tuple[float, float] | None = None
         self._pending_fundamental: object | None = None
         self._pending_trades: list[Trade] = []
+        # ストレステスト用RNG（再現性確保）
+        self._rng = np.random.default_rng(42)
+        # エントリー遅延キュー（entry_delay_bars > 0時に使用）
+        self._delay_queue: deque[
+            tuple[Signal, tuple[float, float] | None, object | None]
+        ] = deque()
+        # ストレス設定キャッシュ
+        self._stress_slippage_extra = (
+            self.config.slippage_extra_pips * self._pip_unit
+        )
+        self._stress_slippage_rnd_max = (
+            self.config.slippage_random_max_pips * self._pip_unit
+        )
+        self._stress_price_noise_max = (
+            self.config.price_noise_pips * self._pip_unit
+        )
         # セッション別スプレッド
         self._use_session_spread = self.config.use_session_spread
         if self._use_session_spread:
@@ -314,6 +351,9 @@ class TradeSimulator:
         self._pending_consensus = None
         self._pending_fundamental = None
         self._pending_trades = []
+        # ストレステスト用状態リセット
+        self._rng = np.random.default_rng(42)
+        self._delay_queue.clear()
         if self._pos_event_logger:
             self._pos_event_logger.reset()
 
@@ -343,9 +383,37 @@ class TradeSimulator:
         """
         state = self.state
         trades: list[Trade] = []
+
+        # ストレス: シグナルランダムスキップ
+        if (
+            signal is not None
+            and self.config.signal_skip_rate > 0
+            and self._rng.random() < self.config.signal_skip_rate
+        ):
+            signal = None
+
         sig_type = (
             signal.signal_type if signal else None
         )
+
+        # ストレス: エントリー遅延キュー処理
+        _delay = self.config.entry_delay_bars
+        if _delay > 0 and signal is not None:
+            # 新シグナルをキューに投入
+            self._delay_queue.append(
+                (signal, consensus_scores, fundamental_assessment),
+            )
+            # 遅延分待ってから取り出す
+            if len(self._delay_queue) > _delay:
+                _ds, _dc, _df = self._delay_queue.popleft()
+                signal = _ds
+                consensus_scores = _dc
+                fundamental_assessment = _df
+                sig_type = signal.signal_type
+            else:
+                # まだ遅延分溜まっていない
+                signal = None
+                sig_type = None
 
         # 前足からのpendingエントリーを今足のopenで約定
         if self._pending_signal is not None:
@@ -519,6 +587,25 @@ class TradeSimulator:
         ):
             _eff_max += self.config.bonus_max_positions
         if len(state.open_positions) < _eff_max:
+            # ストレス: 約定失敗
+            if (
+                self.config.fill_failure_rate > 0
+                and self._rng.random()
+                < self.config.fill_failure_rate
+            ):
+                return
+            # ストレス: 部分約定（volumeを縮小）
+            if self.config.partial_fill_ratio < 1.0:
+                _orig_lot = signal.lot or self.config.default_volume
+                signal = signal.model_copy(
+                    update={
+                        "lot": round(
+                            _orig_lot
+                            * self.config.partial_fill_ratio,
+                            2,
+                        ),
+                    },
+                )
             position = self._open_position(
                 signal, candle, at_open=True,
             )
@@ -1294,12 +1381,34 @@ class TradeSimulator:
         )
         half_spread = spread / 2
         base_price = candle.open if at_open else candle.close
+        # ストレス: 価格ノイズ
+        if self._stress_price_noise_max > 0:
+            base_price += self._rng.uniform(
+                -self._stress_price_noise_max,
+                self._stress_price_noise_max,
+            )
+        # ストレス: 追加スリッページ
+        extra_slip = self._stress_slippage_extra
+        if self._stress_slippage_rnd_max > 0:
+            extra_slip += self._rng.uniform(
+                0, self._stress_slippage_rnd_max,
+            )
         if signal_type == SignalType.BUY:
             # 買い：Ask価格（base + スプレッド半分 + スリッページ）
-            return base_price + half_spread + self._slippage_price
+            return (
+                base_price
+                + half_spread
+                + self._slippage_price
+                + extra_slip
+            )
         else:
             # 売り：Bid価格（base - スプレッド半分 - スリッページ）
-            return base_price - half_spread - self._slippage_price
+            return (
+                base_price
+                - half_spread
+                - self._slippage_price
+                - extra_slip
+            )
 
     def _get_exit_price(
         self,

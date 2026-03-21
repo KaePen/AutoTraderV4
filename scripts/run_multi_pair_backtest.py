@@ -596,6 +596,28 @@ def setup_pair_context(
         sl_exit_spread_factor=_bt_ovr.get(
             "sl_exit_spread_factor", 0.5,
         ),
+        # ストレステスト用パラメータ
+        slippage_extra_pips=_bt_ovr.get(
+            "slippage_extra_pips", 0.0,
+        ),
+        slippage_random_max_pips=_bt_ovr.get(
+            "slippage_random_max_pips", 0.0,
+        ),
+        fill_failure_rate=_bt_ovr.get(
+            "fill_failure_rate", 0.0,
+        ),
+        partial_fill_ratio=_bt_ovr.get(
+            "partial_fill_ratio", 1.0,
+        ),
+        entry_delay_bars=_bt_ovr.get(
+            "entry_delay_bars", 0,
+        ),
+        price_noise_pips=_bt_ovr.get(
+            "price_noise_pips", 0.0,
+        ),
+        signal_skip_rate=_bt_ovr.get(
+            "signal_skip_rate", 0.0,
+        ),
     )
     simulator = TradeSimulator(config=sim_config)
 
