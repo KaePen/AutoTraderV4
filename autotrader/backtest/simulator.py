@@ -123,6 +123,29 @@ class SimulatorConfig:
     # シグナルランダムスキップ率(0.0~1.0)
     signal_skip_rate: float = 0.0
 
+    def __post_init__(self) -> None:
+        """ストレステストパラメータのバリデーション"""
+        if not 0.0 <= self.fill_failure_rate <= 1.0:
+            raise ValueError(
+                "fill_failure_rate must be [0,1]: "
+                f"{self.fill_failure_rate}",
+            )
+        if not 0.0 < self.partial_fill_ratio <= 1.0:
+            raise ValueError(
+                "partial_fill_ratio must be (0,1]: "
+                f"{self.partial_fill_ratio}",
+            )
+        if not 0.0 <= self.signal_skip_rate <= 1.0:
+            raise ValueError(
+                "signal_skip_rate must be [0,1]: "
+                f"{self.signal_skip_rate}",
+            )
+        if self.entry_delay_bars < 0:
+            raise ValueError(
+                "entry_delay_bars must be >= 0: "
+                f"{self.entry_delay_bars}",
+            )
+
     @classmethod
     def from_preset(
         cls,
@@ -275,9 +298,17 @@ class TradeSimulator:
         # ストレステスト用RNG（再現性確保）
         self._rng = np.random.default_rng(42)
         # エントリー遅延キュー（entry_delay_bars > 0時に使用）
+        # 要素: (signal, consensus, fundamental, queued_bar)
         self._delay_queue: deque[
-            tuple[Signal, tuple[float, float] | None, object | None]
+            tuple[
+                Signal,
+                tuple[float, float] | None,
+                object | None,
+                int,
+            ]
         ] = deque()
+        # bar数カウンター（遅延計算用）
+        self._bar_count: int = 0
         # ストレス設定キャッシュ
         self._stress_slippage_extra = (
             self.config.slippage_extra_pips * self._pip_unit
@@ -354,6 +385,7 @@ class TradeSimulator:
         # ストレステスト用状態リセット
         self._rng = np.random.default_rng(42)
         self._delay_queue.clear()
+        self._bar_count = 0
         if self._pos_event_logger:
             self._pos_event_logger.reset()
 
@@ -396,24 +428,34 @@ class TradeSimulator:
             signal.signal_type if signal else None
         )
 
-        # ストレス: エントリー遅延キュー処理
+        # ストレス: エントリー遅延キュー処理（bar数ベース）
         _delay = self.config.entry_delay_bars
-        if _delay > 0 and signal is not None:
+        if _delay > 0:
             # 新シグナルをキューに投入
-            self._delay_queue.append(
-                (signal, consensus_scores, fundamental_assessment),
-            )
-            # 遅延分待ってから取り出す
-            if len(self._delay_queue) > _delay:
-                _ds, _dc, _df = self._delay_queue.popleft()
+            if signal is not None:
+                self._delay_queue.append(
+                    (
+                        signal, consensus_scores,
+                        fundamental_assessment,
+                        self._bar_count,
+                    ),
+                )
+                signal = None
+                sig_type = None
+            # delay分のbar経過したシグナルを取り出す
+            if (
+                self._delay_queue
+                and self._bar_count
+                - self._delay_queue[0][3] >= _delay
+            ):
+                _ds, _dc, _df, _ = (
+                    self._delay_queue.popleft()
+                )
                 signal = _ds
                 consensus_scores = _dc
                 fundamental_assessment = _df
                 sig_type = signal.signal_type
-            else:
-                # まだ遅延分溜まっていない
-                signal = None
-                sig_type = None
+        self._bar_count += 1
 
         # 前足からのpendingエントリーを今足のopenで約定
         if self._pending_signal is not None:
