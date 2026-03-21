@@ -34,8 +34,8 @@ JPY_SYMBOLS = [
 ]
 USD_SYMBOLS = ["EURUSD", "GBPUSD"]
 
-# IS期間
-YEARS = "2023-2025"
+# OOS期間（最適化バイアスのない条件で耐性を測る）
+YEARS = "2020-2022"
 
 # 基本マルチペア設定
 BASE_MULTI_PAIR_CONFIG = {
