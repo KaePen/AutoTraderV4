@@ -92,6 +92,45 @@ def _candles(n: int, start_price: float = 150.0) -> list[Candle]:
     return result
 
 
+class TestStressValidation:
+    """ストレスパラメータのバリデーションテスト"""
+
+    def test_fill_failure_rate_out_of_range(self) -> None:
+        """fill_failure_rate が [0,1] 範囲外でエラー"""
+        with pytest.raises(ValueError, match="fill_failure_rate"):
+            _base_config(fill_failure_rate=1.5)
+        with pytest.raises(ValueError, match="fill_failure_rate"):
+            _base_config(fill_failure_rate=-0.1)
+
+    def test_partial_fill_ratio_out_of_range(self) -> None:
+        """partial_fill_ratio が (0,1] 範囲外でエラー"""
+        with pytest.raises(ValueError, match="partial_fill_ratio"):
+            _base_config(partial_fill_ratio=0.0)
+        with pytest.raises(ValueError, match="partial_fill_ratio"):
+            _base_config(partial_fill_ratio=-0.5)
+
+    def test_signal_skip_rate_out_of_range(self) -> None:
+        """signal_skip_rate が [0,1] 範囲外でエラー"""
+        with pytest.raises(ValueError, match="signal_skip_rate"):
+            _base_config(signal_skip_rate=2.0)
+
+    def test_entry_delay_bars_negative(self) -> None:
+        """entry_delay_bars が負でエラー"""
+        with pytest.raises(ValueError, match="entry_delay_bars"):
+            _base_config(entry_delay_bars=-1)
+
+    def test_valid_boundary_values(self) -> None:
+        """境界値でエラーにならないこと"""
+        # 全てエラーなし
+        _base_config(fill_failure_rate=0.0)
+        _base_config(fill_failure_rate=1.0)
+        _base_config(partial_fill_ratio=0.01)
+        _base_config(partial_fill_ratio=1.0)
+        _base_config(signal_skip_rate=0.0)
+        _base_config(signal_skip_rate=1.0)
+        _base_config(entry_delay_bars=0)
+
+
 class TestStressDefaults:
     """ストレスパラメータのデフォルト値テスト"""
 
@@ -234,41 +273,63 @@ class TestSignalSkipRate:
 
 
 class TestEntryDelayBars:
-    """エントリー遅延のテスト"""
+    """エントリー遅延のテスト（bar数ベース）"""
 
     def test_entry_delay_3_bars(self) -> None:
-        """entry_delay_bars=3でシグナルから3本遅延後に約定
+        """entry_delay_bars=3でシグナルから3bar後にpending設定
 
-        遅延キューは新シグナル投入時にのみ取り出される。
-        delay=3の場合、4つ目のシグナルで最初のシグナルがpendingに設定。
+        bar 0: シグナル → キューに入る (queued_bar=0)
+        bar 1: シグナルなし、bar_count=1 - 0 = 1 < 3
+        bar 2: シグナルなし、bar_count=2 - 0 = 2 < 3
+        bar 3: シグナルなし、bar_count=3 - 0 = 3 >= 3 → pending
+        bar 4: pending約定
         """
         config = _base_config(entry_delay_bars=3)
         sim = TradeSimulator(config)
-        candles = _candles(12)
+        candles = _candles(8)
 
-        # 足0: シグナル1 → キューサイズ1（<= delay=3、取り出さない）
-        sig1 = _make_signal(SignalType.BUY, time=candles[0].time)
-        sim.process_candle(candles[0], sig1)
+        # 足0: シグナル → キューに入る
+        sig = _make_signal(SignalType.BUY, time=candles[0].time)
+        sim.process_candle(candles[0], sig)
         assert len(sim.state.open_positions) == 0
         assert sim._pending_signal is None
 
-        # 足1: シグナル2 → キューサイズ2
-        sig2 = _make_signal(SignalType.BUY, time=candles[1].time)
-        sim.process_candle(candles[1], sig2)
+        # 足1: まだ1bar経過（< 3）
+        sim.process_candle(candles[1])
         assert sim._pending_signal is None
 
-        # 足2: シグナル3 → キューサイズ3
-        sig3 = _make_signal(SignalType.BUY, time=candles[2].time)
-        sim.process_candle(candles[2], sig3)
+        # 足2: 2bar経過（< 3）
+        sim.process_candle(candles[2])
         assert sim._pending_signal is None
 
-        # 足3: シグナル4 → キューサイズ4 > delay=3 → sig1が取り出されpendingに
-        sig4 = _make_signal(SignalType.BUY, time=candles[3].time)
-        sim.process_candle(candles[3], sig4)
+        # 足3: 3bar経過（>= 3）→ シグナルがpendingに
+        sim.process_candle(candles[3])
         assert sim._pending_signal is not None
 
         # 足4: pendingが約定
         sim.process_candle(candles[4])
+        assert len(sim.state.open_positions) == 1
+
+    def test_entry_delay_1_bar(self) -> None:
+        """entry_delay_bars=1で1bar後にpending設定
+
+        通常の次足約定に加えてさらに1bar遅延 = 合計2bar後に約定。
+        """
+        config = _base_config(entry_delay_bars=1)
+        sim = TradeSimulator(config)
+        candles = _candles(6)
+
+        sig = _make_signal(SignalType.BUY, time=candles[0].time)
+        sim.process_candle(candles[0], sig)
+        # キューに入った、まだpendingではない
+        assert sim._pending_signal is None
+
+        # 足1: 1bar経過 → pending設定
+        sim.process_candle(candles[1])
+        assert sim._pending_signal is not None
+
+        # 足2: pending約定
+        sim.process_candle(candles[2])
         assert len(sim.state.open_positions) == 1
 
     def test_entry_delay_0_immediate(self) -> None:
