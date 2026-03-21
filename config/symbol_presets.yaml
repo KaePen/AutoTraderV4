@@ -371,6 +371,9 @@ symbols:
 # --- マルチ通貨ペア ポートフォリオ設定 ---
 # ポートフォリオ制約のみ（base_risk_pct/consensus_threshold は個別プリセットの責務）
 # 8ペア構成: 6JPY + EURUSD + GBPUSD（信号密度・品質で選定）
+# 検証結果 (2026-03-21, PR #763, spread p95閾値更新後):
+#   IS(2023-2025): PF 3.52, Sharpe 7.24, DD 1.79%, WR 86.0%, Net 3,467K, 3,022 trades
+#   OOS(2020-2022): PF 3.34, Sharpe 8.03, DD 1.77%, WR 84.9%, Net 2,522K, 2,303 trades
 multi_pair:
   global_max_positions: 4
   per_pair_max_positions: 1
