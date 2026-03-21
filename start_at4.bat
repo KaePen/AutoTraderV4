@@ -9,4 +9,4 @@ echo   AutoTraderV4 Starting...
 echo   http://localhost:8000
 echo ========================================
 
-uv run python -m autotrader.web
+uv run python -m autotrader.web --auto-trade
