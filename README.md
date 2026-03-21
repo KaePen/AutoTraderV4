@@ -1,166 +1,307 @@
 # AutoTraderV4
 
-FX自動トレードシステム — MetaTrader 5連携、マルチタイムフレーム分析、テクニカル+ファンダメンタル統合戦略
-
-## 概要
-
-AutoTraderV4は、外国為替（FX）取引を自動化するPythonベースのトレーディングシステムです。
-M1からD1まで8つの時間足を同時に分析し、コンセンサススコアリングでエントリー判断を行います。
-バックテストとリアルトレードで**同一のトレードロジック**を共有するアーキテクチャにより、
-バックテスト結果とリアルトレードの乖離を最小化しています。
-
-### 主要機能
-
-- **マルチタイムフレーム分析**: M1, M5, M15, M30, H1, H4, H8, D1 を並列評価
-- **テクニカル指標**: MACD, RSI, ADX, ストキャスティクス, ボリンジャーバンド, SMC（スマートマネーコンセプト）
-- **市場構造分析**: BOS/CHoCH検出, スイングハイ/ロー, 流動性ゾーン
-- **ファンダメンタル統合**: 経済指標イベントのリスク評価・LLMニュースセンチメント分析
-- **月単位並列バックテスト**: 1月=1CPUのアトミック並列実行 + Parquetインジケータキャッシュ
-- **リスク管理**: ATRベースの動的SL/TP、HardGuard/SoftGuardの多層防御
-- **マルチペア運用**: 8通貨ペア同時運用（6 JPY + 2 USD）、共有エクイティ管理
-
-### 対応通貨ペア
-
-| ペア | 区分 | 状態 |
-|------|------|------|
-| USDJPY, EURJPY, GBPJPY, AUDJPY, CADJPY, CHFJPY | JPY | 運用中 |
-| EURUSD, GBPUSD | USD | 運用中 |
-| AUDUSD, NZDUSD, USDCHF, USDCAD | USD | 定義済み（無効） |
+FX自動トレードシステム — MetaTrader 5連携、マルチタイムフレーム分析、8通貨ペア同時運用
 
 ---
 
-## セットアップ
+## 1. はじめに
 
-### 前提条件
+AutoTraderV4は、外国為替（FX）取引を自動化するPythonベースのトレーディングシステムです。
+M1からD1まで8つの時間足を同時に分析し、コンセンサススコアリングでエントリー判断を行います。
 
-- Python 3.12以上
-- [uv](https://github.com/astral-sh/uv) パッケージマネージャー
-- MetaTrader 5（リアルトレード・データエクスポート時。Windows専用）
+### 特徴
 
-### インストール
+- **8通貨ペア同時運用**: USDJPY, EURJPY, GBPJPY, AUDJPY, CADJPY, CHFJPY, EURUSD, GBPUSD
+- **マルチタイムフレーム分析**: M1〜D1の8時間足を並列評価
+- **テクニカル指標**: MACD, RSI, ADX, ストキャスティクス, ボリンジャーバンド, SMC
+- **多層リスク管理**: ATRベース動的SL/TP、HardGuard/SoftGuardの二重防御
+- **バックテスト/リアル共通ロジック**: 同一コードで検証と運用が可能
+
+---
+
+## 2. 環境準備
+
+### 2.1 必要なソフトウェア
+
+| ソフトウェア | バージョン | 用途 |
+|-------------|-----------|------|
+| **Python** | 3.12以上 | ボット本体 |
+| **uv** | 最新 | Pythonパッケージ管理 |
+| **Git** | 最新 | ソースコード管理 |
+| **MetaTrader 5** | 最新 | FXブローカー接続（Windows専用） |
+
+### 2.2 Python のインストール
+
+公式サイトからPython 3.12以上をダウンロード・インストールしてください。
+
+https://www.python.org/downloads/
+
+インストール時に **「Add Python to PATH」にチェック** を入れてください。
+
+確認:
+```bash
+python --version
+# Python 3.12.x が表示されればOK
+```
+
+### 2.3 uv のインストール
+
+`uv` はPythonのパッケージマネージャーです。pipより高速に依存関係を解決します。
+
+```bash
+# Windows (PowerShell)
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+
+# macOS / Linux
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+確認:
+```bash
+uv --version
+```
+
+### 2.4 リポジトリの取得
 
 ```bash
 git clone https://github.com/KaePen/AutoTraderV4.git
 cd AutoTraderV4
-
-# 基本インストール
-uv sync
-
-# MT5連携を含む
-uv sync --extra mt5
-
-# MT5 + ライブ機能（ニュース収集等）
-uv sync --extra mt5 --extra live
-
-# 全機能（mt5, live, fast, gdelt, bigquery, dev）
-uv sync --all-extras
-
-# 開発用（pytest, ruff, mypy等）
-uv sync --extra dev
 ```
 
-### extras 一覧
+### 2.5 依存パッケージのインストール
 
-| extras名 | 内容 |
-|---------|------|
-| `mt5` | MetaTrader5, pywin32（Windows専用） |
-| `live` | feedparser（RSSニュース取得） |
-| `fast` | numba（JITコンパイル高速化） |
-| `gdelt` | requests（GDELTニュース取得） |
-| `bigquery` | google-cloud-bigquery（GDELT BigQuery） |
-| `dev` | pytest, mypy, ruff, hypothesis |
+```bash
+# 基本インストール（ライブトレードに必要な最小構成）
+uv sync
 
-### 環境変数
+# MT5連携を含む（推奨）
+uv sync --extra mt5
 
-`.env` ファイルをプロジェクトルートに作成:
+# 全機能
+uv sync --all-extras
+```
+
+#### extras 一覧
+
+| extras名 | 内容 | いつ必要か |
+|---------|------|-----------|
+| `mt5` | MetaTrader5, pywin32 | リアルトレード時（Windows専用） |
+| `live` | feedparser | RSSニュース取得 |
+| `fast` | numba | JITコンパイル高速化 |
+| `gdelt` | requests | GDELTニュース取得 |
+| `bigquery` | google-cloud-bigquery | GDELT BigQuery |
+| `dev` | pytest, mypy, ruff | 開発・テスト |
+
+### 2.6 MetaTrader 5 の準備
+
+1. ブローカーからMT5をダウンロード・インストール
+2. デモまたはリアル口座を開設
+3. MT5にログインし、対象通貨ペアのチャートを開く
+4. ツール → オプション → Expert Advisors で「アルゴリズム取引を許可」を有効化
+
+### 2.7 環境変数の設定（任意）
+
+`.env` ファイルをプロジェクトルートに作成すると、起動時に自動読み込みされます:
 
 ```env
-# トレーディングモード
-TRADING_MODE=BACKTEST
+# MT5接続情報
+MT5_LOGIN=123456
+MT5_PASSWORD=your_password
+MT5_SERVER=YourBroker-Server
+MT5_TERMINAL_PATH=C:/Program Files/MetaTrader 5/terminal64.exe
 
-# 対象通貨ペア
-SYMBOL=USDJPY
+# 自動トレードON/OFF
+AUTOTRADER_AUTO_TRADE=false
 
-# データベース
-DATABASE_URL=sqlite:///data/autotrader.db
-LOCAL_DATABASE_URL=sqlite:///data/local_state.db
-
-# Ollama LLM（ファンダメンタル分析に使用）
-OLLAMA_HOST=http://localhost:11434
-OLLAMA_MODEL=llama3.2
-
-# リスク管理
-MAX_DAILY_LOSS_PCT=5.0
-MAX_POSITION_COUNT=2
-MIN_MARGIN_RATIO=150.0
-
-# ログ
+# ログレベル
 LOG_LEVEL=INFO
 ```
 
+> **注意**: `.env` ファイルにはパスワードが含まれます。gitにコミットしないでください（`.gitignore` で除外済み）。
+
 ---
 
-## アーキテクチャ
+## 3. 起動方法
 
-バックテストとリアルトレードは**同一のトレードロジック**を共有します:
+### 3.1 かんたん起動（推奨）
 
-```
-バックテスト:   CSV --> 前処理 --> [共通トレードロジック] --> メトリクス出力
-リアルトレード: MT5 --> [共通トレードロジック] --> MT5注文実行
-```
-
-### レイヤー構造
+プロジェクトルートの `start_at4.bat` をダブルクリックするだけで起動できます。
 
 ```
-core/               共通エンティティ・インターフェース（Signal, Trade, Position, Candle）
-calculator/         指標計算（テクニカル・マーケット構造）  ← バックテスト・リアル共用
-constraint/         トレード制約（HardGuard, SoftGuard）   ← バックテスト・リアル共用
-decision/           シグナル生成・ポジション管理           ← バックテスト・リアル共用
-backtest/           データI/O・シミュレーション実行・メトリクス
-live/               MT5接続・リアルタイム実行
-adapters/           外部サービスアダプタ（MT5, DB, Ollama, ファンダメンタル）
-config/             設定管理
-web/                FastAPI ダッシュボード
+AutoTraderV4/
+  start_at4.bat    ← これをダブルクリック
 ```
 
-### シグナル生成パイプライン
+コマンドプロンプトが開き、ログが表示されます。
+起動後、ブラウザで http://localhost:8000 にアクセスしてダッシュボードを確認できます。
 
-```
-各時間足データ
-  │
-TimeframeEvaluator（時間足別評価）
-  ├─ テクニカル指標: RSI, MACD, ADX, Stoch, BB
-  ├─ 市場構造: BOS/CHoCH, スイングH/L, 流動性
-  └─ スコア: -1.0 ~ +1.0
-  │
-ModeAwareScoreConsensus（マルチTF統合）
-  ├─ 役割別重み付け: Entry / Confirmation / Higher TF
-  ├─ 品質フィルター: ADX強度、RSI過熱除外
-  └─ コンセンサススコア算出
-  │
-FilterManager + HardGuard / SoftGuard（多層フィルタリング）
-  ├─ TrendFilter, VolatilityFilter, SessionFilter, ADXFilter, EventFilter
-  ├─ HardGuard: 証拠金不足 / 日次損失上限 / 最大ポジション超過 / 時間外
-  └─ SoftGuard: スプレッド拡大 / セッション非推奨帯 / ボラ異常（ペナルティ減算）
-  │
-Signal（エントリー判断）
+停止するにはコマンドプロンプトで `Ctrl+C` を押してください。
+
+### 3.2 コマンドラインから起動
+
+```bash
+cd AutoTraderV4
+uv run python -m autotrader.web
 ```
 
-### ポジション管理
+### 3.3 MT5接続付きで起動
 
-`PositionManager` が提供する機能:
+環境変数でMT5の接続情報を指定して起動します:
 
-| 機能 | 説明 |
+```bash
+MT5_LOGIN=123456 \
+MT5_PASSWORD=your_password \
+MT5_SERVER=YourBroker-Server \
+MT5_TERMINAL_PATH="C:/Program Files/MetaTrader 5/terminal64.exe" \
+AUTOTRADER_AUTO_TRADE=true \
+uv run python -m autotrader.web
+```
+
+または `.env` ファイルに記載しておけば、引数なしで起動できます。
+
+### 3.4 Web UI
+
+起動後、以下のURLでダッシュボードにアクセスできます:
+
+| URL | 内容 |
+|-----|------|
+| http://localhost:8000 | メインダッシュボード |
+| http://localhost:8000/api/v1/health | ヘルスチェック |
+
+#### 主要エンドポイント
+
+| パス | 説明 |
 |------|------|
-| 建値移動 | 1R到達で損益分岐点にSL移動 |
-| 部分決済 | 0.5R / 1R / 2R で段階的に利益確保 |
-| トレーリングSL | ATRベースの動的SL追従（2段階） |
-| 時間決済 | 長時間停滞ポジションの自動撤退 |
-| コンセンサス逆転Exit | 反対シグナル発生時の決済 |
+| `/` | ダッシュボード画面 |
+| `/api/v1/dashboard` | 口座情報・サマリー |
+| `/api/v1/signals` | シグナル一覧 |
+| `/api/v1/positions` | オープンポジション |
+| `/api/v1/trades` | 取引履歴 |
+| `/api/v1/settings` | パラメータ設定（GET/PUT） |
+| `/ws/market/{symbol}` | 市場データWebSocket |
+| `/ws/dashboard` | ダッシュボードWebSocket |
+
+#### Web UI 環境変数
+
+| 変数名 | デフォルト | 説明 |
+|--------|-----------|------|
+| `AUTOTRADER_WEB_HOST` | `0.0.0.0` | ホスト |
+| `AUTOTRADER_WEB_PORT` | `8000` | ポート |
+| `AUTOTRADER_WEB_DEBUG` | `false` | デバッグモード |
 
 ---
 
-## バックテスト
+## 4. ファイル構造
+
+```
+AutoTraderV4/
+├── start_at4.bat               # ワンクリック起動バッチ
+├── pyproject.toml               # プロジェクト定義・依存関係
+├── config/
+│   ├── symbol_presets.yaml      # 通貨ペア別パラメータ（SSOT）
+│   ├── live_trading.yaml        # ライブトレード設定
+│   └── accounts.yaml            # MT5アカウント情報
+│
+├── autotrader/                  # === メインパッケージ ===
+│   ├── core/                    # 共通エンティティ・インターフェース
+│   ├── calculator/              # 指標計算（バックテスト・リアル共通）
+│   ├── constraint/              # トレード制約（HardGuard/SoftGuard）
+│   ├── decision/unified/        # シグナル生成・ポジション管理
+│   ├── backtest/                # バックテスト実行基盤
+│   ├── live/                    # リアルトレード実行基盤
+│   ├── adapters/                # 外部サービスアダプタ（MT5, DB, LLM）
+│   ├── web/                     # FastAPI Web UI
+│   └── config/                  # 設定管理
+│
+├── scripts/                     # ユーティリティスクリプト
+├── tests/                       # テストコード
+└── .env                         # 環境変数（git管理外）
+```
+
+### アーキテクチャの特徴
+
+バックテストとリアルトレードは**同一のトレードロジック**を共有しています:
+
+```
+バックテスト:   CSV → 前処理 → [共通ロジック] → メトリクス出力
+リアルトレード: MT5 →          [共通ロジック] → MT5注文実行
+```
+
+`calculator/`, `constraint/`, `decision/` の3層はバックテスト・リアルの両方から呼び出されます。
+これにより、バックテスト結果とリアルトレードの乖離を最小化しています。
+
+---
+
+## 5. ボットの性能
+
+### 8ペアマルチバックテスト結果
+
+初期資金100万円、2020〜2025年のM1データで検証した結果です。
+
+#### インサンプル（IS: 2023-2025）
+
+| 指標 | 値 |
+|------|-----|
+| プロフィットファクター | 3.52 |
+| シャープレシオ | 7.24 |
+| 最大ドローダウン | 1.79% |
+| 勝率 | 86.0% |
+| 純利益 | +3,467,000円 |
+| 取引回数 | 3,022回 |
+
+#### アウトオブサンプル（OOS: 2020-2022）
+
+| 指標 | 値 |
+|------|-----|
+| プロフィットファクター | 3.34 |
+| シャープレシオ | 8.03 |
+| 最大ドローダウン | 1.77% |
+| 勝率 | 84.9% |
+| 純利益 | +2,522,000円 |
+| 取引回数 | 2,303回 |
+
+#### スプレッドストレステスト（IS 2023-2025）
+
+スプレッドを通常の1〜3倍に拡大した場合の耐性テストです:
+
+| スプレッド倍率 | PF | 最大DD | 純利益 |
+|--------------|-----|--------|--------|
+| x1.0（通常） | 3.08 | 2.15% | 3.48M |
+| x1.5 | 2.71 | 2.28% | 3.02M |
+| x2.0 | 2.19 | 4.01% | 2.32M |
+| x3.0 | 1.54 | 4.28% | 1.19M |
+
+> スプレッド3倍でもPF 1.54（利益 > 損失）を維持しています。
+
+### 運用構成
+
+| 項目 | 設定値 |
+|------|--------|
+| 対象ペア | 8ペア（6 JPY + 2 USD） |
+| 最大同時ポジション | 4 |
+| JPY同方向上限 | 3ペアまで |
+| 1トレードリスク | 0.5%（DD 2%目標） |
+| コンセンサス閾値 | 18.0 |
+
+---
+
+## 6. 通貨ペア別設定
+
+`config/symbol_presets.yaml` で通貨ペアごとのパラメータを一元管理しています:
+
+| カテゴリ | パラメータ例 |
+|---------|------------|
+| 基本 | `pip_value`, `pip_unit`, `spread_pips`, `slippage_pips` |
+| SL/TP | `default_sl_pips`, `default_tp_pips` |
+| リスク | `base_risk_pct`, `max_positions` |
+| シグナル | `consensus_threshold`, `bca_min_edge` |
+| ポジション管理 | `trailing_start_r`, `partial_close_1r_ratio` |
+
+バックテストでもリアルでも同じ `get_preset("USDJPY")` で取得します。
+
+---
+
+## 7. バックテスト
 
 ### キューランナー（推奨）
 
@@ -170,46 +311,15 @@ Signal（エントリー判断）
 uv run python scripts/backtest_queue_runner.py --cpu-threads 12
 ```
 
-キューファイル `backtest_queue.json` にジョブを記述して投入:
+キューファイルにジョブを記述して投入:
 
 ```json
 {
   "jobs": [
     {
-      "id": "TEST-USDJPY",
       "symbol": "USDJPY",
       "years": "2020-2025",
-      "description": "USDJPY検証",
-      "overrides": {
-        "bot": { "consensus_threshold": 17.0 },
-        "pm":  { "trailing_start_r": 1.5 },
-        "backtest": { "spread_multiplier": 1.0 }
-      }
-    }
-  ]
-}
-```
-
-マルチペアジョブ:
-
-```json
-{
-  "jobs": [
-    {
-      "id": "multi-8pair-T1",
-      "type": "multi_pair",
-      "symbols": ["USDJPY", "EURJPY", "GBPJPY", "AUDJPY", "CADJPY", "CHFJPY", "EURUSD", "GBPUSD"],
-      "years": "2023-2025",
-      "description": "8ペア統合テスト",
-      "multi_pair_config": {
-        "name": "8PAIR-T1",
-        "global_max_positions": 8,
-        "per_pair_max_positions": 1,
-        "global_max_exposure_lot": 12.0,
-        "base_risk_pct": 0.004,
-        "consensus_threshold": 17.0,
-        "spread_multiplier": 1.0
-      }
+      "description": "USDJPY検証"
     }
   ]
 }
@@ -219,23 +329,13 @@ uv run python scripts/backtest_queue_runner.py --cpu-threads 12
 
 | コマンド | 動作 |
 |---------|------|
-| `status` | 稼働状態・CPU使用数・各ジョブ進捗を表示 |
-| `pause` | 新規タスク取得を一時停止 |
-| `resume` | 一時停止解除 |
-| `stop` | 全タスク停止 + completed_idsクリア |
-| `cpu N` | CPUスレッド数を動的変更 |
-| `quit` | 全停止してランナー終了 |
-
-#### 実行フロー
-
-1. 全TF×全年のインジケータを事前計算（`PrecomputeEngine`、Parquetキャッシュ）
-2. 年×月の全組み合わせをタスクキューに投入（1月=1CPU）
-3. 月完了時にチェックポイント保存（`month_results/`）→ 途中再開可能
-4. 全月完了 → ジョブ集約結果を `backtest_results/{result_id}.json` に出力
+| `status` | 稼働状態・進捗を表示 |
+| `pause` / `resume` | 一時停止 / 再開 |
+| `stop` | 全タスク停止 |
+| `cpu N` | CPUスレッド数を変更 |
+| `quit` | ランナー終了 |
 
 ### 直接実行（開発・デバッグ用）
-
-コード変更時の動作確認に限り直接実行を許可:
 
 ```bash
 # シングルペア
@@ -243,266 +343,26 @@ uv run python scripts/run_backtest.py --symbol USDJPY --years 2023-2025
 
 # マルチペア
 uv run python scripts/run_multi_pair_backtest.py --tests R1
-
-# ウォークフォワード検証
-uv run python scripts/run_backtest.py --walk-forward --years 2015-2025
-
-# 診断モード
-uv run python scripts/run_backtest.py --diagnose --years 2023
-```
-
-#### 主要引数（run_backtest.py）
-
-| 引数 | デフォルト | 説明 |
-|------|-----------|------|
-| `--symbol` | `USDJPY` | 通貨ペア |
-| `--years` | `2020-2024` | 年範囲（例: `2020-2025`） |
-| `--start-date` / `--end-date` | - | 日付範囲（yearsより優先） |
-| `-tf, --timeframe` | `M15` | 基準時間足 |
-| `--initial-balance` | `1,000,000` | 初期残高（JPY） |
-| `--risk-pct` | `0.04` | 基本リスク率 |
-| `--consensus-threshold` | `8.0` | コンセンサス閾値 |
-| `--walk-forward` | - | ウォークフォワード検証 |
-| `--diagnose` | - | 診断モード |
-| `--fundamental` | - | 経済イベントデータ使用 |
-| `--sequential` | - | シーケンシャル実行（デバッグ用） |
-
-### 結果出力
-
-| パス | 内容 |
-|------|------|
-| `backtest_results/{result_id}.json` | ジョブ集約結果（全年統合） |
-| `month_results/{result_id}/` | 月別チェックポイント |
-
-結果にはRichライブラリによるカラーテーブルで以下を表示:
-総取引数、勝率、非敗率、プロフィットファクター、純利益、最大ドローダウン、シャープレシオ、年別詳細
-
-### データ準備
-
-チャートデータはMT5からエクスポートしたタブ区切りCSVを使用:
-
-```
-data/{SYMBOL}/chart/
-  USDJPY_M1_20100104_20251231.csv
-  USDJPY_M5_20100104_20251231.csv
-  USDJPY_M15_20100104_20251231.csv
-  USDJPY_H1_20100104_20251231.csv
-  USDJPY_H4_20100104_20251231.csv
-  USDJPY_D1_20100104_20251231.csv
-```
-
-データディレクトリは `get_data_dir()` で自動検出されます（デフォルト: プロジェクトルートの `data/`）。
-
----
-
-## Web UI
-
-FastAPI + Jinja2 によるダッシュボードで、リアルタイムの監視・制御を行います。
-
-### 起動
-
-```bash
-# 標準起動（ポート8000）
-uv run python -m autotrader.web
-
-# 開発モード（自動リロード）
-uv run uvicorn autotrader.web.main:app --host 0.0.0.0 --port 8000 --reload
-```
-
-起動後: http://localhost:8000
-
-### MT5接続付きで起動
-
-```bash
-MT5_LOGIN=123456 \
-MT5_PASSWORD=your_password \
-MT5_SERVER=YourBroker-Server \
-MT5_TERMINAL_PATH="C:/Program Files/MetaTrader 5/terminal64.exe" \
-AUTOTRADER_SYMBOL=USDJPY \
-AUTOTRADER_AUTO_TRADE=true \
-uv run python -m autotrader.web
-```
-
-### バックテストWeb UI
-
-キューランナーの状態監視・制御用の別ダッシュボード:
-
-```bash
-uv run python scripts/backtest_web_ui.py --port 8888
-```
-
-### Web UI 環境変数
-
-| 変数名 | デフォルト | 説明 |
-|--------|-----------|------|
-| `AUTOTRADER_WEB_HOST` | `0.0.0.0` | ホスト |
-| `AUTOTRADER_WEB_PORT` | `8000` | ポート |
-| `AUTOTRADER_WEB_DEBUG` | `false` | デバッグモード |
-| `AUTOTRADER_WEB_WS_HEARTBEAT_INTERVAL` | `30` | WebSocketハートビート間隔（秒） |
-
-### 主要エンドポイント
-
-| パス | 説明 |
-|------|------|
-| `/` | ダッシュボード画面 |
-| `/api/v1/health` | ヘルスチェック |
-| `/api/v1/dashboard` | 口座情報・サマリー |
-| `/api/v1/signals` | シグナル一覧 |
-| `/api/v1/positions` | オープンポジション |
-| `/api/v1/trades` | 取引履歴 |
-| `/api/v1/indicators/{symbol}/{timeframe}` | 指標スナップショット |
-| `/api/v1/candles/{symbol}/{timeframe}` | ローソク足データ |
-| `/api/v1/settings` | パラメータ設定（GET/PUT） |
-| `/api/v1/trading/mt5/connect` | MT5接続（POST） |
-| `/ws/market/{symbol}` | 市場データWebSocket |
-| `/ws/signals` | シグナルWebSocket |
-| `/ws/dashboard` | ダッシュボードWebSocket |
-
----
-
-## 通貨ペア別設定
-
-`config/symbol_presets.yaml` で通貨ペアごとにパラメータを一元管理（Single Source of Truth）:
-
-| カテゴリ | パラメータ例 |
-|---------|------------|
-| 基本 | `pip_value`, `pip_unit`, `spread_pips`, `slippage_pips` |
-| SL/TP | `default_sl_pips`, `default_tp_pips` |
-| リスク | `base_risk_pct`, `max_risk_pct_abs`, `max_positions` |
-| シグナル | `consensus_threshold`, `macd_slope_deadzone`等のオーバーライド |
-| ポジション管理 | `trailing_start_r`, `partial_1r_ratio`等 |
-
-バックテストでもリアルでも同じ `get_preset("USDJPY")` で取得します。
-
----
-
-## スクリプト一覧
-
-### バックテスト
-
-| スクリプト | 説明 |
-|-----------|------|
-| `backtest_queue_runner.py` | キューランナー（月単位並列、常駐プロセス） |
-| `backtest_web_ui.py` | キューランナーWeb UI（状態監視・制御） |
-| `run_backtest.py` | シングルペアバックテスト（直接実行） |
-| `run_multi_pair_backtest.py` | マルチペアバックテスト（共有エクイティ） |
-| `analyze_whatif.py` | What-If分析（ブロックシグナルの機会損失定量化） |
-
-### 運用
-
-| スクリプト | 説明 |
-|-----------|------|
-| `pr_watcher.py` | PR自動マージ・worktree掃除デーモン |
-| `mt5/CalendarExporter.mq5` | MT5経済カレンダーエクスポート（MQL5） |
-
----
-
-## プロジェクト構造
-
-```
-AutoTraderV4/
-  autotrader/                     # メインパッケージ
-    core/                         # 共通エンティティ・インターフェース
-      entities.py                 #   Signal, Trade, Position, Candle
-      enums.py                    #   列挙型（Direction, Timeframe等）
-      interfaces/                 #   DataProvider, TradeExecutor, Guard
-      diagnostics.py              #   診断データ構造
-    calculator/                   # 指標計算（バックテスト・リアル共通）
-      technical/                  #   トレンド, モメンタム, ボラティリティ
-        batch.py                  #   バッチ計算（全TF一括）
-      market_structure/           #   BOS/CHoCH, スイング, 流動性
-      features/                   #   レジーム, MTF整合, ダイバージェンス
-    constraint/                   # トレード制約
-      hard_guard.py               #   絶対禁止条件
-      soft_guard.py               #   ペナルティ条件
-      filters/                    #   トレンド, ボラ, セッション, ADX, イベント
-    decision/unified/             # シグナル生成・ポジション管理
-      trade_bot.py                #   UnifiedTradeBot（メイン）
-      mode_aware_consensus.py     #   マルチTFコンセンサス
-      position_manager.py         #   トレーリング・建値・部分決済
-      config.py                   #   UnifiedBotConfig
-    backtest/                     # バックテスト実行基盤
-      engine.py                   #   バックテストエンジン本体
-      simulator.py                #   TradeSimulator
-      runner.py                   #   BacktestRunner
-      month_runner.py             #   月単位並列実行
-      year_runner.py              #   年単位実行管理
-      walk_forward.py             #   ウォークフォワード検証
-      metrics.py                  #   パフォーマンス指標計算
-      metrics_aggregator.py       #   複数期間メトリクス集計
-      csv_data_provider.py        #   CSVデータ提供
-      whatif_tracker.py           #   What-If分析用追跡
-      config.py                   #   バックテスト固有設定
-    live/                         # リアルトレード実行基盤
-      engine.py                   #   LiveTradingEngine
-      engine_manager.py           #   EngineManager（マルチシンボル）
-      data_feed.py                #   リアルタイムデータフィード
-      order_service.py            #   注文実行サービス
-      position_sync.py            #   MT5⇔DB同期
-      tick_entry_optimizer.py     #   M1ティックエントリー最適化
-      fundamental_service.py      #   ファンダメンタルリアルタイム取得
-    adapters/                     # 外部サービスアダプタ
-      mt5/                        #   MT5接続・データ・注文
-      fundamental/                #   経済指標・ニュース・LLM分析
-        exchange_calendar_provider.py  # 取引所カレンダー（exchange-calendars）
-        forex_factory.py          #   ForexFactory経済指標
-        collector.py              #   データ収集統括
-      ollama/                     #   ローカルLLMクライアント
-      database/                   #   SQLAlchemy DB
-    web/                          # FastAPI Web UI
-      routers/                    #   APIルーター群
-      templates/                  #   Jinja2 HTMLテンプレート
-      websocket/                  #   WebSocketハンドラ
-      auth/                       #   JWT認証
-      middleware/                 #   HTTPSリダイレクト等
-    config/                       # 設定管理
-      settings.py                 #   環境変数読み込み
-      trading_params.py           #   SymbolPreset・get_preset()
-      config_loader.py            #   YAML設定ローダー
-  config/                         # YAML設定ファイル
-    symbol_presets.yaml           #   通貨ペア別パラメータ（SSOT）
-    live_trading.yaml             #   本番トレード設定
-    demo_trading.yaml             #   デモトレード設定
-    accounts.yaml                 #   MT5アカウント情報
-  scripts/                        # 実行スクリプト
-  tests/                          # テスト
-    golden/                       #   回帰テスト
-    unit/                         #   ユニットテスト
 ```
 
 ---
 
-## テスト
+## 8. 開発
+
+### テスト
 
 ```bash
-# 全テスト実行（カバレッジ付き）
-uv run pytest
-
-# 詳細出力
-uv run pytest -v
-
-# HTMLカバレッジレポート
-uv run pytest --cov=autotrader --cov-report=html
-
-# 特定ディレクトリ
-uv run pytest tests/unit/backtest/
-uv run pytest tests/unit/decision/
-
-# 回帰テスト
-uv run pytest tests/golden/
+uv run pytest                    # 全テスト実行
+uv run pytest -v                 # 詳細出力
+uv run pytest tests/unit/        # ユニットテストのみ
 ```
 
-## 開発
+### コード品質
 
 ```bash
-# リンター
-uv run ruff check autotrader/
-
-# フォーマッター
-uv run ruff format autotrader/
-
-# 型チェック
-uv run mypy autotrader/
+uv run ruff check autotrader/    # リンター
+uv run ruff format autotrader/   # フォーマッター
+uv run mypy autotrader/          # 型チェック
 ```
 
 ---
