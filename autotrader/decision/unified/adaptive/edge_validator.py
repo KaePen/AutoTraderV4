@@ -21,11 +21,18 @@ logger = logging.getLogger(__name__)
 
 
 class EdgeAlertLevel(Enum):
-    """エッジアラートレベル"""
+    """エッジアラートレベル
+
+    OK → INFO → WARNING → STOP → CRITICAL の5段階。
+    WARNING: ロット縮小（防御モード）
+    STOP: 一時停止（壊れる前に止める）
+    CRITICAL: サーキットブレーカー発動
+    """
 
     OK = "ok"
     INFO = "info"
     WARNING = "warning"
+    STOP = "stop"
     CRITICAL = "critical"
 
 
@@ -33,31 +40,43 @@ class EdgeAlertLevel(Enum):
 class EdgeValidatorConfig:
     """エッジ検定設定
 
+    5段階アラート: OK → INFO → WARNING → STOP → CRITICAL
+    デュアルウィンドウ: 短期(30)で早期検知、長期(100)で安定判定。
+
     Attributes:
         enabled: エッジ検定有効化
-        window_size: ローリングウィンドウサイズ
-        min_samples: 検定に必要な最小サンプル数
+        window_size: 長期ローリングウィンドウサイズ
+        short_window_size: 短期ローリングウィンドウサイズ（早期検知）
+        min_samples: 検定に必要な最小サンプル数（長期）
+        short_min_samples: 短期ウィンドウの最小サンプル数
         expected_winrate: 期待勝率（BT基準）
         info_wr_drop: INFO閾値（WR低下幅）
         warning_wr_drop: WARNING閾値（WR低下幅）
+        stop_wr_drop: STOP閾値（WR低下幅）
         critical_wr_drop: CRITICAL閾値（WR低下幅）
         info_pf_threshold: INFO閾値（PF）
         warning_pf_threshold: WARNING閾値（PF）
+        stop_pf_threshold: STOP閾値（PF）
         critical_pf_threshold: CRITICAL閾値（PF）
         pf_below_1_max_trades: PF<1.0持続の最大許容トレード数
     """
 
     enabled: bool = True
     window_size: int = 100
+    # 短期ウィンドウ（早期検知用）
+    short_window_size: int = 30
     min_samples: int = 20
+    short_min_samples: int = 10
     expected_winrate: float = 0.80
     # WR低下閾値
     info_wr_drop: float = 0.05
     warning_wr_drop: float = 0.10
+    stop_wr_drop: float = 0.15
     critical_wr_drop: float = 0.20
     # PF閾値
     info_pf_threshold: float = 2.0
     warning_pf_threshold: float = 1.5
+    stop_pf_threshold: float = 1.3
     critical_pf_threshold: float = 1.0
     # PF<1.0持続閾値
     pf_below_1_max_trades: int = 15
@@ -68,14 +87,17 @@ class EdgeStatus:
     """エッジ検定結果
 
     Attributes:
-        alert_level: アラートレベル
-        rolling_winrate: ローリング勝率
-        rolling_pf: ローリングプロフィットファクター
+        alert_level: アラートレベル（5段階）
+        rolling_winrate: 長期ローリング勝率
+        rolling_pf: 長期ローリングPF
         rolling_sharpe: ローリングシャープレシオ
-        wr_drop: 期待WRからの低下幅
+        wr_drop: 期待WRからの低下幅（長期）
         pf_below_1_count: PF<1.0持続トレード数
         reasons: アラート理由リスト
-        sample_count: サンプル数
+        sample_count: 長期サンプル数
+        short_winrate: 短期ローリング勝率
+        short_pf: 短期ローリングPF
+        short_sample_count: 短期サンプル数
     """
 
     alert_level: EdgeAlertLevel = EdgeAlertLevel.OK
@@ -86,13 +108,17 @@ class EdgeStatus:
     pf_below_1_count: int = 0
     reasons: list[str] = field(default_factory=list)
     sample_count: int = 0
+    short_winrate: float = 0.0
+    short_pf: float = 0.0
+    short_sample_count: int = 0
 
 
 class EdgeValidator:
     """統計的エッジ検定器
 
-    直近Nトレードでボットの統計的エッジを検証し、
-    エッジ消失の兆候を3段階アラートで報告する。
+    デュアルウィンドウ（短期+長期）でボットの統計的エッジを検証し、
+    エッジ消失の兆候を5段階アラートで報告する。
+    短期ウィンドウで早期検知、長期ウィンドウで安定判定。
     """
 
     def __init__(
@@ -100,8 +126,13 @@ class EdgeValidator:
         config: EdgeValidatorConfig | None = None,
     ) -> None:
         self._config = config or EdgeValidatorConfig()
+        # 長期ウィンドウ
         self._window: deque[TradeRecord] = deque(
             maxlen=self._config.window_size,
+        )
+        # 短期ウィンドウ（早期検知用）
+        self._short_window: deque[TradeRecord] = deque(
+            maxlen=self._config.short_window_size,
         )
         self._last_status = EdgeStatus()
         # PF<1.0持続カウンタ
@@ -132,6 +163,7 @@ class EdgeValidator:
             EdgeStatus: 検定結果
         """
         self._window.append(record)
+        self._short_window.append(record)
 
         if not self._config.enabled:
             return self._last_status
@@ -139,6 +171,7 @@ class EdgeValidator:
         if len(self._window) < self._config.min_samples:
             self._last_status = EdgeStatus(
                 sample_count=len(self._window),
+                short_sample_count=len(self._short_window),
             )
             return self._last_status
 
@@ -149,6 +182,13 @@ class EdgeValidator:
         if status.alert_level == EdgeAlertLevel.CRITICAL:
             logger.warning(
                 "エッジCRITICAL: WR=%.1f%% PF=%.2f %s",
+                status.rolling_winrate * 100,
+                status.rolling_pf,
+                "; ".join(status.reasons),
+            )
+        elif status.alert_level == EdgeAlertLevel.STOP:
+            logger.warning(
+                "エッジSTOP: WR=%.1f%% PF=%.2f %s",
                 status.rolling_winrate * 100,
                 status.rolling_pf,
                 "; ".join(status.reasons),
@@ -166,27 +206,23 @@ class EdgeValidator:
     def reset(self) -> None:
         """状態をリセット"""
         self._window.clear()
+        self._short_window.clear()
         self._last_status = EdgeStatus()
         self._pf_below_1_count = 0
 
     def _evaluate(self) -> EdgeStatus:
-        """エッジ検定を実行"""
+        """エッジ検定を実行（デュアルウィンドウ）
+
+        短期ウィンドウで早期検知、長期ウィンドウで安定判定。
+        両方の結果のうち、より深刻な方を採用する。
+        """
         trades = list(self._window)
         n = len(trades)
         reasons: list[str] = []
 
-        # ローリング勝率
-        wins = sum(1 for t in trades if t.is_win)
-        rolling_wr = wins / n
-
-        # WR低下幅
-        wr_drop = self._config.expected_winrate - rolling_wr
-
-        # ローリングPF
-        gross_profit = sum(t.pnl for t in trades if t.pnl > 0)
-        gross_loss = abs(sum(t.pnl for t in trades if t.pnl < 0))
-        rolling_pf = (
-            gross_profit / gross_loss if gross_loss > 0 else 99.9
+        # --- 長期ウィンドウ統計 ---
+        rolling_wr, wr_drop, rolling_pf = (
+            self._calc_stats(trades)
         )
 
         # PF<1.0持続カウンタ更新
@@ -195,61 +231,41 @@ class EdgeValidator:
         else:
             self._pf_below_1_count = 0
 
-        # ローリングシャープレシオ（簡易版: pnl_pipsベース）
         rolling_sharpe = self._calc_sharpe(trades)
 
-        # アラートレベル判定
-        alert = EdgeAlertLevel.OK
-
-        # CRITICAL判定
-        if wr_drop >= self._config.critical_wr_drop:
-            alert = EdgeAlertLevel.CRITICAL
-            reasons.append(
-                f"WR急落: {rolling_wr:.1%}"
-                f"(期待{self._config.expected_winrate:.1%})",
-            )
-        if rolling_pf < self._config.critical_pf_threshold:
-            alert = EdgeAlertLevel.CRITICAL
-            reasons.append(f"PF<{self._config.critical_pf_threshold}: {rolling_pf:.2f}")
-        if (
-            self._pf_below_1_count
-            >= self._config.pf_below_1_max_trades
-        ):
-            alert = EdgeAlertLevel.CRITICAL
-            reasons.append(
-                f"PF<1.0が{self._pf_below_1_count}トレード持続",
+        # --- 短期ウィンドウ統計 ---
+        short_trades = list(self._short_window)
+        short_n = len(short_trades)
+        short_wr = 0.0
+        short_pf = 0.0
+        if short_n >= self._config.short_min_samples:
+            short_wr, _, short_pf = self._calc_stats(
+                short_trades,
             )
 
-        # WARNING判定（CRITICALでなければ）
-        if alert != EdgeAlertLevel.CRITICAL:
-            if wr_drop >= self._config.warning_wr_drop:
-                alert = EdgeAlertLevel.WARNING
-                reasons.append(
-                    f"WR低下: {rolling_wr:.1%}"
-                    f"(期待{self._config.expected_winrate:.1%})",
-                )
-            if rolling_pf < self._config.warning_pf_threshold:
-                alert = max(alert, EdgeAlertLevel.WARNING, key=lambda x: list(EdgeAlertLevel).index(x))
-                reasons.append(
-                    f"PF低下: {rolling_pf:.2f}"
-                    f"(<{self._config.warning_pf_threshold})",
-                )
-            if rolling_sharpe < 0:
-                alert = max(alert, EdgeAlertLevel.WARNING, key=lambda x: list(EdgeAlertLevel).index(x))
-                reasons.append(f"Sharpe反転: {rolling_sharpe:.2f}")
+        # --- アラートレベル判定（長期ベース） ---
+        alert = self._judge_alert(
+            rolling_wr, wr_drop, rolling_pf,
+            rolling_sharpe, reasons, "長期",
+        )
 
-        # INFO判定（WARNING以上でなければ）
-        if alert == EdgeAlertLevel.OK:
-            if wr_drop >= self._config.info_wr_drop:
-                alert = EdgeAlertLevel.INFO
-                reasons.append(
-                    f"WR軽微低下: {rolling_wr:.1%}",
-                )
-            if rolling_pf < self._config.info_pf_threshold:
-                alert = max(alert, EdgeAlertLevel.INFO, key=lambda x: list(EdgeAlertLevel).index(x))
-                reasons.append(
-                    f"PF軽微低下: {rolling_pf:.2f}",
-                )
+        # --- 短期ウィンドウによる早期検知 ---
+        if short_n >= self._config.short_min_samples:
+            short_reasons: list[str] = []
+            short_wr_drop = (
+                self._config.expected_winrate - short_wr
+            )
+            short_alert = self._judge_alert(
+                short_wr, short_wr_drop, short_pf,
+                0.0, short_reasons, "短期",
+            )
+            # 短期の方が深刻なら昇格
+            _levels = list(EdgeAlertLevel)
+            if _levels.index(short_alert) > _levels.index(
+                alert,
+            ):
+                alert = short_alert
+                reasons.extend(short_reasons)
 
         return EdgeStatus(
             alert_level=alert,
@@ -260,7 +276,135 @@ class EdgeValidator:
             pf_below_1_count=self._pf_below_1_count,
             reasons=reasons,
             sample_count=n,
+            short_winrate=short_wr,
+            short_pf=short_pf,
+            short_sample_count=short_n,
         )
+
+    def _calc_stats(
+        self,
+        trades: list[TradeRecord],
+    ) -> tuple[float, float, float]:
+        """ウィンドウの基本統計を計算
+
+        Returns:
+            (勝率, WR低下幅, PF)
+        """
+        n = len(trades)
+        if n == 0:
+            return 0.0, self._config.expected_winrate, 0.0
+        wins = sum(1 for t in trades if t.is_win)
+        wr = wins / n
+        wr_drop = self._config.expected_winrate - wr
+        gross_profit = sum(t.pnl for t in trades if t.pnl > 0)
+        gross_loss = abs(
+            sum(t.pnl for t in trades if t.pnl < 0),
+        )
+        pf = gross_profit / gross_loss if gross_loss > 0 else 99.9
+        return wr, wr_drop, pf
+
+    def _judge_alert(
+        self,
+        wr: float,
+        wr_drop: float,
+        pf: float,
+        sharpe: float,
+        reasons: list[str],
+        label: str,
+    ) -> EdgeAlertLevel:
+        """アラートレベルを判定"""
+        alert = EdgeAlertLevel.OK
+        cfg = self._config
+
+        # CRITICAL判定
+        if wr_drop >= cfg.critical_wr_drop:
+            alert = EdgeAlertLevel.CRITICAL
+            reasons.append(
+                f"{label}WR急落: {wr:.1%}"
+                f"(期待{cfg.expected_winrate:.1%})",
+            )
+        if pf < cfg.critical_pf_threshold:
+            alert = EdgeAlertLevel.CRITICAL
+            reasons.append(
+                f"{label}PF<{cfg.critical_pf_threshold}: "
+                f"{pf:.2f}",
+            )
+        if (
+            self._pf_below_1_count
+            >= cfg.pf_below_1_max_trades
+        ):
+            alert = EdgeAlertLevel.CRITICAL
+            reasons.append(
+                f"PF<1.0が"
+                f"{self._pf_below_1_count}トレード持続",
+            )
+
+        # STOP判定（CRITICALでなければ）
+        if alert != EdgeAlertLevel.CRITICAL:
+            if wr_drop >= cfg.stop_wr_drop:
+                alert = EdgeAlertLevel.STOP
+                reasons.append(
+                    f"{label}WR低下(STOP): {wr:.1%}",
+                )
+            if pf < cfg.stop_pf_threshold:
+                alert = self._max_alert(
+                    alert, EdgeAlertLevel.STOP,
+                )
+                reasons.append(
+                    f"{label}PF低下(STOP): {pf:.2f}"
+                    f"(<{cfg.stop_pf_threshold})",
+                )
+
+        # WARNING判定（STOP以上でなければ）
+        if alert in (EdgeAlertLevel.OK, EdgeAlertLevel.INFO):
+            if wr_drop >= cfg.warning_wr_drop:
+                alert = EdgeAlertLevel.WARNING
+                reasons.append(
+                    f"{label}WR低下: {wr:.1%}",
+                )
+            if pf < cfg.warning_pf_threshold:
+                alert = self._max_alert(
+                    alert, EdgeAlertLevel.WARNING,
+                )
+                reasons.append(
+                    f"{label}PF低下: {pf:.2f}"
+                    f"(<{cfg.warning_pf_threshold})",
+                )
+            if sharpe < 0:
+                alert = self._max_alert(
+                    alert, EdgeAlertLevel.WARNING,
+                )
+                reasons.append(
+                    f"{label}Sharpe反転: {sharpe:.2f}",
+                )
+
+        # INFO判定
+        if alert == EdgeAlertLevel.OK:
+            if wr_drop >= cfg.info_wr_drop:
+                alert = EdgeAlertLevel.INFO
+                reasons.append(
+                    f"{label}WR軽微低下: {wr:.1%}",
+                )
+            if pf < cfg.info_pf_threshold:
+                alert = self._max_alert(
+                    alert, EdgeAlertLevel.INFO,
+                )
+                reasons.append(
+                    f"{label}PF軽微低下: {pf:.2f}",
+                )
+
+        return alert
+
+    @staticmethod
+    def _max_alert(
+        a: EdgeAlertLevel,
+        b: EdgeAlertLevel,
+    ) -> EdgeAlertLevel:
+        """より深刻なアラートレベルを返す"""
+        _levels = list(EdgeAlertLevel)
+        if _levels.index(a) >= _levels.index(b):
+            return a
+        return b
 
     @staticmethod
     def _calc_sharpe(trades: list[TradeRecord]) -> float:
@@ -296,5 +440,8 @@ class EdgeValidator:
             "edge_wr_drop": round(s.wr_drop, 4),
             "edge_pf_below_1_count": s.pf_below_1_count,
             "edge_sample_count": s.sample_count,
+            "edge_short_winrate": round(s.short_winrate, 4),
+            "edge_short_pf": round(s.short_pf, 2),
+            "edge_short_sample_count": s.short_sample_count,
             "edge_reasons": s.reasons,
         }

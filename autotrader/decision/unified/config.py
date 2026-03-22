@@ -116,7 +116,8 @@ class RiskConfig:
     # Layer 4: ポートフォリオ・サーキットブレーカー
     circuit_breaker_enabled: bool = True
     circuit_breaker_loss_pct: float = 0.05
-    circuit_breaker_pause_minutes: int = 60
+    # サーキットブレーカー一時停止時間（1440分=1日）
+    circuit_breaker_pause_minutes: int = 1440
     # Layer 5: 急速DD検知パウズ
     rapid_dd_pause_enabled: bool = True
     rapid_dd_window_minutes: int = 30
@@ -573,12 +574,18 @@ class UnifiedBotConfig:
     # HIGH_FEAR時ペナルティ
     macro_regime_high_fear_penalty: float = 0.3
     # --- エッジ検定 ---
-    # エッジ検定有効化（モニタリング専用、ログ出力のみ）
+    # エッジ検定有効化
     edge_validator_enabled: bool = True
-    # CRITICAL時にサーキットブレーカーを自動発動するか（デフォルトOFF）
-    edge_validator_auto_cb: bool = False
-    # ローリングウィンドウサイズ
+    # STOP/CRITICAL時にサーキットブレーカーを自動発動
+    edge_validator_auto_cb: bool = True
+    # WARNING時にロットを縮小する係数（1.0=縮小なし）
+    edge_warning_lot_multiplier: float = 0.5
+    # サーキットブレーカー後の手動復帰要求
+    edge_cb_manual_recovery: bool = False
+    # ローリングウィンドウサイズ（長期）
     edge_validator_window: int = 100
+    # 短期ウィンドウサイズ（早期検知）
+    edge_validator_short_window: int = 30
     # 期待勝率（単体ペア基準: 65-78%の範囲）
     edge_validator_expected_wr: float = 0.65
     # --- SL約定時スプレッド考慮 ---

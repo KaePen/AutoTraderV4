@@ -546,10 +546,15 @@ class UnifiedTradeBot:
         )
 
         self._edge_validator: EdgeValidator | None = None
+        # エッジ劣化時のロット縮小係数（1.0=通常）
+        self._edge_lot_multiplier: float = 1.0
         if self.config.edge_validator_enabled:
             self._edge_validator = EdgeValidator(
                 EdgeValidatorConfig(
                     window_size=self.config.edge_validator_window,
+                    short_window_size=(
+                        self.config.edge_validator_short_window
+                    ),
                     expected_winrate=(
                         self.config.edge_validator_expected_wr
                     ),
@@ -1807,6 +1812,13 @@ class UnifiedTradeBot:
             if sizing_result.blocked:
                 return _filt_hold("資金不足")
             lot = sizing_result.lot
+            # エッジ劣化WARNING時のロット縮小
+            if self._edge_lot_multiplier < 1.0:
+                lot = round(
+                    lot * self._edge_lot_multiplier, 2,
+                )
+                if lot < 0.01:
+                    return _filt_hold("エッジ劣化ロット縮小")
 
         rationale = (
             f"{consensus.reasoning}, mode={plan.mode}, lot={lot:.2f}"
@@ -2910,17 +2922,41 @@ class UnifiedTradeBot:
             edge_status = self._edge_validator.record_trade(
                 trade_record,
             )
-            # CRITICAL → サーキットブレーカー発動（opt-in）
-            if (
-                edge_status.alert_level == EdgeAlertLevel.CRITICAL
-                and self.config.edge_validator_auto_cb
-            ):
-                logger.warning(
-                    "エッジCRITICAL → サーキットブレーカー発動",
-                )
-                self.risk_manager.trigger_circuit_breaker(
-                    timestamp,
-                )
+            if self.config.edge_validator_auto_cb:
+                # STOP → サーキットブレーカー発動
+                if (
+                    edge_status.alert_level
+                    == EdgeAlertLevel.STOP
+                ):
+                    logger.warning(
+                        "エッジSTOP → サーキットブレーカー発動",
+                    )
+                    self.risk_manager.trigger_circuit_breaker(
+                        timestamp,
+                    )
+                # CRITICAL → サーキットブレーカー発動
+                elif (
+                    edge_status.alert_level
+                    == EdgeAlertLevel.CRITICAL
+                ):
+                    logger.warning(
+                        "エッジCRITICAL → "
+                        "サーキットブレーカー発動",
+                    )
+                    self.risk_manager.trigger_circuit_breaker(
+                        timestamp,
+                    )
+                # WARNING → ロット縮小フラグ設定
+                elif (
+                    edge_status.alert_level
+                    == EdgeAlertLevel.WARNING
+                ):
+                    self._edge_lot_multiplier = (
+                        self.config.edge_warning_lot_multiplier
+                    )
+                else:
+                    # OK/INFO → ロット縮小解除
+                    self._edge_lot_multiplier = 1.0
         # Layer 6: 連続敗戦サーキットブレーカー
         if (
             pnl is not None

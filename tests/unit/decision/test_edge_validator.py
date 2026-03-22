@@ -221,3 +221,142 @@ class TestEdgeValidator:
                 _make_record(pnl=100.0, pnl_pips=10.0),
             )
         assert ev.last_status.rolling_sharpe == 0.0
+
+
+class TestEdgeValidatorEnhanced:
+    """拡張機能のテスト（STOPレベル・デュアルウィンドウ）"""
+
+    def test_stop_level_pf_below_1_3(self) -> None:
+        """PF<1.3でSTOP"""
+        ev = EdgeValidator(
+            EdgeValidatorConfig(
+                min_samples=5,
+                window_size=20,
+                expected_winrate=0.50,
+                stop_pf_threshold=1.3,
+                stop_wr_drop=0.40,
+                warning_wr_drop=0.30,
+                critical_wr_drop=0.50,
+                critical_pf_threshold=1.0,
+            ),
+        )
+        # 12勝8敗、PF = 120/160 = 0.75 → CRITICAL(PF<1.0)
+        # PF = 1.2 (STOP範囲) にするには: 勝12*15=180, 負8*18=144
+        for _ in range(12):
+            ev.record_trade(
+                _make_record(pnl=15.0, pnl_pips=1.5),
+            )
+        for _ in range(8):
+            status = ev.record_trade(
+                _make_record(pnl=-18.0, pnl_pips=-1.8),
+            )
+        # PF = 180/144 = 1.25 → STOP (< 1.3)
+        assert status.rolling_pf < 1.3
+        assert status.alert_level == EdgeAlertLevel.STOP
+
+    def test_stop_level_wr_drop_15pct(self) -> None:
+        """WR15%低下でSTOP"""
+        ev = EdgeValidator(
+            EdgeValidatorConfig(
+                min_samples=5,
+                window_size=20,
+                expected_winrate=0.80,
+                stop_wr_drop=0.15,
+                warning_wr_drop=0.10,
+                critical_wr_drop=0.25,
+            ),
+        )
+        # 20中13勝7敗 → WR=65% → 15%低下 → STOP
+        for _ in range(13):
+            ev.record_trade(
+                _make_record(pnl=100.0, pnl_pips=10.0),
+            )
+        for _ in range(7):
+            status = ev.record_trade(
+                _make_record(pnl=-30.0, pnl_pips=-3.0),
+            )
+        assert status.alert_level == EdgeAlertLevel.STOP
+
+    def test_dual_window_short_detects_early(self) -> None:
+        """短期ウィンドウで早期検知"""
+        ev = EdgeValidator(
+            EdgeValidatorConfig(
+                min_samples=5,
+                short_min_samples=5,
+                window_size=50,
+                short_window_size=10,
+                expected_winrate=0.80,
+                critical_wr_drop=0.30,
+            ),
+        )
+        # 長期: 40勝 → WR高い
+        for _ in range(40):
+            ev.record_trade(
+                _make_record(pnl=100.0, pnl_pips=10.0),
+            )
+        # 短期10本中8敗 → 短期WR=20% → 60%低下 → CRITICAL
+        for _ in range(2):
+            ev.record_trade(
+                _make_record(pnl=100.0, pnl_pips=10.0),
+            )
+        for _ in range(8):
+            status = ev.record_trade(
+                _make_record(pnl=-50.0, pnl_pips=-5.0),
+            )
+        # 長期はまだ42/50=84%で健全だが、短期が検知
+        assert status.alert_level == EdgeAlertLevel.CRITICAL
+        assert status.short_sample_count == 10
+
+    def test_short_window_in_status(self) -> None:
+        """EdgeStatusに短期ウィンドウ情報が含まれる"""
+        ev = EdgeValidator(
+            EdgeValidatorConfig(
+                min_samples=5,
+                short_min_samples=3,
+                short_window_size=10,
+            ),
+        )
+        for _ in range(10):
+            ev.record_trade(_make_record())
+        s = ev.last_status
+        assert s.short_sample_count == 10
+        assert s.short_winrate > 0
+        assert s.short_pf > 0
+
+    def test_status_dict_has_short_fields(self) -> None:
+        """get_status_dictに短期フィールドが含まれる"""
+        ev = EdgeValidator(
+            EdgeValidatorConfig(
+                min_samples=3,
+                short_min_samples=3,
+            ),
+        )
+        for _ in range(5):
+            ev.record_trade(_make_record())
+        d = ev.get_status_dict()
+        assert "edge_short_winrate" in d
+        assert "edge_short_pf" in d
+        assert "edge_short_sample_count" in d
+
+    def test_alert_level_ordering(self) -> None:
+        """アラートレベルの順序が正しい"""
+        levels = list(EdgeAlertLevel)
+        assert levels.index(EdgeAlertLevel.OK) == 0
+        assert levels.index(EdgeAlertLevel.INFO) == 1
+        assert levels.index(EdgeAlertLevel.WARNING) == 2
+        assert levels.index(EdgeAlertLevel.STOP) == 3
+        assert levels.index(EdgeAlertLevel.CRITICAL) == 4
+
+    def test_reset_clears_short_window(self) -> None:
+        """リセットで短期ウィンドウもクリア"""
+        ev = EdgeValidator(
+            EdgeValidatorConfig(
+                min_samples=3,
+                short_min_samples=3,
+            ),
+        )
+        for _ in range(10):
+            ev.record_trade(_make_record())
+        ev.reset()
+        assert ev.window_size == 0
+        assert len(ev._short_window) == 0
