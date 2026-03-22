@@ -124,15 +124,16 @@ def _single_job(
 
 
 def generate_phase1_jobs() -> list[dict]:
-    """Phase 1: 約定系ストレス（~10ジョブ）
+    """Phase 1: 約定系ストレス（~10ジョブ、シングルペア）
 
-    固定/ランダムスリッページ、約定遅延、約定失敗、部分約定
+    固定/ランダムスリッページ、約定遅延、約定失敗、部分約定。
+    マルチペアではスロット解放による副作用があるためシングルで実施。
     """
     jobs = []
 
     # 固定スリッページ追加
     for extra in [0.5, 1.0, 2.0]:
-        jobs.append(_multi_job(
+        jobs.append(_single_job(
             f"stress_p1_slip_fixed_{extra}",
             f"P1 固定スリッページ +{extra}pips",
             bt_overrides={"slippage_extra_pips": extra},
@@ -140,7 +141,7 @@ def generate_phase1_jobs() -> list[dict]:
 
     # ランダムスリッページ
     for rnd_max in [1.0, 2.0]:
-        jobs.append(_multi_job(
+        jobs.append(_single_job(
             f"stress_p1_slip_rnd_{rnd_max}",
             f"P1 ランダムスリッページ 0-{rnd_max}pips",
             bt_overrides={"slippage_random_max_pips": rnd_max},
@@ -148,7 +149,7 @@ def generate_phase1_jobs() -> list[dict]:
 
     # エントリー遅延
     for delay in [1, 3]:
-        jobs.append(_multi_job(
+        jobs.append(_single_job(
             f"stress_p1_delay_{delay}",
             f"P1 エントリー遅延 +{delay}本",
             bt_overrides={"entry_delay_bars": delay},
@@ -157,14 +158,14 @@ def generate_phase1_jobs() -> list[dict]:
     # 約定失敗
     for rate in [0.05, 0.10]:
         pct = int(rate * 100)
-        jobs.append(_multi_job(
+        jobs.append(_single_job(
             f"stress_p1_fail_{pct}pct",
             f"P1 約定失敗率 {pct}%",
             bt_overrides={"fill_failure_rate": rate},
         ))
 
     # 部分約定
-    jobs.append(_multi_job(
+    jobs.append(_single_job(
         "stress_p1_partial_50pct",
         "P1 部分約定 50%",
         bt_overrides={"partial_fill_ratio": 0.5},
