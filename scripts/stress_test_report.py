@@ -62,17 +62,21 @@ def _find_stress_results() -> dict[str, list[dict]]:
         )
         job_id = result.get("job_id", d.name)
 
-        if not job_id.startswith("stress_p"):
+        # stress_p* または ss_p* プレフィックスを検出
+        if not (
+            job_id.startswith("stress_p")
+            or job_id.startswith("ss_p")
+        ):
             continue
 
         # フェーズ判定
-        if job_id.startswith("stress_p1_"):
+        if "p1_" in job_id[:8]:
             phase = "p1"
-        elif job_id.startswith("stress_p2_"):
+        elif "p2_" in job_id[:8]:
             phase = "p2"
-        elif job_id.startswith("stress_p3_"):
+        elif "p3_" in job_id[:8]:
             phase = "p3"
-        elif job_id.startswith("stress_p4_"):
+        elif "p4_" in job_id[:8]:
             phase = "p4"
         else:
             continue
@@ -178,9 +182,12 @@ def generate_phase3_table(
     # パラメータ名でグルーピング
     params: dict[str, list[dict]] = {}
     for r in results:
-        # stress_p3_{param}_{mult}x から param を抽出
+        # ss_p3_{param}_{mult}x から param を抽出
         jid = r["job_id"]
-        parts = jid.replace("stress_p3_", "").rsplit("_", 1)
+        _stripped = jid.replace("ss_p3_", "").replace(
+            "stress_p3_", "",
+        )
+        parts = _stripped.rsplit("_", 1)
         if len(parts) == 2:
             param_name = parts[0]
         else:

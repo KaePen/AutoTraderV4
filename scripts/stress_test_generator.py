@@ -134,7 +134,7 @@ def generate_phase1_jobs() -> list[dict]:
     # 固定スリッページ追加
     for extra in [0.5, 1.0, 2.0]:
         jobs.append(_single_job(
-            f"stress_p1_slip_fixed_{extra}",
+            f"ss_p1_slip_fixed_{extra}",
             f"P1 固定スリッページ +{extra}pips",
             bt_overrides={"slippage_extra_pips": extra},
         ))
@@ -142,7 +142,7 @@ def generate_phase1_jobs() -> list[dict]:
     # ランダムスリッページ
     for rnd_max in [1.0, 2.0]:
         jobs.append(_single_job(
-            f"stress_p1_slip_rnd_{rnd_max}",
+            f"ss_p1_slip_rnd_{rnd_max}",
             f"P1 ランダムスリッページ 0-{rnd_max}pips",
             bt_overrides={"slippage_random_max_pips": rnd_max},
         ))
@@ -150,7 +150,7 @@ def generate_phase1_jobs() -> list[dict]:
     # エントリー遅延
     for delay in [1, 3]:
         jobs.append(_single_job(
-            f"stress_p1_delay_{delay}",
+            f"ss_p1_delay_{delay}",
             f"P1 エントリー遅延 +{delay}本",
             bt_overrides={"entry_delay_bars": delay},
         ))
@@ -159,14 +159,14 @@ def generate_phase1_jobs() -> list[dict]:
     for rate in [0.05, 0.10]:
         pct = int(rate * 100)
         jobs.append(_single_job(
-            f"stress_p1_fail_{pct}pct",
+            f"ss_p1_fail_{pct}pct",
             f"P1 約定失敗率 {pct}%",
             bt_overrides={"fill_failure_rate": rate},
         ))
 
     # 部分約定
     jobs.append(_single_job(
-        "stress_p1_partial_50pct",
+        "ss_p1_partial_50pct",
         "P1 部分約定 50%",
         bt_overrides={"partial_fill_ratio": 0.5},
     ))
@@ -185,7 +185,7 @@ def generate_phase2_jobs() -> list[dict]:
     # 価格ノイズ
     for noise in [0.5, 1.0]:
         jobs.append(_single_job(
-            f"stress_p2_noise_{noise}",
+            f"ss_p2_noise_{noise}",
             f"P2 価格ノイズ ±{noise}pips",
             bt_overrides={"price_noise_pips": noise},
         ))
@@ -194,14 +194,14 @@ def generate_phase2_jobs() -> list[dict]:
     for skip in [0.05, 0.10]:
         pct = int(skip * 100)
         jobs.append(_single_job(
-            f"stress_p2_skip_{pct}pct",
+            f"ss_p2_skip_{pct}pct",
             f"P2 シグナルスキップ {pct}%",
             bt_overrides={"signal_skip_rate": skip},
         ))
 
     # 複合: ランダムスリッページ + 価格ノイズ
     jobs.append(_single_job(
-        "stress_p2_combined_light",
+        "ss_p2_combined_light",
         "P2 複合ノイズ(軽) slip_rnd=0.5 + noise=0.5",
         bt_overrides={
             "slippage_random_max_pips": 0.5,
@@ -209,7 +209,7 @@ def generate_phase2_jobs() -> list[dict]:
         },
     ))
     jobs.append(_single_job(
-        "stress_p2_combined_heavy",
+        "ss_p2_combined_heavy",
         "P2 複合ノイズ(重) slip_rnd=1.0 + noise=1.0 + skip=5%",
         bt_overrides={
             "slippage_random_max_pips": 1.0,
@@ -221,7 +221,7 @@ def generate_phase2_jobs() -> list[dict]:
     # スプレッド倍率（既存機能活用）
     for mult in [1.5, 2.0]:
         jobs.append(_single_job(
-            f"stress_p2_spread_x{mult}",
+            f"ss_p2_spread_x{mult}",
             f"P2 スプレッド {mult}倍",
             bt_overrides={"spread_multiplier": mult},
         ))
@@ -257,7 +257,7 @@ def generate_phase3_jobs() -> list[dict]:
         for mult in multipliers:
             val = round(base_val * mult, 6)
             mult_str = f"{mult:.1f}x"
-            job_id = f"stress_p3_{name}_{mult_str}"
+            job_id = f"ss_p3_{name}_{mult_str}"
             desc = f"P3 {name}={val} ({mult_str})"
 
             overrides: dict = {}
@@ -285,7 +285,7 @@ def generate_phase4_jobs() -> list[dict]:
 
     # JPY系のみ
     jobs.append(_multi_job(
-        "stress_p4_jpy_only",
+        "ss_p4_jpy_only",
         "P4 JPY系のみ 6ペア",
         symbols=JPY_SYMBOLS,
         multi_pair_config={"global_max_positions": 4},
@@ -293,7 +293,7 @@ def generate_phase4_jobs() -> list[dict]:
 
     # USD系のみ
     jobs.append(_multi_job(
-        "stress_p4_usd_only",
+        "ss_p4_usd_only",
         "P4 USD系のみ 2ペア",
         symbols=USD_SYMBOLS,
         multi_pair_config={"global_max_positions": 2},
@@ -301,21 +301,21 @@ def generate_phase4_jobs() -> list[dict]:
 
     # 高ボラ期間（2020年コロナショック）
     jobs.append(_multi_job(
-        "stress_p4_high_vol_2020",
+        "ss_p4_high_vol_2020",
         "P4 高ボラ期間 2020年",
         years="2020",
     ))
 
     # 低ボラ期間（2014年）
     jobs.append(_multi_job(
-        "stress_p4_low_vol_2014",
+        "ss_p4_low_vol_2014",
         "P4 低ボラ期間 2014年",
         years="2014",
     ))
 
     # 全フィルタ無効化
     jobs.append(_multi_job(
-        "stress_p4_no_filters",
+        "ss_p4_no_filters",
         "P4 全フィルタ無効化",
         bot_overrides={
             "regime_threshold_enabled": False,
@@ -328,7 +328,7 @@ def generate_phase4_jobs() -> list[dict]:
 
     # フィルタ最大強化
     jobs.append(_multi_job(
-        "stress_p4_max_filters",
+        "ss_p4_max_filters",
         "P4 フィルタ最大強化",
         bot_overrides={
             "sg_off_hours_penalty": 1.0,
