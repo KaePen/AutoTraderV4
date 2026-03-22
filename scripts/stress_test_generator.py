@@ -51,6 +51,22 @@ BASE_MULTI_PAIR_CONFIG = {
 }
 
 
+def _build_overrides(
+    bt_overrides: dict | None = None,
+    bot_overrides: dict | None = None,
+    pm_overrides: dict | None = None,
+) -> dict:
+    """overrides辞書を構築"""
+    overrides: dict = {}
+    if bot_overrides:
+        overrides["bot"] = bot_overrides
+    if pm_overrides:
+        overrides["pm"] = pm_overrides
+    if bt_overrides:
+        overrides["backtest"] = bt_overrides
+    return overrides
+
+
 def _multi_job(
     job_id: str,
     description: str,
@@ -67,22 +83,43 @@ def _multi_job(
     if multi_pair_config:
         mpc.update(multi_pair_config)
 
-    overrides: dict = {}
-    if bot_overrides:
-        overrides["bot"] = bot_overrides
-    if pm_overrides:
-        overrides["pm"] = pm_overrides
-    if bt_overrides:
-        overrides["backtest"] = bt_overrides
-
     return {
         "id": job_id,
         "type": "multi_pair",
         "symbols": symbols or SYMBOLS,
         "years": years,
         "description": f"[STRESS] {description}",
-        "overrides": overrides,
+        "overrides": _build_overrides(
+            bt_overrides, bot_overrides, pm_overrides,
+        ),
         "multi_pair_config": mpc,
+    }
+
+
+# シングルペア用デフォルトシンボル
+SINGLE_SYMBOL = "USDJPY"
+
+
+def _single_job(
+    job_id: str,
+    description: str,
+    *,
+    bt_overrides: dict | None = None,
+    bot_overrides: dict | None = None,
+    pm_overrides: dict | None = None,
+    symbol: str = SINGLE_SYMBOL,
+    years: str = YEARS,
+) -> dict:
+    """シングルペアジョブの雛形を生成"""
+    return {
+        "id": job_id,
+        "type": "single",
+        "symbol": symbol,
+        "years": years,
+        "description": f"[STRESS] {description}",
+        "overrides": _build_overrides(
+            bt_overrides, bot_overrides, pm_overrides,
+        ),
     }
 
 
@@ -137,15 +174,16 @@ def generate_phase1_jobs() -> list[dict]:
 
 
 def generate_phase2_jobs() -> list[dict]:
-    """Phase 2: 入力ノイズ（~8ジョブ）
+    """Phase 2: 入力ノイズ（~8ジョブ、シングルペア）
 
-    エントリー遅延、価格ノイズ、シグナルスキップ
+    エントリー遅延、価格ノイズ、シグナルスキップ。
+    トレードロジック共通のためUSDJPY単体で十分。
     """
     jobs = []
 
     # 価格ノイズ
     for noise in [0.5, 1.0]:
-        jobs.append(_multi_job(
+        jobs.append(_single_job(
             f"stress_p2_noise_{noise}",
             f"P2 価格ノイズ ±{noise}pips",
             bt_overrides={"price_noise_pips": noise},
@@ -154,14 +192,14 @@ def generate_phase2_jobs() -> list[dict]:
     # シグナルスキップ
     for skip in [0.05, 0.10]:
         pct = int(skip * 100)
-        jobs.append(_multi_job(
+        jobs.append(_single_job(
             f"stress_p2_skip_{pct}pct",
             f"P2 シグナルスキップ {pct}%",
             bt_overrides={"signal_skip_rate": skip},
         ))
 
     # 複合: ランダムスリッページ + 価格ノイズ
-    jobs.append(_multi_job(
+    jobs.append(_single_job(
         "stress_p2_combined_light",
         "P2 複合ノイズ(軽) slip_rnd=0.5 + noise=0.5",
         bt_overrides={
@@ -169,7 +207,7 @@ def generate_phase2_jobs() -> list[dict]:
             "price_noise_pips": 0.5,
         },
     ))
-    jobs.append(_multi_job(
+    jobs.append(_single_job(
         "stress_p2_combined_heavy",
         "P2 複合ノイズ(重) slip_rnd=1.0 + noise=1.0 + skip=5%",
         bt_overrides={
@@ -181,19 +219,20 @@ def generate_phase2_jobs() -> list[dict]:
 
     # スプレッド倍率（既存機能活用）
     for mult in [1.5, 2.0]:
-        jobs.append(_multi_job(
+        jobs.append(_single_job(
             f"stress_p2_spread_x{mult}",
             f"P2 スプレッド {mult}倍",
-            multi_pair_config={"spread_multiplier": mult},
+            bt_overrides={"spread_multiplier": mult},
         ))
 
     return jobs
 
 
 def generate_phase3_jobs() -> list[dict]:
-    """Phase 3: パラメータ耐性（~50ジョブ）
+    """Phase 3: パラメータ耐性（~50ジョブ、シングルペア）
 
-    10パラメータ × 5水準 (0.8/0.9/1.0/1.1/1.2)
+    10パラメータ × 5水準 (0.8/0.9/1.0/1.1/1.2)。
+    トレードロジック共通のためUSDJPY単体で十分。
     """
     # パラメータ名、ベース値、overridesキー
     params: list[tuple[str, float, str, str]] = [
@@ -226,22 +265,12 @@ def generate_phase3_jobs() -> list[dict]:
             elif target == "pm":
                 overrides = {"pm": {field: val}}
 
-            mpc = dict(BASE_MULTI_PAIR_CONFIG)
-            # consensus_thresholdとbase_risk_pctはmulti_pair_configにも反映
-            if field == "consensus_threshold":
-                mpc["consensus_threshold"] = val
-            elif field == "base_risk_pct":
-                mpc["base_risk_pct"] = val
-
-            jobs.append({
-                "id": job_id,
-                "type": "multi_pair",
-                "symbols": SYMBOLS,
-                "years": YEARS,
-                "description": f"[STRESS] {desc}",
-                "overrides": overrides,
-                "multi_pair_config": mpc,
-            })
+            jobs.append(_single_job(
+                job_id,
+                desc,
+                bot_overrides=overrides.get("bot"),
+                pm_overrides=overrides.get("pm"),
+            ))
 
     return jobs
 
