@@ -172,7 +172,7 @@ class SignalConfig:
     regime_detection_tf: str = "H1"
     htf_alignment_tfs: list[str] = field(default_factory=lambda: ["H4", "D1"])
     macd_slope_filter_threshold: float = -2.0
-    trend_strength_max: float = 0.7
+    trend_strength_max: float = 0.6
 
 
 @dataclass(frozen=True)
@@ -374,7 +374,7 @@ class UnifiedBotConfig:
     # ペナルティ上限（これ以上でエントリーブロック）
     penalty_cap: float = 0.3
     # トレンド強度上限（過大なトレンド強度でブロック）
-    trend_strength_max: float = 0.7
+    trend_strength_max: float = 0.6
     # --- コンセンサス重み ---
     consensus_primary_weight: float = 2.0
     consensus_entry_weight: float = 1.5

@@ -25,7 +25,7 @@ signal:
   htf_score_filter_min_alignment: 0.1
   htf_score_filter_threshold_add: 1.0
   macd_slope_filter_threshold: -2.0
-  trend_strength_max: 0.7
+  trend_strength_max: 0.6             # ストレステストP3結果: 0.6が最適 (PF +8%, DD -17%)
   regime_trend_threshold_add: 1.5    # フォールバック（per-pair signalで上書き）
 
 # --- リスク管理設定（全通貨ペア共通デフォルト）---
@@ -95,7 +95,7 @@ defaults:
   max_positions: 1              # マルチペア運用: per_pair=1 に統一
   bonus_max_positions: 0        # 1ペア1ポジションなのでボーナス不要
   bonus_score_threshold: 7.0
-  base_risk_pct: 0.005        # IMP-H1 CT18+DD2%目標 (旧0.004)
+  base_risk_pct: 0.006        # ストレステストP3結果: 0.6%採用 (旧0.005)
   max_lot_per_trade: 1.5      # pip_value修正後DD対策: 2.5 → 1.5
   max_total_exposure_lot: 3.0 # pip_value修正後DD対策: 4.0 → 3.0
   equity_floor_pct: 0.30
@@ -235,7 +235,7 @@ symbols:
     max_positions: 1
     bonus_max_positions: 0
     bonus_score_threshold: 7.0
-    base_risk_pct: 0.005          # IMP-H1 CT18+DD2%目標 (旧0.004)
+    base_risk_pct: 0.006          # ストレステストP3結果: 0.6%採用 (旧0.005)
     max_lot_per_trade: 2.0
     max_total_exposure_lot: 4.0
     equity_floor_pct: 0.30
@@ -256,7 +256,7 @@ symbols:
     # Tier 1 (WR 75%, PF 2.5)
     max_positions: 1              # マルチペア運用: per_pair=1 に統一
     bonus_score_threshold: 7.5
-    base_risk_pct: 0.005          # IMP-H1 CT18+DD2%目標 (旧0.004)
+    base_risk_pct: 0.006          # ストレステストP3結果: 0.6%採用 (旧0.005)
     max_lot_per_trade: 2.0
     max_total_exposure_lot: 4.0
     signal:
@@ -282,7 +282,7 @@ symbols:
     max_positions: 1              # マルチペア運用: per_pair=1 に統一
     bonus_max_positions: 0
     bonus_score_threshold: 8.0
-    base_risk_pct: 0.005          # IMP-H1 CT18+DD2%目標 (旧0.004)
+    base_risk_pct: 0.006          # ストレステストP3結果: 0.6%採用 (旧0.005)
     max_lot_per_trade: 1.5
     max_total_exposure_lot: 3.0
     signal:
@@ -307,7 +307,7 @@ symbols:
     # Tier 2 (WR 73%, PF 2.2)
     max_positions: 1              # マルチペア運用: per_pair=1 に統一
     bonus_score_threshold: 7.0
-    base_risk_pct: 0.005          # IMP-H1 CT18+DD2%目標 (旧0.004)
+    base_risk_pct: 0.006          # ストレステストP3結果: 0.6%採用 (旧0.005)
     max_lot_per_trade: 1.5
     max_total_exposure_lot: 3.0
     signal:
@@ -333,7 +333,7 @@ symbols:
     # Tier 2 (WR 73%, PF 2.4)
     max_positions: 1              # マルチペア運用: per_pair=1 に統一
     bonus_score_threshold: 7.0
-    base_risk_pct: 0.005          # IMP-H1 CT18+DD2%目標 (旧0.004)
+    base_risk_pct: 0.006          # ストレステストP3結果: 0.6%採用 (旧0.005)
     max_lot_per_trade: 1.5
     max_total_exposure_lot: 3.0
     signal:
@@ -357,7 +357,7 @@ symbols:
     # Tier 2 (WR 74%, PF 2.2)
     max_positions: 1              # マルチペア運用: per_pair=1 に統一
     bonus_score_threshold: 7.5
-    base_risk_pct: 0.005          # IMP-H1 CT18+DD2%目標 (旧0.004)
+    base_risk_pct: 0.006          # ストレステストP3結果: 0.6%採用 (旧0.005)
     max_lot_per_trade: 1.5
     max_total_exposure_lot: 3.0
     signal:
