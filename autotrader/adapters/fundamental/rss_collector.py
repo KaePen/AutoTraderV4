@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import ssl
+import urllib.request
 from collections import OrderedDict
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
@@ -27,6 +29,26 @@ try:
     import feedparser as _feedparser_module
 except ImportError:
     _feedparser_module = None  # type: ignore[assignment]
+
+
+def _build_ssl_handler() -> urllib.request.HTTPSHandler | None:
+    """certifi を使用した SSL ハンドラーを構築
+
+    Windows Server 等で OS の CA ストアが Python に認識されない場合、
+    certifi の CA バンドルを明示的に使用して SSL 検証を通す。
+
+    Returns:
+        urllib.request.HTTPSHandler | None: SSL ハンドラー（certifi 未導入時は None）
+    """
+    try:
+        import certifi
+        ctx = ssl.create_default_context(cafile=certifi.where())
+        return urllib.request.HTTPSHandler(context=ctx)
+    except ImportError:
+        return None
+
+
+_SSL_HANDLER = _build_ssl_handler()
 
 # RSSフィードURL定義（通貨別）
 RSS_FEEDS: dict[str, list[str]] = {
@@ -238,7 +260,10 @@ class RSSCollector:
             return []
 
         try:
-            feed = _feedparser_module.parse(feed_url)
+            handlers = [_SSL_HANDLER] if _SSL_HANDLER else []
+            feed = _feedparser_module.parse(
+                feed_url, handlers=handlers
+            )
         except Exception as e:
             logger.warning(
                 f"[RSSCollector] パースエラー {feed_url}: {e}"
