@@ -18,7 +18,7 @@ from sqlalchemy.orm import DeclarativeBase
 
 
 class Base(DeclarativeBase):
-    """ベースモデル（Supabase/メインDB用）"""
+    """ベースモデル（メインDB用）"""
 
     pass
 
