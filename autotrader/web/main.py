@@ -355,7 +355,7 @@ def create_app() -> FastAPI:
     )
 
     # HTTPSリダイレクト（本番環境用）
-    app.add_middleware(HTTPSRedirectMiddleware)
+    # app.add_middleware(HTTPSRedirectMiddleware)
 
     # セキュリティヘッダー
     app.add_middleware(SecurityHeadersMiddleware)

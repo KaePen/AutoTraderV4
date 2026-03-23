@@ -21,9 +21,7 @@
       "Read(./.aws/**)",
       "Read(./build/**)",
       "Write(./docs/**)",
-      "Write(./documentation/**)",
-      "Write(README.md)",
-      "Edit(README.md)"
+      "Write(./documentation/**)"
     ],
     "defaultMode": "acceptEdits"
   },
