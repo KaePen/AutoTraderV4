@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from collections.abc import Generator
 from contextlib import contextmanager
+from pathlib import Path
+from urllib.parse import urlparse
 
 from sqlalchemy import Engine, create_engine
 from sqlalchemy.orm import Session, sessionmaker
@@ -34,6 +36,11 @@ def get_engine(database_url: str) -> Engine:
 
         if database_url.startswith("sqlite"):
             connect_args["check_same_thread"] = False
+            # SQLiteはディレクトリが存在しないとファイルを作れないため自動作成
+            parsed = urlparse(database_url)
+            db_path = parsed.path.lstrip("/")
+            if db_path and db_path != ":memory:":
+                Path(db_path).parent.mkdir(parents=True, exist_ok=True)
         else:
             # PostgreSQL: 接続プール設定
             kwargs["pool_size"] = 5

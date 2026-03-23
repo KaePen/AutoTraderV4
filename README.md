@@ -68,9 +68,23 @@ git clone https://github.com/KaePen/AutoTraderV4.git
 cd AutoTraderV4
 ```
 
-### 2.5 依存パッケージのインストール
+### 2.5 Visual C++ ランタイムのインストール（Windows必須）
 
-```bash
+`numba` ライブラリが依存する Microsoft Visual C++ ランタイムが必要です。
+インストールされていない場合、起動時に `OSError: Could not find/load shared object file` エラーが発生します。
+
+```powershell
+# winget でインストール（推奨）
+winget install Microsoft.VCRedist.2015+.x64
+```
+
+または [Microsoft 公式](https://aka.ms/vs/17/release/vc_redist.x64.exe) からダウンロードしてインストールしてください。
+
+> インストール後、Windowsを**再起動**してから次の手順へ進んでください。
+
+### 2.6 依存パッケージのインストール
+
+```powershell
 # 基本インストール（ライブトレードに必要な最小構成）
 uv sync
 
@@ -92,14 +106,28 @@ uv sync --all-extras
 | `bigquery` | google-cloud-bigquery | GDELT BigQuery |
 | `dev` | pytest, mypy, ruff | 開発・テスト |
 
-### 2.6 MetaTrader 5 の準備
+#### MT5パッケージのインストール確認
+
+`uv sync --extra mt5` 実行後、MetaTrader5 パッケージが正しくインストールされたか確認してください:
+
+```powershell
+.venv\Scripts\python.exe -c "import MetaTrader5; print('MetaTrader5 OK')"
+```
+
+`MetaTrader5 OK` と表示されれば正常です。エラーが出る場合は個別にインストールしてください:
+
+```powershell
+.venv\Scripts\pip install MetaTrader5
+```
+
+### 2.7 MetaTrader 5 の準備
 
 1. ブローカーからMT5をダウンロード・インストール
 2. デモまたはリアル口座を開設
 3. MT5にログインし、対象通貨ペアのチャートを開く
 4. ツール → オプション → Expert Advisors で「アルゴリズム取引を許可」を有効化
 
-### 2.7 環境変数の設定（任意）
+### 2.8 環境変数の設定（任意）
 
 `.env` ファイルをプロジェクトルートに作成すると、起動時に自動読み込みされます:
 
@@ -118,6 +146,12 @@ LOG_LEVEL=INFO
 ```
 
 > **注意**: `.env` ファイルにはパスワードが含まれます。gitにコミットしないでください（`.gitignore` で除外済み）。
+>
+> **Windows の注意**: `.env` は必ず **UTF-8 (BOM なし)** で保存してください。メモ帳や PowerShell の `>` リダイレクトはデフォルトで UTF-16 になるため、起動時に `UnicodeDecodeError` が発生します。
+> ```powershell
+> # UTF-8 BOMなしで .env を作成する方法
+> [System.IO.File]::WriteAllText(".env", (Get-Content ".env" -Raw), [System.Text.UTF8Encoding]::new($false))
+> ```
 
 ---
 
