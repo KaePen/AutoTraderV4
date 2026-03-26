@@ -39,7 +39,7 @@ pm_config:
   # ポジション管理パラメータ（通貨ペア非依存）
   # spread_pips/slippage_pips は symbol_presets.yaml (SSOT) を参照
   # 基本（M1最適化 No.3）
-  partial_close_1r_ratio: 0.30
+  partial_close_1r_ratio: 0.50
   partial_close_2r_ratio: 0.05
   breakeven_at_1r: true
   trailing_start_r: 0.5

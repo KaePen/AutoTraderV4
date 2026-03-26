@@ -422,7 +422,7 @@ class PositionManagementConfigResponse(BaseModel):
 
     enable_position_manager: bool = True
     # 部分利確
-    partial_close_1r_ratio: float = 0.30
+    partial_close_1r_ratio: float = 0.50
     partial_close_2r_ratio: float = 0.05
     breakeven_at_1r: bool = True
     # トレーリング

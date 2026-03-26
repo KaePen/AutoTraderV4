@@ -221,7 +221,7 @@ class TestPositionManagerConfigDefaults:
         self.config = PositionManagerConfig()
 
     def test_partial_close_ratios(self) -> None:
-        assert self.config.partial_close_1r_ratio == 0.30
+        assert self.config.partial_close_1r_ratio == 0.50
         assert self.config.partial_close_2r_ratio == 0.05
 
     def test_trailing_settings(self) -> None:
