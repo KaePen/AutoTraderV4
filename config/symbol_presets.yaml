@@ -53,7 +53,7 @@ filter:
 
 # --- PM設定（全通貨ペア共通デフォルト）---
 pm_config:
-  partial_close_1r_ratio: 0.30
+  partial_close_1r_ratio: 0.50
   partial_close_2r_ratio: 0.05
   breakeven_at_1r: true
   trailing_start_r: 0.5

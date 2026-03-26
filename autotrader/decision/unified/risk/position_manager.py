@@ -209,7 +209,7 @@ class PositionManagerConfig:
         be_cushion_pips: BE移動時の利益方向クッション(pips)
     """
 
-    partial_close_1r_ratio: float = 0.30
+    partial_close_1r_ratio: float = 0.50
     partial_close_2r_ratio: float = 0.05
     breakeven_at_1r: bool = True
     trailing_start_r: float = 0.5

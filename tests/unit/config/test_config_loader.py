@@ -27,7 +27,7 @@ class TestConfigLoader:
         assert isinstance(pm, PositionManagerConfig)
         # デフォルト値確認
         assert bot.base_risk_pct == 0.04
-        assert pm.partial_close_1r_ratio == 0.30
+        assert pm.partial_close_1r_ratio == 0.50
 
     def test_正常なYAML読み込み(
         self, tmp_path: Path,
@@ -230,7 +230,7 @@ class TestPresetConfig:
         _, pm = loader.load_preset_config("USDJPY")
 
         # symbol_presets.yamlのpm_config
-        assert pm.partial_close_1r_ratio == 0.30
+        assert pm.partial_close_1r_ratio == 0.50
         assert pm.trailing_start_r == 0.5
         assert pm.stagnation_exit_minutes == 120.0
 
