@@ -25,8 +25,8 @@ class TestConfigLoader:
 
         assert isinstance(bot, UnifiedBotConfig)
         assert isinstance(pm, PositionManagerConfig)
-        # デフォルト値確認
-        assert bot.base_risk_pct == 0.04
+        # デフォルト値確認（UnifiedBotConfigのPythonデフォルト）
+        assert bot.base_risk_pct == 0.05
         assert pm.partial_close_1r_ratio == 0.50
 
     def test_正常なYAML読み込み(
@@ -138,19 +138,19 @@ class TestConfigLoader:
     def test_セクション差し替え保存で他セクション維持(
         self, tmp_path: Path,
     ) -> None:
-        """pm_config保存時にbot_configが維持される"""
-        # 初期YAML作成
-        config_data = {
-            "bot_config": {
+        """pm_config保存時にsignalセクションが維持される（3ファイル構成）"""
+        # 初期 trading_defaults.yaml を作成（signal にbase_risk_pctを含む）
+        defaults_data = {
+            "signal": {
                 "base_risk_pct": 0.03,
             },
             "pm_config": {
                 "partial_close_1r_ratio": 0.3,
             },
         }
-        yaml_path = tmp_path / "live_trading.yaml"
-        with open(yaml_path, "w", encoding="utf-8") as f:
-            yaml.dump(config_data, f)
+        defaults_path = tmp_path / "trading_defaults.yaml"
+        with open(defaults_path, "w", encoding="utf-8") as f:
+            yaml.dump(defaults_data, f)
 
         # PM設定のみ更新
         loader = ConfigLoader(config_dir=tmp_path)
@@ -159,7 +159,7 @@ class TestConfigLoader:
         )
         loader.save_pm_config(pm)
 
-        # bot_configが維持されている
+        # signalセクション（base_risk_pct）が維持されている
         bot, loaded_pm = loader.load_live_config()
         assert bot.base_risk_pct == 0.03
         assert loaded_pm.partial_close_1r_ratio == 0.5
@@ -190,17 +190,17 @@ class TestPresetConfig:
     """load_preset_config のテスト"""
 
     def test_デフォルト設定でUSDJPY読み込み(self) -> None:
-        """実際のsymbol_presets.yamlからUSDJPY設定を読み込み"""
+        """実際のtrading_defaults.yaml / symbol_overrides.yamlからUSDJPY設定を読み込み"""
         loader = ConfigLoader()
         bot, pm = loader.load_preset_config("USDJPY")
 
         assert isinstance(bot, UnifiedBotConfig)
         assert isinstance(pm, PositionManagerConfig)
-        # symbol_presets.yamlのsignal.consensus_threshold
-        assert bot.consensus_threshold == 17.0
-        # symbol_presets.yamlのsignal.bca_min_edge
+        # trading_defaults.yaml の signal.consensus_threshold
+        assert bot.consensus_threshold == 18.0
+        # trading_defaults.yaml の signal.bca_min_edge
         assert bot.bca_min_edge == 0.60
-        # USDJPYプリセットのmax_positions
+        # symbol_overrides.yaml の USDJPY.max_positions
         assert bot.max_positions == 1
 
     def test_EURJPY通貨ペア別上書き(self) -> None:
@@ -210,8 +210,8 @@ class TestPresetConfig:
 
         # EURJPY固有: bca_min_edge=0.70
         assert bot.bca_min_edge == 0.70
-        # 共通デフォルト: consensus_threshold=9.0
-        assert bot.consensus_threshold == 17.0
+        # 共通デフォルト: consensus_threshold=18.0
+        assert bot.consensus_threshold == 18.0
         # EURJPYプリセットのmax_positions
         assert bot.max_positions == 1
 
@@ -220,8 +220,8 @@ class TestPresetConfig:
         loader = ConfigLoader()
         bot, _ = loader.load_preset_config("XYZJPY")
 
-        # デフォルト値
-        assert bot.consensus_threshold == 17.0
+        # グローバルデフォルト値
+        assert bot.consensus_threshold == 18.0
         assert bot.bca_min_edge == 0.60
 
     def test_PM設定が読み込まれる(self) -> None:
