@@ -262,6 +262,7 @@ class MarketService:
                 exit_reason=_parse_exit_reason(t.exit_reason),
                 opened_at=t.opened_at,
                 closed_at=t.closed_at,
+                entry_own_score=t.entry_own_score or 0.0,
             )
             for t in trades
         ]

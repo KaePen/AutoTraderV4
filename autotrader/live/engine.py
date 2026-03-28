@@ -1836,6 +1836,7 @@ class LiveTradingEngine:
             tp=tp_price,
             volume=volume,
             plan=plan,
+            entry_own_score=signal.consensus_score or 0.0,
         )
         # 新規登録時に管理状態をローカルDBに保存
         self._save_position_state(str(ticket))
@@ -1904,6 +1905,7 @@ class LiveTradingEngine:
                     stop_loss=sl_price,
                     take_profit=tp_price,
                     ticket=ticket,
+                    entry_own_score=signal.consensus_score or 0.0,
                 )
                 trade_id = trade.trade_id
             logger.info(
@@ -2401,12 +2403,15 @@ class LiveTradingEngine:
                         )
                     )
                 # ポジション評価
+                _cs = self._last_analysis
                 action = self._pm.evaluate(
                     position_id=pos_id,
                     current_price=current_price,
                     current_time=datetime.now(UTC),
                     atr=atr,
                     current_signal=current_signal_type,
+                    buy_score=(_cs.buy_score or 0.0) if _cs else 0.0,
+                    sell_score=(_cs.sell_score or 0.0) if _cs else 0.0,
                     fundamental_assessment=_fund_ctx,
                 )
 
