@@ -1,0 +1,265 @@
+# 通貨ペア別プリセット設定
+# ============================================================
+# trading_defaults.yaml のグローバル値を通貨ペア別に上書きする。
+# symbols[X] セクションのみ変更が必要な値を記載する。
+# ============================================================
+
+# --- 通貨ペア共通フォールバック（SymbolPreset フィールド）---
+defaults:
+  pip_unit: 0.01          # JPYペア: 1pip = 0.01
+  # quote_ccy_rate: クォート通貨→口座通貨(JPY)変換レート
+  # JPYペアは1.0固定。非JPYペアは概算値
+  quote_ccy_rate: 1.0
+  pip_value: 100.0
+  spread_pips: 1.5
+  slippage_pips: 0.5
+  default_sl_pips: 20.0
+  default_tp_pips: 40.0
+  min_lot: 0.01
+  max_lot: 10.0
+  commission_per_lot: 0.0
+  max_positions: 1
+  bonus_max_positions: 0
+  bonus_score_threshold: 7.0
+  base_risk_pct: 0.006          # ストレステストP3結果: 0.6%採用
+  max_lot_per_trade: 1.5
+  max_total_exposure_lot: 3.0
+  equity_floor_pct: 0.30
+  use_position_manager: true
+  trailing_start_r: 0.5
+  trailing_atr_multiplier: 2.0
+  breakeven_at_1r: true
+  sg_spread_threshold_pips: 4.5  # p95ベース切り上げ
+
+# ------------------------------------------------------------------
+# USD ペア（quote currency = USD: pip_value ≈ $10/lot）
+# ------------------------------------------------------------------
+symbols:
+  EURUSD:
+    pip_unit: 0.0001
+    quote_ccy_rate: 150.0
+    pip_value: 10.0
+    spread_pips: 1.0
+    sg_spread_threshold_pips: 2.5  # p95ベース (2023-2025 p95=2.2)
+    slippage_pips: 0.3
+    default_sl_pips: 15.0
+    default_tp_pips: 30.0
+    max_positions: 1
+    bonus_score_threshold: 7.0
+    base_risk_pct: 0.01
+    max_lot_per_trade: 1.5
+    max_total_exposure_lot: 3.0
+    signal:
+      macd_slope_deadzone_atr_ratio: 0.01  # DZ-T2: PF 4.22→4.86
+    filter:
+      regime_trend_threshold_add: 2.0
+
+  GBPUSD:
+    pip_unit: 0.0001
+    quote_ccy_rate: 150.0
+    pip_value: 10.0
+    spread_pips: 1.5
+    sg_spread_threshold_pips: 3.0  # p95ベース (2023-2025 p95=2.9)
+    slippage_pips: 0.3
+    default_sl_pips: 20.0
+    default_tp_pips: 40.0
+    max_positions: 1
+    bonus_score_threshold: 7.0
+    base_risk_pct: 0.01
+    max_lot_per_trade: 1.5
+    max_total_exposure_lot: 2.0
+    use_position_manager: true
+    signal:
+      macd_slope_deadzone_atr_ratio: 0.01  # DZ-R4: PF 4.00→4.77
+    filter:
+      regime_trend_threshold_add: 2.0
+    pm_config:
+      trailing_start_r: 1.5
+      trailing_atr_multiplier: 2.0
+
+  AUDUSD:
+    pip_unit: 0.0001
+    quote_ccy_rate: 150.0
+    pip_value: 10.0
+    spread_pips: 1.5
+    slippage_pips: 0.3
+    default_sl_pips: 15.0
+    default_tp_pips: 30.0
+    max_positions: 0              # 不採用ペア
+    bonus_score_threshold: 7.0
+    base_risk_pct: 0.01
+    max_lot_per_trade: 1.5
+    max_total_exposure_lot: 3.0
+
+  NZDUSD:
+    pip_unit: 0.0001
+    quote_ccy_rate: 150.0
+    pip_value: 10.0
+    spread_pips: 2.0
+    slippage_pips: 0.5
+    default_sl_pips: 15.0
+    default_tp_pips: 30.0
+    max_positions: 0              # 不採用ペア
+    bonus_score_threshold: 7.0
+    base_risk_pct: 0.01
+    max_lot_per_trade: 1.5
+    max_total_exposure_lot: 2.0
+
+  USDCHF:
+    pip_unit: 0.0001
+    quote_ccy_rate: 170.0
+    pip_value: 9.0
+    spread_pips: 1.5
+    slippage_pips: 0.3
+    default_sl_pips: 15.0
+    default_tp_pips: 30.0
+    max_positions: 0              # 不採用ペア
+    bonus_score_threshold: 7.0
+    base_risk_pct: 0.02
+    max_lot_per_trade: 2.0
+
+  USDCAD:
+    pip_unit: 0.0001
+    quote_ccy_rate: 110.0
+    pip_value: 7.5
+    spread_pips: 2.0
+    slippage_pips: 0.5
+    default_sl_pips: 15.0
+    default_tp_pips: 30.0
+    max_positions: 0              # 不採用ペア
+    bonus_score_threshold: 7.0
+    base_risk_pct: 0.02
+    max_lot_per_trade: 2.0
+
+# ------------------------------------------------------------------
+# JPY ペア（quote currency = JPY: pip_value=100）
+# ------------------------------------------------------------------
+
+  USDJPY:
+    pip_value: 100.0
+    spread_pips: 1.5
+    sg_spread_threshold_pips: 3.0  # p95ベース (2023-2025 p95=3.0)
+    slippage_pips: 0.5
+    default_sl_pips: 20.0
+    default_tp_pips: 40.0
+    max_positions: 1
+    bonus_max_positions: 0
+    bonus_score_threshold: 7.0
+    base_risk_pct: 0.006
+    max_lot_per_trade: 2.0
+    max_total_exposure_lot: 4.0
+    equity_floor_pct: 0.30
+    signal:
+      trend_strength_max: 0.85    # WI: +1,353K, WR +0.3pp vs 0.7
+      regime_trend_threshold_add: 2.0
+
+  EURJPY:
+    pip_value: 100.0
+    spread_pips: 2.0
+    sg_spread_threshold_pips: 4.5  # p95ベース (2023-2025 p95=4.4)
+    slippage_pips: 0.7
+    default_sl_pips: 25.0
+    default_tp_pips: 50.0
+    max_positions: 1
+    bonus_score_threshold: 7.5
+    base_risk_pct: 0.006
+    max_lot_per_trade: 2.0
+    max_total_exposure_lot: 4.0
+    signal:
+      bca_min_edge: 0.70
+      volume_filter_enabled: true
+      volume_filter_threshold: 1.0  # T2: Profit+330K, DD -0.31pp
+      volume_filter_penalty: 0.5
+      regime_trend_threshold_add: 2.0
+    filter:
+      penalty_cap: 0.5              # WI: +764K, WR -1.1pp
+
+  GBPJPY:
+    pip_value: 100.0
+    spread_pips: 3.0
+    sg_spread_threshold_pips: 5.5  # p95ベース (2023-2025 p95=5.4)
+    slippage_pips: 1.0
+    default_sl_pips: 30.0
+    default_tp_pips: 60.0
+    max_positions: 1
+    bonus_max_positions: 0
+    bonus_score_threshold: 8.0
+    base_risk_pct: 0.006
+    max_lot_per_trade: 1.5
+    max_total_exposure_lot: 3.0
+    signal:
+      bca_min_edge: 0.70          # P2: 0.70が最良 (DD -1.4pp)
+      volume_filter_enabled: false # P3: VF効果なし
+      trend_strength_max: 0.85    # IM-T30: +9.9%(6Y)
+      m1_micro_reversal_enabled: true  # RL-T20: +450K, DD -0.30pp
+      regime_trend_threshold_add: 2.0
+    filter:
+      penalty_cap: 0.5              # IM-T9/T15: +6.0%(6Y)
+
+  AUDJPY:
+    pip_value: 100.0
+    spread_pips: 2.0
+    sg_spread_threshold_pips: 4.5  # p95ベース (2023-2025 p95=4.3)
+    slippage_pips: 0.7
+    default_sl_pips: 20.0
+    default_tp_pips: 40.0
+    max_positions: 1
+    bonus_score_threshold: 7.0
+    base_risk_pct: 0.006
+    max_lot_per_trade: 1.5
+    max_total_exposure_lot: 3.0
+    signal:
+      bca_min_edge: 0.65          # P2: 0.65が最良 (PF +0.079)
+      volume_filter_enabled: true
+      volume_filter_threshold: 1.0  # T2: Profit+80K
+      volume_filter_penalty: 0.5
+      trend_strength_max: 0.85    # IM-T32: +4.6%(6Y)
+      regime_trend_threshold_add: 2.0
+    filter:
+      penalty_cap: 0.5              # WI: +2,054K
+
+  CADJPY:
+    pip_value: 100.0
+    spread_pips: 2.5
+    sg_spread_threshold_pips: 5.5  # p95ベース (2023-2025 p95=5.4)
+    slippage_pips: 0.7
+    default_sl_pips: 20.0
+    default_tp_pips: 40.0
+    max_positions: 1
+    bonus_score_threshold: 7.0
+    base_risk_pct: 0.006
+    max_lot_per_trade: 1.5
+    max_total_exposure_lot: 3.0
+    signal:
+      bca_min_edge: 0.70          # P2: 0.70が最良 (Sharpe +0.73)
+      volume_filter_enabled: true
+      volume_filter_threshold: 1.0  # T2: Profit+220K, DD -1.61pp
+      volume_filter_penalty: 0.5
+      trend_strength_max: 0.85    # IM-T24: +8.5%(6Y)
+      regime_trend_threshold_add: 2.0
+
+  CHFJPY:
+    pip_value: 100.0
+    spread_pips: 2.5
+    sg_spread_threshold_pips: 6.5  # p95ベース (2023-2025 p95=6.2)
+    slippage_pips: 0.7
+    default_sl_pips: 25.0
+    default_tp_pips: 50.0
+    max_positions: 1
+    bonus_score_threshold: 7.5
+    base_risk_pct: 0.006
+    max_lot_per_trade: 1.5
+    max_total_exposure_lot: 3.0
+    signal:
+      bca_min_edge: 0.70          # P2: 0.70が最良 (Sharpe +0.71)
+      trend_strength_max: 0.85    # IM-T31: +4.0%(6Y)
+      regime_trend_threshold_add: 2.0
+    filter:
+      penalty_cap: 0.5              # WI: +2,918K
+
+# --- マルチ通貨ペア ポートフォリオ設定 ---
+multi_pair:
+  global_max_positions: 4
+  per_pair_max_positions: 1
+  global_max_exposure_lot: 5.0
+  max_same_direction_jpy: 3

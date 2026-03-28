@@ -1,0 +1,150 @@
+# グローバルトレードロジック・デフォルト値
+# ============================================================
+# このファイルがパラメータの Single Source of Truth (SSOT)。
+# symbol_overrides.yaml で通貨ペア別に上書き可能。
+# Python dataclass のデフォルト値はフォールバックに過ぎない。
+# ============================================================
+
+# === シグナル生成・コンセンサス ===
+signal:
+  consensus_threshold: 18.0
+  consensus_primary_weight: 2.0
+  consensus_entry_weight: 1.5
+  consensus_confirm_weight: 3.0
+  consensus_manage_weight: 0.5
+  consensus_other_weight: 1.0
+  bca_enabled: true
+  bca_min_edge: 0.60
+  bca_penalty_scale: 1.0
+  htf_score_filter_enabled: true
+  htf_score_filter_min_alignment: 0.1
+  htf_score_filter_threshold_add: 1.0
+  macd_slope_filter_threshold: -2.0
+  trend_strength_max: 0.6             # ストレステストP3: 0.6が最適 (PF +8%, DD -17%)
+  regime_trend_threshold_add: 1.5
+  # MACDスロープスコアリング係数
+  macd_slope_bonus: 2.5
+  macd_slope_penalty: 2.0
+  # HTF整合スコアリング係数
+  htf_align_bonus_strong: 4.0
+  htf_align_bonus_weak: 2.0
+  # BREAKOUT設定
+  regime_breakout_lookback: 20
+  regime_breakout_tp_multiplier: 1.5
+  # ボラティリティ検出閾値
+  vol_expanding_threshold: 0.3
+  vol_compressing_threshold: -0.2
+  vol_expanding_penalty: 0.1
+  # CHOPPY検出
+  choppy_ci_threshold: 61.8
+  choppy_threshold_add: 3.0
+  # M1実行ゲート
+  m1_exec_gate_bb_low: 0.3
+  m1_exec_gate_bb_high: 0.7
+
+# === リスク管理 ===
+risk_mgmt:
+  sl_min_pips: 20.0
+  sl_max_pips_default: 50.0
+  default_tp_sl_ratio_range: [1.1, 1.4]
+  use_dynamic_lot: true
+  slippage_buffer_pips: 2.0
+
+# === フィルター ===
+filter:
+  range_day_bbw_threshold: 0.25
+  range_day_score_premium: 0.3
+  weak_hours_enabled: true
+  weak_hours_score_premium: 0.5
+  sg_spread_penalty_rate: 0.2
+  sg_off_hours_penalty: 0.5           # WF検証済み (IS+OOS全期間)
+  sg_volatility_penalty: 0.05
+  sg_recent_loss_penalty: 0.1
+  sg_penalty_hours: [15]              # UTC 15時（NY Open直後）
+  sg_penalty_hours_value: 0.3
+  regime_threshold_enabled: true
+
+# === ポジション管理 ===
+pm_config:
+  partial_close_1r_ratio: 0.50
+  partial_close_2r_ratio: 0.05
+  breakeven_at_1r: true
+  trailing_start_r: 0.5
+  trailing_atr_multiplier: 2.0
+  early_breakeven_r: 0.3
+  signal_rev_close_ratio: 0.0
+  range_day_be_disabled: true
+  range_day_early_be_r: 0.3
+  range_day_fast_be_enabled: true
+  range_day_fast_be_minutes: 90.0
+  stagnation_exit_minutes: 120.0
+  stagnation_min_mfe_r: 0.10
+  be_cushion_pips: 3.0
+  range_day_insurance_enabled: false
+  insurance_trigger_r: 1.0
+  insurance_block_high_mfe_r: 0.8
+  insurance_min_holding_minutes: 15.0
+  range_day_half_r_partial_enabled: false
+  range_day_half_r_partial_ratio: 0.20
+  range_day_half_r_trigger: 0.5
+  early_profit_guard_enabled: true
+  stag_pretighten_enabled: true
+  # 2段階トレーリング
+  trailing_stage2_r: 1.5
+  trailing_stage2_atr_multiplier: 1.2
+  # Stagnation段階制御
+  stagnation_stage1_minutes: 60.0
+  stagnation_stage1_mfe_r: 0.05
+  stagnation_stage2_minutes: 90.0
+  stagnation_stage2_mfe_r: 0.10
+  # Stagnation予防的SL締め
+  stag_pretighten_pct: 0.80
+  stag_pretighten_mfe_r: 0.10
+  stag_pretighten_sl_r: -0.05
+  # 早期利益ガード詳細
+  early_profit_guard_min_mfe_r: 0.05
+  early_profit_guard_max_r: 0.30
+  early_profit_guard_score_diff: 1.0
+  early_profit_guard_min_opp_score: 4.0
+  early_profit_guard_min_hold_minutes: 5.0
+  # エッジ劣化監視（Mode A: 純粋劣化exit）
+  edge_decay_exit_enabled: true
+  edge_decay_exit_threshold: 0.40     # 40%劣化で発動（Mode A基準値）
+  edge_decay_exit_min_bars: 5
+  edge_decay_exit_max_loss_r: -0.3
+  # Mode B: 利益侵食 + エッジ劣化複合exit
+  edge_decay_profit_exit_enabled: true
+  edge_decay_profit_erosion_threshold: 0.60
+  edge_decay_profit_decay_min: 0.25
+  # Stagnation連携
+  edge_decay_stagnation_enabled: true
+  edge_decay_stagnation_threshold: 0.35
+  edge_decay_stagnation_multiplier: 0.65
+
+# === エッジ検定（EdgeValidatorConfig）===
+edge_validator:
+  expected_winrate: 0.80
+  info_wr_drop: 0.05
+  warning_wr_drop: 0.10
+  stop_wr_drop: 0.15
+  critical_wr_drop: 0.20
+  info_pf_threshold: 2.0
+  warning_pf_threshold: 1.5
+  stop_pf_threshold: 1.3
+  critical_pf_threshold: 1.0
+
+# === ポジションサイザー（PositionSizerConfig）===
+position_sizer:
+  base_risk_pct: 0.025
+  max_lot_per_trade: 2.5
+  max_total_exposure_lot: 4.0
+  equity_floor_pct: 0.30
+  equity_caution_pct: 0.50
+  confidence_high_threshold: 0.7
+  confidence_low_threshold: 0.5
+  dd_reduction_threshold: 0.015
+  dd_max_reduction: 0.5
+  dd_early_threshold: 0.008
+  consecutive_loss_start: 2
+  consecutive_loss_max: 5
+  consecutive_loss_min_adjust: 0.2

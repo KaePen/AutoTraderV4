@@ -144,9 +144,9 @@ class SymbolPreset:
 
 # プリセットキャッシュ
 # parents[2] = プロジェクトルート（autotrader/config/ から2階層上）
-_DEFAULT_PRESET_PATH = (
-    Path(__file__).resolve().parents[2] / "config" / "symbol_presets.yaml"
-)
+_CONFIG_DIR = Path(__file__).resolve().parents[2] / "config"
+_DEFAULT_PRESET_PATH = _CONFIG_DIR / "symbol_presets.yaml"
+_DEFAULT_OVERRIDES_PATH = _CONFIG_DIR / "symbol_overrides.yaml"
 _preset_cache: dict[str, SymbolPreset] = {}
 # ペア別 signal/filter/pm_config 上書き辞書
 _symbol_overrides_cache: dict[
@@ -159,17 +159,27 @@ _loaded_path: Path | None = None  # 現在キャッシュしているYAMLパス
 def _load_presets(path: Path | None = None) -> None:
     """YAMLからプリセットを読み込みキャッシュに格納.
 
+    symbol_overrides.yaml（新構成）が存在すればそちらを優先し、
+    存在しない場合は symbol_presets.yaml にフォールバックする。
     defaults をベースに symbols[X] で上書きするマージ方式。
 
     Args:
-        path: YAMLファイルパス（None時はデフォルトパス）
+        path: YAMLファイルパス（None時は自動検出）
     """
     global _presets_loaded, _loaded_path
     import dataclasses  # noqa: PLC0415
 
     import yaml  # noqa: PLC0415
 
-    target = path or _DEFAULT_PRESET_PATH
+    # 新構成ファイルが存在すれば優先使用
+    if path is None:
+        if _DEFAULT_OVERRIDES_PATH.exists():
+            target = _DEFAULT_OVERRIDES_PATH
+        else:
+            target = _DEFAULT_PRESET_PATH
+    else:
+        target = path
+
     _loaded_path = target
 
     if not target.exists():
@@ -186,6 +196,7 @@ def _load_presets(path: Path | None = None) -> None:
     symbols: dict[str, Any] = raw.get("symbols", {})
 
     # グローバルの signal/filter/risk_mgmt/pm_config デフォルト
+    # symbol_overrides.yaml には存在しないが、後方互換で読み込む
     _global_signal: dict[str, Any] = raw.get("signal", {})
     _global_filter: dict[str, Any] = raw.get("filter", {})
     _global_risk: dict[str, Any] = raw.get("risk_mgmt", {})
@@ -238,15 +249,23 @@ def get_preset(
 
     未定義シンボルは USDJPY 相当のデフォルト値を返す。
     path が現在のキャッシュと異なる場合は再読み込みを行う。
+    path 未指定時は symbol_overrides.yaml → symbol_presets.yaml の順で自動検出。
 
     Args:
         symbol: 通貨ペア名
-        path: YAMLファイルパス（None時はデフォルトパス）
+        path: YAMLファイルパス（None時は自動検出）
 
     Returns:
         SymbolPreset: プリセット設定
     """
-    effective_path = path if path is not None else _DEFAULT_PRESET_PATH
+    if path is None:
+        effective_path = (
+            _DEFAULT_OVERRIDES_PATH
+            if _DEFAULT_OVERRIDES_PATH.exists()
+            else _DEFAULT_PRESET_PATH
+        )
+    else:
+        effective_path = path
     # 未ロードまたは異なるパスが指定された場合は再読み込み
     if not _presets_loaded or effective_path != _loaded_path:
         _preset_cache.clear()
@@ -275,9 +294,14 @@ def get_symbol_overrides(
     Returns:
         dict: {"signal": {...}, "filter": {...}, "pm_config": {...}}
     """
-    effective_path = (
-        path if path is not None else _DEFAULT_PRESET_PATH
-    )
+    if path is None:
+        effective_path = (
+            _DEFAULT_OVERRIDES_PATH
+            if _DEFAULT_OVERRIDES_PATH.exists()
+            else _DEFAULT_PRESET_PATH
+        )
+    else:
+        effective_path = path
     if not _presets_loaded or effective_path != _loaded_path:
         _preset_cache.clear()
         _symbol_overrides_cache.clear()
