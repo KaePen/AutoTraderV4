@@ -1244,6 +1244,7 @@ class TradeSimulator:
                 tp=position.take_profit,
                 volume=volume,
                 plan=plan,
+                entry_own_score=signal.consensus_score or 0.0,
             )
             # シグナル参照をキャッシュ
             self._signal_cache[position.position_id] = signal
