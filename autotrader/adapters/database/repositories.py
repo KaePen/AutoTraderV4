@@ -283,6 +283,12 @@ class PositionStateRepository:
             )
             self.session.add(record)
 
+        # エントリー時スコア（再起動後の劣化計算継続用）
+        # 既存値が0より大きい場合のみ上書き（0へのリセットを防ぐ）
+        new_score = state.get("entry_own_score", 0.0)
+        if new_score > 0:
+            record.entry_own_score = new_score
+
         # 追跡値
         record.highest_price = state.get(
             "highest_price", 0.0
