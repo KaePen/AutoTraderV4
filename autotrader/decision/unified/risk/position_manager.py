@@ -147,6 +147,8 @@ class ManagedPosition:
     current_r: float = 0.0
     highest_r: float = 0.0
     trailing_activated: bool = False
+    # エッジ劣化監視: エントリー時の自方向スコアを保存
+    entry_own_score: float = 0.0
     state_machine: PositionStateMachine = field(
         default_factory=lambda: PositionStateMachine(
             PositionState.OPEN,
@@ -341,6 +343,27 @@ class PositionManagerConfig:
     weekend_close_enabled: bool = True
     weekend_close_hour: int = 20
     weekend_close_minute: int = 30
+    # エッジ劣化監視: エントリー時のコンセンサススコアと比較して劣化率を監視
+    # モードA: 純粋エッジ劣化exit
+    edge_decay_exit_enabled: bool = True
+    # エントリースコアからの劣化率がこの閾値以上で発動（0.50=50%劣化）
+    edge_decay_exit_threshold: float = 0.50
+    # 最低保有バー数（エントリー直後のノイズ排除）
+    edge_decay_exit_min_bars: int = 5
+    # 許容最大損失R値（これより大きな損失は通常SLに任せる）
+    edge_decay_exit_max_loss_r: float = -0.3
+    # モードB: 利益侵食 + エッジ劣化 複合exit（利益を守る）
+    edge_decay_profit_exit_enabled: bool = True
+    # MFEピークからの利益侵食率がこの閾値以上で発動（0.60=60%侵食）
+    edge_decay_profit_erosion_threshold: float = 0.60
+    # モードB発動に必要な最低エッジ劣化率（緩い閾値）
+    edge_decay_profit_decay_min: float = 0.25
+    # Stagnation連携: エッジ劣化時にstagnation時間閾値を短縮
+    edge_decay_stagnation_enabled: bool = True
+    # この劣化率以上でstagnation閾値を短縮
+    edge_decay_stagnation_threshold: float = 0.35
+    # stagnation時間をこの倍率に短縮（0.65=65%に短縮）
+    edge_decay_stagnation_multiplier: float = 0.65
 
 
 class PositionManager:
@@ -383,6 +406,7 @@ class PositionManager:
         tp: float,
         volume: float,
         plan: TradingPlan,
+        entry_own_score: float = 0.0,
     ) -> None:
         """ポジションを登録
 
@@ -395,6 +419,7 @@ class PositionManager:
             tp: TP価格
             volume: ロット数
             plan: トレーディングプラン
+            entry_own_score: エントリー時の自方向コンセンサススコア（エッジ劣化監視用）
         """
         self._positions[position_id] = ManagedPosition(
             position_id=position_id,
@@ -409,6 +434,7 @@ class PositionManager:
             plan=plan,
             highest_price=entry_price,
             lowest_price=entry_price,
+            entry_own_score=entry_own_score,
         )
 
     def unregister_position(self, position_id: str) -> None:
@@ -454,6 +480,7 @@ class PositionManager:
             "highest_r": pos.highest_r,
             "bars_held": pos.bars_held,
             "trailing_activated": pos.trailing_activated,
+            "entry_own_score": pos.entry_own_score,
             "partial_closed_1r": (
                 position_id in self._partial_closed_1r
             ),
@@ -511,6 +538,9 @@ class PositionManager:
         pos.trailing_activated = state.get(
             "trailing_activated", pos.trailing_activated
         )
+        pos.entry_own_score = state.get(
+            "entry_own_score", pos.entry_own_score
+        )
 
         # フラグの復元（対称的: True→add, False→discard）
         _flag_map = {
@@ -567,6 +597,20 @@ class PositionManager:
         # 価格更新
         position.update_price(current_price)
         position.bars_held += 1
+
+        # エッジ劣化率を計算（以降のチェックで共有）
+        _own_score = (
+            buy_score
+            if position.direction == SignalType.BUY
+            else sell_score
+        )
+        _decay_ratio = 0.0
+        if position.entry_own_score > 0 and buy_score + sell_score > 0:
+            _decay_ratio = max(
+                0.0,
+                (position.entry_own_score - _own_score)
+                / position.entry_own_score,
+            )
 
         # 1. SL到達チェック
         action = self._check_sl(position, current_price)
@@ -637,6 +681,7 @@ class PositionManager:
         # 4. 進捗なしExitチェック
         action = self._check_stagnation_exit(
             position, current_time, current_price,
+            decay_ratio=_decay_ratio,
         )
         if action is not None:
             self._try_state_transition(position, action)
@@ -675,6 +720,15 @@ class PositionManager:
                     position, action,
                 )
                 return action
+
+        # 6.6 エッジ劣化exit
+        action = self._check_edge_decay_exit(
+            position, current_price,
+            _own_score, _decay_ratio,
+        )
+        if action is not None:
+            self._try_state_transition(position, action)
+            return action
 
         # 7. トレーリング更新
         action = self._check_trailing(
@@ -829,6 +883,7 @@ class PositionManager:
         position: ManagedPosition,
         current_time: datetime,
         current_price: float,
+        decay_ratio: float = 0.0,
     ) -> ManagementAction | None:
         """進捗なしExit
 
@@ -837,6 +892,8 @@ class PositionManager:
         - TREND: 60分（早期検知）
         - RANGE: 90分（レンジ内での停滞を許容）
         - CHOPPY: 120分（従来値）
+
+        エッジ劣化が閾値以上の場合、stagnation時間を短縮する。
         """
         regime = getattr(position.plan, "regime", None)
         is_range = regime == "RANGE"
@@ -1019,6 +1076,22 @@ class PositionManager:
             "RANGE": _range_min,
             "CHOPPY": self.config.stagnation_exit_minutes,
         }.get(regime, self.config.stagnation_exit_minutes)
+
+        # エッジ劣化が閾値以上の場合はstagnation時間を短縮
+        _stag_decay_note = ""
+        if (
+            self.config.edge_decay_stagnation_enabled
+            and decay_ratio
+            >= self.config.edge_decay_stagnation_threshold
+        ):
+            regime_stag_minutes = (
+                regime_stag_minutes
+                * self.config.edge_decay_stagnation_multiplier
+            )
+            _stag_decay_note = (
+                f" [decay={decay_ratio:.0%}→短縮]"
+            )
+
         stag_mfe = self.config.stagnation_min_mfe_r
 
         if (
@@ -1027,7 +1100,8 @@ class PositionManager:
         ):
             return ManagementAction.full_close(
                 f"進捗なし({regime}): {elapsed:.0f}分経過,"
-                f" MFE={position.highest_r:.2f}R",
+                f" MFE={position.highest_r:.2f}R"
+                f"{_stag_decay_note}",
                 ExitReason.STAGNATION,
                 trigger_price=current_price,
             )
@@ -1165,6 +1239,89 @@ class PositionManager:
                 exit_reason=ExitReason.SIGNAL_REVERSAL,
                 trigger_price=current_price,
             )
+
+        return None
+
+    def _check_edge_decay_exit(
+        self,
+        position: ManagedPosition,
+        current_price: float,
+        own_score: float,
+        decay_ratio: float,
+    ) -> ManagementAction | None:
+        """エッジ劣化exit
+
+        エントリー時のコンセンサススコアと現在スコアを比較し、
+        劣化率が閾値を超えた場合に早期撤退する。
+
+        モードB（優先）: 利益が出ている状態でMFEピークから大きく後退し、
+        かつエッジも劣化している場合、プラスのうちに撤退。
+
+        モードA: 損失が小さい範囲でエッジが大幅に劣化した場合に撤退。
+
+        Args:
+            position: 管理中ポジション
+            current_price: 現在価格
+            own_score: 現在の自方向コンセンサススコア
+            decay_ratio: エントリー時からのスコア劣化率（0.0〜1.0）
+
+        Returns:
+            ManagementAction | None: 決済アクション
+        """
+        cfg = self.config
+
+        # エントリースコアが記録されていない場合はスキップ
+        if position.entry_own_score <= 0:
+            return None
+
+        # 最低保有バー数未満はスキップ（エントリー直後のノイズ排除）
+        if position.bars_held < cfg.edge_decay_exit_min_bars:
+            return None
+
+        # モードB: 利益侵食 + エッジ劣化（利益を守る・優先）
+        if cfg.edge_decay_profit_exit_enabled:
+            if (
+                position.current_r > 0  # 利益あり
+                and position.highest_r > 0  # MFEが記録されている
+                and decay_ratio >= cfg.edge_decay_profit_decay_min
+            ):
+                profit_erosion = (
+                    (position.highest_r - position.current_r)
+                    / position.highest_r
+                )
+                if (
+                    profit_erosion
+                    >= cfg.edge_decay_profit_erosion_threshold
+                ):
+                    return ManagementAction.full_close(
+                        reason=(
+                            f"エッジ劣化+利益侵食: "
+                            f"decay={decay_ratio:.0%},"
+                            f" MFE={position.highest_r:.2f}R"
+                            f"→{position.current_r:.2f}R"
+                            f" (侵食{profit_erosion:.0%})"
+                        ),
+                        exit_reason=ExitReason.EDGE_DECAY,
+                        trigger_price=current_price,
+                    )
+
+        # モードA: 純粋エッジ劣化exit
+        if cfg.edge_decay_exit_enabled:
+            if (
+                decay_ratio >= cfg.edge_decay_exit_threshold
+                and position.current_r
+                >= cfg.edge_decay_exit_max_loss_r
+            ):
+                return ManagementAction.full_close(
+                    reason=(
+                        f"エッジ劣化: "
+                        f"entry={position.entry_own_score:.1f}"
+                        f"→{own_score:.1f}"
+                        f" (劣化{decay_ratio:.0%})"
+                    ),
+                    exit_reason=ExitReason.EDGE_DECAY,
+                    trigger_price=current_price,
+                )
 
         return None
 
