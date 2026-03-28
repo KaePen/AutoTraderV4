@@ -100,6 +100,11 @@ class PositionStateRecord(LocalBase):
         String(36), unique=True, nullable=False, index=True,
     )
 
+    # エッジ劣化監視: エントリー時スコア（再起動後も劣化計算を継続するために保存）
+    entry_own_score = Column(
+        Float, nullable=True, default=0.0,
+    )
+
     # 追跡値
     highest_price = Column(
         Float, nullable=False, default=0.0,

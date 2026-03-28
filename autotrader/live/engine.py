@@ -2930,6 +2930,7 @@ class LiveTradingEngine:
                 for rec in repo.get_all():
                     result[rec.position_id] = {
                         "position_id": rec.position_id,
+                        "entry_own_score": rec.entry_own_score or 0.0,
                         "highest_price": rec.highest_price,
                         "lowest_price": rec.lowest_price,
                         "highest_r": rec.highest_r,
