@@ -105,6 +105,7 @@ class TradeRepository:
         stop_loss: float | None = None,
         take_profit: float | None = None,
         ticket: int | None = None,
+        entry_own_score: float = 0.0,
     ) -> Trade:
         """トレードを作成
 
@@ -117,6 +118,7 @@ class TradeRepository:
             stop_loss: 損切価格
             take_profit: 利確価格
             ticket: MT5チケットID
+            entry_own_score: エントリー時のエッジスコア
 
         Returns:
             Trade: 作成されたトレード
@@ -132,6 +134,7 @@ class TradeRepository:
             take_profit=take_profit,
             opened_at=opened_at,
             is_open=True,
+            entry_own_score=entry_own_score,
         )
         self.session.add(record)
         self.session.flush()

@@ -284,6 +284,7 @@ class TradeResponse(BaseModel):
     mfe_pips: float | None = None
     mae_pips: float | None = None
     entry_spread: float | None = None
+    entry_own_score: float = 0.0
 
 
 class TradeSummaryResponse(BaseModel):

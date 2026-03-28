@@ -957,6 +957,7 @@ class TradeHistory extends Component {
       TP_EARLY: { l: 'TP_E', c: 'bg-emerald-900/40 text-emerald-400 border-emerald-800/50' },
       FORCE_CLOSE: { l: 'FORCE', c: 'bg-orange-900/40 text-orange-400 border-orange-800/50' },
       EXTERNAL_CLOSE: { l: 'EXT', c: 'bg-gray-700 text-gray-300 border-gray-500' },
+      EDGE_DECAY: { l: 'DECAY', c: 'bg-amber-900/40 text-amber-400 border-amber-800/50' },
     };
 
     const rows = filtered.map(t => {
@@ -994,6 +995,9 @@ class TradeHistory extends Component {
       const rowBg = isOpen ? 'rgba(30,58,138,0.10)' : isProfit ? 'rgba(20,83,45,0.07)' : 'rgba(127,29,29,0.07)';
       const borderClr = isOpen ? 'rgba(96,165,250,0.5)' : isProfit ? 'rgba(34,197,94,0.45)' : 'rgba(239,68,68,0.45)';
       const rowTextClr = isOpen ? 'text-gray-400' : isProfit ? 'text-green-400' : 'text-red-400';
+      const scoreHtml = t.entry_own_score > 0
+        ? `<span class="tabular-nums text-xs text-amber-400">${t.entry_own_score.toFixed(1)}</span>`
+        : '<span class="text-gray-600">-</span>';
       return `<tr style="background:${rowBg}">
         <td style="box-shadow:inset 3px 0 0 ${borderClr}" class="text-xs ${rowTextClr} whitespace-nowrap tabular-nums">${t.opened_at ? fmtDateTime(t.opened_at) : '-'}</td>
         <td class="text-xs ${rowTextClr} whitespace-nowrap tabular-nums">${t.closed_at ? fmtDateTime(t.closed_at) : '-'}</td>
@@ -1003,6 +1007,7 @@ class TradeHistory extends Component {
         <td class="text-xs ${rowTextClr} tabular-nums">${t.entry_price.toFixed(_getSymbolDigits(t.symbol))}</td>
         <td class="text-xs ${rowTextClr} tabular-nums">${t.exit_price !== null ? t.exit_price.toFixed(_getSymbolDigits(t.symbol)) : '-'}</td>
         <td>${reasonHtml}</td>
+        <td class="text-center">${scoreHtml}</td>
         <td class="text-right text-xs font-bold tabular-nums ${rowTextClr}">${pnlText}</td>
       </tr>`;
     }).join('');
@@ -1010,7 +1015,7 @@ class TradeHistory extends Component {
     tableEl.innerHTML = `
       <table class="table">
         <thead class="sticky top-0 bg-gray-800 z-10">
-          <tr><th>約定日時</th><th>決済日時</th><th>通貨</th><th>方向</th><th>数量</th><th>約定価格</th><th>決済価格</th><th>状態</th><th class="text-right">損益</th></tr>
+          <tr><th>約定日時</th><th>決済日時</th><th>通貨</th><th>方向</th><th>数量</th><th>約定価格</th><th>決済価格</th><th>状態</th><th class="text-center">エッジ</th><th class="text-right">損益</th></tr>
         </thead>
         <tbody>${rows}</tbody>
       </table>`;

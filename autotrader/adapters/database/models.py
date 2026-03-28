@@ -50,6 +50,7 @@ class TradeRecord(Base):
     profit_loss = Column(Float, nullable=True)
     profit_loss_pips = Column(Float, nullable=True)
     exit_reason = Column(String(30), nullable=True)
+    entry_own_score = Column(Float, nullable=True, default=0.0)
     opened_at = Column(DateTime(timezone=True), nullable=False)
     closed_at = Column(DateTime(timezone=True), nullable=True)
     is_open = Column(Boolean, default=True, nullable=False)
@@ -76,6 +77,7 @@ class TradeRecord(Base):
             "profit_loss": self.profit_loss,
             "profit_loss_pips": self.profit_loss_pips,
             "exit_reason": self.exit_reason,
+            "entry_own_score": self.entry_own_score,
             "opened_at": self.opened_at.isoformat() if self.opened_at else None,
             "closed_at": self.closed_at.isoformat() if self.closed_at else None,
             "is_open": self.is_open,
