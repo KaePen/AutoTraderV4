@@ -2410,7 +2410,9 @@ class TestRegimeBasedParameters:
             trailing_atr_multiplier=2.0,
             trailing_trend_atr_multiplier=1.2,
             trailing_stage2_enabled=False,
+            trailing_stage3_enabled=False,
             breakeven_at_1r=False,
+            early_breakeven_enabled=False,
             stag_pretighten_enabled=False,
         )
         manager = PositionManager(config)
@@ -2438,7 +2440,9 @@ class TestRegimeBasedParameters:
             trailing_atr_multiplier=2.0,
             trailing_trend_atr_multiplier=1.2,
             trailing_stage2_enabled=False,
+            trailing_stage3_enabled=False,
             breakeven_at_1r=False,
+            early_breakeven_enabled=False,
             stag_pretighten_enabled=False,
         )
         manager = PositionManager(config)
@@ -2514,10 +2518,13 @@ class TestRegimeBasedParameters:
             trailing_stage2_r=1.5,
             trailing_stage2_atr_multiplier=1.2,
             trailing_trend_stage2_atr_multiplier=0.8,
+            trailing_stage3_enabled=False,
             breakeven_at_1r=False,
+            early_breakeven_enabled=False,
             stag_pretighten_enabled=False,
             partial_close_1r_ratio=0.0,
             partial_close_2r_ratio=0.0,
+            partial_close_15r_enabled=False,
             early_profit_guard_enabled=False,
         )
         manager = PositionManager(config)

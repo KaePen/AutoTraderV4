@@ -213,13 +213,20 @@ class PositionManagerConfig:
 
     partial_close_1r_ratio: float = 0.50
     partial_close_2r_ratio: float = 0.05
+    # 1.5R部分利確（2Rと1Rの間で20%を刈り取る）
+    partial_close_15r_enabled: bool = True
+    partial_close_15r_ratio: float = 0.20
     breakeven_at_1r: bool = True
     trailing_start_r: float = 0.5
     trailing_atr_multiplier: float = 2.0
-    # 2段階トレーリング: 利益が伸びたらATR倍率を引き締め
+    # 2段階トレーリング: 1.0R到達でATR倍率を引き締め
     trailing_stage2_enabled: bool = True
-    trailing_stage2_r: float = 1.5
+    trailing_stage2_r: float = 1.0
     trailing_stage2_atr_multiplier: float = 1.2
+    # 3段階トレーリング: 1.5R到達でさらに引き締め（利益刈り取り）
+    trailing_stage3_enabled: bool = True
+    trailing_stage3_r: float = 1.5
+    trailing_stage3_atr_multiplier: float = 0.7
     time_exit_enabled: bool = True
     spread_pips: float = 1.5
     slippage_pips: float = 0.5
@@ -227,7 +234,7 @@ class PositionManagerConfig:
         UNIVERSAL_MODE,
     )
     early_breakeven_r: float = 0.3
-    early_breakeven_enabled: bool = False
+    early_breakeven_enabled: bool = True
     disable_tp_after_partial: bool = True
     signal_rev_close_ratio: float = 0.0
     stagnation_exit_minutes: float = 120.0
@@ -390,6 +397,7 @@ class PositionManager:
         self._positions: dict[str, ManagedPosition] = {}
         self._partial_closed_1r: set[str] = set()
         self._partial_closed_2r: set[str] = set()
+        self._partial_closed_15r: set[str] = set()
         self._early_be_applied: set[str] = set()
         self._tp_disabled: set[str] = set()
         self._insurance_sl_applied: set[str] = set()
@@ -446,6 +454,7 @@ class PositionManager:
         self._positions.pop(position_id, None)
         self._partial_closed_1r.discard(position_id)
         self._partial_closed_2r.discard(position_id)
+        self._partial_closed_15r.discard(position_id)
         self._early_be_applied.discard(position_id)
         self._tp_disabled.discard(position_id)
         self._insurance_sl_applied.discard(position_id)
@@ -486,6 +495,9 @@ class PositionManager:
             ),
             "partial_closed_2r": (
                 position_id in self._partial_closed_2r
+            ),
+            "partial_closed_15r": (
+                position_id in self._partial_closed_15r
             ),
             "tp_disabled": (
                 position_id in self._tp_disabled
@@ -546,6 +558,7 @@ class PositionManager:
         _flag_map = {
             "partial_closed_1r": self._partial_closed_1r,
             "partial_closed_2r": self._partial_closed_2r,
+            "partial_closed_15r": self._partial_closed_15r,
             "tp_disabled": self._tp_disabled,
             "early_be_applied": self._early_be_applied,
             "insurance_sl_applied": (
@@ -1592,6 +1605,35 @@ class PositionManager:
                 trigger_price=_2r_price,
             )
 
+        # === 1.5R（2Rと1Rの間）===
+        if (
+            self.config.partial_close_15r_enabled
+            and position.current_r >= 1.5
+            and pos_id not in self._partial_closed_15r
+            and pos_id not in self._partial_closed_2r
+        ):
+            self._partial_closed_15r.add(pos_id)
+            if position.direction == SignalType.BUY:
+                _15r_price = (
+                    position.entry_price
+                    + position.r_value * 1.5
+                )
+            else:
+                _15r_price = (
+                    position.entry_price
+                    - position.r_value * 1.5
+                )
+            return ManagementAction.partial_close(
+                ratio=self.config.partial_close_15r_ratio,
+                new_sl=None,
+                reason=(
+                    f"1.5R到達: {position.current_r:.2f}R、"
+                    f"20%利確"
+                ),
+                exit_reason=ExitReason.TAKE_PROFIT_EARLY,
+                trigger_price=_15r_price,
+            )
+
         # === 1R（中優先）===
         if (position.current_r >= 1.0 and
                 pos_id not in self._partial_closed_1r):
@@ -1953,8 +1995,17 @@ class PositionManager:
                     self.config.trailing_trend_stage2_atr_multiplier
                 )
 
-        # 2段階トレーリング: highest_rが閾値以上なら引き締め
+        # 3段階トレーリング: highest_rが高いほど引き締め
         if (
+            self.config.trailing_stage3_enabled
+            and position.highest_r
+            >= self.config.trailing_stage3_r
+        ):
+            # Stage3: 最も引き締め（MFEピーク付近で刈り取り）
+            trail_distance = (
+                atr * self.config.trailing_stage3_atr_multiplier
+            )
+        elif (
             self.config.trailing_stage2_enabled
             and position.highest_r
             >= self.config.trailing_stage2_r
