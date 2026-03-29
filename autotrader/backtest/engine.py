@@ -745,6 +745,8 @@ class UnifiedBacktestEngine:
                         position_id=(
                             new_trade.position_id or ""
                         ),
+                        mfe_pips=new_trade.mfe_pips or 0.0,
+                        mae_pips=new_trade.mae_pips or 0.0,
                     )
 
                     # メトリクス発行
@@ -1095,6 +1097,8 @@ class ParallelMultiTFBacktestEngine:
                             position_id=(
                                 new_trade.position_id or ""
                             ),
+                            mfe_pips=new_trade.mfe_pips or 0.0,
+                            mae_pips=new_trade.mae_pips or 0.0,
                         )
 
                         # メトリクス発行

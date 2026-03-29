@@ -1306,6 +1306,11 @@ class TradeSimulator:
         # 残高更新
         self.state.balance += profit_loss
 
+        # MFE/MAEをトレーカーから取得（pips単位、mfe=正値、mae=正値に変換）
+        _mfe_mae = self._mfe_mae.get(position.position_id, {})
+        mfe_pips = _mfe_mae.get("mfe", 0.0)
+        mae_pips = abs(_mfe_mae.get("mae", 0.0))
+
         # トレード作成
         trade = Trade(
             trade_id=str(uuid4()),
@@ -1326,6 +1331,8 @@ class TradeSimulator:
             mode=position.mode,
             consensus_score=position.consensus_score,
             position_id=position.position_id,
+            mfe_pips=mfe_pips,
+            mae_pips=mae_pips,
         )
 
         # ポジションリストから削除
