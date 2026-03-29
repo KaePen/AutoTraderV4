@@ -68,10 +68,14 @@ filter:
 pm_config:
   partial_close_1r_ratio: 0.50
   partial_close_2r_ratio: 0.05
+  # 1.5R部分利確（2Rと1Rの間で20%を刈り取る）
+  partial_close_15r_enabled: true
+  partial_close_15r_ratio: 0.20
   breakeven_at_1r: true
   trailing_start_r: 0.5
   trailing_atr_multiplier: 2.0
   early_breakeven_r: 0.3
+  early_breakeven_enabled: true
   signal_rev_close_ratio: 0.0
   range_day_be_disabled: true
   range_day_early_be_r: 0.3
@@ -89,9 +93,12 @@ pm_config:
   range_day_half_r_trigger: 0.5
   early_profit_guard_enabled: true
   stag_pretighten_enabled: true
-  # 2段階トレーリング
-  trailing_stage2_r: 1.5
+  # 多段階トレーリング（段階的に引き締め）
+  trailing_stage2_r: 1.0
   trailing_stage2_atr_multiplier: 1.2
+  trailing_stage3_enabled: true
+  trailing_stage3_r: 1.5
+  trailing_stage3_atr_multiplier: 0.7
   # Stagnation段階制御
   stagnation_stage1_minutes: 60.0
   stagnation_stage1_mfe_r: 0.05
