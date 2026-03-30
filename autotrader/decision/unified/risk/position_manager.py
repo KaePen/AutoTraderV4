@@ -213,18 +213,18 @@ class PositionManagerConfig:
 
     partial_close_1r_ratio: float = 0.50
     partial_close_2r_ratio: float = 0.05
-    # 1.5R部分利確（2Rと1Rの間で20%を刈り取る）
-    partial_close_15r_enabled: bool = True
+    # 1.5R部分利確（BT検証: stage2トレーリングが先に発動するため実質不使用）
+    partial_close_15r_enabled: bool = False
     partial_close_15r_ratio: float = 0.20
     breakeven_at_1r: bool = True
     trailing_start_r: float = 0.5
     trailing_atr_multiplier: float = 2.0
-    # 2段階トレーリング: 1.0R到達でATR倍率を引き締め
+    # 2段階トレーリング: 1.2R到達でATR倍率を引き締め（BT検証: 1.0Rより1.2Rが優位）
     trailing_stage2_enabled: bool = True
-    trailing_stage2_r: float = 1.0
+    trailing_stage2_r: float = 1.2
     trailing_stage2_atr_multiplier: float = 1.2
-    # 3段階トレーリング: 1.5R到達でさらに引き締め（利益刈り取り）
-    trailing_stage3_enabled: bool = True
+    # 3段階トレーリング: BT検証で実質不使用のためデフォルト無効
+    trailing_stage3_enabled: bool = False
     trailing_stage3_r: float = 1.5
     trailing_stage3_atr_multiplier: float = 0.7
     time_exit_enabled: bool = True
@@ -233,7 +233,7 @@ class PositionManagerConfig:
     be_enabled_modes: tuple[str, ...] = (
         UNIVERSAL_MODE,
     )
-    early_breakeven_r: float = 0.3
+    early_breakeven_r: float = 0.6  # BT検証(0000062): 0.3Rは過剰, 0.6Rが最適
     early_breakeven_enabled: bool = True
     disable_tp_after_partial: bool = True
     signal_rev_close_ratio: float = 0.0

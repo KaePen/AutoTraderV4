@@ -346,7 +346,7 @@ class TestPositionManager:
             atr=0.5,
         )
         assert action.action_type == ManagementActionType.PARTIAL_CLOSE
-        assert action.close_ratio == 0.05
+        assert action.close_ratio == pytest.approx(0.5)  # partial_close_1r_ratio=0.50
         # DAY_TRADEもBE移動あり（slip*2 + cushion = 0.01+0.03）
         assert action.new_sl == pytest.approx(150.04)
 
@@ -756,8 +756,11 @@ class TestBreakevenImprovement:
 
     def setup_method(self) -> None:
         """テストセットアップ"""
-        # early_breakeven_enabled を明示的にONにしてテスト
-        cfg = PositionManagerConfig(early_breakeven_enabled=True)
+        # early_breakeven_enabled を明示的にONにしてテスト（0.3R閾値で動作確認）
+        cfg = PositionManagerConfig(
+            early_breakeven_enabled=True,
+            early_breakeven_r=0.3,  # テストは0.3R閾値前提
+        )
         self.manager = PositionManager(config=cfg)
         self.entry_time = datetime(2024, 1, 1, 10, 0, 0)
         # デフォルト: slip=0.5, cushion=3.0
@@ -903,7 +906,7 @@ class TestBreakevenImprovement:
             atr=0.5,
         )
         assert action.action_type == ManagementActionType.PARTIAL_CLOSE
-        assert action.close_ratio == 0.05
+        assert action.close_ratio == pytest.approx(0.5)  # partial_close_1r_ratio=0.50
         # DAY_TRADEでもBE移動あり
         assert action.new_sl == pytest.approx(150.04)
         assert action.exit_reason == ExitReason.TAKE_PROFIT_1R
@@ -1015,7 +1018,7 @@ class TestBreakevenImprovement:
             atr=0.5,
         )
         assert action.action_type == ManagementActionType.PARTIAL_CLOSE
-        assert action.close_ratio == 0.05
+        assert action.close_ratio == pytest.approx(0.5)  # partial_close_1r_ratio=0.50
         # SWINGではBE移動あり（offset付き）
         assert action.new_sl == pytest.approx(150.04)
 
@@ -1104,6 +1107,7 @@ class TestRangeDayBeFix:
         """テストセットアップ"""
         self.config = PositionManagerConfig(
             early_breakeven_enabled=True,
+            early_breakeven_r=0.3,  # テストは0.3R閾値前提
             range_day_be_disabled=True,
             range_day_early_be_r=1.0,
             range_day_fast_be_enabled=False,
@@ -1239,6 +1243,7 @@ class TestRangeDayBeFix:
         """--no-range-day-be-fixで従来動作（0.5R BE）"""
         legacy_config = PositionManagerConfig(
             early_breakeven_enabled=True,
+            early_breakeven_r=0.3,  # テストは0.3R閾値前提（0.5R > 0.3R → 発火）
             range_day_be_disabled=False,
             range_day_insurance_enabled=False,
             range_day_half_r_partial_enabled=False,
@@ -1314,6 +1319,7 @@ class TestFastBeAndStagnation:
         """RANGE×DAY: 30分で0.5R到達→BE発火"""
         config = PositionManagerConfig(
             early_breakeven_enabled=True,
+            early_breakeven_r=0.3,  # 0.5R到達でfast_BEを発火させるため0.3R閾値
             range_day_be_disabled=True,
             range_day_early_be_r=1.0,
             range_day_fast_be_enabled=True,
