@@ -51,16 +51,6 @@ class FundamentalService:
         self._shared_rss_collector = shared_rss_collector
         self._owns_collectors = shared_fundamental_collector is None
 
-        # キーワードセンチメント分析・永続化（常時有効）
-        from autotrader.adapters.fundamental.keyword_sentiment import (
-            KeywordSentimentScorer,
-        )
-        from autotrader.adapters.fundamental.sentiment_store import (
-            SentimentStore,
-        )
-
-        self.keyword_scorer = KeywordSentimentScorer()
-        self.sentiment_store = SentimentStore()
 
     def init_fundamental(
         self,
@@ -155,22 +145,6 @@ class FundamentalService:
             logger.error("[Calendar] 軽量初期化失敗: %s", e)
             self.fundamental_collector = None
 
-        # RSS軽量ポーリング（DB・LLM不要）
-        try:
-            from autotrader.adapters.fundamental.rss_collector import (
-                RSSCollector,
-            )
-
-            if self._shared_rss_collector:
-                self.rss_collector = self._shared_rss_collector
-            else:
-                self.rss_collector = RSSCollector(
-                    poll_interval=300,
-                )
-            logger.info("[RSS] 軽量RSSポーリング初期化完了")
-        except Exception as e:
-            logger.warning("[RSS] RSS初期化スキップ: %s", e)
-            self.rss_collector = None
 
     async def start_tasks(self) -> None:
         """ファンダメンタル収集タスクを起動"""
@@ -225,80 +199,8 @@ class FundamentalService:
         Args:
             news_item: 受信したNewsItem
         """
-        self.news_buffer.append(news_item)
-
-        # active_symbol 関連のキーワードセンチメント分析
-        # NOTE: 呼び出し元がsymbolを設定する必要あり
-        symbol = getattr(self, "_active_symbol", "")
-        if not symbol:
-            return
-
-        base = symbol[:3].upper()
-        quote = symbol[3:6].upper()
-        if base in news_item.currencies or quote in news_item.currencies:
-            headlines = [
-                n.title
-                for n in self.news_buffer
-                if base in n.currencies or quote in n.currencies
-            ]
-            if headlines:
-                from autotrader.adapters.fundamental.sentiment_store import (
-                    SentimentRecord,
-                )
-
-                result = self.keyword_scorer.score(
-                    headlines,
-                    symbol,
-                )
-                if result.headlines_used > 0:
-                    record = SentimentRecord(
-                        timestamp=datetime.now(
-                            UTC,
-                        ).isoformat(),
-                        score=result.score,
-                        method="keyword",
-                        confidence=min(
-                            result.headlines_used / 10,
-                            1.0,
-                        ),
-                        news_count=result.headlines_used,
-                        top_headlines=headlines[:3],
-                    )
-                    self.sentiment_store.save(
-                        symbol,
-                        record,
-                    )
-
-        # 3日超の古いニュースを削除
-        _TTL_HOURS = 72
-        now = datetime.now(UTC)
-        self.news_buffer = [
-            n
-            for n in self.news_buffer
-            if (now - getattr(n, "published_at", now)).total_seconds()
-            < _TTL_HOURS * 3600
-        ]
-        # バッファ上限（メモリリーク防止）
-        _MAX_BUFFER = 500
-        if len(self.news_buffer) > _MAX_BUFFER:
-            self.news_buffer = self.news_buffer[-_MAX_BUFFER:]
-        # EventBus経由でダッシュボードに配信
-        if base in news_item.currencies or quote in news_item.currencies:
-            event_bus.publish_nowait(
-                "news.received",
-                {
-                    "news_id": getattr(news_item, "news_id", ""),
-                    "published_at": str(
-                        getattr(news_item, "published_at", "")
-                    ),
-                    "title": getattr(news_item, "title", ""),
-                    "source_name": getattr(news_item, "source_name", ""),
-                    "source_url": getattr(news_item, "source_url", ""),
-                    "currencies": getattr(news_item, "currencies", []),
-                    "snippet": getattr(news_item, "snippet", None),
-                    "symbol": symbol,
-                },
-            )
+        # RSS/センチメントはATv5で再実装予定、現在は無効
+        pass
 
     @staticmethod
     def blend_news_sentiment(

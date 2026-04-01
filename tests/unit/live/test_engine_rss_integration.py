@@ -55,13 +55,6 @@ def _make_engine_stub() -> LiveTradingEngine:
     engine._shared_fundamental_collector = None
     engine._shared_rss_collector = None
     engine._owns_collectors = True
-    # キーワードスコアラーのモック（score()の戻り値を設定）
-    mock_scorer = MagicMock()
-    mock_result = MagicMock()
-    mock_result.headlines_used = 0
-    mock_scorer.score.return_value = mock_result
-    engine._keyword_scorer = mock_scorer
-    engine._sentiment_store = MagicMock()
     return engine
 
 
@@ -124,10 +117,14 @@ class TestBlendNewsSentiment:
 
 
 class TestOnRssNews:
-    """_on_rss_news コールバックのテスト"""
+    """_on_rss_news コールバックのテスト
 
-    def test_buffers_matching_currency(self) -> None:
-        """該当通貨のニュースがバッファに蓄積される"""
+    RSS/センチメントはATv5で再実装予定のため現在は無効化済み。
+    _on_rss_news は何もしない（pass）ことを検証する。
+    """
+
+    def test_on_rss_news_is_noop(self) -> None:
+        """_on_rss_news はバッファに蓄積しない（無効化済み）"""
         engine = _make_engine_stub()
         item = _FakeNewsItem(
             news_id="1",
@@ -137,23 +134,7 @@ class TestOnRssNews:
         asyncio.get_event_loop().run_until_complete(
             engine._on_rss_news(item)
         )
-        # グローバルバッファに蓄積される
-        assert len(engine._news_buffer) == 1
-        assert engine._news_buffer[0] is item
-
-    def test_buffers_all_currencies(self) -> None:
-        """全通貨のニュースがグローバルバッファに蓄積される"""
-        engine = _make_engine_stub()
-        item = _FakeNewsItem(
-            news_id="2",
-            title="ECB decision",
-            currencies=["EUR"],
-        )
-        asyncio.get_event_loop().run_until_complete(
-            engine._on_rss_news(item)
-        )
-        # 無関係通貨もグローバルバッファに蓄積される
-        assert len(engine._news_buffer) == 1
+        assert len(engine._news_buffer) == 0
 
     def test_get_news_for_symbol_filters(self) -> None:
         """get_news_for_symbol が正しくフィルタする"""
@@ -176,29 +157,6 @@ class TestOnRssNews:
         # EURUSDでフィルタ → 両方含まれる
         result = engine.get_news_for_symbol("EURUSD")
         assert len(result) == 2
-
-    def test_buffer_limit(self) -> None:
-        """バッファが500件上限を超えない"""
-        engine = _make_engine_stub()
-
-        async def _fill_buffer():
-            for i in range(550):
-                item = _FakeNewsItem(
-                    news_id=str(i),
-                    title=f"News {i}",
-                    currencies=["JPY"],
-                )
-                await engine._on_rss_news(item)
-
-        asyncio.get_event_loop().run_until_complete(
-            _fill_buffer()
-        )
-        assert len(engine._news_buffer) == 500
-        # 最新の500件が保持される（末尾がID 549）
-        assert (
-            engine._news_buffer[-1].news_id
-            == "549"
-        )
 
 
 # ===== _init_fundamental RSS初期化テスト =====
