@@ -1351,8 +1351,10 @@ class LiveTradingEngine:
                 logger.warning("未知の時間足: %s", tf_str)
                 continue
 
+            # M1/M5はMT5サーバー時間オフセットにより多めに取得
+            tf_lookback = max(lookback, 500) if tf_str in ("M1", "M5") else lookback
             df = await self._data_provider.get_candles_from_pos(
-                symbol, tf, lookback
+                symbol, tf, tf_lookback
             )
             if df.empty:
                 logger.warning("データなし: %s %s", symbol, tf_str)
@@ -1380,7 +1382,9 @@ class LiveTradingEngine:
         """
         symbol = self._active_symbol
         # 全TFのデータを一括収集してから設定
-        # sma_50計算に50本必要なためバッファを含め200本取得
+        # MT5サーバー時間(UTC+2/3)とUTCのずれにより、
+        # M1は200本だとSMA(50)のウォームアップ範囲(先頭49本)に
+        # 現在行が入るため、M1/M5は500本取得する
         # （個別set_market_dataは辞書を上書きするため）
         all_data: dict[str, pd.DataFrame] = {}
         for tf_str in self._bot.timeframes:
@@ -1389,8 +1393,9 @@ class LiveTradingEngine:
             except ValueError:
                 continue
 
+            lookback = 500 if tf_str in ("M1", "M5") else 200
             df = await self._data_provider.get_candles_from_pos(
-                symbol, tf, 200
+                symbol, tf, lookback
             )
             if not df.empty:
                 all_data[tf_str] = df
