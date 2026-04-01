@@ -152,14 +152,6 @@ class EngineManager:
                 self._shared_fundamental_collector = (
                     first_engine._fundamental_collector
                 )
-            if (
-                self._shared_rss_collector is None
-                and first_engine._rss_collector
-                is not None
-            ):
-                self._shared_rss_collector = (
-                    first_engine._rss_collector
-                )
 
         engine = LiveTradingEngine(
             config=config,
@@ -168,9 +160,7 @@ class EngineManager:
             shared_fundamental_collector=(
                 self._shared_fundamental_collector
             ),
-            shared_rss_collector=(
-                self._shared_rss_collector
-            ),
+            shared_rss_collector=None,
         )
         # グローバル制限コールバックを注入
         engine.set_global_limit_callbacks(
