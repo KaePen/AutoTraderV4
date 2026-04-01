@@ -1628,7 +1628,7 @@ class PositionManager:
                 new_sl=None,
                 reason=(
                     f"1.5R到達: {position.current_r:.2f}R、"
-                    f"20%利確"
+                    f"{self.config.partial_close_15r_ratio:.0%}利確"
                 ),
                 exit_reason=ExitReason.TAKE_PROFIT_EARLY,
                 trigger_price=_15r_price,
@@ -1890,7 +1890,7 @@ class PositionManager:
         if pos_id in self._insurance_sl_applied:
             return None
 
-        effective_be_r = self.config.early_breakeven_r  # 0.5
+        effective_be_r = self.config.early_breakeven_r
         if is_range and self.config.range_day_be_disabled:
             if self.config.range_day_fast_be_enabled:
                 elapsed_min = (
@@ -2002,9 +2002,14 @@ class PositionManager:
             >= self.config.trailing_stage3_r
         ):
             # Stage3: 最も引き締め（MFEピーク付近で刈り取り）
-            trail_distance = (
-                atr * self.config.trailing_stage3_atr_multiplier
-            )
+            # レジーム別倍率がStage2に適用されている場合、同じ比率でStage3も調整
+            _s3_mult = self.config.trailing_stage3_atr_multiplier
+            if _s2_mult != self.config.trailing_stage2_atr_multiplier:
+                _s3_mult *= (
+                    _s2_mult
+                    / self.config.trailing_stage2_atr_multiplier
+                )
+            trail_distance = atr * _s3_mult
         elif (
             self.config.trailing_stage2_enabled
             and position.highest_r

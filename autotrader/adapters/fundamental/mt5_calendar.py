@@ -170,7 +170,7 @@ class MT5CalendarClient:
                         )
                         continue
 
-            logger.info(
+            logger.debug(
                 f"[MT5Calendar] {len(events)}件のイベントを取得"
                 f" ({from_date.date()} 〜 {to_date.date()})"
             )
