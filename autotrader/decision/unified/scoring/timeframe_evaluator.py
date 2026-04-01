@@ -312,29 +312,26 @@ class TimeframeEvaluator:
             return 0.0, 0.0, ["条件不十分"], _empty_bd
 
         # RSIフィルター（極端値のみ除外）
-        # M1はRSI(14)の窓が14分と短いため、上昇/下降トレンド中に自然にRSI>80/<20に達する
-        # M1でRSI過熱フィルターを適用するとトレンド中に常にスコア0になるため除外
         rsi = row.get("rsi_14")
         if rsi is not None and not pd.isna(rsi):
-            if self.timeframe != "M1":
-                if buy_score > 0 and rsi > 80:
-                    _bd_rsi = -999.0
-                    return (
-                        0.0, 0.0, ["RSI過熱"],
-                        ScoreBreakdown(
-                            trend=_bd_trend, adx=_bd_adx,
-                            rsi=-999.0,
-                        ),
-                    )
-                if sell_score > 0 and rsi < 20:
-                    _bd_rsi = -999.0
-                    return (
-                        0.0, 0.0, ["RSI過冷"],
-                        ScoreBreakdown(
-                            trend=_bd_trend, adx=_bd_adx,
-                            rsi=-999.0,
-                        ),
-                    )
+            if buy_score > 0 and rsi > 80:  # 緩和
+                _bd_rsi = -999.0
+                return (
+                    0.0, 0.0, ["RSI過熱"],
+                    ScoreBreakdown(
+                        trend=_bd_trend, adx=_bd_adx,
+                        rsi=-999.0,
+                    ),
+                )
+            if sell_score > 0 and rsi < 20:  # 緩和
+                _bd_rsi = -999.0
+                return (
+                    0.0, 0.0, ["RSI過冷"],
+                    ScoreBreakdown(
+                        trend=_bd_trend, adx=_bd_adx,
+                        rsi=-999.0,
+                    ),
+                )
             # 順方向のRSIはボーナス（対称範囲）
             if buy_score > 0 and 30 <= rsi <= 70:
                 buy_score += 1.0
@@ -350,10 +347,7 @@ class TimeframeEvaluator:
         ):
             _slope_active = True
             # デッドゾーン判定（ATR比で微小変化を無視）
-            # M1はMACDスロープがノイズで頻繁に反転するため最低デッドゾーンを適用
             dz = self.config.macd_slope_deadzone_atr_ratio
-            if self.timeframe == "M1" and dz < 0.05:
-                dz = 0.05  # ATRの5%未満のスロープ変化はM1ではノイズとして無視
             if dz > 0:
                 atr = row.get("atr_14")
                 if (
@@ -426,20 +420,17 @@ class TimeframeEvaluator:
                     _bd_ema_cross = _ema_penalty
 
         # ストキャスティクス確認（過熱回避）
-        # M1はStochastic K(14)が上昇/下降トレンド中に自然に80超/20未満に達するため
-        # 過熱ペナルティはM1では適用しない（ボーナスは引き続き適用）
         stoch_k = row.get("stoch_k")
         if stoch_k is not None and not pd.isna(stoch_k):
-            if self.timeframe != "M1":
-                if buy_score > 0 and stoch_k > 80:
-                    buy_score -= 1.5
-                    _bd_stochastic = -1.5
-                    reasons.append("Stoch過買")
-                elif sell_score > 0 and stoch_k < 20:
-                    sell_score -= 1.5
-                    _bd_stochastic = -1.5
-                    reasons.append("Stoch過売")
-            if buy_score > 0 and 20 <= stoch_k <= 50:
+            if buy_score > 0 and stoch_k > 80:
+                buy_score -= 1.5
+                _bd_stochastic = -1.5
+                reasons.append("Stoch過買")
+            elif sell_score > 0 and stoch_k < 20:
+                sell_score -= 1.5
+                _bd_stochastic = -1.5
+                reasons.append("Stoch過売")
+            elif buy_score > 0 and 20 <= stoch_k <= 50:
                 buy_score += 0.5
                 _bd_stochastic = 0.5
             elif sell_score > 0 and 50 <= stoch_k <= 80:
@@ -877,13 +868,12 @@ class TimeframeEvaluator:
         if direction == SignalType.HOLD:
             return direction
 
-        # ADX最小値チェック（M5のみ: M1はコンセンサス閾値が高いため不要）
-        # M1のADX閾値(10)はUSAJPY M1の通常レンジ(8-12)と被りUI表示が常に0になるため除外
-        if self.timeframe == "M5":
-            adx = row.get("adx")
-            if adx is not None and not pd.isna(adx):
-                if adx < 8.0:
-                    return SignalType.HOLD
+        # ADX最小値チェック（緩和: トレンドが弱くてもエントリー可能に）
+        adx = row.get("adx")
+        if adx is not None and not pd.isna(adx):
+            min_adx = 10.0 if self.timeframe == "M1" else 8.0  # 緩和
+            if adx < min_adx:
+                return SignalType.HOLD
 
         # ボラティリティ範囲チェック（緩和）
         atr = row.get("atr_14")
