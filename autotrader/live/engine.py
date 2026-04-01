@@ -122,6 +122,8 @@ class LiveTradingEngine:
         self._running = False
         self._task: asyncio.Task | None = None  # type: ignore[type-arg]
         self._account_info: AccountInfo | None = None
+        # TF別MT5取得連続失敗カウンター（陳腐データ検知用）
+        self._tf_fetch_fail_count: dict[str, int] = {}
 
         # コールバック（WebSocket連携用）
         self.on_signal: asyncio.Event | None = None
@@ -1417,11 +1419,27 @@ class LiveTradingEngine:
             existing = self._bot.market_data
             for tf_str in self._bot.timeframes:
                 if tf_str not in all_data and tf_str in existing:
-                    logger.debug(
-                        "市場データ補完: %s（MT5取得失敗のため前回値使用）",
-                        tf_str,
+                    self._tf_fetch_fail_count[tf_str] = (
+                        self._tf_fetch_fail_count.get(tf_str, 0)
+                        + 1
                     )
+                    fail_n = self._tf_fetch_fail_count[tf_str]
+                    if fail_n >= 5:
+                        logger.warning(
+                            "[%s] %s: MT5取得が%d回連続失敗"
+                            "（陳腐データ使用中）",
+                            self._active_symbol, tf_str, fail_n,
+                        )
+                    else:
+                        logger.debug(
+                            "市場データ補完: %s"
+                            "（MT5取得失敗のため前回値使用）",
+                            tf_str,
+                        )
                     all_data[tf_str] = existing[tf_str]
+                elif tf_str in all_data:
+                    # 取得成功時はカウンターリセット
+                    self._tf_fetch_fail_count.pop(tf_str, None)
 
             all_data = self._calc_indicators(all_data)
             self._bot.set_market_data(all_data)
