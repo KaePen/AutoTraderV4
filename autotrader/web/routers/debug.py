@@ -55,6 +55,77 @@ async def ws_status(request: Request) -> dict[str, Any]:
     }
 
 
+@router.get("/debug/m1-diag")
+async def m1_diagnostic(
+    request: Request,
+    symbol: str = "USDJPY",
+) -> dict[str, Any]:
+    """M1タイムフレームの診断情報
+
+    Returns:
+        dict: M1データの状態、行データ、インジケータ値
+    """
+    import numpy as np
+    import pandas as pd
+
+    mgr = request.app.state.engine_manager
+    engine = mgr.get_engine(symbol) if mgr else None
+    if engine is None:
+        return {"error": f"エンジンなし: {symbol}"}
+
+    bot = engine._bot
+    result: dict[str, Any] = {
+        "symbol": symbol,
+        "timeframes": bot.timeframes,
+        "market_data_keys": list(bot._market_data.keys()),
+        "m1_in_data": "M1" in bot._market_data,
+        "m1_in_time_arrays": "M1" in bot._time_arrays,
+    }
+
+    df = bot._market_data.get("M1")
+    if df is not None:
+        result["m1_rows"] = len(df)
+        result["m1_columns"] = list(df.columns)
+        last = df.iloc[-1]
+        result["m1_last_row"] = {
+            col: (
+                None if (isinstance(v, float) and (pd.isna(v) or np.isinf(v)))
+                else float(v) if isinstance(v, (float, np.floating))
+                else str(v)
+            )
+            for col, v in last.items()
+        }
+        # sma_50のNaN数を確認
+        if "sma_50" in df.columns:
+            nan_count = df["sma_50"].isna().sum()
+            result["sma_50_nan_count"] = int(nan_count)
+            result["sma_50_total"] = len(df)
+    else:
+        result["m1_rows"] = 0
+
+    # _get_current_row テスト
+    try:
+        ct = pd.Timestamp.now(tz="UTC")
+        row = bot._get_current_row("M1", ct)
+        if row is not None:
+            result["current_row_close"] = float(row.get("close", 0))
+            result["current_row_sma_20"] = (
+                None if pd.isna(row.get("sma_20")) else float(row.get("sma_20", 0))
+            )
+            result["current_row_sma_50"] = (
+                None if pd.isna(row.get("sma_50")) else float(row.get("sma_50", 0))
+            )
+            result["current_row_index"] = int(
+                bot._current_indices.get("M1", -1)
+            )
+        else:
+            result["current_row"] = None
+    except Exception as e:
+        result["current_row_error"] = str(e)
+
+    return result
+
+
 @router.get("/debug/simulate-dd")
 async def simulate_dd(
     request: Request,
