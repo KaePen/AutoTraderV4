@@ -794,6 +794,15 @@ class UnifiedTradeBot:
                 level.value,
             )
 
+    @property
+    def market_data(self) -> dict[str, pd.DataFrame]:
+        """現在の市場データを返す（読み取り専用コピー）
+
+        Returns:
+            dict[str, pd.DataFrame]: 時間足別市場データ
+        """
+        return dict(self._market_data)
+
     def set_market_data(
         self,
         data: dict[str, pd.DataFrame],

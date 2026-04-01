@@ -1417,6 +1417,17 @@ class LiveTradingEngine:
                     all_data[tf_str] = df
 
         if all_data:
+            # MT5取得に失敗したTFは既存データで補完し、
+            # set_market_dataで誤って削除されないようにする
+            existing = self._bot.market_data
+            for tf_str in self._bot.timeframes:
+                if tf_str not in all_data and tf_str in existing:
+                    logger.debug(
+                        "市場データ補完: %s（MT5取得失敗のため前回値使用）",
+                        tf_str,
+                    )
+                    all_data[tf_str] = existing[tf_str]
+
             all_data = self._calc_indicators(all_data)
             self._bot.set_market_data(all_data)
 
