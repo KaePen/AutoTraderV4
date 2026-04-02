@@ -272,12 +272,12 @@ class LiveTradingEngine:
     @property
     def trade_history(self) -> list[dict]:
         """クローズ済みトレード履歴"""
-        return self._closed_trades
+        return list(self._closed_trades)
 
     @property
     def cached_positions(self) -> list[dict]:
         """キャッシュ済みオープンポジション（UI表示用）"""
-        return self._cached_positions
+        return list(self._cached_positions)
 
     async def change_symbol(self, symbol: str) -> None:
         """アクティブシンボルを変更しコンポーネントを再初期化
