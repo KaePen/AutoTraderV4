@@ -5,7 +5,11 @@
 
 from __future__ import annotations
 
+import logging
+
 import pandas as pd
+
+logger = logging.getLogger(__name__)
 
 
 class TechnicalIndicatorBatch:
@@ -292,3 +296,25 @@ class TechnicalIndicatorBatch:
             )
 
         return df
+
+
+def calc_indicators_multi_tf(
+    data: dict[str, pd.DataFrame],
+) -> dict[str, pd.DataFrame]:
+    """複数時間足の生OHLCVデータにテクニカル指標を一括計算
+
+    Args:
+        data: 時間足文字列→生OHLCVデータ
+
+    Returns:
+        dict[str, pd.DataFrame]: 指標付きデータ
+    """
+    calc = TechnicalIndicatorBatch()
+    result: dict[str, pd.DataFrame] = {}
+    for tf, df in data.items():
+        try:
+            result[tf] = calc.calculate_basic(df.copy())
+        except Exception as e:
+            logger.warning("指標計算失敗: %s %s", tf, e)
+            result[tf] = df
+    return result

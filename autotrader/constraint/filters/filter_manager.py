@@ -7,6 +7,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from pathlib import Path
+from typing import Any
 
 import pandas as pd
 
@@ -43,7 +44,7 @@ class FilterManager:
         use_session_filter: bool = True,
         pip_unit: float = 0.01,
     ) -> None:
-        self.filters: list[tuple[str, any]] = []
+        self.filters: list[tuple[str, Any]] = []
 
         # イベントフィルター
         if use_event_filter:
@@ -106,7 +107,7 @@ class FilterManager:
     def _apply_filter(
         self,
         filter_name: str,
-        filter_instance: any,
+        filter_instance: Any,
         timestamp: datetime,
         row: pd.Series,
         symbol: str,

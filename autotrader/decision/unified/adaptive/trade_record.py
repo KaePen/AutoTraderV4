@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 
 from autotrader.config.trading_params import get_pip_unit
 from autotrader.core.entities import ExitReason, Trade
@@ -80,7 +80,7 @@ class TradeRecord:
             mae_pips=trade.mae_pips or 0.0,
             sl_pips=sl_pips,
             holding_minutes=holding_min,
-            closed_at=trade.closed_at or datetime.now(),
+            closed_at=trade.closed_at or datetime.now(UTC),
         )
 
     @property

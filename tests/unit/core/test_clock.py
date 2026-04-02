@@ -5,7 +5,7 @@ FixedClock / SystemClock の動作を検証する。
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 from autotrader.core.clock import FixedClock, SystemClock
 
@@ -20,9 +20,9 @@ class TestSystemClock:
 
     def test_now_is_close_to_real_time(self) -> None:
         clock = SystemClock()
-        before = datetime.now()
+        before = datetime.now(UTC)
         result = clock.now()
-        after = datetime.now()
+        after = datetime.now(UTC)
         assert before <= result <= after
 
 

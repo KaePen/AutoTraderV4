@@ -5,7 +5,7 @@ Pydanticベースのイミュータブルなエンティティ。
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Any
 
@@ -73,7 +73,7 @@ class Candle(BaseModel):
 
     symbol: str = "USDJPY"
     timeframe: Timeframe = Timeframe.M15
-    time: datetime = Field(default_factory=datetime.now)
+    time: datetime = Field(default_factory=lambda: datetime.now(UTC))
     open: float
     high: float
     low: float
@@ -132,7 +132,7 @@ class Signal(BaseModel):
     stop_loss: float | None = None
     take_profit: float | None = None
     reasoning: str = ""
-    created_at: datetime = Field(default_factory=datetime.now)
+    created_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     indicators_snapshot: dict[str, Any] = Field(default_factory=dict)
     # ログ強化: レジーム/モード/コンセンサススコア
     regime: str | None = None
@@ -189,7 +189,7 @@ class Position(BaseModel):
     entry_price: float
     stop_loss: float | None = None
     take_profit: float | None = None
-    opened_at: datetime = Field(default_factory=datetime.now)
+    opened_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     signal_id: str | None = None
     # ログ強化: レジーム/モード/コンセンサススコア
     regime: str | None = None
@@ -291,7 +291,7 @@ class Trade(BaseModel):
     profit_loss: float | None = None
     profit_loss_pips: float | None = None
     exit_reason: ExitReason | None = None
-    opened_at: datetime = Field(default_factory=datetime.now)
+    opened_at: datetime = Field(default_factory=lambda: datetime.now(UTC))
     closed_at: datetime | None = None
     signal_id: str | None = None
     # ログ強化: レジーム/モード/コンセンサススコア
