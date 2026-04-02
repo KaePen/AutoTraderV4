@@ -2093,7 +2093,7 @@ def _execute_month_multi_pair(
         )
 
     # インターリーブ実行（月データは自動的に1ヶ月分）
-    pair_trades = run_multi_pair_year(
+    pair_trades, _trade_breakdowns = run_multi_pair_year(
         year, contexts, multi_config, portfolio,
         vix_data=_vix_data,
     )
@@ -2165,6 +2165,29 @@ def _execute_month_multi_pair(
                 "mfe_pips": trade.mfe_pips or 0.0,
                 "mae_pips": trade.mae_pips or 0.0,
             })
+            # ScoreBreakdown追加（存在する場合）
+            _bd = _trade_breakdowns.get(
+                trade.trade_id, {},
+            )
+            if _bd:
+                trade_rows[-1].update({
+                    "score_trend": _bd.get("trend", 0.0),
+                    "score_adx": _bd.get("adx", 0.0),
+                    "score_rsi": _bd.get("rsi", 0.0),
+                    "score_macd_slope": _bd.get(
+                        "macd_slope", 0.0,
+                    ),
+                    "score_divergence": _bd.get(
+                        "divergence", 0.0,
+                    ),
+                    "score_ema_cross": _bd.get(
+                        "ema_cross", 0.0,
+                    ),
+                    "score_stochastic": _bd.get(
+                        "stochastic", 0.0,
+                    ),
+                    "score_htf": _bd.get("htf", 0.0),
+                })
         pair_summaries[sym] = {
             "trades": len(trades),
             "wins": wins,
