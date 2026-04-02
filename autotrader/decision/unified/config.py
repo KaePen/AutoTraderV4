@@ -4,6 +4,17 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
+# ===================================================================
+# 共有デフォルト定数（SSOT: UnifiedBotConfig ↔ サブConfig 間の値一致を保証）
+# サブConfigの個別デフォルトと UnifiedBotConfig の両方がこの定数を参照する。
+# ===================================================================
+DEFAULT_SL_MIN_PIPS: float = 20.0
+DEFAULT_SL_MAX_PIPS: float = 50.0
+DEFAULT_CONSENSUS_THRESHOLD: float = 18.0
+DEFAULT_MAX_POSITIONS: int = 3
+DEFAULT_BASE_RISK_PCT: float = 0.05
+DEFAULT_REGIME_DETECTION_TF: str = "H1"
+
 
 @dataclass(frozen=True)
 class StrengthConfig:
@@ -50,9 +61,9 @@ class EvaluatorConfig:
     atr_tp_multiplier: float = 2.0
     pip_unit: float = 0.01
     # SL最小値（pips）: UnifiedBotConfig.sl_min_pipsから伝搬
-    sl_min_pips: float = 20.0
+    sl_min_pips: float = DEFAULT_SL_MIN_PIPS
     # SL最大値（pips）: UnifiedBotConfig.sl_max_pips_defaultから伝搬
-    sl_max_pips: float = 50.0
+    sl_max_pips: float = DEFAULT_SL_MAX_PIPS
     ema_cross_penalty: float | None = (
         None  # EMAクロス矛盾ペナルティ（None=-2.5）
     )
@@ -68,6 +79,45 @@ class EvaluatorConfig:
     htf_align_bonus_strong: float = 4.0
     # HTF弱整合ボーナス（1TF一致）
     htf_align_bonus_weak: float = 2.0
+    # --- スコアリング定数（_calculate_scoreマジックナンバー集約） ---
+    # トレンドスコア: 完全トレンド+MACD一致
+    trend_full_macd_score: float = 5.0
+    # トレンドスコア: トレンド+MACD一致
+    trend_partial_macd_score: float = 4.0
+    # トレンドスコア: トレンドのみ
+    trend_only_score: float = 2.5
+    # ADX強トレンド判定閾値
+    adx_strong_threshold: float = 20.0
+    # ADX強トレンドボーナス
+    adx_strong_bonus: float = 2.0
+    # RSI過熱閾値（買い時にこの値超でブロック）
+    rsi_overbought_block: float = 80.0
+    # RSI過冷閾値（売り時にこの値未満でブロック）
+    rsi_oversold_block: float = 20.0
+    # RSI順方向ボーナス範囲下限
+    rsi_bonus_low: float = 30.0
+    # RSI順方向ボーナス範囲上限
+    rsi_bonus_high: float = 70.0
+    # RSI順方向ボーナス値
+    rsi_bonus: float = 1.0
+    # ダイバージェンス逆方向ペナルティ（正の値、内部で減算）
+    divergence_opposing_penalty: float = 2.0
+    # ダイバージェンス順方向ボーナス
+    divergence_supporting_bonus: float = 1.5
+    # EMAクロス整合ボーナス
+    ema_cross_aligned_bonus: float = 0.5
+    # ストキャスティクス過買閾値
+    stoch_overbought: float = 80.0
+    # ストキャスティクス過売閾値
+    stoch_oversold: float = 20.0
+    # ストキャスティクス過熱ペナルティ（正の値、内部で減算）
+    stoch_extreme_penalty: float = 1.5
+    # ストキャスティクス順方向ボーナス範囲（買い: oversold～この値）
+    stoch_buy_zone_upper: float = 50.0
+    # ストキャスティクス順方向ボーナス範囲（売り: この値～overbought）
+    stoch_sell_zone_lower: float = 50.0
+    # ストキャスティクス順方向ボーナス値
+    stoch_zone_bonus: float = 0.5
 
 
 @dataclass(frozen=True)
@@ -157,7 +207,7 @@ class SignalConfig:
         trend_strength_max: トレンド強度上限
     """
 
-    consensus_threshold: float = 18.0
+    consensus_threshold: float = DEFAULT_CONSENSUS_THRESHOLD
     consensus_primary_weight: float = 2.0
     consensus_entry_weight: float = 1.5
     consensus_confirm_weight: float = 3.0
@@ -169,7 +219,7 @@ class SignalConfig:
     htf_score_filter_enabled: bool = True
     htf_score_filter_min_alignment: float = 0.1
     htf_score_filter_threshold_add: float = 1.0
-    regime_detection_tf: str = "H1"
+    regime_detection_tf: str = DEFAULT_REGIME_DETECTION_TF
     htf_alignment_tfs: list[str] = field(default_factory=lambda: ["H4", "D1"])
     macd_slope_filter_threshold: float = -2.0
     trend_strength_max: float = 0.6
@@ -201,18 +251,18 @@ class RiskManagementConfig:
         use_position_manager: ポジション管理有効
     """
 
-    sl_min_pips: float = 20.0
-    sl_max_pips_default: float = 50.0
+    sl_min_pips: float = DEFAULT_SL_MIN_PIPS
+    sl_max_pips_default: float = DEFAULT_SL_MAX_PIPS
     trend_sl_min_pips: float | None = None
     trend_sl_max_pips: float | None = None
     penalty_cap: float = 0.3
     default_tp_sl_ratio_range: tuple[float, float] = (1.1, 1.4)
-    max_positions: int = 3
+    max_positions: int = DEFAULT_MAX_POSITIONS
     bonus_max_positions: int = 0
     bonus_score_threshold: float = 7.0
     max_lot_per_trade: float = 5.0
     max_total_exposure_lot: float = 10.0
-    base_risk_pct: float = 0.05
+    base_risk_pct: float = DEFAULT_BASE_RISK_PCT
     max_risk_pct_absolute: float = 0.07
     equity_floor_pct: float = 0.30
     equity_caution_pct: float = 0.50
@@ -334,7 +384,7 @@ class UnifiedBotConfig:
     # 資金管理パラメータ（PositionSizerConfigに渡す）
     max_lot_per_trade: float = 5.0
     max_total_exposure_lot: float = 10.0
-    base_risk_pct: float = 0.05
+    base_risk_pct: float = DEFAULT_BASE_RISK_PCT
     max_risk_pct_absolute: float = 0.07
     equity_floor_pct: float = 0.30
     equity_caution_pct: float = 0.50
@@ -343,9 +393,9 @@ class UnifiedBotConfig:
     # デモモード（閾値を下げて活発にシグナルを発火させる）
     demo_mode: bool = False
     # コンセンサス閾値（BT・ライブ共通）
-    consensus_threshold: float = 18.0
+    consensus_threshold: float = DEFAULT_CONSENSUS_THRESHOLD
     # 最大同時ポジション数（ライブ用）
-    max_positions: int = 3
+    max_positions: int = DEFAULT_MAX_POSITIONS
     # デモモード時の最大同時ポジション数
     demo_max_positions: int = 1
     # デモモード時のクールダウン時間（分）: 0=無効
@@ -358,7 +408,7 @@ class UnifiedBotConfig:
     bonus_max_positions: int = 0
     bonus_score_threshold: float = 7.0
     # レジーム検出に使用するTF
-    regime_detection_tf: str = "H1"
+    regime_detection_tf: str = DEFAULT_REGIME_DETECTION_TF
     # HTF整合性チェックに使用するTFリスト
     htf_alignment_tfs: list[str] = field(default_factory=lambda: ["H4", "D1"])
     # --- TradingPlan デフォルト設定 ---
@@ -369,8 +419,8 @@ class UnifiedBotConfig:
     default_tp_sl_ratio_range: tuple[float, float] = (1.1, 1.4)
     # --- フィルター閾値 ---
     macd_slope_filter_threshold: float = -2.0
-    sl_min_pips: float = 20.0
-    sl_max_pips_default: float = 50.0
+    sl_min_pips: float = DEFAULT_SL_MIN_PIPS
+    sl_max_pips_default: float = DEFAULT_SL_MAX_PIPS
     # ペナルティ上限（これ以上でエントリーブロック）
     penalty_cap: float = 0.3
     # トレンド強度上限（過大なトレンド強度でブロック）

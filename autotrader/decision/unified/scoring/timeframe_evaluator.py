@@ -275,38 +275,41 @@ class TimeframeEvaluator:
         adx = row.get("adx")
         strong_trend = False
         if adx is not None and not pd.isna(adx):
-            strong_trend = adx > 20
+            strong_trend = adx > self.config.adx_strong_threshold
+
+        # スコアリング定数
+        _s = self.config
 
         # スコアリング（トレンド必須）
         if full_uptrend and macd_bullish:
-            buy_score = 5.0
-            _bd_trend = 5.0
+            buy_score = _s.trend_full_macd_score
+            _bd_trend = _s.trend_full_macd_score
             reasons.append("完全上昇+MACD↑")
             if strong_trend:
-                buy_score += 2.0
-                _bd_adx = 2.0
+                buy_score += _s.adx_strong_bonus
+                _bd_adx = _s.adx_strong_bonus
         elif full_downtrend and macd_bearish:
-            sell_score = 5.0
-            _bd_trend = 5.0
+            sell_score = _s.trend_full_macd_score
+            _bd_trend = _s.trend_full_macd_score
             reasons.append("完全下降+MACD↓")
             if strong_trend:
-                sell_score += 2.0
-                _bd_adx = 2.0
+                sell_score += _s.adx_strong_bonus
+                _bd_adx = _s.adx_strong_bonus
         elif uptrend and macd_bullish:
-            buy_score = 4.0
-            _bd_trend = 4.0
+            buy_score = _s.trend_partial_macd_score
+            _bd_trend = _s.trend_partial_macd_score
             reasons.append("上昇+MACD↑")
         elif downtrend and macd_bearish:
-            sell_score = 4.0
-            _bd_trend = 4.0
+            sell_score = _s.trend_partial_macd_score
+            _bd_trend = _s.trend_partial_macd_score
             reasons.append("下降+MACD↓")
         elif full_uptrend or uptrend:
-            buy_score = 2.5
-            _bd_trend = 2.5
+            buy_score = _s.trend_only_score
+            _bd_trend = _s.trend_only_score
             reasons.append("上昇トレンドのみ")
         elif full_downtrend or downtrend:
-            sell_score = 2.5
-            _bd_trend = 2.5
+            sell_score = _s.trend_only_score
+            _bd_trend = _s.trend_only_score
             reasons.append("下降トレンドのみ")
         else:
             return 0.0, 0.0, ["条件不十分"], _empty_bd
@@ -314,7 +317,7 @@ class TimeframeEvaluator:
         # RSIフィルター（極端値のみ除外）
         rsi = row.get("rsi_14")
         if rsi is not None and not pd.isna(rsi):
-            if buy_score > 0 and rsi > 80:  # 緩和
+            if buy_score > 0 and rsi > _s.rsi_overbought_block:
                 _bd_rsi = -999.0
                 return (
                     0.0, 0.0, ["RSI過熱"],
@@ -323,7 +326,7 @@ class TimeframeEvaluator:
                         rsi=-999.0,
                     ),
                 )
-            if sell_score > 0 and rsi < 20:  # 緩和
+            if sell_score > 0 and rsi < _s.rsi_oversold_block:
                 _bd_rsi = -999.0
                 return (
                     0.0, 0.0, ["RSI過冷"],
@@ -333,12 +336,12 @@ class TimeframeEvaluator:
                     ),
                 )
             # 順方向のRSIはボーナス（対称範囲）
-            if buy_score > 0 and 30 <= rsi <= 70:
-                buy_score += 1.0
-                _bd_rsi = 1.0
-            elif sell_score > 0 and 30 <= rsi <= 70:
-                sell_score += 1.0
-                _bd_rsi = 1.0
+            if buy_score > 0 and _s.rsi_bonus_low <= rsi <= _s.rsi_bonus_high:
+                buy_score += _s.rsi_bonus
+                _bd_rsi = _s.rsi_bonus
+            elif sell_score > 0 and _s.rsi_bonus_low <= rsi <= _s.rsi_bonus_high:
+                sell_score += _s.rsi_bonus
+                _bd_rsi = _s.rsi_bonus
 
         # MACDヒストグラム傾斜（モメンタム加速確認）
         macd_hist_slope = row.get("macd_hist_slope")
@@ -381,37 +384,37 @@ class TimeframeEvaluator:
         bear_div = row.get("is_bearish_div", False)
         if bull_div and not pd.isna(bull_div) and bull_div:
             if sell_score > 0:
-                sell_score -= 2.0
-                _bd_divergence = -2.0
+                sell_score -= _s.divergence_opposing_penalty
+                _bd_divergence = -_s.divergence_opposing_penalty
                 reasons.append("強気ダイバ→売り抑制")
             elif buy_score > 0:
-                buy_score += 1.5
-                _bd_divergence = 1.5
+                buy_score += _s.divergence_supporting_bonus
+                _bd_divergence = _s.divergence_supporting_bonus
                 reasons.append("強気ダイバ+買い")
         if bear_div and not pd.isna(bear_div) and bear_div:
             if buy_score > 0:
-                buy_score -= 2.0
-                _bd_divergence = -2.0
+                buy_score -= _s.divergence_opposing_penalty
+                _bd_divergence = -_s.divergence_opposing_penalty
                 reasons.append("弱気ダイバ→買い抑制")
             elif sell_score > 0:
-                sell_score += 1.5
-                _bd_divergence = 1.5
+                sell_score += _s.divergence_supporting_bonus
+                _bd_divergence = _s.divergence_supporting_bonus
                 reasons.append("弱気ダイバ+売り")
 
         # EMAクロス確認
         _ema_penalty = (
-            self.config.ema_cross_penalty
-            if self.config.ema_cross_penalty is not None
+            _s.ema_cross_penalty
+            if _s.ema_cross_penalty is not None
             else -2.5
         )
         if ema_12 is not None and ema_26 is not None:
             if not pd.isna(ema_12) and not pd.isna(ema_26):
                 if buy_score > 0 and ema_12 > ema_26:
-                    buy_score += 0.5
-                    _bd_ema_cross = 0.5
+                    buy_score += _s.ema_cross_aligned_bonus
+                    _bd_ema_cross = _s.ema_cross_aligned_bonus
                 elif sell_score > 0 and ema_12 < ema_26:
-                    sell_score += 0.5
-                    _bd_ema_cross = 0.5
+                    sell_score += _s.ema_cross_aligned_bonus
+                    _bd_ema_cross = _s.ema_cross_aligned_bonus
                 elif buy_score > 0 and ema_12 < ema_26:
                     buy_score += _ema_penalty
                     _bd_ema_cross = _ema_penalty
@@ -422,20 +425,20 @@ class TimeframeEvaluator:
         # ストキャスティクス確認（過熱回避）
         stoch_k = row.get("stoch_k")
         if stoch_k is not None and not pd.isna(stoch_k):
-            if buy_score > 0 and stoch_k > 80:
-                buy_score -= 1.5
-                _bd_stochastic = -1.5
+            if buy_score > 0 and stoch_k > _s.stoch_overbought:
+                buy_score -= _s.stoch_extreme_penalty
+                _bd_stochastic = -_s.stoch_extreme_penalty
                 reasons.append("Stoch過買")
-            elif sell_score > 0 and stoch_k < 20:
-                sell_score -= 1.5
-                _bd_stochastic = -1.5
+            elif sell_score > 0 and stoch_k < _s.stoch_oversold:
+                sell_score -= _s.stoch_extreme_penalty
+                _bd_stochastic = -_s.stoch_extreme_penalty
                 reasons.append("Stoch過売")
-            elif buy_score > 0 and 20 <= stoch_k <= 50:
-                buy_score += 0.5
-                _bd_stochastic = 0.5
-            elif sell_score > 0 and 50 <= stoch_k <= 80:
-                sell_score += 0.5
-                _bd_stochastic = 0.5
+            elif buy_score > 0 and _s.stoch_oversold <= stoch_k <= _s.stoch_buy_zone_upper:
+                buy_score += _s.stoch_zone_bonus
+                _bd_stochastic = _s.stoch_zone_bonus
+            elif sell_score > 0 and _s.stoch_sell_zone_lower <= stoch_k <= _s.stoch_overbought:
+                sell_score += _s.stoch_zone_bonus
+                _bd_stochastic = _s.stoch_zone_bonus
 
         # 上位時間足整合性（ボーナスのみ）
         htf_bonus, htf_reason = self._score_htf_alignment(

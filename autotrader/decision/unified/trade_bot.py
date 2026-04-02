@@ -1657,81 +1657,15 @@ class UnifiedTradeBot:
                 )
             return _filt_hold("primary_tfデータなし")
 
-        sl_pips = primary_signal.sl_pips * _overrides.sl_multiplier
-        # M1構造的SL
-        if self.config.m1_structure_sl_enabled:
-            _m1_row_sl = self._get_current_row(
-                "M1",
-                current_time,
-            )
-            if _m1_row_sl is not None:
-                _pip_unit = self.config.pip_unit
-                _current_close = (
-                    candle.close
-                    if candle
-                    else (
-                        _m1_row_sl.get("close")
-                        if _m1_row_sl is not None
-                        else None
-                    )
-                )
-                if _current_close is not None:
-                    if consensus.direction == SignalType.BUY:
-                        _swing = _m1_row_sl.get(
-                            "last_swing_low",
-                        )
-                        if _swing is not None and not pd.isna(_swing):
-                            _struct_sl = (
-                                (_current_close - float(_swing)) / _pip_unit
-                                + self.config.m1_structure_sl_buffer_pips
-                            )
-                            _struct_sl = max(
-                                self.config.m1_structure_sl_min_pips,
-                                min(
-                                    _struct_sl,
-                                    self.config.m1_structure_sl_max_pips,
-                                ),
-                            )
-                            sl_pips = _struct_sl
-                    elif consensus.direction == SignalType.SELL:
-                        _swing = _m1_row_sl.get(
-                            "last_swing_high",
-                        )
-                        if _swing is not None and not pd.isna(_swing):
-                            _struct_sl = (
-                                (float(_swing) - _current_close) / _pip_unit
-                                + self.config.m1_structure_sl_buffer_pips
-                            )
-                            _struct_sl = max(
-                                self.config.m1_structure_sl_min_pips,
-                                min(
-                                    _struct_sl,
-                                    self.config.m1_structure_sl_max_pips,
-                                ),
-                            )
-                            sl_pips = _struct_sl
-        # TREND時のSL下限上書き
-        if (
-            self.config.trend_sl_min_pips is not None
-            and regime_result.regime == MarketRegime.TREND
-        ):
-            sl_pips = max(
-                sl_pips,
-                self.config.trend_sl_min_pips,
-            )
-        # TREND時のSL上限キャップ
-        if (
-            self.config.trend_sl_max_pips is not None
-            and regime_result.regime == MarketRegime.TREND
-        ):
-            sl_pips = min(
-                sl_pips,
-                self.config.trend_sl_max_pips,
-            )
-        tp_sl_ratio = (
-            plan.get_recommended_tp_sl_ratio() * self.config.tp_sl_ratio
+        sl_pips, tp_pips = self._calculate_final_sl_tp(
+            primary_signal=primary_signal,
+            direction=consensus.direction,
+            regime=regime_result.regime,
+            sl_multiplier=_overrides.sl_multiplier,
+            current_time=current_time,
+            candle=candle,
+            plan=plan,
         )
-        tp_pips = sl_pips * tp_sl_ratio
 
         # M1リトレースエントリー
         if self.config.m1_retrace_entry_enabled:
@@ -1963,6 +1897,110 @@ class UnifiedTradeBot:
             sell_score=consensus.sell_score,
             lot=lot,
         )
+
+    def _calculate_final_sl_tp(
+        self,
+        primary_signal: TimeframeSignal,
+        direction: SignalType,
+        regime: MarketRegime,
+        sl_multiplier: float,
+        current_time: pd.Timestamp,
+        candle: Candle | None,
+        plan: TradingPlan,
+    ) -> tuple[float, float]:
+        """SL/TPの最終計算
+
+        primary_tfの基本SLに各種調整（M1構造的SL、TREND上下限）を適用し、
+        TP/SL比率からTPを算出する。
+
+        Args:
+            primary_signal: プライマリTFシグナル
+            direction: トレード方向
+            regime: 市場レジーム
+            sl_multiplier: SL倍率（アダプティブ調整）
+            current_time: 現在時刻
+            candle: ローソク足データ
+            plan: トレーディングプラン
+
+        Returns:
+            tuple[float, float]: (sl_pips, tp_pips)
+        """
+        sl_pips = primary_signal.sl_pips * sl_multiplier
+        # M1構造的SL
+        if self.config.m1_structure_sl_enabled:
+            _m1_row_sl = self._get_current_row(
+                "M1",
+                current_time,
+            )
+            if _m1_row_sl is not None:
+                _pip_unit = self.config.pip_unit
+                _current_close = (
+                    candle.close
+                    if candle
+                    else (
+                        _m1_row_sl.get("close")
+                        if _m1_row_sl is not None
+                        else None
+                    )
+                )
+                if _current_close is not None:
+                    if direction == SignalType.BUY:
+                        _swing = _m1_row_sl.get(
+                            "last_swing_low",
+                        )
+                        if _swing is not None and not pd.isna(_swing):
+                            _struct_sl = (
+                                (_current_close - float(_swing)) / _pip_unit
+                                + self.config.m1_structure_sl_buffer_pips
+                            )
+                            _struct_sl = max(
+                                self.config.m1_structure_sl_min_pips,
+                                min(
+                                    _struct_sl,
+                                    self.config.m1_structure_sl_max_pips,
+                                ),
+                            )
+                            sl_pips = _struct_sl
+                    elif direction == SignalType.SELL:
+                        _swing = _m1_row_sl.get(
+                            "last_swing_high",
+                        )
+                        if _swing is not None and not pd.isna(_swing):
+                            _struct_sl = (
+                                (float(_swing) - _current_close) / _pip_unit
+                                + self.config.m1_structure_sl_buffer_pips
+                            )
+                            _struct_sl = max(
+                                self.config.m1_structure_sl_min_pips,
+                                min(
+                                    _struct_sl,
+                                    self.config.m1_structure_sl_max_pips,
+                                ),
+                            )
+                            sl_pips = _struct_sl
+        # TREND時のSL下限上書き
+        if (
+            self.config.trend_sl_min_pips is not None
+            and regime == MarketRegime.TREND
+        ):
+            sl_pips = max(
+                sl_pips,
+                self.config.trend_sl_min_pips,
+            )
+        # TREND時のSL上限キャップ
+        if (
+            self.config.trend_sl_max_pips is not None
+            and regime == MarketRegime.TREND
+        ):
+            sl_pips = min(
+                sl_pips,
+                self.config.trend_sl_max_pips,
+            )
+        tp_sl_ratio = (
+            plan.get_recommended_tp_sl_ratio() * self.config.tp_sl_ratio
+        )
+        tp_pips = sl_pips * tp_sl_ratio
+        return sl_pips, tp_pips
 
     def set_current_spread_pips(
         self, spread_pips: float,
