@@ -693,6 +693,9 @@ def run_multi_pair_year(
     _vix_current_date = None
     # クロスペアシグナル方向追跡（直近シグナル方向を記録）
     _pair_last_direction: dict[str, str] = {}
+    # ScoreBreakdown追跡（trade_id → primary_tf breakdowns）
+    _pending_breakdowns: dict[str, dict[str, Any]] = {}  # sym → latest
+    _trade_breakdowns: dict[str, dict[str, Any]] = {}  # trade_id → bd
 
     for bar_num, (bar_time, sym, idx) in enumerate(merged):
         ctx = contexts[sym]
@@ -799,6 +802,14 @@ def run_multi_pair_year(
         # クロスペア方向を記録
         if consolidated.direction != SignalType.HOLD:
             _pair_last_direction[sym] = consolidated.direction.value
+            # ScoreBreakdown追跡（エントリーシグナル時点のprimary_tf内訳）
+            _bd = {}
+            if consolidated.tf_score_breakdowns:
+                _ptf = consolidated.primary_tf
+                _bd = consolidated.tf_score_breakdowns.get(_ptf, {})
+                if not _bd and consolidated.tf_score_breakdowns:
+                    _bd = next(iter(consolidated.tf_score_breakdowns.values()), {})
+            _pending_breakdowns[sym] = _bd
 
         # Signal変換（SL/TPはpips値で格納=ライブと統一）
         signal = None
@@ -937,6 +948,11 @@ def run_multi_pair_year(
                 pnl=pnl,
                 trade_record=_trade_record,
             )
+            # ScoreBreakdownをtrade_idに紐付け
+            if new_trade.trade_id and sym in _pending_breakdowns:
+                _trade_breakdowns[new_trade.trade_id] = (
+                    _pending_breakdowns[sym]
+                )
 
         # 進捗表示（5000バーごと）
         if bar_num % 5000 == 0 and bar_num > 0:
@@ -1042,7 +1058,7 @@ def run_multi_pair_year(
     for sym, ctx in contexts.items():
         pair_trades[sym] = list(ctx.simulator.state.closed_trades)
 
-    return pair_trades
+    return pair_trades, _trade_breakdowns
 
 
 # =============================================================
@@ -1179,7 +1195,7 @@ def _run_year_worker(args: tuple) -> dict[str, Any] | None:
 
     # インターリーブ実行
     _t1 = _time.time()
-    pair_trades = run_multi_pair_year(
+    pair_trades, _ = run_multi_pair_year(
         year,
         contexts,
         mc,
@@ -1615,7 +1631,7 @@ def run_test_case(
 
         # インターリーブ実行
         _t_sim = time.time()
-        pair_trades = run_multi_pair_year(
+        pair_trades, _ = run_multi_pair_year(
             year,
             contexts,
             test_config,
