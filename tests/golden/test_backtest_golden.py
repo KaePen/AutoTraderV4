@@ -11,7 +11,7 @@ import pytest
 
 from autotrader.config.trading_params import SymbolPreset, get_preset
 from autotrader.decision.unified.config import UnifiedBotConfig
-from autotrader.decision.unified.position_manager import (
+from autotrader.decision.unified.risk.position_manager import (
     PositionManagerConfig,
 )
 

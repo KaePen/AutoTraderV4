@@ -3,14 +3,10 @@
 from __future__ import annotations
 
 import logging
+import threading
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
-
-if TYPE_CHECKING:
-    from autotrader.decision.unified.position_manager import (
-        PositionManagerConfig,
-    )
+from typing import Any
 
 logger = logging.getLogger(__name__)
 
@@ -111,7 +107,7 @@ class SymbolPreset:
         Returns:
             PositionManagerConfig: PM設定
         """
-        from autotrader.decision.unified.position_manager import (  # noqa: PLC0415
+        from autotrader.decision.unified.risk.position_manager import (  # noqa: PLC0415
             PositionManagerConfig,
         )
 
@@ -147,6 +143,7 @@ class SymbolPreset:
 _CONFIG_DIR = Path(__file__).resolve().parents[2] / "config"
 _DEFAULT_PRESET_PATH = _CONFIG_DIR / "symbol_presets.yaml"
 _DEFAULT_OVERRIDES_PATH = _CONFIG_DIR / "symbol_overrides.yaml"
+_lock = threading.Lock()
 _preset_cache: dict[str, SymbolPreset] = {}
 # ペア別 signal/filter/pm_config 上書き辞書
 _symbol_overrides_cache: dict[
@@ -258,20 +255,21 @@ def get_preset(
     Returns:
         SymbolPreset: プリセット設定
     """
-    if path is None:
-        effective_path = (
-            _DEFAULT_OVERRIDES_PATH
-            if _DEFAULT_OVERRIDES_PATH.exists()
-            else _DEFAULT_PRESET_PATH
-        )
-    else:
-        effective_path = path
-    # 未ロードまたは異なるパスが指定された場合は再読み込み
-    if not _presets_loaded or effective_path != _loaded_path:
-        _preset_cache.clear()
-        _load_presets(path)
-    if symbol in _preset_cache:
-        return _preset_cache[symbol]
+    with _lock:
+        if path is None:
+            effective_path = (
+                _DEFAULT_OVERRIDES_PATH
+                if _DEFAULT_OVERRIDES_PATH.exists()
+                else _DEFAULT_PRESET_PATH
+            )
+        else:
+            effective_path = path
+        # 未ロードまたは異なるパスが指定された場合は再読み込み
+        if not _presets_loaded or effective_path != _loaded_path:
+            _preset_cache.clear()
+            _load_presets(path)
+        if symbol in _preset_cache:
+            return _preset_cache[symbol]
     logger.warning(
         "プリセット未定義シンボル、デフォルト使用: %s", symbol,
     )
@@ -294,24 +292,25 @@ def get_symbol_overrides(
     Returns:
         dict: {"signal": {...}, "filter": {...}, "pm_config": {...}}
     """
-    if path is None:
-        effective_path = (
-            _DEFAULT_OVERRIDES_PATH
-            if _DEFAULT_OVERRIDES_PATH.exists()
-            else _DEFAULT_PRESET_PATH
-        )
-    else:
-        effective_path = path
-    if not _presets_loaded or effective_path != _loaded_path:
-        _preset_cache.clear()
-        _symbol_overrides_cache.clear()
-        _load_presets(path)
-    return _symbol_overrides_cache.get(symbol, {
-        "signal": {},
-        "filter": {},
-        "risk_mgmt": {},
-        "pm_config": {},
-    })
+    with _lock:
+        if path is None:
+            effective_path = (
+                _DEFAULT_OVERRIDES_PATH
+                if _DEFAULT_OVERRIDES_PATH.exists()
+                else _DEFAULT_PRESET_PATH
+            )
+        else:
+            effective_path = path
+        if not _presets_loaded or effective_path != _loaded_path:
+            _preset_cache.clear()
+            _symbol_overrides_cache.clear()
+            _load_presets(path)
+        return _symbol_overrides_cache.get(symbol, {
+            "signal": {},
+            "filter": {},
+            "risk_mgmt": {},
+            "pm_config": {},
+        })
 
 
 def reload_presets(path: Path | None = None) -> None:
@@ -323,11 +322,12 @@ def reload_presets(path: Path | None = None) -> None:
         path: YAMLファイルパス（None時はデフォルトパス）
     """
     global _presets_loaded, _loaded_path
-    _preset_cache.clear()
-    _symbol_overrides_cache.clear()
-    _presets_loaded = False
-    _loaded_path = None
-    _load_presets(path)
+    with _lock:
+        _preset_cache.clear()
+        _symbol_overrides_cache.clear()
+        _presets_loaded = False
+        _loaded_path = None
+        _load_presets(path)
 
 
 # -------------------------------------------------------------------

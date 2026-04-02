@@ -69,7 +69,7 @@ from autotrader.core.enums import (
     SignalType,
     Timeframe,
 )
-from autotrader.decision.unified.position_manager import (
+from autotrader.decision.unified.risk.position_manager import (
     PositionManagerConfig,
 )
 

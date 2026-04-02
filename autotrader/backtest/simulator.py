@@ -26,7 +26,7 @@ from autotrader.config.trading_params import (
 from autotrader.core.entities import Candle, Position, Signal, Trade
 from autotrader.core.enums import ExitReason, SignalType
 from autotrader.core.exceptions import BacktestError
-from autotrader.decision.unified.position_manager import (
+from autotrader.decision.unified.risk.position_manager import (
     ManagementActionType,
     PositionManager,
     PositionManagerConfig,

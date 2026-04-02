@@ -5,7 +5,7 @@ from __future__ import annotations
 import pandas as pd
 
 from autotrader.core.enums import SignalType
-from autotrader.decision.unified.timeframe_evaluator import (
+from autotrader.decision.unified.scoring.timeframe_evaluator import (
     TimeframeEvaluator,
     TimeframeSignal,
 )

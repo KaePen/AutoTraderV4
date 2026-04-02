@@ -15,10 +15,10 @@ from autotrader.adapters.mt5.config import MT5Config
 from autotrader.core.entities import AccountInfo, Position, Signal
 from autotrader.core.enums import SignalType
 from autotrader.core.interfaces.position_sizing import SizingResult
-from autotrader.decision.unified.position_manager import (
+from autotrader.decision.unified.risk.position_manager import (
     ManagementAction,
 )
-from autotrader.decision.unified.signal_consolidator import (
+from autotrader.decision.unified.scoring.consolidator import (
     ConsolidatedSignal,
 )
 from autotrader.live.config import LiveTradingConfig

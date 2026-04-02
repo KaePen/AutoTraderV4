@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 
 from autotrader.adapters.mt5.config import MT5Config
 from autotrader.decision.unified.config import UnifiedBotConfig
-from autotrader.decision.unified.position_manager import (
+from autotrader.decision.unified.risk.position_manager import (
     PositionManagerConfig,
 )
 from autotrader.live.tick_entry_config import TickEntryConfig

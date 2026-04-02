@@ -401,7 +401,7 @@ class TestToPmConfig:
 
     def test_returns_position_manager_config(self):
         """PositionManagerConfig インスタンスを返す"""
-        from autotrader.decision.unified.position_manager import (
+        from autotrader.decision.unified.risk.position_manager import (
             PositionManagerConfig,
         )
 

@@ -19,7 +19,7 @@ from autotrader.core.enums import ExitReason, SignalType, Timeframe
 from autotrader.core.event_bus import event_bus
 from autotrader.core.exceptions import TradingError
 from autotrader.decision.unified.mode_selector import TradingPlan
-from autotrader.decision.unified.position_manager import (
+from autotrader.decision.unified.risk.position_manager import (
     PositionManager,
 )
 from autotrader.live.mt5_utils import mt5_reason_to_exit_reason

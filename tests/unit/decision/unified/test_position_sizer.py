@@ -6,7 +6,7 @@ import pytest
 
 from autotrader.core.enums import MarketRegime
 from autotrader.core.interfaces.position_sizing import SizingContext
-from autotrader.decision.unified.position_sizer import (
+from autotrader.decision.unified.risk.position_sizer import (
     PositionSizer,
     PositionSizerConfig,
 )

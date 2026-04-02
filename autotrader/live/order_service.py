@@ -20,11 +20,11 @@ from autotrader.core.enums import (
 )
 from autotrader.core.event_bus import event_bus
 from autotrader.core.interfaces.position_sizing import SizingContext
-from autotrader.decision.unified.position_manager import (
+from autotrader.decision.unified.risk.position_manager import (
     ManagementActionType,
     PositionManager,
 )
-from autotrader.decision.unified.position_sizer import PositionSizer
+from autotrader.decision.unified.risk.position_sizer import PositionSizer
 from autotrader.decision.unified.mode_selector import (
     UNIVERSAL_MODE,
     TradingPlan,

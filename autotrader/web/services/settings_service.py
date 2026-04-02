@@ -8,7 +8,7 @@ import logging
 from autotrader.config.config_loader import ConfigLoader
 from autotrader.config.settings import Settings
 from autotrader.decision.unified import UnifiedBotConfig
-from autotrader.decision.unified.position_manager import (
+from autotrader.decision.unified.risk.position_manager import (
     PositionManagerConfig,
 )
 from autotrader.web.schemas import SettingsResponse

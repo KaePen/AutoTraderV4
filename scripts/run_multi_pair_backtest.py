@@ -69,7 +69,7 @@ from autotrader.decision.unified import (  # noqa: E402
 from autotrader.decision.unified.adaptive import (  # noqa: E402
     TradeRecord,
 )
-from autotrader.decision.unified.position_manager import (  # noqa: E402
+from autotrader.decision.unified.risk.position_manager import (  # noqa: E402
     PositionManagerConfig,
 )
 

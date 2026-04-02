@@ -12,7 +12,7 @@ import pandas as pd
 
 from autotrader.core.enums import SignalType
 from autotrader.decision.unified.mode_selector import UNIVERSAL_MODE
-from autotrader.decision.unified.timeframe_evaluator import (
+from autotrader.decision.unified.scoring.timeframe_evaluator import (
     TimeframeEvaluator,
     TimeframeSignal,
 )

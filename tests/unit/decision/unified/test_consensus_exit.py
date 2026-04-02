@@ -8,7 +8,7 @@ import pytest
 
 from autotrader.core.enums import SignalType
 from autotrader.decision.unified.mode_selector import TradingPlan
-from autotrader.decision.unified.position_manager import (
+from autotrader.decision.unified.risk.position_manager import (
     ManagedPosition,
     ManagementAction,
     ManagementActionType,
