@@ -5,7 +5,7 @@
 
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Protocol
 
 
@@ -20,7 +20,7 @@ class SystemClock:
 
     def now(self) -> datetime:
         """現在のシステム時刻を返す"""
-        return datetime.now()
+        return datetime.now(UTC)
 
 
 class FixedClock:

@@ -5,7 +5,7 @@ Clock 注入により時刻をテストで制御できることを検証する�
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 
 from autotrader.backtest.state import BacktestStateManager
 from autotrader.core.clock import FixedClock
@@ -74,6 +74,6 @@ class TestBacktestStateManagerClock:
         assert state.started_at is not None
         # SystemClock なので現在時刻に近い値
         diff = abs(
-            (datetime.now() - state.started_at).total_seconds()
+            (datetime.now(UTC) - state.started_at).total_seconds()
         )
         assert diff < 5

@@ -8,14 +8,14 @@ frozen=True で不変性を保証し、typo やフィールド不整合を
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 
 
 @dataclass(frozen=True)
 class BaseEvent:
     """全イベントの基底クラス"""
 
-    timestamp: datetime = field(default_factory=datetime.now)
+    timestamp: datetime = field(default_factory=lambda: datetime.now(UTC))
 
 
 @dataclass(frozen=True)

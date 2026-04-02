@@ -14,6 +14,7 @@ import pandas as pd
 from autotrader.adapters.mt5.data_provider import MT5DataProvider
 from autotrader.calculator.technical.batch import (
     TechnicalIndicatorBatch,
+    calc_indicators_multi_tf,
 )
 from autotrader.core.enums import Timeframe
 from autotrader.decision.unified.trade_bot import UnifiedTradeBot
@@ -255,20 +256,5 @@ class DataFeedService:
         self,
         data: dict[str, pd.DataFrame],
     ) -> dict[str, pd.DataFrame]:
-        """生OHLCVデータにテクニカル指標を計算して付加
-
-        Args:
-            data: 時間足別生OHLCVデータ
-
-        Returns:
-            dict[str, pd.DataFrame]: 指標付きデータ
-        """
-        calc = TechnicalIndicatorBatch()
-        result: dict[str, pd.DataFrame] = {}
-        for tf, df in data.items():
-            try:
-                result[tf] = calc.calculate_basic(df.copy())
-            except Exception as e:
-                logger.warning("指標計算失敗: %s %s", tf, e)
-                result[tf] = df
-        return result
+        """生OHLCVデータにテクニカル指標を計算して付加"""
+        return calc_indicators_multi_tf(data)

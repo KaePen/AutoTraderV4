@@ -20,7 +20,10 @@ from autotrader.adapters.mt5.connection import MT5ConnectionManager
 from autotrader.adapters.mt5.data_provider import MT5DataProvider
 from autotrader.adapters.mt5.exceptions import MT5DataError, MT5Error
 from autotrader.adapters.mt5.trade_executor import MT5TradeExecutor
-from autotrader.calculator.technical.batch import TechnicalIndicatorBatch
+from autotrader.calculator.technical.batch import (
+    TechnicalIndicatorBatch,
+    calc_indicators_multi_tf,
+)
 from autotrader.config.trading_params import get_pip_unit, get_pip_value
 from autotrader.core.entities import AccountInfo, Signal
 from autotrader.core.enums import (
@@ -854,9 +857,19 @@ class LiveTradingEngine:
             self._broadcast_tick_update(),
         )
         self._background_tasks.add(task)
-        task.add_done_callback(
-            self._background_tasks.discard,
-        )
+        task.add_done_callback(self._on_background_task_done)
+
+    def _on_background_task_done(
+        self, task: asyncio.Task[None]
+    ) -> None:
+        """Background task 完了コールバック（例外ログ付き）"""
+        self._background_tasks.discard(task)
+        if not task.cancelled() and task.exception() is not None:
+            logger.error(
+                "Background task 失敗: %s",
+                task.exception(),
+                exc_info=task.exception(),
+            )
 
     async def _publish_cached_price(self) -> None:
         """MT5から最新tick価格を取得してチャートに配信
@@ -1448,23 +1461,8 @@ class LiveTradingEngine:
         self,
         data: dict[str, pd.DataFrame],
     ) -> dict[str, pd.DataFrame]:
-        """生OHLCVデータにテクニカル指標を計算して付加
-
-        Args:
-            data: 時間足別生OHLCVデータ
-
-        Returns:
-            dict[str, pd.DataFrame]: 指標付きデータ
-        """
-        calc = TechnicalIndicatorBatch()
-        result: dict[str, pd.DataFrame] = {}
-        for tf, df in data.items():
-            try:
-                result[tf] = calc.calculate_basic(df.copy())
-            except Exception as e:
-                logger.warning("指標計算失敗: %s %s", tf, e)
-                result[tf] = df
-        return result
+        """生OHLCVデータにテクニカル指標を計算して付加"""
+        return calc_indicators_multi_tf(data)
 
     def _should_use_tick_optimizer(self) -> bool:
         """ティック最適化を使用すべきか判定

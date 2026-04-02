@@ -1,6 +1,7 @@
 # [DEPRECATED] このファイルは廃止予定です。
-# 全設定は config/symbol_presets.yaml に移行してください。
-# このファイルの値は symbol_presets.yaml のデフォルトを上書きします。
+# 全設定は trading_defaults.yaml + symbol_overrides.yaml + modes.yaml に移行済み。
+# trading_defaults.yaml が存在する場合、このファイルは読み込まれません。
+# フォールバック時の安全性のため、SSOT (trading_defaults.yaml) と同じ値を維持。
 #
 # ライブトレード用設定（本番環境）
 # バックテストはCLI引数で別管理
@@ -9,10 +10,8 @@
 symbol: USDJPY
 
 bot_config:
-  # 戦略パラメータ（通貨ペア非依存）
-  # リスク管理パラメータは symbol_presets.yaml (SSOT) を参照
-  # コンセンサス設定（Round3: 閾値9.0）
-  consensus_threshold: 9.0
+  # コンセンサス設定（SSOT同期: trading_defaults.yaml）
+  consensus_threshold: 18.0
   consensus_primary_weight: 2.0
   consensus_entry_weight: 1.5
   consensus_confirm_weight: 3.0
@@ -24,44 +23,41 @@ bot_config:
   weak_hours_enabled: true
   weak_hours_score_premium: 0.5
   sl_min_pips: 20.0
-  # エントリーフィルター（Round2追加）
+  # エントリーフィルター
   penalty_cap: 0.3
-  trend_strength_max: 0.8
-  # SoftGuardペナルティ
+  trend_strength_max: 0.6
+  # SoftGuardペナルティ（SSOT同期）
   sg_spread_penalty_rate: 0.2
-  sg_off_hours_penalty: 0.25
+  sg_off_hours_penalty: 0.5
   sg_volatility_penalty: 0.05
   sg_recent_loss_penalty: 0.1
   use_dynamic_lot: true
   slippage_buffer_pips: 2.0
 
 pm_config:
-  # ポジション管理パラメータ（通貨ペア非依存）
-  # spread_pips/slippage_pips は symbol_presets.yaml (SSOT) を参照
-  # 基本（M1最適化 No.3）
+  # ポジション管理パラメータ（SSOT同期: trading_defaults.yaml）
   partial_close_1r_ratio: 0.50
   partial_close_2r_ratio: 0.05
   breakeven_at_1r: true
   trailing_start_r: 0.5
-  trailing_atr_multiplier: 2.5
-  early_breakeven_r: 0.3
+  trailing_atr_multiplier: 2.0
+  early_breakeven_r: 0.6
   signal_rev_close_ratio: 0.0
   # BE制御
   range_day_be_disabled: true
   range_day_early_be_r: 0.3
   range_day_fast_be_enabled: true
   range_day_fast_be_minutes: 90.0
-  # Stagnation（120分+MFE<0.10Rで早期撤退）
+  # Stagnation
   stagnation_exit_minutes: 120.0
   stagnation_min_mfe_r: 0.10
-  # BE移動クッション（3pips余裕を持たせBE_HIT頻度を低減）
   be_cushion_pips: 3.0
-  # 保険
-  range_day_insurance_enabled: true
+  # 保険（SSOT同期: 無効化）
+  range_day_insurance_enabled: false
   insurance_trigger_r: 1.0
   insurance_block_high_mfe_r: 0.8
   insurance_min_holding_minutes: 15.0
-  # 0.5R部分利確
-  range_day_half_r_partial_enabled: true
+  # 0.5R部分利確（SSOT同期: 無効化）
+  range_day_half_r_partial_enabled: false
   range_day_half_r_partial_ratio: 0.20
   range_day_half_r_trigger: 0.5

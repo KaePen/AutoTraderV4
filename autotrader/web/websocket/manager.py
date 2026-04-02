@@ -6,7 +6,7 @@ import asyncio
 import json
 import time as _time
 from collections import defaultdict
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import Enum
 from typing import Any
 
@@ -101,7 +101,7 @@ class ConnectionManager:
         message = {
             "type": event_type.value,
             "data": data,
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
         message_json = json.dumps(message, default=str)
 
@@ -145,7 +145,7 @@ class ConnectionManager:
         message = {
             "type": event_type.value,
             "data": data,
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": datetime.now(UTC).isoformat(),
         }
         try:
             await websocket.send_text(json.dumps(message, default=str))

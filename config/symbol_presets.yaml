@@ -58,7 +58,7 @@ pm_config:
   breakeven_at_1r: true
   trailing_start_r: 0.5
   trailing_atr_multiplier: 2.0
-  early_breakeven_r: 0.3
+  early_breakeven_r: 0.6               # BT検証(0000062): 0.3Rは過剰, 0.6Rが最適
   signal_rev_close_ratio: 0.0
   range_day_be_disabled: true
   range_day_early_be_r: 0.3

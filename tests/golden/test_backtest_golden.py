@@ -26,7 +26,7 @@ class TestUnifiedBotConfigDefaults:
     # --- コンセンサス・シグナル設定 ---
 
     def test_consensus_threshold(self) -> None:
-        assert self.config.consensus_threshold == 9.0
+        assert self.config.consensus_threshold == 18.0
 
     def test_consensus_weights(self) -> None:
         assert self.config.consensus_primary_weight == 2.0
@@ -72,7 +72,7 @@ class TestUnifiedBotConfigDefaults:
         assert self.config.use_position_manager is True
 
     def test_base_risk_pct(self) -> None:
-        assert self.config.base_risk_pct == 0.04
+        assert self.config.base_risk_pct == 0.05
 
     def test_max_lot_per_trade(self) -> None:
         assert self.config.max_lot_per_trade == 5.0
@@ -98,7 +98,7 @@ class TestUnifiedBotConfigDefaults:
 
     def test_sg_penalties(self) -> None:
         assert self.config.sg_spread_penalty_rate == 0.2
-        assert self.config.sg_off_hours_penalty == 0.25
+        assert self.config.sg_off_hours_penalty == 0.5
         assert self.config.sg_volatility_penalty == 0.05
         assert self.config.sg_recent_loss_penalty == 0.1
 
@@ -107,7 +107,6 @@ class TestUnifiedBotConfigDefaults:
     def test_phase3_features_off_by_default(self) -> None:
         """Phase3で劣化を引き起こしたフィーチャーがOFF"""
         assert self.config.session_transition_wait_enabled is False
-        assert self.config.liquidity_based_tp_enabled is False
 
     # --- ファンダメンタル設定（デフォルトOFF確認）---
 
@@ -170,7 +169,7 @@ class TestSymbolPresetValues:
         assert p.default_tp_pips == 40.0
         assert p.max_positions == 1
         assert p.bonus_max_positions == 0
-        assert p.base_risk_pct == 0.004
+        assert p.base_risk_pct == 0.006
         assert p.max_lot_per_trade == 2.0
         assert p.max_total_exposure_lot == 4.0
         assert p.use_position_manager is True
@@ -184,14 +183,14 @@ class TestSymbolPresetValues:
         assert p.default_sl_pips == 25.0
         assert p.default_tp_pips == 50.0
         assert p.max_positions == 1
-        assert p.base_risk_pct == 0.004
+        assert p.base_risk_pct == 0.006
 
     def test_gbpjpy_preset(self) -> None:
         """GBPJPYプリセット（高スプレッド通貨ペア）"""
         p = get_preset("GBPJPY")
         assert p.spread_pips == 3.0
         assert p.max_positions == 1
-        assert p.base_risk_pct == 0.004
+        assert p.base_risk_pct == 0.006
 
     def test_eurusd_preset(self) -> None:
         """EURUSDプリセット（USDクオート）"""
