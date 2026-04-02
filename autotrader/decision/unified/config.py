@@ -455,6 +455,20 @@ class UnifiedBotConfig:
     regime_breakout_sl_min_pips: float | None = None
     # BREAKOUT時のSL上限（None=sl_max_pipsを使用）
     regime_breakout_sl_max_pips: float | None = None
+    # --- レジーム遷移シグナル ---
+    # レジーム遷移検出有効化
+    regime_transition_enabled: bool = False
+    # RANGE→BREAKOUT遷移時のコンセンサス閾値ボーナス（負値=閾値引下げ）
+    regime_transition_breakout_bonus: float = -2.0
+    # レジーム遷移の有効期間（足数、0=遷移直後のみ）
+    regime_transition_window: int = 3
+    # --- クロスペア合意シグナル ---
+    # クロスペア合意フィルタ有効化
+    cross_pair_agreement_enabled: bool = False
+    # 同方向ペア数がこの値以上で閾値ボーナス適用
+    cross_pair_min_agreement: int = 3
+    # 合意時のコンセンサス閾値ボーナス（負値=閾値引下げ）
+    cross_pair_agreement_bonus: float = -1.0
     # --- ボラティリティ方向検出設定 ---
     # ボラ方向検出有効化
     vol_direction_enabled: bool = True
