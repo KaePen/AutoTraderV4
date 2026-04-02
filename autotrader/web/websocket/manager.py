@@ -39,10 +39,10 @@ class ConnectionManager:
 
     def __init__(self) -> None:
         """初期化"""
-        # チャネル別接続リスト
-        self._connections: dict[str, list[WebSocket]] = {}
-        # グローバル接続リスト
-        self._all_connections: list[WebSocket] = []
+        # チャネル別接続セット
+        self._connections: dict[str, set[WebSocket]] = {}
+        # グローバル接続セット
+        self._all_connections: set[WebSocket] = set()
         # ロック
         self._lock = asyncio.Lock()
         # 診断カウンター
@@ -63,11 +63,11 @@ class ConnectionManager:
         """
         await websocket.accept()
         async with self._lock:
-            self._all_connections.append(websocket)
+            self._all_connections.add(websocket)
             if channel:
                 if channel not in self._connections:
-                    self._connections[channel] = []
-                self._connections[channel].append(websocket)
+                    self._connections[channel] = set()
+                self._connections[channel].add(websocket)
 
     async def disconnect(
         self, websocket: WebSocket, channel: str | None = None
@@ -79,11 +79,9 @@ class ConnectionManager:
             channel: 購読チャネル
         """
         async with self._lock:
-            if websocket in self._all_connections:
-                self._all_connections.remove(websocket)
+            self._all_connections.discard(websocket)
             if channel and channel in self._connections:
-                if websocket in self._connections[channel]:
-                    self._connections[channel].remove(websocket)
+                self._connections[channel].discard(websocket)
 
     async def broadcast(
         self,
@@ -116,21 +114,19 @@ class ConnectionManager:
             else:
                 targets = self._all_connections
 
-            disconnected = []
-            for connection in targets:
+            disconnected: set[WebSocket] = set()
+            for connection in list(targets):
                 try:
                     await connection.send_text(message_json)
                 except Exception:
                     self._send_errors += 1
-                    disconnected.append(connection)
+                    disconnected.add(connection)
 
-            # 切断された接続を削除
-            for conn in disconnected:
-                if conn in self._all_connections:
-                    self._all_connections.remove(conn)
+            # 切断された接続を削除（O(1)）
+            if disconnected:
+                self._all_connections -= disconnected
                 for ch_conns in self._connections.values():
-                    if conn in ch_conns:
-                        ch_conns.remove(conn)
+                    ch_conns -= disconnected
 
     async def send_personal(
         self, websocket: WebSocket, event_type: EventType, data: dict[str, Any]
