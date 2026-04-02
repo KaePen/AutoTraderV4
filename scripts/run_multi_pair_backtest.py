@@ -691,6 +691,8 @@ def run_multi_pair_year(
     _t0 = time.time()
     # VIX日付追跡（日次更新のため日付変更時のみ全ペア更新）
     _vix_current_date = None
+    # クロスペアシグナル方向追跡（直近シグナル方向を記録）
+    _pair_last_direction: dict[str, str] = {}
 
     for bar_num, (bar_time, sym, idx) in enumerate(merged):
         ctx = contexts[sym]
@@ -780,6 +782,12 @@ def run_multi_pair_year(
             ):
                 continue
 
+        # クロスペア合意度をbotに設定（自ペア除外）
+        _other_dirs = {
+            s: d for s, d in _pair_last_direction.items() if s != sym
+        }
+        ctx.bot.set_cross_pair_directions(_other_dirs)
+
         # シグナル生成
         current_time = pd.Timestamp(bar_time)
         consolidated = ctx.bot.generate_signal(
@@ -787,6 +795,10 @@ def run_multi_pair_year(
             candle,
             fundamental_ctx=_fctx,
         )
+
+        # クロスペア方向を記録
+        if consolidated.direction != SignalType.HOLD:
+            _pair_last_direction[sym] = consolidated.direction.value
 
         # Signal変換（SL/TPはpips値で格納=ライブと統一）
         signal = None

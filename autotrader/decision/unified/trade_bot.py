@@ -561,6 +561,13 @@ class UnifiedTradeBot:
                 ),
             )
 
+        # レジーム遷移追跡
+        self._prev_regime: str = ""
+        self._regime_transition_bars: int = 0
+
+        # クロスペア方向データ（マルチペアBTから注入）
+        self._cross_pair_directions: dict[str, str] = {}
+
         # リアルタイムスプレッド（BT: CSV実データ、ライブ: MT5取得値）
         self._current_spread_pips: float | None = None
 
@@ -1104,9 +1111,19 @@ class UnifiedTradeBot:
                     f"HIGH_VOLポジション上限({_open_pos_count}/{_vol_max})"
                 )
 
+        # レジーム遷移検出
+        _current_regime = regime_result.regime.value
+        _regime_transitioned = False
+        if self._prev_regime and self._prev_regime != _current_regime:
+            self._regime_transition_bars = 0
+            _regime_transitioned = True
+        else:
+            self._regime_transition_bars += 1
+
         # 分析用に最後のモード/レジームを保持
         self._last_mode = plan.mode
-        self._last_regime = regime_result.regime.value
+        self._last_regime = _current_regime
+        self._prev_regime = _current_regime
 
         # 8. TFルーティング（動的plan使用）
         tf_set = self.tf_router.route(plan)
@@ -1166,6 +1183,43 @@ class UnifiedTradeBot:
             _base_threshold = (
                 _base_threshold + self.config.htf_score_filter_threshold_add
             )
+        # レジーム遷移ボーナス（RANGE→BREAKOUTで閾値引下げ）
+        if (
+            self.config.regime_transition_enabled
+            and self._prev_regime == "RANGE"
+            and _current_regime == "BREAKOUT"
+            and self._regime_transition_bars
+            <= self.config.regime_transition_window
+        ):
+            _base_threshold = (
+                _base_threshold
+                + self.config.regime_transition_breakout_bonus
+            )
+        # クロスペア合意ボーナス（複数ペアが同方向で閾値引下げ）
+        if (
+            self.config.cross_pair_agreement_enabled
+            and self._cross_pair_directions
+            and consensus_signals
+        ):
+            # 暫定方向を推定（buy_score vs sell_score）
+            _prelim_buy = sum(
+                s.buy_strength for s in consensus_signals.values()
+            )
+            _prelim_sell = sum(
+                s.sell_strength for s in consensus_signals.values()
+            )
+            _prelim_dir = (
+                "BUY" if _prelim_buy > _prelim_sell else "SELL"
+            )
+            _same_dir_count = sum(
+                1 for d in self._cross_pair_directions.values()
+                if d == _prelim_dir
+            )
+            if _same_dir_count >= self.config.cross_pair_min_agreement:
+                _base_threshold = (
+                    _base_threshold
+                    + self.config.cross_pair_agreement_bonus
+                )
         if _base_threshold != self.consensus.threshold:
             _threshold_override = _base_threshold
         consensus = self.consensus.consolidate(
@@ -2001,6 +2055,18 @@ class UnifiedTradeBot:
         )
         tp_pips = sl_pips * tp_sl_ratio
         return sl_pips, tp_pips
+
+    def set_cross_pair_directions(
+        self, directions: dict[str, str],
+    ) -> None:
+        """クロスペアシグナル方向を設定
+
+        マルチペアBTから他ペアの直近シグナル方向を受け取る。
+
+        Args:
+            directions: ペア名→方向("BUY"/"SELL")の辞書
+        """
+        self._cross_pair_directions = directions
 
     def set_current_spread_pips(
         self, spread_pips: float,
