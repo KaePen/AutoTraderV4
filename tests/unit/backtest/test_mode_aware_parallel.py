@@ -24,7 +24,7 @@ class TestEntryTimeframeResolver:
 
     def test_get_entry_config_universal(self) -> None:
         """UNIVERSALモードのエントリー設定取得"""
-        from autotrader.decision.unified.entry_resolver import (
+        from autotrader.decision.unified.pipeline_pkg.entry_resolver import (
             EntryTimeframeResolver,
         )
 
@@ -38,7 +38,7 @@ class TestEntryTimeframeResolver:
 
     def test_should_check_entry_on_entry_tf(self) -> None:
         """entry_tf確定時にチェックすべき"""
-        from autotrader.decision.unified.entry_resolver import (
+        from autotrader.decision.unified.pipeline_pkg.entry_resolver import (
             EntryTimeframeResolver,
         )
 
@@ -52,7 +52,7 @@ class TestEntryTimeframeResolver:
 
     def test_resolve_entry_decision(self) -> None:
         """エントリー判定の解決"""
-        from autotrader.decision.unified.entry_resolver import (
+        from autotrader.decision.unified.pipeline_pkg.entry_resolver import (
             EntryTimeframeResolver,
         )
 
@@ -85,7 +85,7 @@ class TestEntryTimeframeResolver:
 
     def test_resolve_no_entry_on_direction_conflict(self) -> None:
         """方向不一致では見送り"""
-        from autotrader.decision.unified.entry_resolver import (
+        from autotrader.decision.unified.pipeline_pkg.entry_resolver import (
             EntryTimeframeResolver,
         )
 
@@ -118,7 +118,7 @@ class TestModeAwareScoreConsensus:
         from autotrader.decision.unified.mode_aware_consensus import (
             ModeAwareScoreConsensus,
         )
-        from autotrader.decision.unified.timeframe_evaluator import (
+        from autotrader.decision.unified.scoring.timeframe_evaluator import (
             TimeframeSignal,
         )
         from autotrader.decision.unified.mode_selector import (
@@ -173,7 +173,7 @@ class TestModeAwareScoreConsensus:
         from autotrader.decision.unified.mode_aware_consensus import (
             ModeAwareScoreConsensus,
         )
-        from autotrader.decision.unified.timeframe_evaluator import (
+        from autotrader.decision.unified.scoring.timeframe_evaluator import (
             TimeframeSignal,
         )
         from autotrader.decision.unified.mode_selector import (
@@ -221,7 +221,7 @@ class TestModeAwareScoreConsensus:
         from autotrader.decision.unified.mode_aware_consensus import (
             ModeAwareScoreConsensus,
         )
-        from autotrader.decision.unified.timeframe_evaluator import (
+        from autotrader.decision.unified.scoring.timeframe_evaluator import (
             TimeframeSignal,
         )
         from autotrader.decision.unified.mode_selector import (

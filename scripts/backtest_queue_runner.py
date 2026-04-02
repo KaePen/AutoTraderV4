@@ -1663,7 +1663,7 @@ def _execute_month_single(
         get_symbol_overrides,
     )
     from autotrader.decision.unified import UnifiedBotConfig
-    from autotrader.decision.unified.position_manager import (
+    from autotrader.decision.unified.risk.position_manager import (
         PositionManagerConfig,
     )
 

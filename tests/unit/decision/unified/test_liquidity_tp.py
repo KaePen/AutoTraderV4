@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pytest
 
-from autotrader.decision.unified.position_sizer import (
+from autotrader.decision.unified.risk.position_sizer import (
     calculate_tp_with_liquidity,
     LiquidityTPResult,
 )

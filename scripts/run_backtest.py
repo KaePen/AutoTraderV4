@@ -93,7 +93,7 @@ def parse_args() -> argparse.Namespace:
     """
     from autotrader.config.cli_utils import add_config_args
     from autotrader.decision.unified import UnifiedBotConfig
-    from autotrader.decision.unified.position_manager import (
+    from autotrader.decision.unified.risk.position_manager import (
         PositionManagerConfig,
     )
 
@@ -1326,7 +1326,7 @@ def run_single_backtest(args: argparse.Namespace):
         load_yaml_config,
     )
     from autotrader.decision.unified import UnifiedBotConfig
-    from autotrader.decision.unified.position_manager import (
+    from autotrader.decision.unified.risk.position_manager import (
         PositionManagerConfig,
     )
 

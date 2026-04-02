@@ -8,7 +8,7 @@ import yaml
 
 from autotrader.config.config_loader import ConfigLoader
 from autotrader.decision.unified.config import UnifiedBotConfig
-from autotrader.decision.unified.position_manager import (
+from autotrader.decision.unified.risk.position_manager import (
     PositionManagerConfig,
 )
 

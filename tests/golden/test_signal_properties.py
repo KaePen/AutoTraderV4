@@ -15,7 +15,7 @@ from autotrader.decision.unified.config import (
     SignalConfig,
     UnifiedBotConfig,
 )
-from autotrader.decision.unified.position_manager import (
+from autotrader.decision.unified.risk.position_manager import (
     PositionManagerConfig,
 )
 

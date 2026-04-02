@@ -104,6 +104,11 @@ class SignalType(str, Enum):
     HOLD = "HOLD"
 
 
+# 確度レベル判定閾値
+CONFIDENCE_HIGH_THRESHOLD: float = 0.65
+CONFIDENCE_MEDIUM_THRESHOLD: float = 0.50
+
+
 class ConfidenceLevel(str, Enum):
     """確度レベル
 
@@ -126,9 +131,9 @@ class ConfidenceLevel(str, Enum):
         Returns:
             ConfidenceLevel: 対応するレベル
         """
-        if confidence >= 0.65:
+        if confidence >= CONFIDENCE_HIGH_THRESHOLD:
             return cls.HIGH
-        elif confidence >= 0.50:
+        elif confidence >= CONFIDENCE_MEDIUM_THRESHOLD:
             return cls.MEDIUM
         return cls.LOW
 

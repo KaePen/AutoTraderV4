@@ -8,7 +8,7 @@ from autotrader.decision.unified.mode_aware_consensus import (
     ConsensusConfig,
     ModeAwareScoreConsensus,
 )
-from autotrader.decision.unified.timeframe_evaluator import (
+from autotrader.decision.unified.scoring.timeframe_evaluator import (
     TimeframeSignal,
 )
 from autotrader.decision.unified.mode_selector import TradingPlan

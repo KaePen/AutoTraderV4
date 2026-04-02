@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import pandas as pd
 
-from autotrader.decision.unified.strength_calculator import (
+from autotrader.decision.unified.scoring.strength_calculator import (
     IndicatorStrength,
     IndicatorStrengthCalculator,
 )
