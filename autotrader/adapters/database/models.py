@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timezone
 from typing import Any
 
 from sqlalchemy import (
@@ -13,8 +13,33 @@ from sqlalchemy import (
     Index,
     Integer,
     String,
+    TypeDecorator,
 )
 from sqlalchemy.orm import DeclarativeBase
+
+
+class TZDateTime(TypeDecorator):
+    """SQLite互換のタイムゾーン付きDateTime
+
+    SQLiteは読み出し時にタイムゾーン情報を消失するため、
+    naive datetimeをUTCとして復元する。
+    PostgreSQLでは通常のDateTime(timezone=True)と同等に動作する。
+    """
+
+    impl = DateTime
+    cache_ok = True
+
+    def __init__(self) -> None:
+        super().__init__(timezone=True)
+
+    def process_result_value(
+        self,
+        value: datetime | None,
+        dialect: Any,
+    ) -> datetime | None:
+        if value is not None and value.tzinfo is None:
+            value = value.replace(tzinfo=timezone.utc)
+        return value
 
 
 class Base(DeclarativeBase):
@@ -51,8 +76,8 @@ class TradeRecord(Base):
     profit_loss_pips = Column(Float, nullable=True)
     exit_reason = Column(String(30), nullable=True)
     entry_own_score = Column(Float, nullable=True, default=0.0)
-    opened_at = Column(DateTime(timezone=True), nullable=False)
-    closed_at = Column(DateTime(timezone=True), nullable=True)
+    opened_at = Column(TZDateTime(), nullable=False)
+    closed_at = Column(TZDateTime(), nullable=True)
     is_open = Column(Boolean, default=True, nullable=False)
 
     __table_args__ = (
@@ -146,7 +171,7 @@ class PositionStateRecord(LocalBase):
     )
 
     updated_at = Column(
-        DateTime(timezone=True),
+        TZDateTime(),
         default=lambda: datetime.now(UTC),
         onupdate=lambda: datetime.now(UTC),
         nullable=False,
