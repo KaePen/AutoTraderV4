@@ -693,6 +693,13 @@ class UnifiedBotConfig:
     htf_align_bonus_strong: float = 4.0
     # HTF弱整合ボーナス（1TF一致）
     htf_align_bonus_weak: float = 2.0
+    # --- スコアリング定数（EvaluatorConfigに伝搬） ---
+    # トレンドスコア: トレンドのみ（MACD未確認）
+    trend_only_score: float = 2.5
+    # ストキャスティクス過熱ペナルティ
+    stoch_extreme_penalty: float = 1.5
+    # ストキャスティクス順方向ボーナス
+    stoch_zone_bonus: float = 0.5
 
     def get_evaluator_config(self, timeframe: str) -> EvaluatorConfig:
         """時間足別評価器設定を取得
@@ -715,6 +722,9 @@ class UnifiedBotConfig:
             macd_slope_penalty=self.macd_slope_penalty,
             htf_align_bonus_strong=self.htf_align_bonus_strong,
             htf_align_bonus_weak=self.htf_align_bonus_weak,
+            trend_only_score=self.trend_only_score,
+            stoch_extreme_penalty=self.stoch_extreme_penalty,
+            stoch_zone_bonus=self.stoch_zone_bonus,
         )
         if timeframe in self.evaluator_configs:
             cfg = self.evaluator_configs[timeframe]
