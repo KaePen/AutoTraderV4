@@ -59,7 +59,7 @@ from autotrader.config.paths import (
     get_supervisor_state_file,
 )
 
-PROJECT_DIR = Path("D:/Projects/AutoTraderV4")
+PROJECT_DIR = Path.home() / "projects" / "AutoTraderV4" if sys.platform != "win32" else Path("D:/Projects/AutoTraderV4")
 TEMPLATES_DIR = Path(__file__).resolve().parent / "templates"
 
 STATE_FILE = get_supervisor_state_file()

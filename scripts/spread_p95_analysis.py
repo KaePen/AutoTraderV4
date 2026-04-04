@@ -31,7 +31,10 @@ CURRENT_THRESHOLDS: dict[str, float] = {
 }
 
 # データディレクトリ
-DATA_DIR = Path("D:/Projects/AutoTraderV4_data/data")
+sys.path.insert(0, str(Path(__file__).parent.parent))
+from autotrader.config.paths import get_data_dir
+
+DATA_DIR = Path(get_data_dir())
 
 
 def _find_m1_csv(symbol: str) -> Path:

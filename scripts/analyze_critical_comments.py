@@ -10,7 +10,10 @@ import math
 import sys
 from pathlib import Path
 
-RESULTS_DIR = Path("D:/Projects/AutoTraderV4_data/backtest/results")
+sys.path.insert(0, str(Path(__file__).parent.parent))
+from autotrader.config.paths import get_results_dir
+
+RESULTS_DIR = get_results_dir()
 
 # 既知のベースライン（MEMORY.mdより、PR #707時点）
 BASELINE = {

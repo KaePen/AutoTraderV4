@@ -7,13 +7,17 @@ from __future__ import annotations
 
 import json
 import math
+import sys
 from collections import defaultdict
 from datetime import datetime
 from pathlib import Path
 
 import numpy as np
 
-RESULTS_DIR = Path("D:/Projects/AutoTraderV4_data/backtest/results")
+sys.path.insert(0, str(Path(__file__).parent.parent))
+from autotrader.config.paths import get_results_dir
+
+RESULTS_DIR = get_results_dir()
 INITIAL = 1_000_000
 
 DATASETS = [

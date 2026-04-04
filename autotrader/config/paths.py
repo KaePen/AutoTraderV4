@@ -14,10 +14,20 @@ worktree作業時でも同一パスを参照可能にする。
 """
 from __future__ import annotations
 
+import sys
 import os
 from pathlib import Path
 
-_DATA_ROOT = Path("D:/Projects/AutoTraderV4_data")
+
+def _default_data_root() -> Path:
+    """プラットフォームに応じたデフォルトデータルートを返す。"""
+    if sys.platform == "win32":
+        return Path("D:/Projects/AutoTraderV4_data")
+    # WSL / Linux
+    return Path.home() / "projects" / "AutoTraderV4_data"
+
+
+_DATA_ROOT = _default_data_root()
 
 
 def _find_project_root() -> Path:

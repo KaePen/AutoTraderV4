@@ -42,7 +42,7 @@ if sys.platform == "win32":
 try:
     project_root = Path(__file__).parent.parent
 except NameError:
-    project_root = Path("D:/Projects/AutoTraderV4")
+    project_root = Path.home() / "projects" / "AutoTraderV4" if sys.platform != "win32" else Path("D:/Projects/AutoTraderV4")
 sys.path.insert(0, str(project_root))
 
 

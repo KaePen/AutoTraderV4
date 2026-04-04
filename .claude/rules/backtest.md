@@ -16,7 +16,7 @@
 
 ## キュー形式
 
-キューファイル: `D:\Projects\AutoTraderV4_data\state\backtest_queue.json`
+キューファイル: `~/projects/AutoTraderV4_data/state/backtest_queue.json`（WSL）/ `D:\Projects\AutoTraderV4_data\state\backtest_queue.json`（Windows）
 
 ### シングルペアジョブ
 
@@ -112,7 +112,7 @@
       "id": "verify-refactor",
       "symbol": "USDJPY",
       "years": "2023",
-      "code_dir": "D:/Projects/AutoTraderV4/.claude/worktrees/my-branch"
+      "code_dir": "~/projects/AutoTraderV4/.claude/worktrees/my-branch"
     }
   ]
 }
@@ -190,6 +190,6 @@ Web UI経由でも `state/runner_commands.json` にコマンド書き込みで�
 
 ## データディレクトリ
 
-- データパス: `D:\Projects\AutoTraderV4_data\data\`（`get_data_dir()` で自動検出）
+- データパス: `~/projects/AutoTraderV4_data/data/`（WSL）/ `D:\Projects\AutoTraderV4_data\data\`（Windows）（`get_data_dir()` で自動検出）
 - `--data-dir` は省略する（自動検出に任せる）
 - worktree 内の `data/` は存在しない（git管理外）
