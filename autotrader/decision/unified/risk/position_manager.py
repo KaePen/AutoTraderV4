@@ -354,7 +354,7 @@ class PositionManagerConfig:
     # モードA: 純粋エッジ劣化exit
     edge_decay_exit_enabled: bool = True
     # エントリースコアからの劣化率がこの閾値以上で発動（0.40=40%劣化）
-    edge_decay_exit_threshold: float = 0.40
+    edge_decay_exit_threshold: float = 0.50
     # 最低保有バー数（エントリー直後のノイズ排除）
     edge_decay_exit_min_bars: int = 5
     # 許容最大損失R値（これより大きな損失は通常SLに任せる）
