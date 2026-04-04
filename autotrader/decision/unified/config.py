@@ -700,6 +700,8 @@ class UnifiedBotConfig:
     stoch_extreme_penalty: float = 1.5
     # ストキャスティクス順方向ボーナス
     stoch_zone_bonus: float = 0.5
+    # RSI順方向ボーナス値
+    rsi_bonus: float = 1.0
 
     def get_evaluator_config(self, timeframe: str) -> EvaluatorConfig:
         """時間足別評価器設定を取得
@@ -725,6 +727,7 @@ class UnifiedBotConfig:
             trend_only_score=self.trend_only_score,
             stoch_extreme_penalty=self.stoch_extreme_penalty,
             stoch_zone_bonus=self.stoch_zone_bonus,
+            rsi_bonus=self.rsi_bonus,
         )
         if timeframe in self.evaluator_configs:
             cfg = self.evaluator_configs[timeframe]
