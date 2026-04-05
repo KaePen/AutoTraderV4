@@ -247,7 +247,7 @@ def generate_phase3_jobs() -> list[dict]:
         ("sg_off_hours_penalty", 0.5, "bot", "sg_off_hours_penalty"),
         ("trailing_start_r", 0.5, "pm", "trailing_start_r"),
         ("trailing_atr_mult", 2.0, "pm", "trailing_atr_multiplier"),
-        ("stagnation_minutes", 120.0, "pm", "stagnation_exit_minutes"),
+        ("stagnation_minutes", 90.0, "pm", "stagnation_exit_minutes"),
     ]
 
     multipliers = [0.8, 0.9, 1.0, 1.1, 1.2]

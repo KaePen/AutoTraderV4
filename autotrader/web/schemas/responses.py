@@ -440,7 +440,7 @@ class PositionManagementConfigResponse(BaseModel):
     disable_tp_after_partial: bool = True
     signal_rev_close_ratio: float = 0.5
     # Stagnation
-    stagnation_exit_minutes: float = 120.0
+    stagnation_exit_minutes: float = 90.0
     stagnation_min_mfe_r: float = 0.15
     # BE制御（RANGE×DAY）
     range_day_be_disabled: bool = True

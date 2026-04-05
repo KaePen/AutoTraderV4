@@ -49,7 +49,7 @@ pm_config:
   range_day_fast_be_enabled: true
   range_day_fast_be_minutes: 90.0
   # Stagnation
-  stagnation_exit_minutes: 120.0
+  stagnation_exit_minutes: 90.0
   stagnation_min_mfe_r: 0.15
   # 保険
   range_day_insurance_enabled: true

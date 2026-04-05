@@ -237,7 +237,7 @@ class PositionManagerConfig:
     early_breakeven_enabled: bool = True
     disable_tp_after_partial: bool = True
     signal_rev_close_ratio: float = 0.0
-    stagnation_exit_minutes: float = 120.0
+    stagnation_exit_minutes: float = 90.0
     stagnation_min_mfe_r: float = 0.10
     # 超早期exit（MFE<0.2R + 30分経過）
     very_early_exit_enabled: bool = False
