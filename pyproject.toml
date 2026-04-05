@@ -47,6 +47,7 @@ dependencies = [
     "slowapi>=0.1.9",
     "exchange-calendars>=4.13.2",
     "psutil>=5.9.0",
+    "matplotlib>=3.10.8",
 ]
 
 [project.optional-dependencies]

@@ -27,13 +27,6 @@ venv/
 env/
 ENV/
 
-# 添付ファイル
-.venv
-.serena
-.taskmaster
-.ruff_cache
-.claude/worktrees/*
-
 # テスト・カバレッジ
 .pytest_cache/
 .coverage
@@ -86,3 +79,11 @@ Thumbs.db
 *~
 .vscode/
 .idea/
+
+# Claude Code
+.serena
+.omc
+.venv
+.taskmaster
+.ruff_cache
+.claude/worktrees/*
