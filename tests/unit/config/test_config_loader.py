@@ -232,7 +232,7 @@ class TestPresetConfig:
         # symbol_presets.yamlのpm_config
         assert pm.partial_close_1r_ratio == 0.50
         assert pm.trailing_start_r == 0.5
-        assert pm.stagnation_exit_minutes == 120.0
+        assert pm.stagnation_exit_minutes == 90.0
 
     def test_フィルター設定が読み込まれる(self) -> None:
         """filterセクションが正しく読み込まれる"""

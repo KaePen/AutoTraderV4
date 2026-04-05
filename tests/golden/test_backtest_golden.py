@@ -232,7 +232,7 @@ class TestPositionManagerConfigDefaults:
         assert self.config.be_cushion_pips == 3.0
 
     def test_stagnation_settings(self) -> None:
-        assert self.config.stagnation_exit_minutes == 120.0
+        assert self.config.stagnation_exit_minutes == 90.0
         assert self.config.stagnation_min_mfe_r == 0.10
 
     def test_very_early_exit_disabled(self) -> None:
