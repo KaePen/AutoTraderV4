@@ -438,6 +438,33 @@ def run_unified_year(
                     indicators_snapshot=_indicators,
                 )
 
+        # BT Tick Entry Spread Gate: ライブのTickEntryOptimizerに相当
+        # M1実スプレッドがsg_spread_threshold_pipsを超えたらシグナルをブロック
+        # ライブではティック単位でスプレッド評価+30秒タイムアウトで
+        # ワイドスプレッド時のエントリーを抑制している
+        if (
+            signal is not None
+            and sim_config.use_actual_spread_data
+            and arrays.spread_points is not None
+            and bot_config.sg_spread_threshold_pips is not None
+        ):
+            _gate_spread_pips = float(arrays.spread_points[idx]) / 10.0
+            if _gate_spread_pips > bot_config.sg_spread_threshold_pips:
+                _emitter.emit_signal_blocked(
+                    candle_time=candle_time,
+                    symbol=runner.config.symbol,
+                    direction=signal.signal_type.value,
+                    score=signal.consensus_score or 0,
+                    threshold=bot_config.sg_spread_threshold_pips,
+                    block_reason=(
+                        f"BT spread gate: {_gate_spread_pips:.1f}"
+                        f" > {bot_config.sg_spread_threshold_pips:.1f} pips"
+                    ),
+                    regime=signal.regime or "",
+                    mode=signal.mode or "",
+                )
+                signal = None
+
         prev_position_ids = {
             p.position_id for p in simulator.get_open_positions()
         }

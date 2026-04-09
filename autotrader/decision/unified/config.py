@@ -318,7 +318,7 @@ class FilterConfig:
     range_filter_block_threshold: float = 0.6
     session_transition_wait_enabled: bool = False
     session_transition_wait_minutes: int = 30
-    use_actual_spread_data: bool = False
+    use_actual_spread_data: bool = True
     off_hours_trend_block: bool = False
     off_hours_high_align_block: bool = False
     off_hours_high_align_threshold: float = 0.55
@@ -527,7 +527,7 @@ class UnifiedBotConfig:
     # セッション切替後の待機時間（分）
     session_transition_wait_minutes: int = 30
     # 実スプレッドデータ使用（CSVの<SPREAD>列）
-    use_actual_spread_data: bool = False
+    use_actual_spread_data: bool = True
     # --- 改善検証パラメータ ---
     # off_hours時間帯でTRENDエントリーを完全ブロック
     off_hours_trend_block: bool = False
