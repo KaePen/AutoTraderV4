@@ -1407,6 +1407,7 @@ def run_single_backtest(args: argparse.Namespace):
         "equity_floor_pct": _preset.equity_floor_pct,
         "pip_unit": _pip_unit,
         "quote_ccy_rate": _quote_ccy_rate,
+        "sg_spread_threshold_pips": _preset.sg_spread_threshold_pips,
     })
     # ペア別 signal/filter/risk_mgmt 上書き（プリセット < ペア別 < YAML < CLI）
     # 廃止フィールドの除去（後方互換）
