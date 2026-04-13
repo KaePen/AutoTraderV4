@@ -81,7 +81,7 @@ def _get_data_dir() -> Path:
     """データディレクトリを取得（プラットフォーム自動検出）."""
     from autotrader.config.paths import get_data_dir
 
-    return get_data_dir()
+    return Path(get_data_dir())
 
 
 # ---------------------------------------------------------------------------
