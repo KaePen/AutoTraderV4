@@ -21,6 +21,10 @@ from autotrader.backtest.position_event_logger import (
     PositionEventLogger,
 )
 from autotrader.backtest.simulator import SimulatorConfig, TradeSimulator
+from autotrader.constraint.entry_gate import (
+    EntryGateChecker,
+    EntryGateContext,
+)
 from autotrader.core.entities import Signal
 from autotrader.core.enums import (
     ExitReason,
@@ -82,6 +86,9 @@ def run_unified_year(
     )
     bot.state = bot.state.with_initial_equity(sim_config.initial_balance)
     bot.set_market_data(market_data)
+
+    # 共通エントリーゲート（BT/ライブ統一ロジック）
+    _entry_gate = EntryGateChecker()
 
     # イベントエミッター（並列時はリスナーなしの no-op emitter）
     _emitter = emitter if emitter is not None else runner._emitter
@@ -403,62 +410,91 @@ def run_unified_year(
         # Signalオブジェクトに変換
         signal = None
         if consolidated.direction != SignalType.HOLD:
-            if consolidated.confidence >= 0.5:
-                # SL/TPをpips値で格納（ライブと統一）
-                _sl_pips = (
-                    consolidated.sl_pips
-                    if consolidated.sl_pips > 0
+            # SL/TPをpips値で格納（ライブと統一）
+            _sl_pips = (
+                consolidated.sl_pips
+                if consolidated.sl_pips > 0
+                else None
+            )
+            _tp_pips = (
+                consolidated.tp_pips
+                if consolidated.tp_pips > 0
+                else None
+            )
+
+            # ATR実測値をスナップショットに格納（PM用）
+            _row = period_df.iloc[idx]
+            _atr_val = float(_row.get("atr_14", 0) or 0)
+            _indicators: dict[str, Any] = {}
+            if _atr_val > 0:
+                _indicators["atr_14"] = _atr_val
+
+            signal = Signal(
+                symbol=runner.config.symbol,
+                timeframe=tf,
+                signal_type=consolidated.direction,
+                confidence=min(consolidated.confidence, 1.0),
+                stop_loss=_sl_pips,
+                take_profit=_tp_pips,
+                reasoning=consolidated.rationale,
+                regime=consolidated.regime,
+                mode=consolidated.mode,
+                consensus_score=consolidated.consensus_score,
+                lot=consolidated.lot,
+                indicators_snapshot=_indicators,
+            )
+
+        # 共通エントリーゲート判定（BT/ライブ統一）
+        if signal is not None:
+            _gate_spread_pips = 0.0
+            if (
+                sim_config.use_actual_spread_data
+                and arrays.spread_points is not None
+            ):
+                _gate_spread_pips = (
+                    float(arrays.spread_points[idx]) / 10.0
+                )
+            _gate_ctx = EntryGateContext(
+                signal_direction=signal.signal_type,
+                consensus_score=signal.consensus_score,
+                symbol_position_count=len(
+                    simulator.get_open_positions()
+                ),
+                global_position_count=0,
+                global_exposure_lot=0.0,
+                jpy_same_direction_count=0,
+                max_positions=sim_config.max_positions,
+                bonus_max_positions=sim_config.bonus_max_positions,
+                bonus_score_threshold=(
+                    sim_config.bonus_score_threshold
+                ),
+                global_max_positions=0,
+                global_max_exposure_lot=0.0,
+                max_same_direction_jpy=0,
+                is_jpy_pair=runner.config.symbol.endswith("JPY"),
+                current_spread_pips=_gate_spread_pips,
+                spread_threshold_pips=(
+                    bot_config.sg_spread_threshold_pips
+                    if sim_config.use_actual_spread_data
                     else None
-                )
-                _tp_pips = (
-                    consolidated.tp_pips
-                    if consolidated.tp_pips > 0
-                    else None
-                )
-
-                # ATR実測値をスナップショットに格納（PM用）
-                _row = period_df.iloc[idx]
-                _atr_val = float(_row.get("atr_14", 0) or 0)
-                _indicators: dict[str, Any] = {}
-                if _atr_val > 0:
-                    _indicators["atr_14"] = _atr_val
-
-                signal = Signal(
-                    symbol=runner.config.symbol,
-                    timeframe=tf,
-                    signal_type=consolidated.direction,
-                    confidence=min(consolidated.confidence, 1.0),
-                    stop_loss=_sl_pips,
-                    take_profit=_tp_pips,
-                    reasoning=consolidated.rationale,
-                    regime=consolidated.regime,
-                    mode=consolidated.mode,
-                    consensus_score=consolidated.consensus_score,
-                    lot=consolidated.lot,
-                    indicators_snapshot=_indicators,
-                )
-
-        # BT Tick Entry Spread Gate: ライブのTickEntryOptimizerに相当
-        # M1実スプレッドがsg_spread_threshold_pipsを超えたらシグナルをブロック
-        # ライブではティック単位でスプレッド評価+30秒タイムアウトで
-        # ワイドスプレッド時のエントリーを抑制している
-        if (
-            signal is not None
-            and sim_config.use_actual_spread_data
-            and arrays.spread_points is not None
-            and bot_config.sg_spread_threshold_pips is not None
-        ):
-            _gate_spread_pips = float(arrays.spread_points[idx]) / 10.0
-            if _gate_spread_pips > bot_config.sg_spread_threshold_pips:
+                ),
+                dd_emergency_active=False,
+                margin_usage_pct=0.0,
+                margin_limit_pct=0.0,
+            )
+            _gate_result = _entry_gate.evaluate(_gate_ctx)
+            if not _gate_result.allowed:
                 _emitter.emit_signal_blocked(
                     candle_time=candle_time,
                     symbol=runner.config.symbol,
                     direction=signal.signal_type.value,
                     score=signal.consensus_score or 0,
-                    threshold=bot_config.sg_spread_threshold_pips,
+                    threshold=(
+                        bot_config.sg_spread_threshold_pips or 0
+                    ),
                     block_reason=(
-                        f"BT spread gate: {_gate_spread_pips:.1f}"
-                        f" > {bot_config.sg_spread_threshold_pips:.1f} pips"
+                        f"entry gate: {_gate_result.deny_code}"
+                        f" — {_gate_result.deny_reason}"
                     ),
                     regime=signal.regime or "",
                     mode=signal.mode or "",
@@ -495,6 +531,7 @@ def run_unified_year(
             row_data=_row_data,
             consensus_scores=_consensus_scores,
             fundamental_assessment=_fund_assess,
+            entry_pre_approved=signal is not None,
         )
 
         # 新規ポジション検出

@@ -10,11 +10,19 @@ Modules:
 
 from __future__ import annotations
 
+from autotrader.constraint.entry_gate import (
+    EntryGateChecker,
+    EntryGateContext,
+    EntryGateResult,
+)
 from autotrader.constraint.hard_guard import HardGuard, HardGuardResult
 from autotrader.constraint.result import ConstraintChecker, ConstraintResult
 from autotrader.constraint.soft_guard import SoftGuard, SoftGuardResult
 
 __all__ = [
+    "EntryGateChecker",
+    "EntryGateContext",
+    "EntryGateResult",
     "HardGuard",
     "HardGuardResult",
     "SoftGuard",

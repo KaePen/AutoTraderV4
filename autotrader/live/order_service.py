@@ -13,6 +13,10 @@ from autotrader.adapters.mt5.data_provider import MT5DataProvider
 from autotrader.adapters.mt5.exceptions import MT5DataError
 from autotrader.adapters.mt5.trade_executor import MT5TradeExecutor
 from autotrader.config.trading_params import get_pip_unit, get_pip_value
+from autotrader.constraint.entry_gate import (
+    EntryGateChecker,
+    EntryGateContext,
+)
 from autotrader.core.entities import Signal
 from autotrader.core.enums import (
     MarketRegime,
@@ -145,32 +149,51 @@ class OrderService:
             write_entry_to_db: DB書き込みコールバック
             save_position_state: 状態保存コールバック
         """
-        # 既存ポジションチェック（設定値に基づく上限）
+        # MT5ポジション取得（データI/O）
         positions = await self._executor.get_open_positions_async(
             active_symbol
         )
-        # MT5接続エラー時はエントリーを安全にスキップ
         if positions is None:
             logger.warning("MT5ポジション取得失敗 — エントリースキップ")
             return
+
+        # 共通エントリーゲート判定（BT/ライブ統一ロジック）
         cfg = self._bot.config
-        base_max = (
-            cfg.demo_max_positions if cfg.demo_mode else cfg.max_positions
+        _gate = EntryGateChecker()
+        _gate_ctx = EntryGateContext(
+            signal_direction=signal.signal_type,
+            consensus_score=signal.consensus_score,
+            symbol_position_count=len(positions),
+            global_position_count=0,
+            global_exposure_lot=0.0,
+            jpy_same_direction_count=0,
+            max_positions=(
+                cfg.demo_max_positions
+                if cfg.demo_mode
+                else cfg.max_positions
+            ),
+            bonus_max_positions=getattr(
+                cfg, "bonus_max_positions", 0
+            ),
+            bonus_score_threshold=getattr(
+                cfg, "bonus_score_threshold", 7.0
+            ),
+            global_max_positions=0,
+            global_max_exposure_lot=0.0,
+            max_same_direction_jpy=0,
+            is_jpy_pair=active_symbol.endswith("JPY"),
+            current_spread_pips=0.0,
+            spread_threshold_pips=None,
+            dd_emergency_active=False,
+            margin_usage_pct=0.0,
+            margin_limit_pct=0.0,
         )
-        bonus = getattr(cfg, "bonus_max_positions", 0)
-        threshold = getattr(cfg, "bonus_score_threshold", 7.0)
-        if (
-            bonus > 0
-            and signal.consensus_score is not None
-            and signal.consensus_score >= threshold
-        ):
-            max_pos = base_max + bonus
-        else:
-            max_pos = base_max
-        if len(positions) >= max_pos:
+        _gate_result = _gate.evaluate(_gate_ctx)
+        if not _gate_result.allowed:
             logger.info(
-                "既存ポジション上限(%d)、エントリースキップ",
-                max_pos,
+                "エントリーゲート: %s — %s",
+                _gate_result.deny_code,
+                _gate_result.deny_reason,
             )
             return
 

@@ -20,6 +20,10 @@ from autotrader.adapters.mt5.connection import MT5ConnectionManager
 from autotrader.adapters.mt5.data_provider import MT5DataProvider
 from autotrader.adapters.mt5.exceptions import MT5DataError, MT5Error
 from autotrader.adapters.mt5.trade_executor import MT5TradeExecutor
+from autotrader.constraint.entry_gate import (
+    EntryGateChecker,
+    EntryGateContext,
+)
 from autotrader.calculator.technical.batch import (
     TechnicalIndicatorBatch,
     calc_indicators_multi_tf,
@@ -197,6 +201,8 @@ class LiveTradingEngine:
         self._max_same_direction_jpy: int = 0
         # EngineManager参照（ポートフォリオDD監視用）
         self._engine_manager = None
+        # 共通エントリーゲート（BT/ライブ統一ロジック）
+        self._entry_gate = EntryGateChecker()
 
         # エントリースキップ理由（UI通知用）
         self._last_entry_skip_reason: str | None = None
@@ -1486,120 +1492,89 @@ class LiveTradingEngine:
         Args:
             signal: トレードシグナル
         """
-        # ポートフォリオDD緊急停止チェック
-        if (
-            self._engine_manager is not None
-            and self._engine_manager.dd_emergency_active
-        ):
-            self._last_entry_skip_reason = (
-                f"DD緊急停止 "
-                f"{self._engine_manager.current_dd_pct:.1f}%"
-            )
-            return
-
-        # ホットリロード中はエントリーをスキップ
+        # ホットリロード中はエントリーをスキップ（ライブインフラ固有）
         if self._entry_blocked:
             self._last_entry_skip_reason = "ホットリロード中"
             logger.info("エントリーブロック中（ホットリロード）— スキップ")
             return
 
-        # 既存ポジションチェック（設定値に基づく上限）
+        # MT5ポジション取得（データI/O）
         positions = await self._executor.get_open_positions_async(
             self._active_symbol
         )
-        # MT5接続エラー時はエントリーを安全にスキップ
         if positions is None:
             self._last_entry_skip_reason = "MT5接続エラー"
             logger.warning("MT5ポジション取得失敗 — エントリースキップ")
             return
+
+        # 共通エントリーゲート判定（BT/ライブ統一ロジック）
         cfg = self._bot.config
-        base_max = (
-            cfg.demo_max_positions if cfg.demo_mode else cfg.max_positions
+        _gate_ctx = EntryGateContext(
+            signal_direction=signal.signal_type,
+            consensus_score=signal.consensus_score,
+            symbol_position_count=len(positions),
+            global_position_count=(
+                self._get_global_position_count()
+                if self._get_global_position_count is not None
+                else 0
+            ),
+            global_exposure_lot=(
+                self._get_global_exposure_lot()
+                if self._get_global_exposure_lot is not None
+                else 0.0
+            ),
+            jpy_same_direction_count=(
+                self._get_jpy_direction_count(
+                    signal.signal_type.value
+                )
+                if (
+                    self._get_jpy_direction_count is not None
+                    and self._active_symbol.endswith("JPY")
+                )
+                else 0
+            ),
+            max_positions=(
+                cfg.demo_max_positions
+                if cfg.demo_mode
+                else cfg.max_positions
+            ),
+            bonus_max_positions=getattr(
+                cfg, "bonus_max_positions", 0
+            ),
+            bonus_score_threshold=getattr(
+                cfg, "bonus_score_threshold", 7.0
+            ),
+            global_max_positions=self._global_max_positions,
+            global_max_exposure_lot=(
+                self._global_max_exposure_lot
+            ),
+            max_same_direction_jpy=(
+                self._max_same_direction_jpy
+            ),
+            is_jpy_pair=self._active_symbol.endswith("JPY"),
+            current_spread_pips=getattr(
+                self._bot, "_current_spread_pips", 0.0
+            ),
+            spread_threshold_pips=getattr(
+                cfg, "sg_spread_threshold_pips", None
+            ),
+            dd_emergency_active=(
+                self._engine_manager is not None
+                and self._engine_manager.dd_emergency_active
+            ),
+            margin_usage_pct=0.0,
+            margin_limit_pct=0.0,
         )
-        bonus = getattr(cfg, "bonus_max_positions", 0)
-        threshold = getattr(cfg, "bonus_score_threshold", 7.0)
-        if (
-            bonus > 0
-            and signal.consensus_score is not None
-            and signal.consensus_score >= threshold
-        ):
-            max_pos = base_max + bonus
-        else:
-            max_pos = base_max
-        if len(positions) >= max_pos:
-            self._last_entry_skip_reason = (
-                f"ポジション上限 {len(positions)}/{max_pos}"
-            )
+        _gate_result = self._entry_gate.evaluate(_gate_ctx)
+        if not _gate_result.allowed:
+            self._last_entry_skip_reason = _gate_result.deny_reason
             logger.info(
-                "[%s] 既存ポジション上限(%d)、エントリースキップ",
+                "[%s] エントリーゲート: %s — %s",
                 self._active_symbol,
-                max_pos,
+                _gate_result.deny_code,
+                _gate_result.deny_reason,
             )
             return
-
-        # グローバルポジション制限チェック
-        if (
-            self._global_max_positions > 0
-            and self._get_global_position_count is not None
-        ):
-            _g_count = self._get_global_position_count()
-            if _g_count >= self._global_max_positions:
-                self._last_entry_skip_reason = (
-                    f"グローバルポジション上限 "
-                    f"{_g_count}/{self._global_max_positions}"
-                )
-                logger.info(
-                    "[%s] グローバルポジション上限"
-                    "(%d/%d)、エントリースキップ",
-                    self._active_symbol,
-                    _g_count,
-                    self._global_max_positions,
-                )
-                return
-
-        # グローバルエクスポージャー制限チェック
-        if (
-            self._global_max_exposure_lot > 0
-            and self._get_global_exposure_lot is not None
-        ):
-            _g_lot = self._get_global_exposure_lot()
-            if _g_lot >= self._global_max_exposure_lot:
-                self._last_entry_skip_reason = (
-                    f"ロット上限 "
-                    f"{_g_lot:.2f}/{self._global_max_exposure_lot:.1f}"
-                )
-                logger.info(
-                    "[%s] グローバルロット上限"
-                    "(%.2f/%.1f)、エントリースキップ",
-                    self._active_symbol,
-                    _g_lot,
-                    self._global_max_exposure_lot,
-                )
-                return
-
-        # JPY同方向制限チェック
-        if (
-            self._max_same_direction_jpy > 0
-            and self._get_jpy_direction_count is not None
-            and self._active_symbol.endswith("JPY")
-        ):
-            _dir = signal.signal_type.value
-            _dir_count = self._get_jpy_direction_count(_dir)
-            if _dir_count >= self._max_same_direction_jpy:
-                self._last_entry_skip_reason = (
-                    f"JPY {_dir}上限 "
-                    f"{_dir_count}/"
-                    f"{self._max_same_direction_jpy}"
-                )
-                logger.info(
-                    "[%s] JPY %s方向上限"
-                    "(%d/%d)、エントリースキップ",
-                    self._active_symbol,
-                    _dir,
-                    _dir_count,
-                    self._max_same_direction_jpy,
-                )
-                return
 
         # 全制限チェック通過 → スキップ理由をクリア
         self._last_entry_skip_reason = None

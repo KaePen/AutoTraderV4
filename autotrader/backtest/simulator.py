@@ -122,6 +122,8 @@ class SimulatorConfig:
     price_noise_pips: float = 0.0
     # シグナルランダムスキップ率(0.0~1.0)
     signal_skip_rate: float = 0.0
+    # マージン使用率上限%(0=チェック無効)
+    margin_limit_pct: float = 80.0
 
     def __post_init__(self) -> None:
         """ストレステストパラメータのバリデーション"""
@@ -396,6 +398,7 @@ class TradeSimulator:
         consensus_scores: tuple[float, float] | None = None,
         fundamental_assessment: object | None = None,
         row_data: dict | None = None,
+        entry_pre_approved: bool = False,
     ) -> list[Trade]:
         """足データを処理
 
@@ -578,17 +581,25 @@ class TradeSimulator:
                             )
                             trades.append(trade)
 
-                # 品質ベース動的ポジション枠の計算
-                _eff_max = self.config.max_positions
-                if (
-                    self.config.bonus_max_positions > 0
-                    and signal.consensus_score is not None
-                    and signal.consensus_score
-                    >= self.config.bonus_score_threshold
-                ):
-                    _eff_max += self.config.bonus_max_positions
                 # pending保存（次足openで約定）
-                if len(state.open_positions) < _eff_max:
+                # entry_pre_approved=True の場合、呼び出し側（year_runner）が
+                # EntryGateChecker で事前にポジション枠を検証済み
+                if entry_pre_approved:
+                    _can_enter = True
+                else:
+                    # 品質ベース動的ポジション枠の計算（後方互換）
+                    _eff_max = self.config.max_positions
+                    if (
+                        self.config.bonus_max_positions > 0
+                        and signal.consensus_score is not None
+                        and signal.consensus_score
+                        >= self.config.bonus_score_threshold
+                    ):
+                        _eff_max += self.config.bonus_max_positions
+                    _can_enter = (
+                        len(state.open_positions) < _eff_max
+                    )
+                if _can_enter:
                     self._pending_signal = signal
                     self._pending_consensus = consensus_scores
                     self._pending_fundamental = (
@@ -1144,9 +1155,17 @@ class TradeSimulator:
         )
 
         # 証拠金チェック（簡易版）
-        required_margin = entry_price * volume * 10000 / 25  # レバ25倍想定
-        if required_margin > self.state.balance * 0.8:
-            return None
+        if self.config.margin_limit_pct > 0:
+            required_margin = (
+                entry_price * volume * 10000 / 25  # レバ25倍想定
+            )
+            margin_usage = (
+                required_margin / self.state.balance * 100
+                if self.state.balance > 0
+                else 100.0
+            )
+            if margin_usage >= self.config.margin_limit_pct:
+                return None
 
         # SL/TP: pips値→価格変換（sl_tp_in_pips=Trueの場合）
         sl_price = signal.stop_loss
