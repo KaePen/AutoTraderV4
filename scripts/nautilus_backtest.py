@@ -183,30 +183,43 @@ def _load_ohlcv_data(
 
     market_data: dict[str, pd.DataFrame] = {}
 
+    # chartサブディレクトリの判定（既存runnerと同じロジック）
+    chart_dir = symbol_dir / "chart"
+    base_dir = chart_dir if chart_dir.exists() else symbol_dir
+
     for tf in _TIMEFRAMES_FOR_INDICATORS:
-        # CSVファイルを検索
-        pattern = f"{symbol}_{tf}_*.csv"
-        csv_files = sorted(symbol_dir.glob(pattern))
+        df: pd.DataFrame | None = None
 
-        # chartサブディレクトリも検索
-        chart_dir = symbol_dir / "chart"
-        if chart_dir.exists():
-            csv_files.extend(sorted(chart_dir.glob(pattern)))
+        # 優先1: chart/cache/ Parquet
+        cache_pq = base_dir / "cache" / f"{symbol}_{tf}.parquet"
+        if cache_pq.exists():
+            try:
+                df = pd.read_parquet(cache_pq)
+                logger.info(f"  {tf}: {len(df)} bars (parquet cache)")
+            except Exception as e:
+                logger.warning(f"Parquet読込失敗 {cache_pq}: {e}")
 
-        if not csv_files:
+        # 優先2: 従来CSV（base_dir内）
+        if df is None:
+            pattern = f"{symbol}_{tf}_*.csv"
+            csv_files = sorted(base_dir.glob(pattern))
+            # base_dirとsymbol_dirが異なる場合、symbol_dir側も検索
+            if not csv_files and base_dir != symbol_dir:
+                csv_files = sorted(symbol_dir.glob(pattern))
+            if csv_files:
+                dfs = [DataLoader.load_mt5_csv(f) for f in csv_files]
+                df = pd.concat(dfs, ignore_index=True).drop_duplicates(subset=["time"])
+                df = df.sort_values("time").reset_index(drop=True)
+                logger.info(f"  {tf}: {len(df)} bars (csv)")
+
+        if df is None:
             logger.warning(f"データなし: {symbol} {tf}")
             continue
-
-        # 全ファイルを読み込んで結合
-        dfs = [DataLoader.load_mt5_csv(f) for f in csv_files]
-        df = pd.concat(dfs, ignore_index=True).drop_duplicates(subset=["time"])
-        df = df.sort_values("time").reset_index(drop=True)
 
         # インジケータ事前計算
         df = precompute.compute_technical_indicators(df)
 
         market_data[tf] = df
-        logger.info(f"  {tf}: {len(df)} bars loaded")
 
     return market_data
 
