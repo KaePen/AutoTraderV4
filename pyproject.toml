@@ -61,8 +61,8 @@ dev = [
     "ruff>=0.1.0",
 ]
 mt5 = [
-    "MetaTrader5>=5.0.45",
-    "pywin32>=306",
+    "MetaTrader5>=5.0.45; sys_platform == 'win32'",
+    "pywin32>=306; sys_platform == 'win32'",
 ]
 fast = [
     "numba>=0.59.0",
