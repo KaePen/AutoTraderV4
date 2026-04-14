@@ -70,13 +70,17 @@ def _get_data_dir() -> Path:
 # ---------------------------------------------------------------------------
 
 
-def _load_market_data(symbol: str) -> dict[str, pd.DataFrame]:
+def _load_market_data(
+    symbol: str,
+    start: datetime,
+    end: datetime,
+) -> dict[str, pd.DataFrame]:
     """chart/cache/ Parquet → CSV フォールバックでインジケータ付きデータを読み込み.
 
-    既存のrunnerと同じパス解決ロジックを使用。
-    Parquetキャッシュにインジケータ列が含まれていればそのまま利用し、
-    なければPrecomputeEngineで計算する。
+    既存のrunnerと同じパス解決ロジック。期間フィルタ付き（ウォームアップ500本含む）。
     """
+    import time as _time
+
     data_dir = _get_data_dir()
     symbol_dir = data_dir / symbol
     chart_dir = symbol_dir / "chart"
@@ -86,6 +90,8 @@ def _load_market_data(symbol: str) -> dict[str, pd.DataFrame]:
     market_data: dict[str, pd.DataFrame] = {}
 
     for tf in _TIMEFRAMES:
+        print(f"  {tf}: ", end="", flush=True)
+        t0 = _time.time()
         df: pd.DataFrame | None = None
         source = ""
 
@@ -111,8 +117,18 @@ def _load_market_data(symbol: str) -> dict[str, pd.DataFrame]:
                 source = "csv"
 
         if df is None:
-            logger.warning(f"  {tf}: データなし (skip)")
+            print("データなし (skip)")
             continue
+
+        total_rows = len(df)
+
+        # 期間フィルタ（ウォームアップ500本を含めて切り出し）
+        if "time" in df.columns:
+            time_col = pd.to_datetime(df["time"], utc=True)
+            end_mask = time_col < end
+            start_idx = time_col.searchsorted(start)
+            warmup_start = max(0, start_idx - 500)
+            df = df.iloc[warmup_start:].loc[end_mask.iloc[warmup_start:]].reset_index(drop=True)
 
         # インジケータ列がなければ計算
         if "sma_20" not in df.columns:
@@ -120,7 +136,8 @@ def _load_market_data(symbol: str) -> dict[str, pd.DataFrame]:
             source += "+computed"
 
         market_data[tf] = df
-        print(f"  {tf}: {len(df):,} bars ({source})")
+        elapsed = _time.time() - t0
+        print(f"{len(df):,}/{total_rows:,} bars ({source}) [{elapsed:.1f}s]")
 
     return market_data
 
@@ -245,7 +262,7 @@ def cmd_run(args: argparse.Namespace) -> None:
 
     # 1. インジケータデータ読み込み（chart/cache/ から直接）
     print("1. マーケットデータ読み込み...")
-    market_data = _load_market_data(symbol)
+    market_data = _load_market_data(symbol, start, end)
 
     if _PRIMARY_TF not in market_data:
         print(f"ERROR: {_PRIMARY_TF}データが見つかりません")
