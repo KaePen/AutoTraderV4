@@ -270,7 +270,12 @@ def cmd_run(args: argparse.Namespace) -> None:
 
     # 2. TradeBot初期化
     print("2. TradeBot初期化...")
-    bot = UnifiedTradeBot(UnifiedBotConfig())
+    bot_kwargs: dict[str, Any] = {}
+    if args.consensus_threshold is not None:
+        bot_kwargs["consensus_threshold"] = args.consensus_threshold
+    bot_config = UnifiedBotConfig(**bot_kwargs)
+    print(f"   consensus_threshold={bot_config.consensus_threshold}")
+    bot = UnifiedTradeBot(bot_config)
     bot.set_market_data(market_data)
 
     # 3. 約定データ読み込み（モード別）
@@ -428,12 +433,14 @@ def cmd_run(args: argparse.Namespace) -> None:
                 tp_px = close - sig.tp_pips * pu
 
             lot = sig.lot if sig.lot else self._default_lot
+            # lot→通貨単位変換（0.01 lot = 1000 units）
+            qty_units = int(lot * 100_000)
             side = OrderSide.BUY if sig.direction == SignalType.BUY else OrderSide.SELL
 
             ol: OrderList = self.order_factory.bracket(
                 instrument_id=self._instrument.id,
                 order_side=side,
-                quantity=self._instrument.make_qty(Decimal(str(lot))),
+                quantity=self._instrument.make_qty(Decimal(str(qty_units))),
                 sl_trigger_price=self._instrument.make_price(sl_px),
                 tp_price=self._instrument.make_price(tp_px),
             )
@@ -637,6 +644,10 @@ def main() -> None:
     run_p.add_argument(
         "--mode", default="bar", choices=["bar", "tick"],
         help="bar: M1バーで約定 (デフォルト), tick: 実ティックで約定",
+    )
+    run_p.add_argument(
+        "--consensus-threshold", type=float, default=None,
+        help="コンセンサス閾値（デフォルト: UnifiedBotConfigの値=18.0）",
     )
 
     cmp_p = sub.add_parser("compare", help="結果比較")
