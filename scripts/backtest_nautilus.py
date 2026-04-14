@@ -1,19 +1,11 @@
-"""Nautilus Trader バックテスト実行スクリプト
+"""Nautilus Trader バックテスト実行スクリプト（月並列対応）
 
-既存のchart/cache/のParquetデータを直接使用してバックテストを実行する。
-
-モード:
-    bar  (デフォルト): M1バーデータで約定シミュレーション
-    tick: 実ティックデータで約定シミュレーション（要fetch済み）
+既存BTと同じ.indicator_cacheのデータを使い、
+Nautilus Traderでバックテストを月並列で実行する。
 
 Usage:
-    # barモード（chart/cache/のデータで実行、すぐ使える）
-    uv run python scripts/backtest_nautilus.py run --symbol USDJPY --start 2026-01-01 --end 2026-03-31
-
-    # tickモード（実ティックデータ使用）
-    uv run python scripts/backtest_nautilus.py run --symbol USDJPY --start 2026-01-01 --end 2026-03-31 --mode tick
-
-    # 結果比較
+    uv run python scripts/backtest_nautilus.py run --symbol USDJPY --start 2020-01-01 --end 2022-12-31 --consensus-threshold 18.0
+    uv run python scripts/backtest_nautilus.py run --symbol USDJPY --start 2020-01-01 --end 2022-12-31 --cpus 12
     uv run python scripts/backtest_nautilus.py compare --native results/xxx.json --nautilus results/yyy.json
 """
 
@@ -22,9 +14,11 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import subprocess
 import sys
+import tempfile
+import time as _time
 from datetime import UTC, datetime
-from decimal import Decimal
 from pathlib import Path
 from typing import Any
 
@@ -32,14 +26,6 @@ import pandas as pd
 
 _ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(_ROOT))
-
-from autotrader.backtest.data_loader import DataLoader
-from autotrader.calculator.precompute import PrecomputeEngine
-from autotrader.config.trading_params import get_preset
-from autotrader.core.entities import Candle
-from autotrader.core.enums import SignalType, Timeframe
-from autotrader.decision.unified.config import UnifiedBotConfig
-from autotrader.decision.unified.trade_bot import UnifiedTradeBot
 
 logger = logging.getLogger(__name__)
 
@@ -56,8 +42,6 @@ _NAUTILUS_SYMBOL_MAP = {
 }
 
 _TIMEFRAMES = ["M1", "M5", "M15", "M30", "H1", "H4", "H8", "D1"]
-_PRIMARY_TF = "M15"
-_PRIMARY_TF_MINUTES = 15
 
 
 def _get_data_dir() -> Path:
@@ -75,54 +59,53 @@ def _load_market_data(
     start: datetime,
     end: datetime,
 ) -> dict[str, pd.DataFrame]:
-    """chart/cache/ Parquet → CSV フォールバックでインジケータ付きデータを読み込み.
-
-    既存のrunnerと同じパス解決ロジック。期間フィルタ付き（ウォームアップ500本含む）。
-    """
-    import time as _time
+    """既存BTと同一の.indicator_cacheからデータを読み込み."""
+    from autotrader.backtest.data_loader import DataLoader
+    from autotrader.calculator.precompute import PrecomputeEngine
 
     data_dir = _get_data_dir()
     symbol_dir = data_dir / symbol
     chart_dir = symbol_dir / "chart"
     base_dir = chart_dir if chart_dir.exists() else symbol_dir
+    ind_cache_dir = symbol_dir / ".indicator_cache"
 
     precompute = PrecomputeEngine()
     market_data: dict[str, pd.DataFrame] = {}
 
+    start_year = start.year - 1
+    end_year = end.year
+    needed_years = list(range(start_year, end_year + 1))
+
     for tf in _TIMEFRAMES:
-        print(f"  {tf}: ", end="", flush=True)
-        t0 = _time.time()
         df: pd.DataFrame | None = None
-        source = ""
 
-        # 優先1: chart/cache/ Parquet
-        cache_pq = base_dir / "cache" / f"{symbol}_{tf}.parquet"
-        if cache_pq.exists():
-            try:
-                df = pd.read_parquet(cache_pq)
-                source = "cache"
-            except Exception as e:
-                logger.warning(f"Parquet読込失敗 {cache_pq}: {e}")
+        # 優先1: .indicator_cache/
+        if ind_cache_dir.exists():
+            tf_dirs = sorted(ind_cache_dir.glob(f"{tf}_*"))
+            if tf_dirs:
+                cache_path = tf_dirs[0]
+                year_dfs = []
+                for y in needed_years:
+                    yf = cache_path / f"{y}.parquet"
+                    if yf.exists():
+                        year_dfs.append(pd.read_parquet(yf))
+                if year_dfs:
+                    df = pd.concat(year_dfs, ignore_index=True)
+                    df = df.sort_values("time").reset_index(drop=True)
 
-        # 優先2: CSV
+        # 優先2: chart/cache/
         if df is None:
-            pattern = f"{symbol}_{tf}_*.csv"
-            csv_files = sorted(base_dir.glob(pattern))
-            if not csv_files and base_dir != symbol_dir:
-                csv_files = sorted(symbol_dir.glob(pattern))
-            if csv_files:
-                dfs = [DataLoader.load_mt5_csv(f) for f in csv_files]
-                df = pd.concat(dfs, ignore_index=True).drop_duplicates(subset=["time"])
-                df = df.sort_values("time").reset_index(drop=True)
-                source = "csv"
+            _tf_names = [tf, "Daily"] if tf == "D1" else [tf]
+            for _tn in _tf_names:
+                cache_pq = base_dir / "cache" / f"{symbol}_{_tn}.parquet"
+                if cache_pq.exists():
+                    df = pd.read_parquet(cache_pq)
+                    break
 
         if df is None:
-            print("データなし (skip)")
             continue
 
-        total_rows = len(df)
-
-        # 期間フィルタ（ウォームアップ500本を含めて切り出し）
+        # 期間フィルタ（ウォームアップ500本含む）
         if "time" in df.columns:
             time_col = pd.to_datetime(df["time"], utc=True)
             end_mask = time_col < end
@@ -130,411 +113,393 @@ def _load_market_data(
             warmup_start = max(0, start_idx - 500)
             df = df.iloc[warmup_start:].loc[end_mask.iloc[warmup_start:]].reset_index(drop=True)
 
-        # インジケータ列がなければ計算
         if "sma_20" not in df.columns:
-            df = precompute.compute_technical_indicators(df)
-            source += "+computed"
+            from autotrader.calculator.precompute import PrecomputeEngine
+            df = PrecomputeEngine().compute_technical_indicators(df)
 
         market_data[tf] = df
-        elapsed = _time.time() - t0
-        print(f"{len(df):,}/{total_rows:,} bars ({source}) [{elapsed:.1f}s]")
 
     return market_data
 
 
-def _load_m1_bars_for_nautilus(
+def _load_m1_quote_df(
     symbol: str,
     start: datetime,
     end: datetime,
     spread_pips: float,
     pip_unit: float,
 ) -> pd.DataFrame:
-    """M1バーデータをNautilus用のbid/ask DataFrameに変換.
-
-    M1のclose価格をbidとし、bid + spread をaskとして返す。
-    """
+    """M1バーデータをbid/ask DataFrameに変換."""
     data_dir = _get_data_dir()
     symbol_dir = data_dir / symbol
+    ind_cache_dir = symbol_dir / ".indicator_cache"
     chart_dir = symbol_dir / "chart"
     base_dir = chart_dir if chart_dir.exists() else symbol_dir
 
     df: pd.DataFrame | None = None
 
-    # Parquetキャッシュ優先
-    cache_pq = base_dir / "cache" / f"{symbol}_M1.parquet"
-    if cache_pq.exists():
-        df = pd.read_parquet(cache_pq)
-    else:
-        csv_files = sorted(base_dir.glob(f"{symbol}_M1_*.csv"))
-        if csv_files:
-            dfs = [DataLoader.load_mt5_csv(f) for f in csv_files]
-            df = pd.concat(dfs, ignore_index=True).drop_duplicates(subset=["time"])
-            df = df.sort_values("time").reset_index(drop=True)
+    if ind_cache_dir.exists():
+        tf_dirs = sorted(ind_cache_dir.glob("M1_*"))
+        if tf_dirs:
+            cache_path = tf_dirs[0]
+            year_dfs = []
+            for y in range(start.year, end.year + 1):
+                yf = cache_path / f"{y}.parquet"
+                if yf.exists():
+                    year_dfs.append(pd.read_parquet(yf))
+            if year_dfs:
+                df = pd.concat(year_dfs, ignore_index=True)
 
     if df is None:
-        raise FileNotFoundError(f"M1データが見つかりません: {base_dir}")
+        cache_pq = base_dir / "cache" / f"{symbol}_M1.parquet"
+        if cache_pq.exists():
+            df = pd.read_parquet(cache_pq)
 
-    # 期間フィルタ
+    if df is None:
+        raise FileNotFoundError(f"M1データが見つかりません: {symbol}")
+
     if "time" in df.columns:
         df["time"] = pd.to_datetime(df["time"], utc=True)
         df = df[(df["time"] >= start) & (df["time"] < end)]
         df = df.set_index("time")
-    elif isinstance(df.index, pd.DatetimeIndex):
-        df = df.loc[start:end]
 
     spread = spread_pips * pip_unit
-
-    # bid = close, ask = close + spread でQuoteTick的な2列を作成
-    result = pd.DataFrame({
+    return pd.DataFrame({
         "bid_price": df["close"],
         "ask_price": df["close"] + spread,
     }, index=df.index)
 
-    return result
-
-
-def _load_tick_data(symbol: str, start: datetime, end: datetime) -> pd.DataFrame:
-    """実ティックデータをParquetから読み込み."""
-    tick_dir = _get_data_dir() / symbol / "ticks"
-
-    if not tick_dir.exists():
-        raise FileNotFoundError(
-            f"ティックデータが見つかりません: {tick_dir}\n"
-            f"先に backtest_prepare_data.py fetch で取得してください。"
-        )
-
-    parquet_files = sorted(tick_dir.glob("ticks_*.parquet"))
-    if not parquet_files:
-        raise FileNotFoundError(f"Parquetファイルなし: {tick_dir}")
-
-    dfs = [pd.read_parquet(f) for f in parquet_files]
-    df = pd.concat(dfs)
-
-    if not isinstance(df.index, pd.DatetimeIndex):
-        if "timestamp" in df.columns:
-            df = df.set_index("timestamp")
-
-    df = df.loc[start:end]
-
-    # bid/ask列名の正規化
-    if "bid" in df.columns:
-        df = df.rename(columns={"bid": "bid_price", "ask": "ask_price"})
-
-    return df[["bid_price", "ask_price"]]
-
 
 # ---------------------------------------------------------------------------
-# run: Nautilus バックテスト実行
+# run-month: 1ヶ月分バックテスト（サブプロセスとして実行）
 # ---------------------------------------------------------------------------
 
 
-def cmd_run(args: argparse.Namespace) -> None:
-    """Nautilus Traderでバックテストを実行."""
-    try:
-        from nautilus_trader.backtest.config import BacktestEngineConfig
-        from nautilus_trader.backtest.engine import BacktestEngine
-        from nautilus_trader.backtest.models import FillModel
-        from nautilus_trader.config import LoggingConfig
-        from nautilus_trader.model.currencies import JPY, USD
-        from nautilus_trader.model.enums import AccountType, OmsType
-        from nautilus_trader.model.identifiers import TraderId, Venue
-        from nautilus_trader.model.objects import Money
-        from nautilus_trader.persistence.wranglers import QuoteTickDataWrangler
-        from nautilus_trader.test_kit.providers import TestInstrumentProvider
-    except ImportError:
-        print(
-            "ERROR: nautilus_trader が見つかりません。\n"
-            "pip install nautilus_trader でインストールしてください。"
-        )
-        sys.exit(1)
+def cmd_run_month(args: argparse.Namespace) -> None:
+    """1ヶ月分のバックテストを実行し、結果をJSONファイルに出力."""
+    from decimal import Decimal
+
+    from nautilus_trader.backtest.config import BacktestEngineConfig
+    from nautilus_trader.backtest.engine import BacktestEngine
+    from nautilus_trader.backtest.models import FillModel
+    from nautilus_trader.config import LoggingConfig, StrategyConfig
+    from nautilus_trader.model.currencies import JPY, USD
+    from nautilus_trader.model.data import Bar, BarType
+    from nautilus_trader.model.enums import AccountType, OmsType, OrderSide
+    from nautilus_trader.model.identifiers import InstrumentId, TraderId, Venue
+    from nautilus_trader.model.instruments import Instrument
+    from nautilus_trader.model.objects import Money
+    from nautilus_trader.model.orders.list import OrderList
+    from nautilus_trader.persistence.wranglers import (
+        BarDataWrangler,
+        QuoteTickDataWrangler,
+    )
+    from nautilus_trader.test_kit.providers import TestInstrumentProvider
+    from nautilus_trader.trading.strategy import Strategy
+
+    from autotrader.config.trading_params import get_preset
+    from autotrader.core.entities import Candle
+    from autotrader.core.enums import SignalType, Timeframe
+    from autotrader.decision.unified.config import UnifiedBotConfig
+    from autotrader.decision.unified.trade_bot import UnifiedTradeBot
 
     symbol = args.symbol
-    mode = args.mode
-    start = datetime.strptime(args.start, "%Y-%m-%d").replace(tzinfo=UTC)
-    end = datetime.strptime(args.end, "%Y-%m-%d").replace(tzinfo=UTC)
+    year = args.year
+    month = args.month
+    output_path = Path(args.output)
+    nautilus_symbol = _NAUTILUS_SYMBOL_MAP[symbol]
     preset = get_preset(symbol)
 
-    print(f"=== Nautilus Trader バックテスト ===")
-    print(f"通貨ペア: {symbol}")
-    print(f"期間: {start.date()} → {end.date()}")
-    print(f"モード: {mode}")
-    print()
+    month_start = datetime(year, month, 1, tzinfo=UTC)
+    month_end = datetime(year + (1 if month == 12 else 0),
+                         1 if month == 12 else month + 1, 1, tzinfo=UTC)
 
-    # 1. インジケータデータ読み込み（chart/cache/ から直接）
-    print("1. マーケットデータ読み込み...")
-    market_data = _load_market_data(symbol, start, end)
+    # データ読み込み
+    market_data = _load_market_data(symbol, month_start, month_end)
+    if "M1" not in market_data:
+        json.dump({"year": year, "month": month, "trades": [], "error": "M1データなし"},
+                  open(output_path, "w"))
+        return
 
-    if _PRIMARY_TF not in market_data:
-        print(f"ERROR: {_PRIMARY_TF}データが見つかりません")
-        sys.exit(1)
-
-    # 2. TradeBot初期化
-    print("2. TradeBot初期化...")
+    # TradeBot
     bot_kwargs: dict[str, Any] = {}
     if args.consensus_threshold is not None:
         bot_kwargs["consensus_threshold"] = args.consensus_threshold
-    bot_config = UnifiedBotConfig(**bot_kwargs)
-    print(f"   consensus_threshold={bot_config.consensus_threshold}")
-    bot = UnifiedTradeBot(bot_config)
+    bot = UnifiedTradeBot(UnifiedBotConfig(**bot_kwargs))
     bot.set_market_data(market_data)
 
-    # 3. 約定データ読み込み（モード別）
-    print(f"3. 約定データ読み込み ({mode})...")
-    if mode == "tick":
-        quote_df = _load_tick_data(symbol, start, end)
-        print(f"   {len(quote_df):,} ticks (実データ)")
-    else:
-        quote_df = _load_m1_bars_for_nautilus(
-            symbol, start, end,
-            spread_pips=preset.spread_pips,
-            pip_unit=preset.pip_unit,
-        )
-        print(f"   {len(quote_df):,} M1 bars → quote data")
+    # M1 quote data
+    quote_df = _load_m1_quote_df(
+        symbol, month_start, month_end,
+        spread_pips=preset.spread_pips, pip_unit=preset.pip_unit,
+    )
+    if quote_df.empty:
+        json.dump({"year": year, "month": month, "trades": []}, open(output_path, "w"))
+        return
 
-    # 4. Nautilusエンジン構築
-    print("4. Nautilusエンジン構築...")
-
+    # Nautilusエンジン
     engine = BacktestEngine(config=BacktestEngineConfig(
         trader_id=TraderId("BACKTESTER-001"),
-        logging=LoggingConfig(log_level="WARNING"),
+        logging=LoggingConfig(log_level="ERROR"),
     ))
 
     sim_venue = Venue("SIM")
-    is_jpy_account = preset.quote_ccy_rate == 1.0
-    base_currency = JPY if is_jpy_account else USD
-    initial_balance = 1_000_000 if is_jpy_account else 10_000
+    is_jpy = preset.quote_ccy_rate == 1.0
+    base_ccy = JPY if is_jpy else USD
+    initial_bal = 1_000_000 if is_jpy else 10_000
 
     engine.add_venue(
-        venue=sim_venue,
-        oms_type=OmsType.HEDGING,
-        account_type=AccountType.MARGIN,
-        base_currency=base_currency,
-        starting_balances=[Money(initial_balance, base_currency)],
-        fill_model=FillModel(
-            prob_fill_on_limit=0.2,
-            prob_slippage=0.5,
-            random_seed=42,
-        ),
+        venue=sim_venue, oms_type=OmsType.HEDGING,
+        account_type=AccountType.MARGIN, base_currency=base_ccy,
+        starting_balances=[Money(initial_bal, base_ccy)],
+        fill_model=FillModel(prob_fill_on_limit=0.2, prob_slippage=0.5, random_seed=42),
     )
 
-    nautilus_symbol = _NAUTILUS_SYMBOL_MAP[symbol]
     instrument = TestInstrumentProvider.default_fx_ccy(nautilus_symbol, sim_venue)
     engine.add_instrument(instrument)
 
-    # QuoteTickデータ追加
-    wrangler = QuoteTickDataWrangler(instrument=instrument)
-    ticks = wrangler.process(quote_df)
+    # QuoteTick
+    ticks = QuoteTickDataWrangler(instrument=instrument).process(quote_df.copy())
     engine.add_data(ticks)
-    print(f"   {len(ticks):,} quote ticks → engine")
 
-    # 5. ストラテジー追加
-    print("5. ストラテジー構築...")
+    # M1 EXTERNALバー
+    m1_df = market_data["M1"].copy()
+    if "time" in m1_df.columns:
+        m1_df["time"] = pd.to_datetime(m1_df["time"], utc=True)
+        m1_df = m1_df[(m1_df["time"] >= month_start) & (m1_df["time"] < month_end)]
+        m1_df = m1_df.set_index("time")
+    if "volume" not in m1_df.columns and "tick_volume" in m1_df.columns:
+        m1_df["volume"] = m1_df["tick_volume"]
+    m1_bt = BarType.from_str(f"{nautilus_symbol}.SIM-1-MINUTE-MID-EXTERNAL")
+    m1_bars = BarDataWrangler(bar_type=m1_bt, instrument=instrument).process(
+        m1_df[["open", "high", "low", "close", "volume"]])
+    engine.add_data(m1_bars)
 
-    from nautilus_trader.config import StrategyConfig
-    from nautilus_trader.model.data import Bar, BarType
-    from nautilus_trader.model.enums import OrderSide
-    from nautilus_trader.model.identifiers import InstrumentId
-    from nautilus_trader.model.instruments import Instrument
-    from nautilus_trader.model.orders.list import OrderList
-    from nautilus_trader.trading.strategy import Strategy
+    # ストラテジー
+    pip_unit = preset.pip_unit
+    trade_results: list[dict[str, Any]] = []
 
-    class _Config(StrategyConfig, frozen=True):
-        instrument_id_str: str = ""
-        bar_type_str: str = ""
-        symbol: str = "USDJPY"
-        pip_unit: float = 0.01
-        default_lot: float = 0.1
+    class _Cfg(StrategyConfig, frozen=True):
+        iid: str = ""
+        bt: str = ""
+        sym: str = "USDJPY"
+        pu: float = 0.01
+        dl: float = 0.1
 
-    class VerificationStrategy(Strategy):
-        def __init__(
-            self, config: _Config,
-            trade_bot: UnifiedTradeBot,
-        ) -> None:
+    class S(Strategy):
+        def __init__(self, config: _Cfg, tb: UnifiedTradeBot) -> None:
             super().__init__(config)
-            self._trade_bot = trade_bot
-            self._instrument: Instrument | None = None
-            self._pip_unit = config.pip_unit
-            self._default_lot = config.default_lot
-            self._symbol = config.symbol
-            self._trade_log: list[dict[str, Any]] = []
-            self._bar_count = 0
-            self._signal_count = 0
-            self._hold_count = 0
-            self._low_conf_count = 0
-            self._no_sl_tp_count = 0
+            self._tb = tb
+            self._inst: Instrument | None = None
 
         def on_start(self) -> None:
-            iid = InstrumentId.from_str(self.config.instrument_id_str)
-            self._instrument = self.cache.instrument(iid)
-            if self._instrument is None:
-                self.log.error(f"Instrument not found: {iid}")
+            iid = InstrumentId.from_str(self.config.iid)
+            self._inst = self.cache.instrument(iid)
+            if self._inst is None:
                 self.stop()
                 return
-            bar_type = BarType.from_str(self.config.bar_type_str)
-            self.subscribe_bars(bar_type)
-            self.subscribe_quote_ticks(iid)
+            self.subscribe_bars(BarType.from_str(self.config.bt))
 
         def on_bar(self, bar: Bar) -> None:
-            if self._instrument is None:
+            if self._inst is None or not self.portfolio.is_flat(self._inst.id):
                 return
-
-            self._bar_count += 1
-
-            # 最初の3本でデバッグ出力
-            if self._bar_count <= 3:
-                bar_time = pd.Timestamp(bar.ts_event, unit="ns", tz="UTC")
-                print(f"  [DEBUG] bar #{self._bar_count}: time={bar_time} "
-                      f"O={float(bar.open):.3f} H={float(bar.high):.3f} "
-                      f"L={float(bar.low):.3f} C={float(bar.close):.3f}")
-
-            if not self.portfolio.is_flat(self._instrument.id):
-                return
-
-            bar_time = pd.Timestamp(bar.ts_event, unit="ns", tz="UTC")
-            candle = Candle(
-                symbol=self._symbol,
-                timeframe=Timeframe.M15,
-                time=bar_time.to_pydatetime(),
-                open=float(bar.open),
-                high=float(bar.high),
-                low=float(bar.low),
-                close=float(bar.close),
-                volume=float(bar.volume),
-            )
-
-            sig = self._trade_bot.generate_signal(bar_time, candle)
-
-            # 最初の3本でシグナル結果もデバッグ
-            if self._bar_count <= 3:
-                print(f"  [DEBUG]   → direction={sig.direction.name} "
-                      f"confidence={sig.confidence:.3f} "
-                      f"consensus={sig.consensus_score} "
-                      f"sl_pips={sig.sl_pips} tp_pips={sig.tp_pips}")
-
-            if sig.direction == SignalType.HOLD:
-                self._hold_count += 1
-                return
-            if sig.confidence < 0.5:
-                self._low_conf_count += 1
+            bt = pd.Timestamp(bar.ts_event, unit="ns", tz="UTC")
+            c = Candle(symbol=self.config.sym, timeframe=Timeframe.M1,
+                       time=bt.to_pydatetime(),
+                       open=float(bar.open), high=float(bar.high),
+                       low=float(bar.low), close=float(bar.close),
+                       volume=float(bar.volume))
+            sig = self._tb.generate_signal(bt, c)
+            if sig.direction == SignalType.HOLD or sig.confidence < 0.5:
                 return
             if sig.sl_pips <= 0 or sig.tp_pips <= 0:
-                self._no_sl_tp_count += 1
                 return
-
-            self._signal_count += 1
-
-            close = float(bar.close)
-            pu = self._pip_unit
+            cl = float(bar.close)
+            pu = self.config.pu
             if sig.direction == SignalType.BUY:
-                sl_px = close - sig.sl_pips * pu
-                tp_px = close + sig.tp_pips * pu
+                sl, tp = cl - sig.sl_pips * pu, cl + sig.tp_pips * pu
             else:
-                sl_px = close + sig.sl_pips * pu
-                tp_px = close - sig.tp_pips * pu
-
-            lot = sig.lot if sig.lot else self._default_lot
-            # lot→通貨単位変換（0.01 lot = 1000 units）
-            qty_units = int(lot * 100_000)
+                sl, tp = cl + sig.sl_pips * pu, cl - sig.tp_pips * pu
+            lot = sig.lot if sig.lot else self.config.dl
+            qty = int(lot * 100_000)
             side = OrderSide.BUY if sig.direction == SignalType.BUY else OrderSide.SELL
-
             ol: OrderList = self.order_factory.bracket(
-                instrument_id=self._instrument.id,
-                order_side=side,
-                quantity=self._instrument.make_qty(Decimal(str(qty_units))),
-                sl_trigger_price=self._instrument.make_price(sl_px),
-                tp_price=self._instrument.make_price(tp_px),
-            )
+                instrument_id=self._inst.id, order_side=side,
+                quantity=self._inst.make_qty(Decimal(str(qty))),
+                sl_trigger_price=self._inst.make_price(sl),
+                tp_price=self._inst.make_price(tp))
             self.submit_order_list(ol)
-
-            self.log.info(
-                f"SIGNAL: {sig.direction.name} @ {close:.3f} "
-                f"SL={sl_px:.3f} TP={tp_px:.3f} lot={lot} "
-                f"consensus={sig.consensus_score}"
-            )
 
         def on_position_closed(self, event: Any) -> None:
             pos = self.cache.position(event.position_id)
             if pos is None:
                 return
-            entry = float(pos.avg_px_open)
-            exit_ = float(pos.avg_px_close)
+            e, x = float(pos.avg_px_open), float(pos.avg_px_close)
             pnl = float(pos.realized_pnl)
-            pips = (exit_ - entry) / self._pip_unit if pos.is_long else (entry - exit_) / self._pip_unit
-
-            rec = {
-                "position_id": str(pos.id),
-                "symbol": self._symbol,
-                "direction": "BUY" if pos.is_long else "SELL",
-                "entry_price": entry,
-                "exit_price": exit_,
+            pu = self.config.pu
+            is_buy = pos.entry == OrderSide.BUY
+            pips = (x - e) / pu if is_buy else (e - x) / pu
+            trade_results.append({
+                "symbol": self.config.sym,
+                "direction": "BUY" if is_buy else "SELL",
+                "entry_price": e, "exit_price": x,
                 "volume": float(pos.quantity),
-                "pnl": pnl,
-                "pnl_pips": pips,
+                "pnl": pnl, "pnl_pips": pips,
                 "opened_at": str(pos.ts_opened),
                 "closed_at": str(pos.ts_closed),
-                "duration_s": (pos.ts_closed - pos.ts_opened) / 1e9,
-            }
-            self._trade_log.append(rec)
-            self.log.info(
-                f"CLOSED: {rec['direction']} entry={entry:.3f} "
-                f"exit={exit_:.3f} PnL={pnl:.0f} ({pips:.1f}pips)"
-            )
+            })
 
         def on_stop(self) -> None:
-            print(f"\n  [DEBUG] === シグナル統計 ===")
-            print(f"  on_bar呼び出し: {self._bar_count}")
-            print(f"  HOLD: {self._hold_count}")
-            print(f"  confidence<0.5: {self._low_conf_count}")
-            print(f"  SL/TP無し: {self._no_sl_tp_count}")
-            print(f"  エントリー: {self._signal_count}")
-            if self._instrument:
-                self.cancel_all_orders(self._instrument.id)
-                self.close_all_positions(self._instrument.id)
+            if self._inst:
+                self.cancel_all_orders(self._inst.id)
+                self.close_all_positions(self._inst.id)
 
-        def get_trade_log(self) -> list[dict[str, Any]]:
-            return list(self._trade_log)
-
-    bar_type_str = f"{nautilus_symbol}.SIM-{_PRIMARY_TF_MINUTES}-MINUTE-MID-INTERNAL"
-    strategy = VerificationStrategy(
-        config=_Config(
-            instrument_id_str=f"{nautilus_symbol}.SIM",
-            bar_type_str=bar_type_str,
-            symbol=symbol,
-            pip_unit=preset.pip_unit,
-            default_lot=preset.min_lot,
-        ),
-        trade_bot=bot,
-    )
+    strategy = S(
+        config=_Cfg(
+            iid=f"{nautilus_symbol}.SIM",
+            bt=f"{nautilus_symbol}.SIM-1-MINUTE-MID-EXTERNAL",
+            sym=symbol, pu=pip_unit, dl=preset.min_lot,
+        ), tb=bot)
     engine.add_strategy(strategy)
-
-    # 6. 実行
-    print("6. バックテスト実行中...")
     engine.run()
+    engine.reset()
+    engine.dispose()
 
-    # 7. 結果出力
-    print("\n=== 結果 ===")
-    trade_log = strategy.get_trade_log()
-    print(f"トレード数: {len(trade_log)}")
+    with open(output_path, "w") as f:
+        json.dump({"year": year, "month": month, "trades": trade_results}, f)
+
+
+# ---------------------------------------------------------------------------
+# run: subprocess並列でバックテスト実行
+# ---------------------------------------------------------------------------
+
+
+def cmd_run(args: argparse.Namespace) -> None:
+    """月並列でNautilusバックテストを実行（subprocessベース）."""
+    import os
+
+    symbol = args.symbol
+    start = datetime.strptime(args.start, "%Y-%m-%d").replace(tzinfo=UTC)
+    end = datetime.strptime(args.end, "%Y-%m-%d").replace(tzinfo=UTC)
+    cpus = args.cpus
+    consensus_threshold = args.consensus_threshold
+
+    _p = lambda *a, **k: print(*a, **k, flush=True)
+    _p(f"=== Nautilus Trader バックテスト（月並列） ===")
+    _p(f"通貨ペア: {symbol}")
+    _p(f"期間: {start.date()} → {end.date()}")
+    _p(f"モード: {args.mode}")
+    _p(f"CPU: {cpus}")
+    _p(f"consensus_threshold: {consensus_threshold or 'default(18.0)'}")
+    _p()
+
+    # 月タスク生成
+    months: list[tuple[int, int]] = []
+    current = start
+    while current < end:
+        months.append((current.year, current.month))
+        if current.month == 12:
+            current = datetime(current.year + 1, 1, 1, tzinfo=UTC)
+        else:
+            current = datetime(current.year, current.month + 1, 1, tzinfo=UTC)
+
+    _p(f"月タスク数: {len(months)}")
+    t0 = _time.time()
+
+    # 一時ディレクトリで結果ファイルを管理
+    with tempfile.TemporaryDirectory(prefix="nautilus_bt_") as tmp_dir:
+        tmp_path = Path(tmp_dir)
+
+        # subprocessで並列実行
+        active: dict[tuple[int, int], tuple[subprocess.Popen, Path]] = {}
+        pending = list(months)
+        completed: list[dict[str, Any]] = []
+        failed: list[tuple[int, int, str]] = []
+
+        script_path = Path(__file__).resolve()
+
+        while pending or active:
+            # 空きスロットにタスク投入
+            while pending and len(active) < cpus:
+                year, month = pending.pop(0)
+                out_file = tmp_path / f"{year}_{month:02d}.json"
+                cmd = [
+                    sys.executable, str(script_path), "run-month",
+                    "--symbol", symbol,
+                    "--year", str(year),
+                    "--month", str(month),
+                    "--output", str(out_file),
+                ]
+                if consensus_threshold is not None:
+                    cmd.extend(["--consensus-threshold", str(consensus_threshold)])
+
+                proc = subprocess.Popen(
+                    cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                    cwd=str(_ROOT),
+                )
+                active[(year, month)] = (proc, out_file)
+
+            # 完了チェック
+            done_keys = []
+            for key, (proc, out_file) in active.items():
+                ret = proc.poll()
+                if ret is not None:
+                    done_keys.append(key)
+                    year, month = key
+                    if ret == 0 and out_file.exists():
+                        with open(out_file) as f:
+                            result = json.load(f)
+                        n = len(result.get("trades", []))
+                        _p(f"  [{len(completed)+len(failed)+1}/{len(months)}] "
+                           f"{year}-{month:02d}: {n} trades")
+                        completed.append(result)
+                    else:
+                        _p(f"  [{len(completed)+len(failed)+1}/{len(months)}] "
+                           f"{year}-{month:02d}: FAILED (exit={ret})")
+                        failed.append((year, month, f"exit={ret}"))
+
+            for k in done_keys:
+                del active[k]
+
+            if active:
+                _time.sleep(0.5)
+
+    elapsed = _time.time() - t0
+    _p(f"\n完了: {elapsed:.1f}s ({len(failed)} failures)")
+
+    # マージ
+    all_trades: list[dict[str, Any]] = []
+    for r in sorted(completed, key=lambda x: (x["year"], x["month"])):
+        all_trades.extend(r.get("trades", []))
+    all_trades.sort(key=lambda t: t.get("opened_at", ""))
+
+    # サマリー
+    _p(f"\n=== 結果 ===")
+    _p(f"トレード数: {len(all_trades)}")
 
     total_pnl = 0.0
     win_rate = 0.0
+    if all_trades:
+        wins = [t for t in all_trades if t["pnl"] > 0]
+        losses = [t for t in all_trades if t["pnl"] <= 0]
+        total_pnl = sum(t["pnl"] for t in all_trades)
+        win_rate = len(wins) / len(all_trades) * 100
 
-    if trade_log:
-        wins = [t for t in trade_log if t["pnl"] > 0]
-        losses = [t for t in trade_log if t["pnl"] <= 0]
-        total_pnl = sum(t["pnl"] for t in trade_log)
-        win_rate = len(wins) / len(trade_log) * 100
-
-        print(f"勝率: {win_rate:.1f}% ({len(wins)}W / {len(losses)}L)")
-        print(f"総損益: {total_pnl:,.0f}")
-        avg_pips = sum(t["pnl_pips"] for t in trade_log) / len(trade_log)
-        print(f"平均損益(pips): {avg_pips:.1f}")
+        _p(f"勝率: {win_rate:.1f}% ({len(wins)}W / {len(losses)}L)")
+        _p(f"総損益: {total_pnl:,.0f}")
+        avg_pips = sum(t["pnl_pips"] for t in all_trades) / len(all_trades)
+        _p(f"平均損益(pips): {avg_pips:.1f}")
         if wins:
-            print(f"平均利益(pips): {sum(t['pnl_pips'] for t in wins) / len(wins):.1f}")
+            _p(f"平均利益(pips): {sum(t['pnl_pips'] for t in wins) / len(wins):.1f}")
         if losses:
-            print(f"平均損失(pips): {sum(t['pnl_pips'] for t in losses) / len(losses):.1f}")
+            _p(f"平均損失(pips): {sum(t['pnl_pips'] for t in losses) / len(losses):.1f}")
 
     # JSON保存
+    from autotrader.config.trading_params import get_preset
+    preset = get_preset(symbol)
+    is_jpy = preset.quote_ccy_rate == 1.0
+    initial_balance = 1_000_000 if is_jpy else 10_000
+
     results_dir = _ROOT / "backtest_results" / "nautilus"
     results_dir.mkdir(parents=True, exist_ok=True)
     result_path = results_dir / f"{symbol}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json"
@@ -544,25 +509,19 @@ def cmd_run(args: argparse.Namespace) -> None:
             "engine": "nautilus_trader",
             "symbol": symbol,
             "period": {"start": args.start, "end": args.end},
-            "mode": mode,
+            "mode": args.mode,
+            "consensus_threshold": consensus_threshold,
             "initial_balance": initial_balance,
-            "trades": trade_log,
+            "elapsed_s": elapsed,
+            "trades": all_trades,
             "summary": {
-                "total_trades": len(trade_log),
+                "total_trades": len(all_trades),
                 "win_rate": win_rate,
                 "total_pnl": total_pnl,
             },
         }, f, indent=2, ensure_ascii=False, default=str)
 
-    print(f"\n結果保存: {result_path}")
-
-    positions_report = engine.trader.generate_positions_report()
-    if not positions_report.empty:
-        print(f"\n--- Nautilus Positions Report ---")
-        print(positions_report.to_string())
-
-    engine.reset()
-    engine.dispose()
+    _p(f"\n結果保存: {result_path}")
 
 
 # ---------------------------------------------------------------------------
@@ -619,14 +578,6 @@ def cmd_compare(args: argparse.Namespace) -> None:
     else:
         print("判定: FAIL（差異5%超）→ シミュレーターに問題あり")
 
-    if len(nt) == len(naut) and len(nt) > 0:
-        print(f"\n--- トレード詳細比較 (先頭10件) ---")
-        for i in range(min(10, len(nt))):
-            ed = abs(float(naut[i].get("entry_price", 0)) - float(nt[i].get("entry_price", 0)))
-            xd = abs(float(naut[i].get("exit_price", 0)) - float(nt[i].get("exit_price", 0)))
-            pd_ = abs(float(naut[i].get("pnl_pips", 0)) - float(nt[i].get("pnl_pips", 0)))
-            print(f"  #{i+1}: entry差={ed:.4f}  exit差={xd:.4f}  PnL差={pd_:.1f}pips")
-
 
 # ---------------------------------------------------------------------------
 # CLI
@@ -634,22 +585,27 @@ def cmd_compare(args: argparse.Namespace) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Nautilus Trader バックテスト")
+    parser = argparse.ArgumentParser(description="Nautilus Trader バックテスト（月並列）")
     sub = parser.add_subparsers(dest="command")
 
-    run_p = sub.add_parser("run", help="バックテスト実行")
+    # run
+    run_p = sub.add_parser("run", help="バックテスト実行（月並列）")
     run_p.add_argument("--symbol", default="USDJPY", choices=SUPPORTED_SYMBOLS)
     run_p.add_argument("--start", required=True, help="開始日 (YYYY-MM-DD)")
     run_p.add_argument("--end", required=True, help="終了日 (YYYY-MM-DD)")
-    run_p.add_argument(
-        "--mode", default="bar", choices=["bar", "tick"],
-        help="bar: M1バーで約定 (デフォルト), tick: 実ティックで約定",
-    )
-    run_p.add_argument(
-        "--consensus-threshold", type=float, default=None,
-        help="コンセンサス閾値（デフォルト: UnifiedBotConfigの値=18.0）",
-    )
+    run_p.add_argument("--mode", default="bar", choices=["bar", "tick"])
+    run_p.add_argument("--cpus", type=int, default=12, help="並列CPU数")
+    run_p.add_argument("--consensus-threshold", type=float, default=None)
 
+    # run-month（内部用サブコマンド: subprocessから呼ばれる）
+    rm_p = sub.add_parser("run-month", help=argparse.SUPPRESS)
+    rm_p.add_argument("--symbol", required=True)
+    rm_p.add_argument("--year", type=int, required=True)
+    rm_p.add_argument("--month", type=int, required=True)
+    rm_p.add_argument("--output", required=True)
+    rm_p.add_argument("--consensus-threshold", type=float, default=None)
+
+    # compare
     cmp_p = sub.add_parser("compare", help="結果比較")
     cmp_p.add_argument("--native", required=True, help="独自BT結果JSON")
     cmp_p.add_argument("--nautilus", required=True, help="Nautilus結果JSON")
@@ -660,11 +616,12 @@ def main() -> None:
         sys.exit(1)
 
     logging.basicConfig(
-        level=logging.INFO,
+        level=logging.WARNING,
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     )
 
-    {"run": cmd_run, "compare": cmd_compare}[args.command](args)
+    cmds = {"run": cmd_run, "run-month": cmd_run_month, "compare": cmd_compare}
+    cmds[args.command](args)
 
 
 if __name__ == "__main__":
