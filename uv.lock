@@ -112,8 +112,8 @@ live = [
     { name = "feedparser" },
 ]
 mt5 = [
-    { name = "metatrader5" },
-    { name = "pywin32" },
+    { name = "metatrader5", marker = "sys_platform == 'win32'" },
+    { name = "pywin32", marker = "sys_platform == 'win32'" },
 ]
 
 [package.metadata]
@@ -129,7 +129,7 @@ requires-dist = [
     { name = "jinja2", specifier = ">=3.1.0" },
     { name = "lxml", specifier = ">=5.0.0" },
     { name = "matplotlib", specifier = ">=3.10.8" },
-    { name = "metatrader5", marker = "extra == 'mt5'", specifier = ">=5.0.45" },
+    { name = "metatrader5", marker = "sys_platform == 'win32' and extra == 'mt5'", specifier = ">=5.0.45" },
     { name = "mypy", marker = "extra == 'dev'", specifier = ">=1.8.0" },
     { name = "numba", marker = "extra == 'fast'", specifier = ">=0.59.0" },
     { name = "numpy", specifier = ">=1.26.0" },
@@ -150,7 +150,7 @@ requires-dist = [
     { name = "pytest-mock", marker = "extra == 'dev'", specifier = ">=3.12.0" },
     { name = "python-jose", extras = ["cryptography"], specifier = ">=3.3.0" },
     { name = "pytz", specifier = ">=2024.1" },
-    { name = "pywin32", marker = "extra == 'mt5'", specifier = ">=306" },
+    { name = "pywin32", marker = "sys_platform == 'win32' and extra == 'mt5'", specifier = ">=306" },
     { name = "pyyaml", specifier = ">=6.0" },
     { name = "requests", marker = "extra == 'gdelt'", specifier = ">=2.31.0" },
     { name = "rich", specifier = ">=14.3.2" },
@@ -1386,7 +1386,7 @@ name = "metatrader5"
 version = "5.0.5640"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
-    { name = "numpy" },
+    { name = "numpy", marker = "sys_platform == 'win32'" },
 ]
 wheels = [
     { url = "https://files.pythonhosted.org/packages/6d/ee/b158bece0322ccf426b2879742bfce00104e53291a3c057a333c90633a88/metatrader5-5.0.5640-cp312-cp312-win_amd64.whl", hash = "sha256:24fab41178067e67c4d9ceb70bc0923d1814090a6e1f9bc5d7d13fa83737ddee", size = 48067, upload-time = "2026-02-20T23:31:13.815Z" },

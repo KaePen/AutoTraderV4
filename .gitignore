@@ -86,4 +86,4 @@ Thumbs.db
 .venv
 .taskmaster
 .ruff_cache
-.claude/worktrees/*
+.claude/worktrees/*backtest_results/
