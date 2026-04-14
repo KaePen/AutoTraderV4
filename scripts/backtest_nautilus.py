@@ -352,6 +352,11 @@ def cmd_run(args: argparse.Namespace) -> None:
             self._default_lot = config.default_lot
             self._symbol = config.symbol
             self._trade_log: list[dict[str, Any]] = []
+            self._bar_count = 0
+            self._signal_count = 0
+            self._hold_count = 0
+            self._low_conf_count = 0
+            self._no_sl_tp_count = 0
 
         def on_start(self) -> None:
             iid = InstrumentId.from_str(self.config.instrument_id_str)
@@ -367,6 +372,16 @@ def cmd_run(args: argparse.Namespace) -> None:
         def on_bar(self, bar: Bar) -> None:
             if self._instrument is None:
                 return
+
+            self._bar_count += 1
+
+            # 最初の3本でデバッグ出力
+            if self._bar_count <= 3:
+                bar_time = pd.Timestamp(bar.ts_event, unit="ns", tz="UTC")
+                print(f"  [DEBUG] bar #{self._bar_count}: time={bar_time} "
+                      f"O={float(bar.open):.3f} H={float(bar.high):.3f} "
+                      f"L={float(bar.low):.3f} C={float(bar.close):.3f}")
+
             if not self.portfolio.is_flat(self._instrument.id):
                 return
 
@@ -384,12 +399,24 @@ def cmd_run(args: argparse.Namespace) -> None:
 
             sig = self._trade_bot.generate_signal(bar_time, candle)
 
+            # 最初の3本でシグナル結果もデバッグ
+            if self._bar_count <= 3:
+                print(f"  [DEBUG]   → direction={sig.direction.name} "
+                      f"confidence={sig.confidence:.3f} "
+                      f"consensus={sig.consensus_score} "
+                      f"sl_pips={sig.sl_pips} tp_pips={sig.tp_pips}")
+
             if sig.direction == SignalType.HOLD:
+                self._hold_count += 1
                 return
             if sig.confidence < 0.5:
+                self._low_conf_count += 1
                 return
             if sig.sl_pips <= 0 or sig.tp_pips <= 0:
+                self._no_sl_tp_count += 1
                 return
+
+            self._signal_count += 1
 
             close = float(bar.close)
             pu = self._pip_unit
@@ -447,6 +474,12 @@ def cmd_run(args: argparse.Namespace) -> None:
             )
 
         def on_stop(self) -> None:
+            print(f"\n  [DEBUG] === シグナル統計 ===")
+            print(f"  on_bar呼び出し: {self._bar_count}")
+            print(f"  HOLD: {self._hold_count}")
+            print(f"  confidence<0.5: {self._low_conf_count}")
+            print(f"  SL/TP無し: {self._no_sl_tp_count}")
+            print(f"  エントリー: {self._signal_count}")
             if self._instrument:
                 self.cancel_all_orders(self._instrument.id)
                 self.close_all_positions(self._instrument.id)
