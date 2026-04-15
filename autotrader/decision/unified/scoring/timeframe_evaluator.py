@@ -754,15 +754,18 @@ class TimeframeEvaluator:
                 aligned_count += 1
 
         # 整合性に応じたボーナスのみ
-        if aligned_count >= 2:
+        # 利用可能なHTF数に対する整合率で判定
+        # （H4キャップ時はHTFが1つのみ → 1/1=100%でstrong bonus）
+        total_htf = max(1, len(self._htf_data))
+        if aligned_count >= total_htf:
             return (
                 self.config.htf_align_bonus_strong,
-                f"HTF強整合({aligned_count}TF)",
+                f"HTF強整合({aligned_count}/{total_htf}TF)",
             )
         elif aligned_count >= 1:
             return (
                 self.config.htf_align_bonus_weak,
-                f"HTF整合({aligned_count}TF)",
+                f"HTF整合({aligned_count}/{total_htf}TF)",
             )
         return 0.0, ""
 
