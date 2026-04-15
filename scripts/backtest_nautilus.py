@@ -201,6 +201,12 @@ def cmd_run_month(args: argparse.Namespace) -> None:
     from autotrader.core.entities import Candle
     from autotrader.core.enums import SignalType, Timeframe
     from autotrader.decision.unified.config import UnifiedBotConfig
+    from autotrader.decision.unified.risk.position_manager import (
+        ManagementActionType,
+        PositionManager,
+        PositionManagerConfig,
+    )
+    from autotrader.decision.unified.mode_selector import TradingPlan
     from autotrader.decision.unified.trade_bot import UnifiedTradeBot
 
     symbol = args.symbol
@@ -221,11 +227,36 @@ def cmd_run_month(args: argparse.Namespace) -> None:
                   open(output_path, "w"))
         return
 
-    # TradeBot
-    bot_kwargs: dict[str, Any] = {}
+    # TradeBot — プリセットオーバーライド適用（既存BTと同条件）
+    from autotrader.config.trading_params import (
+        get_pip_unit,
+        get_quote_ccy_rate,
+        get_symbol_overrides,
+    )
+
+    pip_unit = get_pip_unit(symbol)
+    qcr = get_quote_ccy_rate(symbol)
+    bot_kwargs: dict[str, Any] = {
+        "max_positions": preset.max_positions,
+        "bonus_max_positions": preset.bonus_max_positions,
+        "bonus_score_threshold": preset.bonus_score_threshold,
+        "base_risk_pct": preset.base_risk_pct,
+        "max_lot_per_trade": preset.max_lot_per_trade,
+        "max_total_exposure_lot": preset.max_total_exposure_lot,
+        "equity_floor_pct": preset.equity_floor_pct,
+        "pip_unit": pip_unit,
+        "quote_ccy_rate": qcr,
+        "sg_spread_threshold_pips": preset.sg_spread_threshold_pips,
+    }
+    sym_ovr = get_symbol_overrides(symbol)
+    sym_ovr.pop("multi_consensus_threshold", None)
+    bot_kwargs.update(sym_ovr.get("signal", {}))
+    bot_kwargs.update(sym_ovr.get("filter", {}))
+    bot_kwargs.update(sym_ovr.get("risk_mgmt", {}))
     if args.consensus_threshold is not None:
         bot_kwargs["consensus_threshold"] = args.consensus_threshold
-    bot = UnifiedTradeBot(UnifiedBotConfig(**bot_kwargs))
+    bot_config = UnifiedBotConfig(**bot_kwargs)
+    bot = UnifiedTradeBot(bot_config)
     bot.set_market_data(market_data)
 
     # M1 quote data
@@ -286,13 +317,33 @@ def cmd_run_month(args: argparse.Namespace) -> None:
         pu: float = 0.01
         dl: float = 0.1
 
+    # PositionManager 初期化
+    pm_config = PositionManagerConfig(
+        spread_pips=preset.spread_pips,
+        slippage_pips=preset.slippage_pips,
+        pip_unit=pip_unit,
+    )
+    pm = PositionManager(pm_config)
+
     class S(Strategy):
-        def __init__(self, config: _Cfg, tb: UnifiedTradeBot) -> None:
+        def __init__(self, config: _Cfg, tb: UnifiedTradeBot,
+                     pm: PositionManager, bot_cfg: UnifiedBotConfig) -> None:
             super().__init__(config)
             self._tb = tb
+            self._pm = pm
+            self._bot_cfg = bot_cfg
             self._inst: Instrument | None = None
 
         def on_start(self) -> None:
+            self._last_lot: float = 0.0
+            self._pos_id: str | None = None
+            self._pos_dir: SignalType | None = None
+            self._pos_entry: float = 0.0
+            self._pos_sl: float = 0.0
+            self._pos_tp: float = 0.0
+            self._pos_atr: float = 0.002  # デフォルト20pips
+            self._pos_score: float = 0.0
+            self._partial_trades: list[dict] = []
             iid = InstrumentId.from_str(self.config.iid)
             self._inst = self.cache.instrument(iid)
             if self._inst is None:
@@ -300,21 +351,141 @@ def cmd_run_month(args: argparse.Namespace) -> None:
                 return
             self.subscribe_bars(BarType.from_str(self.config.bt))
 
-        def on_bar(self, bar: Bar) -> None:
-            if self._inst is None or not self.portfolio.is_flat(self._inst.id):
+        def _has_open_position(self) -> bool:
+            if self._inst is None:
+                return False
+            return not self.portfolio.is_flat(self._inst.id)
+
+        def _close_position_market(self, bar: Bar) -> None:
+            """成行でポジション全決済"""
+            if self._inst is None:
                 return
+            self.cancel_all_orders(self._inst.id)
+            self.close_all_positions(self._inst.id)
+
+        def _reduce_position(self, bar: Bar, close_ratio: float) -> None:
+            """部分決済"""
+            if self._inst is None:
+                return
+            positions = self.cache.positions(self._inst.id)
+            if not positions:
+                return
+            pos = positions[0]
+            qty_total = float(pos.quantity)
+            close_qty = int(qty_total * close_ratio)
+            if close_qty <= 0:
+                return
+            # 部分決済トレード記録
+            cl = float(bar.close)
+            pu = self.config.pu
+            is_buy = self._pos_dir == SignalType.BUY
+            e = self._pos_entry
+            pips = (cl - e) / pu if is_buy else (e - cl) / pu
+            close_lot = self._last_lot * close_ratio
+            pnl = pips * 1000.0 * close_lot  # pip_value=1000 for JPY pairs
+            self._partial_trades.append({
+                "symbol": self.config.sym,
+                "direction": "BUY" if is_buy else "SELL",
+                "entry_price": e, "exit_price": cl,
+                "volume": close_lot,
+                "pnl": pnl, "pnl_pips": pips,
+                "opened_at": str(pos.ts_opened),
+                "closed_at": str(bar.ts_event),
+                "partial": True,
+            })
+            # Nautilus reduce注文
+            side = OrderSide.SELL if is_buy else OrderSide.BUY
+            order = self.order_factory.market(
+                instrument_id=self._inst.id,
+                order_side=side,
+                quantity=self._inst.make_qty(Decimal(str(close_qty))),
+                reduce_only=True,
+            )
+            self.submit_order(order)
+            self._last_lot -= close_lot
+
+        def _update_sl(self, new_sl: float) -> None:
+            """SL更新（内部状態のみ、on_barでチェック）"""
+            self._pos_sl = new_sl
+
+        def on_bar(self, bar: Bar) -> None:
+            if self._inst is None:
+                return
+
             bt = pd.Timestamp(bar.ts_event, unit="ns", tz="UTC")
+            bar_time = bt.to_pydatetime()
+            cl = float(bar.close)
+
+            # --- ポジション管理（PM evaluate + intrabar SL/TP）---
+            if self._has_open_position() and self._pos_id is not None:
+                hi = float(bar.high)
+                lo = float(bar.low)
+                pu = self.config.pu
+                is_buy = self._pos_dir == SignalType.BUY
+
+                # Intrabar SL/TPチェック（既存BTと同等）
+                if is_buy:
+                    if lo <= self._pos_sl:
+                        self._close_position_market(bar)
+                        return
+                    if self._pos_tp > 0 and hi >= self._pos_tp:
+                        self._close_position_market(bar)
+                        return
+                else:
+                    if hi >= self._pos_sl:
+                        self._close_position_market(bar)
+                        return
+                    if self._pos_tp > 0 and lo <= self._pos_tp:
+                        self._close_position_market(bar)
+                        return
+
+                # シグナル生成（consensus score用）
+                c = Candle(symbol=self.config.sym, timeframe=Timeframe.M1,
+                           time=bar_time,
+                           open=float(bar.open), high=hi,
+                           low=lo, close=cl,
+                           volume=float(bar.volume))
+                sig = self._tb.generate_signal(bt, c)
+                buy_score = sig.buy_score if hasattr(sig, "buy_score") else 0.0
+                sell_score = sig.sell_score if hasattr(sig, "sell_score") else 0.0
+
+                action = self._pm.evaluate(
+                    position_id=self._pos_id,
+                    current_price=cl,
+                    current_time=bar_time,
+                    atr=self._pos_atr,
+                    current_signal=sig.direction,
+                    buy_score=buy_score,
+                    sell_score=sell_score,
+                )
+
+                if action.action_type == ManagementActionType.FULL_CLOSE:
+                    self._close_position_market(bar)
+                    return
+                elif action.action_type == ManagementActionType.PARTIAL_CLOSE:
+                    self._reduce_position(bar, action.close_ratio)
+                    if action.new_sl is not None:
+                        self._pos_sl = action.new_sl
+                    return
+                elif action.action_type == ManagementActionType.UPDATE_SL:
+                    if action.new_sl is not None:
+                        self._pos_sl = action.new_sl
+                return  # ポジション保有中は新規エントリーしない
+
+            # --- 新規エントリー ---
+            if self._has_open_position():
+                return
+
             c = Candle(symbol=self.config.sym, timeframe=Timeframe.M1,
-                       time=bt.to_pydatetime(),
+                       time=bar_time,
                        open=float(bar.open), high=float(bar.high),
-                       low=float(bar.low), close=float(bar.close),
+                       low=float(bar.low), close=cl,
                        volume=float(bar.volume))
             sig = self._tb.generate_signal(bt, c)
             if sig.direction == SignalType.HOLD or sig.confidence < 0.5:
                 return
             if sig.sl_pips <= 0 or sig.tp_pips <= 0:
                 return
-            cl = float(bar.close)
             pu = self.config.pu
             if sig.direction == SignalType.BUY:
                 sl, tp = cl - sig.sl_pips * pu, cl + sig.tp_pips * pu
@@ -323,12 +494,46 @@ def cmd_run_month(args: argparse.Namespace) -> None:
             lot = sig.lot if sig.lot else self.config.dl
             qty = int(lot * 100_000)
             side = OrderSide.BUY if sig.direction == SignalType.BUY else OrderSide.SELL
-            ol: OrderList = self.order_factory.bracket(
-                instrument_id=self._inst.id, order_side=side,
+            # PM管理: bracket注文ではなくmarket注文（SL/TPはPMが管理）
+            order = self.order_factory.market(
+                instrument_id=self._inst.id,
+                order_side=side,
                 quantity=self._inst.make_qty(Decimal(str(qty))),
-                sl_trigger_price=self._inst.make_price(sl),
-                tp_price=self._inst.make_price(tp))
-            self.submit_order_list(ol)
+            )
+            self._last_lot = lot
+            self._pos_dir = sig.direction
+            self._pos_entry = cl
+            self._pos_sl = sl
+            self._pos_tp = tp
+            self._pos_score = sig.consensus_score or 0.0
+            self._partial_trades = []
+            # ATR取得
+            self._pos_atr = 0.002
+            if hasattr(sig, "indicators_snapshot") and sig.indicators_snapshot:
+                self._pos_atr = sig.indicators_snapshot.get("atr_14", 0.002)
+            self.submit_order(order)
+            # PM登録はon_position_openedで行う
+
+        def on_position_opened(self, event: Any) -> None:
+            pos = self.cache.position(event.position_id)
+            if pos is None:
+                return
+            self._pos_id = str(event.position_id)
+            plan = TradingPlan.create_universal(self._bot_cfg)
+            from dataclasses import replace as _dc_replace
+            plan = _dc_replace(plan, regime=getattr(
+                self._tb, "_last_regime", "TREND"))
+            self._pm.register_position(
+                position_id=self._pos_id,
+                direction=self._pos_dir,
+                entry_price=self._pos_entry,
+                entry_time=pd.Timestamp(pos.ts_opened, unit="ns", tz="UTC").to_pydatetime(),
+                sl=self._pos_sl,
+                tp=self._pos_tp,
+                volume=self._last_lot,
+                plan=plan,
+                entry_own_score=self._pos_score,
+            )
 
         def on_position_closed(self, event: Any) -> None:
             pos = self.cache.position(event.position_id)
@@ -339,15 +544,37 @@ def cmd_run_month(args: argparse.Namespace) -> None:
             pu = self.config.pu
             is_buy = pos.entry == OrderSide.BUY
             pips = (x - e) / pu if is_buy else (e - x) / pu
-            trade_results.append({
-                "symbol": self.config.sym,
-                "direction": "BUY" if is_buy else "SELL",
-                "entry_price": e, "exit_price": x,
-                "volume": float(pos.quantity),
-                "pnl": pnl, "pnl_pips": pips,
-                "opened_at": str(pos.ts_opened),
-                "closed_at": str(pos.ts_closed),
-            })
+            # 部分決済トレードを記録
+            for pt in self._partial_trades:
+                trade_results.append(pt)
+            # 残りポジションの最終決済
+            remaining_lot = self._last_lot
+            if remaining_lot > 0.001:
+                trade_results.append({
+                    "symbol": self.config.sym,
+                    "direction": "BUY" if is_buy else "SELL",
+                    "entry_price": e, "exit_price": x,
+                    "volume": remaining_lot,
+                    "pnl": pnl, "pnl_pips": pips,
+                    "opened_at": str(pos.ts_opened),
+                    "closed_at": str(pos.ts_closed),
+                })
+            elif not self._partial_trades:
+                # 部分決済もなく残りもない場合（フォールバック）
+                trade_results.append({
+                    "symbol": self.config.sym,
+                    "direction": "BUY" if is_buy else "SELL",
+                    "entry_price": e, "exit_price": x,
+                    "volume": 0.0,
+                    "pnl": pnl, "pnl_pips": pips,
+                    "opened_at": str(pos.ts_opened),
+                    "closed_at": str(pos.ts_closed),
+                })
+            # PM登録解除
+            if self._pos_id:
+                self._pm.unregister_position(self._pos_id)
+            self._pos_id = None
+            self._pos_dir = None
 
         def on_stop(self) -> None:
             if self._inst:
@@ -359,7 +586,7 @@ def cmd_run_month(args: argparse.Namespace) -> None:
             iid=f"{nautilus_symbol}.SIM",
             bt=f"{nautilus_symbol}.SIM-1-MINUTE-MID-EXTERNAL",
             sym=symbol, pu=pip_unit, dl=preset.min_lot,
-        ), tb=bot)
+        ), tb=bot, pm=pm, bot_cfg=bot_config)
     engine.add_strategy(strategy)
     engine.run()
     engine.reset()
