@@ -1026,8 +1026,10 @@ def cmd_run_multi(args: argparse.Namespace) -> None:
             hit_tp = (pos["tp"] > 0 and hi >= pos["tp"]) if is_buy else (pos["tp"] > 0 and lo <= pos["tp"])
 
             if hit_sl or hit_tp:
-                # SL/TPヒット: 決済
-                exit_price = pos["sl"] if hit_sl else pos["tp"]
+                # SL/TPヒット: 決済（スプレッド適用: BUY→bid, SELL→ask）
+                raw_exit = pos["sl"] if hit_sl else pos["tp"]
+                spread = presets[symbol].spread_pips * pu
+                exit_price = raw_exit if is_buy else raw_exit + spread
                 pips = (exit_price - pos["entry"]) / pu if is_buy else (pos["entry"] - exit_price) / pu
                 pnl = pips * 1000.0 * pos["lot"]
                 for pt in meta.get("partial_trades", []):
@@ -1068,7 +1070,10 @@ def cmd_run_multi(args: argparse.Namespace) -> None:
             )
 
             if action.action_type == ManagementActionType.FULL_CLOSE:
-                pips = (cl - pos["entry"]) / pu if is_buy else (pos["entry"] - cl) / pu
+                # スプレッド適用: BUY→bid(cl), SELL→ask(cl+spread)
+                spread = presets[symbol].spread_pips * pu
+                exit_cl = cl if is_buy else cl + spread
+                pips = (exit_cl - pos["entry"]) / pu if is_buy else (pos["entry"] - exit_cl) / pu
                 pnl = pips * 1000.0 * pos["lot"]
                 for pt in meta.get("partial_trades", []):
                     trade_results.append(pt)
@@ -1077,7 +1082,7 @@ def cmd_run_multi(args: argparse.Namespace) -> None:
                         "symbol": symbol,
                         "direction": "BUY" if is_buy else "SELL",
                         "entry_price": pos["entry"],
-                        "exit_price": cl,
+                        "exit_price": exit_cl,
                         "volume": pos["lot"],
                         "pnl": pnl,
                         "pnl_pips": pips,
@@ -1091,13 +1096,15 @@ def cmd_run_multi(args: argparse.Namespace) -> None:
             elif action.action_type == ManagementActionType.PARTIAL_CLOSE:
                 close_ratio = action.close_ratio
                 close_lot = pos["lot"] * close_ratio
-                pips = (cl - pos["entry"]) / pu if is_buy else (pos["entry"] - cl) / pu
+                spread = presets[symbol].spread_pips * pu
+                exit_cl = cl if is_buy else cl + spread
+                pips = (exit_cl - pos["entry"]) / pu if is_buy else (pos["entry"] - exit_cl) / pu
                 pnl = pips * 1000.0 * close_lot
                 meta.setdefault("partial_trades", []).append({
                     "symbol": symbol,
                     "direction": "BUY" if is_buy else "SELL",
                     "entry_price": pos["entry"],
-                    "exit_price": cl,
+                    "exit_price": exit_cl,
                     "volume": close_lot,
                     "pnl": pnl,
                     "pnl_pips": pips,
@@ -1116,10 +1123,14 @@ def cmd_run_multi(args: argparse.Namespace) -> None:
         # --- pending signal 約定（次足OPENで実行）---
         if symbol not in positions and symbol in pending_signals:
             sig = pending_signals.pop(symbol)
+            # スプレッド適用: BUY→ask(open+spread), SELL→bid(open)
+            spread = preset.spread_pips * pu
             if sig.direction == SignalType.BUY:
-                sl, tp = op - sig.sl_pips * pu, op + sig.tp_pips * pu
+                fill_price = op + spread
+                sl, tp = fill_price - sig.sl_pips * pu, fill_price + sig.tp_pips * pu
             else:
-                sl, tp = op + sig.sl_pips * pu, op - sig.tp_pips * pu
+                fill_price = op
+                sl, tp = fill_price + sig.sl_pips * pu, fill_price - sig.tp_pips * pu
             lot = sig.lot if sig.lot else preset.min_lot
             consensus_score = sig.consensus_score or 0.0
 
@@ -1135,7 +1146,7 @@ def cmd_run_multi(args: argparse.Namespace) -> None:
             positions[symbol] = {
                 "direction": sig.direction,
                 "lot": lot,
-                "entry": op,
+                "entry": fill_price,
                 "sl": sl,
                 "tp": tp,
                 "opened_at": bar_dt,
@@ -1187,11 +1198,13 @@ def cmd_run_multi(args: argparse.Namespace) -> None:
         pos = positions[symbol]
         meta = pos_meta[symbol]
         is_buy = pos["direction"] == SignalType.BUY
-        # 最終M1バーのcloseで決済
+        # 最終M1バーのcloseで決済（スプレッド適用）
         last_row = m1_data[symbol].iloc[-1]
         cl = float(last_row["close"])
         pu = pip_units[symbol]
-        pips = (cl - pos["entry"]) / pu if is_buy else (pos["entry"] - cl) / pu
+        spread = presets[symbol].spread_pips * pu
+        exit_cl = cl if is_buy else cl + spread
+        pips = (exit_cl - pos["entry"]) / pu if is_buy else (pos["entry"] - exit_cl) / pu
         pnl = pips * 1000.0 * pos["lot"]
         for pt in meta.get("partial_trades", []):
             trade_results.append(pt)
@@ -1200,7 +1213,7 @@ def cmd_run_multi(args: argparse.Namespace) -> None:
                 "symbol": symbol,
                 "direction": "BUY" if is_buy else "SELL",
                 "entry_price": pos["entry"],
-                "exit_price": cl,
+                "exit_price": exit_cl,
                 "volume": pos["lot"],
                 "pnl": pnl,
                 "pnl_pips": pips,
