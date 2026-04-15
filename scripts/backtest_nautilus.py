@@ -268,6 +268,9 @@ def cmd_run_month(args: argparse.Namespace) -> None:
     if args.consensus_threshold is not None:
         bot_kwargs["consensus_threshold"] = args.consensus_threshold
     bot_kwargs["max_timeframe"] = max_timeframe
+    if args.bot_overrides:
+        _ovr = json.loads(args.bot_overrides)
+        bot_kwargs.update(_ovr)
     bot_config = UnifiedBotConfig(**bot_kwargs)
     bot = UnifiedTradeBot(bot_config)
     bot.set_market_data(market_data)
@@ -640,6 +643,8 @@ def cmd_run(args: argparse.Namespace) -> None:
     max_timeframe = args.max_timeframe
     _p(f"consensus_threshold: {consensus_threshold or 'default(18.0)'}")
     _p(f"max_timeframe: {max_timeframe}")
+    if args.bot_overrides:
+        _p(f"bot_overrides: {args.bot_overrides}")
     _p()
 
     # 月タスク生成
@@ -682,6 +687,8 @@ def cmd_run(args: argparse.Namespace) -> None:
                 if consensus_threshold is not None:
                     cmd.extend(["--consensus-threshold", str(consensus_threshold)])
                 cmd.extend(["--max-timeframe", max_timeframe])
+                if args.bot_overrides:
+                    cmd.extend(["--bot-overrides", args.bot_overrides])
 
                 proc = subprocess.Popen(
                     cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
@@ -849,6 +856,8 @@ def main() -> None:
     run_p.add_argument("--consensus-threshold", type=float, default=None)
     run_p.add_argument("--max-timeframe", default="D1",
                        help="最大時間足キャップ（D1=既存, H4=マイクロモード）")
+    run_p.add_argument("--bot-overrides", default=None,
+                       help="UnifiedBotConfig上書きJSON (例: '{\"bca_min_edge\":0.70}')")
 
     # run-month（内部用サブコマンド: subprocessから呼ばれる）
     rm_p = sub.add_parser("run-month", help=argparse.SUPPRESS)
@@ -858,6 +867,7 @@ def main() -> None:
     rm_p.add_argument("--output", required=True)
     rm_p.add_argument("--consensus-threshold", type=float, default=None)
     rm_p.add_argument("--max-timeframe", default="D1")
+    rm_p.add_argument("--bot-overrides", default=None)
 
     # compare
     cmp_p = sub.add_parser("compare", help="結果比較")
