@@ -229,7 +229,13 @@ def cmd_run_month(args: argparse.Namespace) -> None:
     month_end = datetime(year + (1 if month == 12 else 0),
                          1 if month == 12 else month + 1, 1, tzinfo=UTC)
 
-    max_timeframe = args.max_timeframe
+    max_timeframe = args.max_timeframe  # None=プリセット値を使用
+
+    # プリセットからmax_timeframe解決（CLI未指定時）
+    if max_timeframe is None:
+        from autotrader.config.trading_params import get_symbol_overrides
+        _ovr = get_symbol_overrides(symbol)
+        max_timeframe = _ovr.get("signal", {}).get("max_timeframe", "D1")
 
     # データ読み込み
     market_data = _load_market_data(symbol, month_start, month_end,
@@ -267,7 +273,8 @@ def cmd_run_month(args: argparse.Namespace) -> None:
     bot_kwargs.update(sym_ovr.get("risk_mgmt", {}))
     if args.consensus_threshold is not None:
         bot_kwargs["consensus_threshold"] = args.consensus_threshold
-    bot_kwargs["max_timeframe"] = max_timeframe
+    if max_timeframe is not None:
+        bot_kwargs["max_timeframe"] = max_timeframe
     if args.bot_overrides:
         _ovr = json.loads(args.bot_overrides)
         bot_kwargs.update(_ovr)
@@ -640,9 +647,14 @@ def cmd_run(args: argparse.Namespace) -> None:
     _p(f"期間: {start.date()} → {end.date()}")
     _p(f"モード: {args.mode}")
     _p(f"CPU: {cpus}")
-    max_timeframe = args.max_timeframe
-    _p(f"consensus_threshold: {consensus_threshold or 'default(18.0)'}")
-    _p(f"max_timeframe: {max_timeframe}")
+    max_timeframe = args.max_timeframe  # None=プリセット値を使用
+    # 表示用: プリセットから解決
+    from autotrader.config.trading_params import get_symbol_overrides
+    _sym_ovr = get_symbol_overrides(symbol)
+    _display_mt = max_timeframe or _sym_ovr.get("signal", {}).get("max_timeframe", "D1")
+    _display_ct = consensus_threshold if consensus_threshold is not None else _sym_ovr.get("signal", {}).get("consensus_threshold", 18.0)
+    _p(f"consensus_threshold: {_display_ct}")
+    _p(f"max_timeframe: {_display_mt}")
     if args.bot_overrides:
         _p(f"bot_overrides: {args.bot_overrides}")
     _p()
@@ -686,7 +698,8 @@ def cmd_run(args: argparse.Namespace) -> None:
                 ]
                 if consensus_threshold is not None:
                     cmd.extend(["--consensus-threshold", str(consensus_threshold)])
-                cmd.extend(["--max-timeframe", max_timeframe])
+                if max_timeframe is not None:
+                    cmd.extend(["--max-timeframe", max_timeframe])
                 if args.bot_overrides:
                     cmd.extend(["--bot-overrides", args.bot_overrides])
 
@@ -767,8 +780,8 @@ def cmd_run(args: argparse.Namespace) -> None:
             "symbol": symbol,
             "period": {"start": args.start, "end": args.end},
             "mode": args.mode,
-            "consensus_threshold": consensus_threshold,
-            "max_timeframe": max_timeframe,
+            "consensus_threshold": _display_ct,
+            "max_timeframe": _display_mt,
             "initial_balance": initial_balance,
             "elapsed_s": elapsed,
             "trades": all_trades,
@@ -854,8 +867,8 @@ def main() -> None:
     run_p.add_argument("--mode", default="bar", choices=["bar", "tick"])
     run_p.add_argument("--cpus", type=int, default=12, help="並列CPU数")
     run_p.add_argument("--consensus-threshold", type=float, default=None)
-    run_p.add_argument("--max-timeframe", default="D1",
-                       help="最大時間足キャップ（D1=既存, H4=マイクロモード）")
+    run_p.add_argument("--max-timeframe", default=None,
+                       help="最大時間足キャップ（省略=プリセット値, D1=既存, H4=マイクロモード）")
     run_p.add_argument("--bot-overrides", default=None,
                        help="UnifiedBotConfig上書きJSON (例: '{\"bca_min_edge\":0.70}')")
 
@@ -866,7 +879,7 @@ def main() -> None:
     rm_p.add_argument("--month", type=int, required=True)
     rm_p.add_argument("--output", required=True)
     rm_p.add_argument("--consensus-threshold", type=float, default=None)
-    rm_p.add_argument("--max-timeframe", default="D1")
+    rm_p.add_argument("--max-timeframe", default=None)
     rm_p.add_argument("--bot-overrides", default=None)
 
     # compare
