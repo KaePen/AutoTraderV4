@@ -241,8 +241,10 @@ symbols:
     equity_floor_pct: 0.30
     signal:
       trend_strength_max: 0.85    # WI: +1,353K, WR +0.3pp vs 0.7
-
       regime_trend_threshold_add: 2.0  # RL-T: TREND DD圧縮
+      # H4マイクロモード (Nautilus BT 2023-2025: WR 68.25%, 1436 trades, +1.53M)
+      max_timeframe: "H4"
+      consensus_threshold: 10.0
 
   EURJPY:
     pip_value: 100.0
