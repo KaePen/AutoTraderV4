@@ -41,7 +41,7 @@ _NAUTILUS_SYMBOL_MAP = {
     "EURUSD": "EUR/USD", "GBPUSD": "GBP/USD",
 }
 
-_TIMEFRAMES = ["M1", "M5", "M15", "M30", "H1", "H4", "H8", "D1"]
+_TIMEFRAMES_ALL = ["M1", "M5", "M15", "M30", "H1", "H4", "H8", "D1"]
 
 
 def _get_data_dir() -> Path:
@@ -58,10 +58,12 @@ def _load_market_data(
     symbol: str,
     start: datetime,
     end: datetime,
+    max_timeframe: str = "D1",
 ) -> dict[str, pd.DataFrame]:
     """既存BTと同一の.indicator_cacheからデータを読み込み."""
     from autotrader.backtest.data_loader import DataLoader
     from autotrader.calculator.precompute import PrecomputeEngine
+    from autotrader.core.enums import Timeframe
 
     data_dir = _get_data_dir()
     symbol_dir = data_dir / symbol
@@ -76,7 +78,14 @@ def _load_market_data(
     end_year = end.year
     needed_years = list(range(start_year, end_year + 1))
 
-    for tf in _TIMEFRAMES:
+    # max_timeframe でTFリストをキャップ
+    cap_minutes = Timeframe(max_timeframe).minutes()
+    timeframes = [
+        tf for tf in _TIMEFRAMES_ALL
+        if Timeframe(tf).minutes() <= cap_minutes
+    ]
+
+    for tf in timeframes:
         df: pd.DataFrame | None = None
 
         # 優先1: .indicator_cache/
@@ -220,8 +229,11 @@ def cmd_run_month(args: argparse.Namespace) -> None:
     month_end = datetime(year + (1 if month == 12 else 0),
                          1 if month == 12 else month + 1, 1, tzinfo=UTC)
 
+    max_timeframe = args.max_timeframe
+
     # データ読み込み
-    market_data = _load_market_data(symbol, month_start, month_end)
+    market_data = _load_market_data(symbol, month_start, month_end,
+                                    max_timeframe=max_timeframe)
     if "M1" not in market_data:
         json.dump({"year": year, "month": month, "trades": [], "error": "M1データなし"},
                   open(output_path, "w"))
@@ -255,6 +267,7 @@ def cmd_run_month(args: argparse.Namespace) -> None:
     bot_kwargs.update(sym_ovr.get("risk_mgmt", {}))
     if args.consensus_threshold is not None:
         bot_kwargs["consensus_threshold"] = args.consensus_threshold
+    bot_kwargs["max_timeframe"] = max_timeframe
     bot_config = UnifiedBotConfig(**bot_kwargs)
     bot = UnifiedTradeBot(bot_config)
     bot.set_market_data(market_data)
@@ -624,7 +637,9 @@ def cmd_run(args: argparse.Namespace) -> None:
     _p(f"期間: {start.date()} → {end.date()}")
     _p(f"モード: {args.mode}")
     _p(f"CPU: {cpus}")
+    max_timeframe = args.max_timeframe
     _p(f"consensus_threshold: {consensus_threshold or 'default(18.0)'}")
+    _p(f"max_timeframe: {max_timeframe}")
     _p()
 
     # 月タスク生成
@@ -666,6 +681,7 @@ def cmd_run(args: argparse.Namespace) -> None:
                 ]
                 if consensus_threshold is not None:
                     cmd.extend(["--consensus-threshold", str(consensus_threshold)])
+                cmd.extend(["--max-timeframe", max_timeframe])
 
                 proc = subprocess.Popen(
                     cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
@@ -745,6 +761,7 @@ def cmd_run(args: argparse.Namespace) -> None:
             "period": {"start": args.start, "end": args.end},
             "mode": args.mode,
             "consensus_threshold": consensus_threshold,
+            "max_timeframe": max_timeframe,
             "initial_balance": initial_balance,
             "elapsed_s": elapsed,
             "trades": all_trades,
@@ -830,6 +847,8 @@ def main() -> None:
     run_p.add_argument("--mode", default="bar", choices=["bar", "tick"])
     run_p.add_argument("--cpus", type=int, default=12, help="並列CPU数")
     run_p.add_argument("--consensus-threshold", type=float, default=None)
+    run_p.add_argument("--max-timeframe", default="D1",
+                       help="最大時間足キャップ（D1=既存, H4=マイクロモード）")
 
     # run-month（内部用サブコマンド: subprocessから呼ばれる）
     rm_p = sub.add_parser("run-month", help=argparse.SUPPRESS)
@@ -838,6 +857,7 @@ def main() -> None:
     rm_p.add_argument("--month", type=int, required=True)
     rm_p.add_argument("--output", required=True)
     rm_p.add_argument("--consensus-threshold", type=float, default=None)
+    rm_p.add_argument("--max-timeframe", default="D1")
 
     # compare
     cmp_p = sub.add_parser("compare", help="結果比較")
