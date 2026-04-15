@@ -85,7 +85,7 @@ class TradingPlan:
             )
             config = UnifiedBotConfig()
         _confirm = [
-            tf for tf in config.timeframes
+            tf for tf in config.effective_timeframes
             if tf not in {
                 config.default_primary_tf,
                 config.default_entry_tf,
@@ -96,7 +96,7 @@ class TradingPlan:
             primary_tf=config.default_primary_tf,
             entry_tf=config.default_entry_tf,
             confirm_tfs=_confirm,
-            manage_tf=config.default_manage_tf,
+            manage_tf=config.effective_manage_tf,
             max_holding_bars=config.default_max_holding_bars,
             tp_sl_ratio_range=config.default_tp_sl_ratio_range,
             selection_reason="UNIVERSAL（動的TF選択）",

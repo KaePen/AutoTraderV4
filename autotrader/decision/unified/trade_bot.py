@@ -506,7 +506,7 @@ class UnifiedTradeBot:
             adaptive_config: アダプティブ調整設定（Noneで無効）
         """
         self.config = config or UnifiedBotConfig()
-        self.timeframes = self.config.timeframes
+        self.timeframes = self.config.effective_timeframes
 
         # 時間足別評価器
         self.evaluators: dict[str, TimeframeEvaluator] = {}
@@ -1083,7 +1083,7 @@ class UnifiedTradeBot:
             _htf_tfs = _dynamic_result.selected_htf_alignment_tfs
         else:
             _regime_tf = self.config.regime_detection_tf
-            _htf_tfs = list(self.config.htf_alignment_tfs)
+            _htf_tfs = list(self.config.effective_htf_alignment_tfs)
 
         # 6. レジーム検出（動的regime_tfを使用）
         regime_result = self._detect_regime(
@@ -2365,7 +2365,7 @@ class UnifiedTradeBot:
             float: HTF整合度（-1から1）
         """
         alignment_scores = []
-        _tfs = htf_tfs or list(self.config.htf_alignment_tfs)
+        _tfs = htf_tfs or list(self.config.effective_htf_alignment_tfs)
 
         for tf in _tfs:
             row = self._get_current_row(tf, current_time)
@@ -2942,7 +2942,7 @@ class UnifiedTradeBot:
             bool: トレンドが一致し、RSIが極端でないか
         """
         aligned_score = 0.0
-        check_tfs = htf_tfs or list(self.config.htf_alignment_tfs)
+        check_tfs = htf_tfs or list(self.config.effective_htf_alignment_tfs)
 
         # プライマリTF（最初のHTF）でRSIチェック
         primary_row = None

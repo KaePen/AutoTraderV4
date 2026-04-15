@@ -72,6 +72,15 @@ class DynamicTFSelector:
             bot_config: ボット設定（フォールバック値参照用）
         """
         self._bot_config = bot_config
+        # max_timeframe でラダーをキャップ
+        if bot_config is not None:
+            cap = Timeframe(bot_config.max_timeframe).minutes()
+            self._tf_ladder = [
+                tf for tf in MAJOR_TF_LADDER
+                if Timeframe(tf).minutes() <= cap
+            ]
+        else:
+            self._tf_ladder = list(MAJOR_TF_LADDER)
 
     def _snap_to_ladder(self, tf: str) -> int:
         """任意のTFを最も近い（以下の）ラダー段に吸着
@@ -82,8 +91,8 @@ class DynamicTFSelector:
         Returns:
             int: ラダーインデックス
         """
-        if tf in MAJOR_TF_LADDER:
-            return MAJOR_TF_LADDER.index(tf)
+        if tf in self._tf_ladder:
+            return self._tf_ladder.index(tf)
         # TF_HIERARCHYでの分数から最も近い以下のラダー段を選択
         try:
             tf_minutes = Timeframe(tf).minutes()
@@ -91,7 +100,7 @@ class DynamicTFSelector:
             return 2  # M15にフォールバック
         # ラダー各段の分数
         ladder_minutes = [
-            Timeframe(t).minutes() for t in MAJOR_TF_LADDER
+            Timeframe(t).minutes() for t in self._tf_ladder
         ]
         # tf_minutes以下で最も大きいラダー段
         best_idx = 0
@@ -114,7 +123,7 @@ class DynamicTFSelector:
         Returns:
             dict: primary_tf, manage_tf, regime_tf, htf_alignment_tfs
         """
-        ladder = MAJOR_TF_LADDER
+        ladder = self._tf_ladder
         entry_idx = self._snap_to_ladder(entry_tf)
 
         primary_idx = min(entry_idx + 1, len(ladder) - 1)
@@ -172,7 +181,7 @@ class DynamicTFSelector:
             _max_bars = self._bot_config.default_max_holding_bars
             _tp_sl = self._bot_config.default_tp_sl_ratio_range
             _regime = self._bot_config.regime_detection_tf
-            _htf = list(self._bot_config.htf_alignment_tfs)
+            _htf = list(self._bot_config.effective_htf_alignment_tfs)
         else:
             _entry = "M15"
             _primary = "H1"
