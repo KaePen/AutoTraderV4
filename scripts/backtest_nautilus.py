@@ -344,6 +344,7 @@ def cmd_run_month(args: argparse.Namespace) -> None:
             self._pos_atr: float = 0.002  # デフォルト20pips
             self._pos_score: float = 0.0
             self._partial_trades: list[dict] = []
+            self._pending_sig: Any = None  # 次足OPEN約定用
             iid = InstrumentId.from_str(self.config.iid)
             self._inst = self.cache.instrument(iid)
             if self._inst is None:
@@ -367,7 +368,7 @@ def cmd_run_month(args: argparse.Namespace) -> None:
             """部分決済"""
             if self._inst is None:
                 return
-            positions = self.cache.positions(self._inst.id)
+            positions = self.cache.positions_open(instrument_id=self._inst.id)
             if not positions:
                 return
             pos = positions[0]
@@ -472,7 +473,38 @@ def cmd_run_month(args: argparse.Namespace) -> None:
                         self._pos_sl = action.new_sl
                 return  # ポジション保有中は新規エントリーしない
 
-            # --- 新規エントリー ---
+            # --- pending signal 約定（次足OPENで実行）---
+            if not self._has_open_position() and self._pending_sig is not None:
+                sig = self._pending_sig
+                self._pending_sig = None
+                op = float(bar.open)  # 次足のOPEN価格で約定
+                pu = self.config.pu
+                if sig.direction == SignalType.BUY:
+                    sl, tp = op - sig.sl_pips * pu, op + sig.tp_pips * pu
+                else:
+                    sl, tp = op + sig.sl_pips * pu, op - sig.tp_pips * pu
+                lot = sig.lot if sig.lot else self.config.dl
+                qty = int(lot * 100_000)
+                side = OrderSide.BUY if sig.direction == SignalType.BUY else OrderSide.SELL
+                order = self.order_factory.market(
+                    instrument_id=self._inst.id,
+                    order_side=side,
+                    quantity=self._inst.make_qty(Decimal(str(qty))),
+                )
+                self._last_lot = lot
+                self._pos_dir = sig.direction
+                self._pos_entry = op
+                self._pos_sl = sl
+                self._pos_tp = tp
+                self._pos_score = sig.consensus_score or 0.0
+                self._partial_trades = []
+                self._pos_atr = 0.002
+                if hasattr(sig, "indicators_snapshot") and sig.indicators_snapshot:
+                    self._pos_atr = sig.indicators_snapshot.get("atr_14", 0.002)
+                self.submit_order(order)
+                return  # 約定処理完了、シグナル生成はスキップ
+
+            # --- シグナル生成 → pending保存（次足OPENで約定）---
             if self._has_open_position():
                 return
 
@@ -486,33 +518,8 @@ def cmd_run_month(args: argparse.Namespace) -> None:
                 return
             if sig.sl_pips <= 0 or sig.tp_pips <= 0:
                 return
-            pu = self.config.pu
-            if sig.direction == SignalType.BUY:
-                sl, tp = cl - sig.sl_pips * pu, cl + sig.tp_pips * pu
-            else:
-                sl, tp = cl + sig.sl_pips * pu, cl - sig.tp_pips * pu
-            lot = sig.lot if sig.lot else self.config.dl
-            qty = int(lot * 100_000)
-            side = OrderSide.BUY if sig.direction == SignalType.BUY else OrderSide.SELL
-            # PM管理: bracket注文ではなくmarket注文（SL/TPはPMが管理）
-            order = self.order_factory.market(
-                instrument_id=self._inst.id,
-                order_side=side,
-                quantity=self._inst.make_qty(Decimal(str(qty))),
-            )
-            self._last_lot = lot
-            self._pos_dir = sig.direction
-            self._pos_entry = cl
-            self._pos_sl = sl
-            self._pos_tp = tp
-            self._pos_score = sig.consensus_score or 0.0
-            self._partial_trades = []
-            # ATR取得
-            self._pos_atr = 0.002
-            if hasattr(sig, "indicators_snapshot") and sig.indicators_snapshot:
-                self._pos_atr = sig.indicators_snapshot.get("atr_14", 0.002)
-            self.submit_order(order)
-            # PM登録はon_position_openedで行う
+            # 次足のOPENで約定するためpendingに保存
+            self._pending_sig = sig
 
         def on_position_opened(self, event: Any) -> None:
             pos = self.cache.position(event.position_id)
