@@ -424,12 +424,17 @@ class BacktestRunner:
         if on_tf_loaded:
             on_tf_loaded("H4", _loaded, _total)
 
-        # 日足
-        df = self._load_chart_tf("Daily")
-        if df is None:
-            df = self._load_chart_tf("D1")
-        if df is not None:
-            self._d1_df = self._calculate_indicators(df)
+        # 日足（max_timeframe が D1 以上の場合のみロード）
+        from autotrader.core.enums import Timeframe as _TF
+
+        if _TF("D1").minutes() <= _TF(
+            getattr(self, "_max_timeframe", "D1")
+        ).minutes():
+            df = self._load_chart_tf("Daily")
+            if df is None:
+                df = self._load_chart_tf("D1")
+            if df is not None:
+                self._d1_df = self._calculate_indicators(df)
         _loaded += 1
         if on_tf_loaded:
             on_tf_loaded("D1", _loaded, _total)
@@ -1090,6 +1095,7 @@ class BacktestRunner:
             include_m1=_needs_short_tf,
             on_tf_loaded=_on_tf_loaded,
             needed_years=needed_years,
+            max_timeframe=bot_config.max_timeframe,
         )
 
         # シミュレーター設定
@@ -1511,6 +1517,7 @@ class BacktestRunner:
             include_m1=_needs_short_tf,
             on_tf_loaded=_on_tf_loaded if not use_parallel_tf else None,
             needed_years=needed_years,
+            max_timeframe=bot_config.max_timeframe,
         )
 
         # 並列マルチTFモードの場合（旧方式・後方互換）
@@ -1820,6 +1827,7 @@ class BacktestRunner:
         on_tf_loaded: "Callable[[str, int, int], None] | None" = None,
         needed_years: list[int] | None = None,
         timeframes_to_load: list[str] | None = None,
+        max_timeframe: str = "D1",
     ) -> dict[str, pd.DataFrame]:
         """全時間足データをロード
 
@@ -1838,6 +1846,7 @@ class BacktestRunner:
                 Noneの場合は全期間を返す（後方互換性）。
             timeframes_to_load: 明示的なTFリスト。指定時は
                 include_m1を無視してこのリストのTFのみロードする。
+            max_timeframe: 最大時間足キャップ（"D1"=全TF、"H4"=H4以下）。
 
         Returns:
             dict[str, pd.DataFrame]: 時間足別データフレーム
@@ -1863,6 +1872,15 @@ class BacktestRunner:
             ]
         else:
             timeframes_to_load = ["M15", "M30", "H1", "H4", "H8", "D1"]
+
+        # max_timeframe でキャップ
+        from autotrader.core.enums import Timeframe as _TF
+
+        _cap_minutes = _TF(max_timeframe).minutes()
+        timeframes_to_load = [
+            tf for tf in timeframes_to_load
+            if _TF(tf).minutes() <= _cap_minutes
+        ]
 
         total_tf = len(timeframes_to_load)
 

@@ -223,6 +223,8 @@ class SignalConfig:
     htf_alignment_tfs: list[str] = field(default_factory=lambda: ["H4", "D1"])
     macd_slope_filter_threshold: float = -2.0
     trend_strength_max: float = 0.6
+    # 最大時間足キャップ（"D1"=既存動作、"H4"=マイクロモード）
+    max_timeframe: str = "D1"
 
 
 @dataclass(frozen=True)
@@ -587,6 +589,9 @@ class UnifiedBotConfig:
     m1_exec_gate_bb_high: float = 0.7
     # 通過に必要な最小スコア
     m1_exec_gate_threshold: float = 1.0
+    # --- 最大時間足キャップ ---
+    # "D1"=既存動作、"H4"=マイクロモード（D1を除外しトレード回数増加）
+    max_timeframe: str = "D1"
     # --- pip単位 ---
     # 1pipの価格単位（JPY系=0.01、非JPY系=0.0001）
     pip_unit: float = 0.01
@@ -703,6 +708,38 @@ class UnifiedBotConfig:
     # RSI順方向ボーナス値
     rsi_bonus: float = 1.0
 
+    @property
+    def effective_timeframes(self) -> list[str]:
+        """max_timeframe でキャップされた時間足リスト"""
+        from autotrader.core.enums import Timeframe
+
+        cap = Timeframe(self.max_timeframe).minutes()
+        return [
+            tf for tf in self.timeframes
+            if Timeframe(tf).minutes() <= cap
+        ]
+
+    @property
+    def effective_htf_alignment_tfs(self) -> list[str]:
+        """max_timeframe でキャップされたHTF整合TFリスト"""
+        from autotrader.core.enums import Timeframe
+
+        cap = Timeframe(self.max_timeframe).minutes()
+        return [
+            tf for tf in self.htf_alignment_tfs
+            if Timeframe(tf).minutes() <= cap
+        ]
+
+    @property
+    def effective_manage_tf(self) -> str:
+        """max_timeframe でキャップされた管理TF"""
+        from autotrader.core.enums import Timeframe
+
+        cap = Timeframe(self.max_timeframe).minutes()
+        if Timeframe(self.default_manage_tf).minutes() <= cap:
+            return self.default_manage_tf
+        return self.max_timeframe
+
     def get_evaluator_config(self, timeframe: str) -> EvaluatorConfig:
         """時間足別評価器設定を取得
 
@@ -772,6 +809,7 @@ class UnifiedBotConfig:
             htf_alignment_tfs=list(self.htf_alignment_tfs),
             macd_slope_filter_threshold=(self.macd_slope_filter_threshold),
             trend_strength_max=self.trend_strength_max,
+            max_timeframe=self.max_timeframe,
         )
 
     def to_risk_management_config(self) -> RiskManagementConfig:
