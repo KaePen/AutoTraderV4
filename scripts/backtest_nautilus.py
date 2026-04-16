@@ -796,12 +796,12 @@ def cmd_run(args: argparse.Namespace) -> None:
 
 
 # ---------------------------------------------------------------------------
-# compare: 結果比較
+# run-multi-month: 1ヶ月分マルチペアシミュレーション（サブプロセスとして実行）
 # ---------------------------------------------------------------------------
 
 
-def cmd_run_multi(args: argparse.Namespace) -> None:
-    """マルチペア同時シミュレーション（純粋Pythonループ）."""
+def cmd_run_multi_month(args: argparse.Namespace) -> None:
+    """1ヶ月分のマルチペア同時シミュレーションを実行し、結果をJSONファイルに出力."""
     import yaml
 
     from autotrader.config.trading_params import (
@@ -826,13 +826,13 @@ def cmd_run_multi(args: argparse.Namespace) -> None:
     from autotrader.decision.unified.trade_bot import UnifiedTradeBot
 
     symbols = [s.strip() for s in args.symbols.split(",")]
-    start = datetime.strptime(args.start, "%Y-%m-%d").replace(tzinfo=UTC)
-    end = datetime.strptime(args.end, "%Y-%m-%d").replace(tzinfo=UTC)
+    year = args.year
+    month = args.month
+    output_path = Path(args.output)
 
-    _p = lambda *a, **k: print(*a, **k, flush=True)
-    _p("=== Nautilus マルチペアバックテスト ===")
-    _p(f"通貨ペア: {', '.join(symbols)}")
-    _p(f"期間: {start.date()} -> {end.date()}")
+    month_start = datetime(year, month, 1, tzinfo=UTC)
+    month_end = datetime(year + (1 if month == 12 else 0),
+                         1 if month == 12 else month + 1, 1, tzinfo=UTC)
 
     # multi_pair設定読み込み
     with open(_ROOT / "config" / "symbol_presets.yaml") as f:
@@ -842,14 +842,6 @@ def cmd_run_multi(args: argparse.Namespace) -> None:
     per_pair_max_positions = mp_cfg.get("per_pair_max_positions", 1)
     global_max_exposure_lot = mp_cfg.get("global_max_exposure_lot", 5.0)
     max_same_direction_jpy = mp_cfg.get("max_same_direction_jpy", 3)
-
-    _p(f"global_max_positions: {global_max_positions}")
-    _p(f"per_pair_max_positions: {per_pair_max_positions}")
-    _p(f"global_max_exposure_lot: {global_max_exposure_lot}")
-    _p(f"max_same_direction_jpy: {max_same_direction_jpy}")
-    if args.bot_overrides:
-        _p(f"bot_overrides: {args.bot_overrides}")
-    _p()
 
     # --- PortfolioState ---
     entry_gate = EntryGateChecker()
@@ -894,7 +886,6 @@ def cmd_run_multi(args: argparse.Namespace) -> None:
         )
         result = entry_gate.evaluate(ctx)
         if not result.allowed:
-            # Track block reasons
             code = result.deny_code or ""
             if "global_position" in code:
                 blocked_counts["global"] += 1
@@ -909,20 +900,22 @@ def cmd_run_multi(args: argparse.Namespace) -> None:
     pms: dict[str, PositionManager] = {}
     presets: dict[str, Any] = {}
     pip_units: dict[str, float] = {}
+    pip_values: dict[str, float] = {}  # pip_value per lot (JPY建て)
     m1_data: dict[str, pd.DataFrame] = {}
-    pending_signals: dict[str, Any] = {}  # symbol -> signal
-    pos_meta: dict[str, dict[str, Any]] = {}  # symbol -> position metadata
+    pending_signals: dict[str, Any] = {}
+    pos_meta: dict[str, dict[str, Any]] = {}
     trade_results: list[dict[str, Any]] = []
     pos_counter = 0
 
-    t0 = _time.time()
-
+    valid_symbols: list[str] = []
     for symbol in symbols:
         preset = get_preset(symbol)
         presets[symbol] = preset
         pip_unit = get_pip_unit(symbol)
         pip_units[symbol] = pip_unit
         qcr = get_quote_ccy_rate(symbol)
+        # pip_value = 100,000通貨 × pip_unit × quote_ccy_rate (JPY建て)
+        pip_values[symbol] = 100_000 * pip_unit * qcr
 
         sym_ovr = get_symbol_overrides(symbol)
         sym_ovr.pop("multi_consensus_threshold", None)
@@ -949,12 +942,9 @@ def cmd_run_multi(args: argparse.Namespace) -> None:
         bot_config = UnifiedBotConfig(**bot_kwargs)
 
         # データ読み込み
-        _p(f"  {symbol}: データ読み込み中...")
-        market_data = _load_market_data(symbol, start, end,
+        market_data = _load_market_data(symbol, month_start, month_end,
                                         max_timeframe=max_timeframe)
         if "M1" not in market_data:
-            _p(f"  {symbol}: M1データなし、スキップ")
-            symbols = [s for s in symbols if s != symbol]
             continue
 
         bot = UnifiedTradeBot(bot_config)
@@ -968,40 +958,29 @@ def cmd_run_multi(args: argparse.Namespace) -> None:
         )
         pms[symbol] = PositionManager(pm_config)
 
-        # M1データ抽出（期間内のみ）
+        # M1データ抽出（月内のみ）
         m1_df = market_data["M1"].copy()
         if "time" in m1_df.columns:
             m1_df["time"] = pd.to_datetime(m1_df["time"], utc=True)
-            m1_df = m1_df[(m1_df["time"] >= start) & (m1_df["time"] < end)]
+            m1_df = m1_df[(m1_df["time"] >= month_start) & (m1_df["time"] < month_end)]
         m1_data[symbol] = m1_df
+        valid_symbols.append(symbol)
 
     if not bots:
-        _p("ERROR: 有効なペアがありません")
+        json.dump({"year": year, "month": month, "trades": [],
+                   "blocked": blocked_counts}, open(output_path, "w"))
         return
 
-    _p(f"\n  有効ペア: {len(bots)}, データ読み込み完了 ({_time.time() - t0:.1f}s)")
-
     # --- M1バーをインターリーブ（時刻順、同時刻はペア名辞書順）---
-    _p("  M1バーをインターリーブ中...")
-    bar_events: list[tuple[pd.Timestamp, str, int]] = []  # (time, symbol, row_idx)
+    bar_events: list[tuple[pd.Timestamp, str, int]] = []
     for symbol, df in m1_data.items():
         times = pd.to_datetime(df["time"], utc=True) if "time" in df.columns else df.index
         for i, t in enumerate(times):
             bar_events.append((t, symbol, i))
     bar_events.sort(key=lambda x: (x[0], x[1]))
-    _p(f"  総M1バー数: {len(bar_events):,}")
-    _p()
 
     # --- メインシミュレーションループ ---
-    _p("  シミュレーション実行中...")
-    progress_interval = max(1, len(bar_events) // 20)
-
-    for bar_idx, (bar_time, symbol, row_idx) in enumerate(bar_events):
-        if bar_idx % progress_interval == 0 and bar_idx > 0:
-            pct = bar_idx / len(bar_events) * 100
-            _p(f"    {pct:.0f}% ({bar_idx:,}/{len(bar_events):,}) "
-               f"trades={len(trade_results)} positions={portfolio_global_count()}")
-
+    for _bar_idx, (bar_time, symbol, row_idx) in enumerate(bar_events):
         row = m1_data[symbol].iloc[row_idx]
         bt = bar_time if isinstance(bar_time, pd.Timestamp) else pd.Timestamp(bar_time)
         bar_dt = bt.to_pydatetime()
@@ -1011,6 +990,7 @@ def cmd_run_multi(args: argparse.Namespace) -> None:
         op = float(row["open"])
         vol = float(row.get("tick_volume", row.get("volume", 0)))
         pu = pip_units[symbol]
+        pv = pip_values[symbol]
         preset = presets[symbol]
         bot = bots[symbol]
         pm = pms[symbol]
@@ -1026,12 +1006,11 @@ def cmd_run_multi(args: argparse.Namespace) -> None:
             hit_tp = (pos["tp"] > 0 and hi >= pos["tp"]) if is_buy else (pos["tp"] > 0 and lo <= pos["tp"])
 
             if hit_sl or hit_tp:
-                # SL/TPヒット: 決済（スプレッド適用: BUY→bid, SELL→ask）
                 raw_exit = pos["sl"] if hit_sl else pos["tp"]
                 spread = presets[symbol].spread_pips * pu
                 exit_price = raw_exit if is_buy else raw_exit + spread
                 pips = (exit_price - pos["entry"]) / pu if is_buy else (pos["entry"] - exit_price) / pu
-                pnl = pips * 1000.0 * pos["lot"]
+                pnl = pips * pv * pos["lot"]
                 for pt in meta.get("partial_trades", []):
                     trade_results.append(pt)
                 if pos["lot"] > 0.001:
@@ -1070,11 +1049,10 @@ def cmd_run_multi(args: argparse.Namespace) -> None:
             )
 
             if action.action_type == ManagementActionType.FULL_CLOSE:
-                # スプレッド適用: BUY→bid(cl), SELL→ask(cl+spread)
                 spread = presets[symbol].spread_pips * pu
                 exit_cl = cl if is_buy else cl + spread
                 pips = (exit_cl - pos["entry"]) / pu if is_buy else (pos["entry"] - exit_cl) / pu
-                pnl = pips * 1000.0 * pos["lot"]
+                pnl = pips * pv * pos["lot"]
                 for pt in meta.get("partial_trades", []):
                     trade_results.append(pt)
                 if pos["lot"] > 0.001:
@@ -1099,7 +1077,7 @@ def cmd_run_multi(args: argparse.Namespace) -> None:
                 spread = presets[symbol].spread_pips * pu
                 exit_cl = cl if is_buy else cl + spread
                 pips = (exit_cl - pos["entry"]) / pu if is_buy else (pos["entry"] - exit_cl) / pu
-                pnl = pips * 1000.0 * close_lot
+                pnl = pips * pv * close_lot
                 meta.setdefault("partial_trades", []).append({
                     "symbol": symbol,
                     "direction": "BUY" if is_buy else "SELL",
@@ -1123,7 +1101,6 @@ def cmd_run_multi(args: argparse.Namespace) -> None:
         # --- pending signal 約定（次足OPENで実行）---
         if symbol not in positions and symbol in pending_signals:
             sig = pending_signals.pop(symbol)
-            # スプレッド適用: BUY→ask(open+spread), SELL→bid(open)
             spread = preset.spread_pips * pu
             if sig.direction == SignalType.BUY:
                 fill_price = op + spread
@@ -1134,7 +1111,6 @@ def cmd_run_multi(args: argparse.Namespace) -> None:
             lot = sig.lot if sig.lot else preset.min_lot
             consensus_score = sig.consensus_score or 0.0
 
-            # EntryGateで可否判定
             allowed, deny_reason = portfolio_can_open(
                 symbol, sig.direction, lot, consensus_score, preset,
             )
@@ -1152,7 +1128,6 @@ def cmd_run_multi(args: argparse.Namespace) -> None:
                 "opened_at": bar_dt,
             }
 
-            # TradingPlan作成・PM登録
             bot_config = bots[symbol].config
             plan = TradingPlan.create_universal(bot_config)
             from dataclasses import replace as _dc_replace
@@ -1177,7 +1152,7 @@ def cmd_run_multi(args: argparse.Namespace) -> None:
                 "score": consensus_score,
                 "partial_trades": [],
             }
-            continue  # 約定処理完了、シグナル生成はスキップ
+            continue
 
         # --- シグナル生成 → pending保存 ---
         if symbol in positions:
@@ -1193,19 +1168,19 @@ def cmd_run_multi(args: argparse.Namespace) -> None:
             continue
         pending_signals[symbol] = sig
 
-    # --- 強制クローズ（シミュレーション終了時のオープンポジション）---
+    # --- 月末強制クローズ ---
     for symbol in list(positions.keys()):
         pos = positions[symbol]
         meta = pos_meta[symbol]
         is_buy = pos["direction"] == SignalType.BUY
-        # 最終M1バーのcloseで決済（スプレッド適用）
         last_row = m1_data[symbol].iloc[-1]
         cl = float(last_row["close"])
         pu = pip_units[symbol]
+        pv = pip_values[symbol]
         spread = presets[symbol].spread_pips * pu
         exit_cl = cl if is_buy else cl + spread
         pips = (exit_cl - pos["entry"]) / pu if is_buy else (pos["entry"] - exit_cl) / pu
-        pnl = pips * 1000.0 * pos["lot"]
+        pnl = pips * pv * pos["lot"]
         for pt in meta.get("partial_trades", []):
             trade_results.append(pt)
         if pos["lot"] > 0.001:
@@ -1223,18 +1198,139 @@ def cmd_run_multi(args: argparse.Namespace) -> None:
             })
         pms[symbol].unregister_position(meta["pos_id"])
 
+    # 結果出力
+    with open(output_path, "w") as f:
+        json.dump({
+            "year": year,
+            "month": month,
+            "trades": trade_results,
+            "blocked": blocked_counts,
+        }, f, default=str)
+
+
+# ---------------------------------------------------------------------------
+# run-multi: subprocess並列でマルチペアバックテスト実行
+# ---------------------------------------------------------------------------
+
+
+def cmd_run_multi(args: argparse.Namespace) -> None:
+    """マルチペアバックテストを月並列（subprocess）で実行."""
+
+    symbols = [s.strip() for s in args.symbols.split(",")]
+    start = datetime.strptime(args.start, "%Y-%m-%d").replace(tzinfo=UTC)
+    end = datetime.strptime(args.end, "%Y-%m-%d").replace(tzinfo=UTC)
+    cpus = args.cpus
+
+    _p = lambda *a, **k: print(*a, **k, flush=True)
+    _p("=== Nautilus マルチペアバックテスト（月並列） ===")
+    _p(f"通貨ペア: {', '.join(symbols)}")
+    _p(f"期間: {start.date()} -> {end.date()}")
+    _p(f"CPU: {cpus}")
+
+    # multi_pair設定読み込み（表示用）
+    import yaml
+    with open(_ROOT / "config" / "symbol_presets.yaml") as f:
+        raw = yaml.safe_load(f)
+    mp_cfg = raw.get("multi_pair", {})
+    _p(f"global_max_positions: {mp_cfg.get('global_max_positions', 4)}")
+    _p(f"per_pair_max_positions: {mp_cfg.get('per_pair_max_positions', 1)}")
+    _p(f"global_max_exposure_lot: {mp_cfg.get('global_max_exposure_lot', 5.0)}")
+    _p(f"max_same_direction_jpy: {mp_cfg.get('max_same_direction_jpy', 3)}")
+    if args.bot_overrides:
+        _p(f"bot_overrides: {args.bot_overrides}")
+    _p()
+
+    # 月タスク生成
+    months: list[tuple[int, int]] = []
+    current = start
+    while current < end:
+        months.append((current.year, current.month))
+        if current.month == 12:
+            current = datetime(current.year + 1, 1, 1, tzinfo=UTC)
+        else:
+            current = datetime(current.year, current.month + 1, 1, tzinfo=UTC)
+
+    _p(f"月タスク数: {len(months)}")
+    t0 = _time.time()
+
+    # 一時ディレクトリで結果ファイルを管理
+    with tempfile.TemporaryDirectory(prefix="nautilus_multi_") as tmp_dir:
+        tmp_path = Path(tmp_dir)
+
+        active: dict[tuple[int, int], tuple[subprocess.Popen, Path]] = {}
+        pending = list(months)
+        completed: list[dict[str, Any]] = []
+        failed: list[tuple[int, int, str]] = []
+
+        script_path = Path(__file__).resolve()
+
+        while pending or active:
+            # 空きスロットにタスク投入
+            while pending and len(active) < cpus:
+                year, month = pending.pop(0)
+                out_file = tmp_path / f"{year}_{month:02d}.json"
+                cmd = [
+                    sys.executable, str(script_path), "run-multi-month",
+                    "--symbols", ",".join(symbols),
+                    "--year", str(year),
+                    "--month", str(month),
+                    "--output", str(out_file),
+                ]
+                if args.bot_overrides:
+                    cmd.extend(["--bot-overrides", args.bot_overrides])
+
+                proc = subprocess.Popen(
+                    cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                    cwd=str(_ROOT),
+                )
+                active[(year, month)] = (proc, out_file)
+
+            # 完了チェック
+            done_keys = []
+            for key, (proc, out_file) in active.items():
+                ret = proc.poll()
+                if ret is not None:
+                    done_keys.append(key)
+                    year, month = key
+                    if ret == 0 and out_file.exists():
+                        with open(out_file) as f:
+                            result = json.load(f)
+                        n = len(result.get("trades", []))
+                        _p(f"  [{len(completed)+len(failed)+1}/{len(months)}] "
+                           f"{year}-{month:02d}: {n} trades")
+                        completed.append(result)
+                    else:
+                        _p(f"  [{len(completed)+len(failed)+1}/{len(months)}] "
+                           f"{year}-{month:02d}: FAILED (exit={ret})")
+                        failed.append((year, month, f"exit={ret}"))
+
+            for k in done_keys:
+                del active[k]
+
+            if active:
+                _time.sleep(0.5)
+
     elapsed = _time.time() - t0
+    _p(f"\n完了: {elapsed:.1f}s ({len(failed)} failures)")
+
+    # マージ
+    all_trades: list[dict[str, Any]] = []
+    total_blocked = {"global": 0, "exposure": 0, "jpy_direction": 0}
+    for r in sorted(completed, key=lambda x: (x["year"], x["month"])):
+        all_trades.extend(r.get("trades", []))
+        blk = r.get("blocked", {})
+        for k in total_blocked:
+            total_blocked[k] += blk.get(k, 0)
+    all_trades.sort(key=lambda t: t.get("opened_at", ""))
 
     # --- 結果集計 ---
-    trade_results.sort(key=lambda t: t.get("opened_at", ""))
-
-    _p(f"\n=== 結果 ({elapsed:.1f}s) ===")
-    _p(f"トレード数: {len(trade_results)}")
+    _p(f"\n=== 結果 ===")
+    _p(f"トレード数: {len(all_trades)}")
 
     # ペア別サマリー
     per_symbol: dict[str, dict[str, Any]] = {}
     for sym in symbols:
-        sym_trades = [t for t in trade_results if t["symbol"] == sym]
+        sym_trades = [t for t in all_trades if t["symbol"] == sym]
         if not sym_trades:
             per_symbol[sym] = {"total_trades": 0, "win_rate": 0.0, "total_pnl": 0.0}
             continue
@@ -1249,16 +1345,16 @@ def cmd_run_multi(args: argparse.Namespace) -> None:
         _p(f"  {sym}: {len(sym_trades)} trades, WR={wr:.1f}%, PnL={total_pnl:,.0f}")
 
     # ポートフォリオサマリー
-    total_pnl = sum(t["pnl"] for t in trade_results) if trade_results else 0.0
+    total_pnl = sum(t["pnl"] for t in all_trades) if all_trades else 0.0
     win_rate = 0.0
-    if trade_results:
-        wins = [t for t in trade_results if t["pnl"] > 0]
-        win_rate = len(wins) / len(trade_results) * 100
+    if all_trades:
+        wins = [t for t in all_trades if t["pnl"] > 0]
+        win_rate = len(wins) / len(all_trades) * 100
 
-    _p(f"\n  ポートフォリオ: {len(trade_results)} trades, WR={win_rate:.1f}%, PnL={total_pnl:,.0f}")
-    _p(f"  ブロック: global={blocked_counts['global']}, "
-       f"exposure={blocked_counts['exposure']}, "
-       f"jpy_direction={blocked_counts['jpy_direction']}")
+    _p(f"\n  ポートフォリオ: {len(all_trades)} trades, WR={win_rate:.1f}%, PnL={total_pnl:,.0f}")
+    _p(f"  ブロック: global={total_blocked['global']}, "
+       f"exposure={total_blocked['exposure']}, "
+       f"jpy_direction={total_blocked['jpy_direction']}")
 
     # JSON保存
     results_dir = _ROOT / "backtest_results" / "nautilus"
@@ -1270,21 +1366,21 @@ def cmd_run_multi(args: argparse.Namespace) -> None:
         "symbols": symbols,
         "period": {"start": args.start, "end": args.end},
         "multi_pair_config": {
-            "global_max_positions": global_max_positions,
-            "per_pair_max_positions": per_pair_max_positions,
-            "global_max_exposure_lot": global_max_exposure_lot,
-            "max_same_direction_jpy": max_same_direction_jpy,
+            "global_max_positions": mp_cfg.get("global_max_positions", 4),
+            "per_pair_max_positions": mp_cfg.get("per_pair_max_positions", 1),
+            "global_max_exposure_lot": mp_cfg.get("global_max_exposure_lot", 5.0),
+            "max_same_direction_jpy": mp_cfg.get("max_same_direction_jpy", 3),
         },
         "elapsed_s": elapsed,
-        "trades": trade_results,
+        "trades": all_trades,
         "per_symbol_summary": per_symbol,
         "portfolio_summary": {
-            "total_trades": len(trade_results),
+            "total_trades": len(all_trades),
             "win_rate": win_rate,
             "total_pnl": total_pnl,
-            "blocked_global": blocked_counts["global"],
-            "blocked_exposure": blocked_counts["exposure"],
-            "blocked_jpy_direction": blocked_counts["jpy_direction"],
+            "blocked_global": total_blocked["global"],
+            "blocked_exposure": total_blocked["exposure"],
+            "blocked_jpy_direction": total_blocked["jpy_direction"],
         },
     }
 
@@ -1382,14 +1478,23 @@ def main() -> None:
     rm_p.add_argument("--bot-overrides", default=None)
 
     # run-multi
-    rm_p2 = sub.add_parser("run-multi", help="マルチペア同時シミュレーション")
+    rm_p2 = sub.add_parser("run-multi", help="マルチペア同時シミュレーション（月並列）")
     _default_symbols = "USDJPY,EURJPY,GBPJPY,AUDJPY,CADJPY,CHFJPY,EURUSD,GBPUSD"
     rm_p2.add_argument("--symbols", default=_default_symbols,
                         help=f"カンマ区切りの通貨ペアリスト (デフォルト: {_default_symbols})")
     rm_p2.add_argument("--start", required=True, help="開始日 (YYYY-MM-DD)")
     rm_p2.add_argument("--end", required=True, help="終了日 (YYYY-MM-DD)")
+    rm_p2.add_argument("--cpus", type=int, default=12, help="並列CPU数")
     rm_p2.add_argument("--bot-overrides", default=None,
                         help="全ペア共通のUnifiedBotConfig上書きJSON")
+
+    # run-multi-month（内部用サブコマンド: subprocessから呼ばれる）
+    rmm_p = sub.add_parser("run-multi-month", help=argparse.SUPPRESS)
+    rmm_p.add_argument("--symbols", required=True)
+    rmm_p.add_argument("--year", type=int, required=True)
+    rmm_p.add_argument("--month", type=int, required=True)
+    rmm_p.add_argument("--output", required=True)
+    rmm_p.add_argument("--bot-overrides", default=None)
 
     # compare
     cmp_p = sub.add_parser("compare", help="結果比較")
@@ -1408,7 +1513,8 @@ def main() -> None:
 
     cmds = {
         "run": cmd_run, "run-month": cmd_run_month,
-        "run-multi": cmd_run_multi, "compare": cmd_compare,
+        "run-multi": cmd_run_multi, "run-multi-month": cmd_run_multi_month,
+        "compare": cmd_compare,
     }
     cmds[args.command](args)
 
