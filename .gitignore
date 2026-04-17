@@ -35,6 +35,7 @@ htmlcov/
 .hypothesis/
 data/
 userdoc/
+backtest_results/
 
 # mypy
 .mypy_cache/
