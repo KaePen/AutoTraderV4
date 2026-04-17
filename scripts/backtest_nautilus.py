@@ -939,11 +939,13 @@ def cmd_run_multi_month(args: argparse.Namespace) -> None:
         bot_kwargs["max_timeframe"] = max_timeframe
         if args.bot_overrides:
             bot_kwargs.update(json.loads(args.bot_overrides))
+        # bot_overridesでmax_timeframeが上書きされた場合、データ読み込みにも反映
+        effective_max_tf = bot_kwargs.get("max_timeframe", max_timeframe)
         bot_config = UnifiedBotConfig(**bot_kwargs)
 
         # データ読み込み
         market_data = _load_market_data(symbol, month_start, month_end,
-                                        max_timeframe=max_timeframe)
+                                        max_timeframe=effective_max_tf)
         if "M1" not in market_data:
             continue
 
