@@ -1306,7 +1306,7 @@ def cmd_run_multi_month(args: argparse.Namespace) -> None:
                 iid=f"{nautilus_symbol}.SIM",
                 bt=f"{nautilus_symbol}.SIM-1-MINUTE-MID-EXTERNAL",
                 sym=symbol, pu=pip_unit, dl=preset.min_lot,
-                strategy_id=StrategyId(f"MultiPair-{symbol}"),
+                strategy_id=f"MultiPair-{symbol}",
             ),
             tb=bot, pm=pm, bot_cfg=bot_config,
             shared_state=shared, preset=preset,
