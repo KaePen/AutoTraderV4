@@ -12,7 +12,7 @@
 
 # --- シグナル生成設定（全通貨ペア共通デフォルト）---
 signal:
-  consensus_threshold: 18.0           # IMP-H1 BT公正性改善後の最適値
+  consensus_threshold: 14.0           # D1/CT14: WR67.1%(IS), 64.7%(OOS), trades 2.7x vs CT18
   consensus_primary_weight: 2.0
   consensus_entry_weight: 1.5
   consensus_confirm_weight: 3.0
@@ -242,9 +242,6 @@ symbols:
     signal:
       trend_strength_max: 0.85    # WI: +1,353K, WR +0.3pp vs 0.7
       regime_trend_threshold_add: 2.0  # RL-T: TREND DD圧縮
-      # H4マイクロモード (Nautilus BT 2023-2025: WR 68.25%, 1436 trades, +1.53M)
-      max_timeframe: "H4"
-      consensus_threshold: 10.0
 
   EURJPY:
     pip_value: 100.0

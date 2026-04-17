@@ -4,6 +4,10 @@
 # symbols[X] セクションのみ変更が必要な値を記載する。
 # ============================================================
 
+# --- グローバルシグナル設定 ---
+signal:
+  consensus_threshold: 14.0           # D1/CT14: WR67.1%(IS), 64.7%(OOS), trades 2.7x vs CT18
+
 # --- 通貨ペア共通フォールバック（SymbolPreset フィールド）---
 defaults:
   pip_unit: 0.01          # JPYペア: 1pip = 0.01
