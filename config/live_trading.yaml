@@ -11,7 +11,7 @@ symbol: USDJPY
 
 bot_config:
   # コンセンサス設定（SSOT同期: trading_defaults.yaml）
-  consensus_threshold: 18.0
+  consensus_threshold: 14.0
   consensus_primary_weight: 2.0
   consensus_entry_weight: 1.5
   consensus_confirm_weight: 3.0
