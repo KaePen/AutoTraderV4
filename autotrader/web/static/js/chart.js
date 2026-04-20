@@ -1,5 +1,9 @@
 /** チャートモジュール */
 
+// MT5ブローカーTZ → JST変換オフセット（時間）
+// JST(+9) - ブローカーTZ = 表示補正値
+const _JST_OFFSET_HOURS = 9 - (window.__BROKER_TZ_HOURS ?? 3);
+
 const ChartManager = {
   chart: null,
   candleSeries: null,
@@ -53,7 +57,7 @@ const ChartManager = {
       },
       localization: {
         timeFormatter: (time) => {
-          const d = new Date(time * 1000 + 7 * 3600 * 1000);
+          const d = new Date(time * 1000 + _JST_OFFSET_HOURS * 3600 * 1000);
           const Y = d.getUTCFullYear();
           const M = String(d.getUTCMonth() + 1).padStart(2, '0');
           const D = String(d.getUTCDate()).padStart(2, '0');
@@ -327,9 +331,8 @@ const ChartManager = {
    * @returns {string} フォーマット済み文字列
    */
   _jstTickMarkFormatter(time, type) {
-    // MT5ブローカーはGMT+2でタイムスタンプを記録するため -2h 補正
-    // 正しいJST = GMT+2データ -2h +9h(JST) = +7h
-    const d = new Date(time * 1000 + 7 * 3600 * 1000);
+    // MT5ブローカーTZからJSTへ変換（設定値: window.__BROKER_TZ_HOURS）
+    const d = new Date(time * 1000 + _JST_OFFSET_HOURS * 3600 * 1000);
     const Y = d.getUTCFullYear();
     const M = String(d.getUTCMonth() + 1).padStart(2, '0');
     const D = String(d.getUTCDate()).padStart(2, '0');

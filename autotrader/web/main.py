@@ -459,8 +459,10 @@ def create_app() -> FastAPI:
         Returns:
             HTMLResponse: ダッシュボードHTML
         """
+        broker_tz = int(os.environ.get("BROKER_TZ_HOURS", "3"))
         return templates.TemplateResponse(
-            "dashboard.html", {"request": request}
+            "dashboard.html",
+            {"request": request, "broker_tz_hours": broker_tz},
         )
 
     return app

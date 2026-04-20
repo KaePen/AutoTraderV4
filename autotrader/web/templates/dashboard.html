@@ -168,7 +168,8 @@
 {% endblock %}
 
 {% block scripts %}
-<script src="/static/js/chart.js?v=9"></script>
+<script>window.__BROKER_TZ_HOURS = {{ broker_tz_hours | default(3) }};</script>
+<script src="/static/js/chart.js?v=10"></script>
 <script src="/static/js/fundamental.js?v=5"></script>
 <script src="/static/js/dashboard.js?v=52"></script>
 {% endblock %}

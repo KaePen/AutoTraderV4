@@ -46,7 +46,7 @@ def _dict_to_position_response(
         opened_at = db_opened_at_map[ticket]
 
     # elapsed_minutesが未計算または0の場合、opened_atから再計算
-    # エンジン側はMT5のブローカーTZ(UTC+2)で計算するため不正確な場合がある
+    # エンジン側はMT5のブローカーTZで計算するため不正確な場合がある
     elapsed_minutes = d.get("elapsed_minutes")
     if (elapsed_minutes is None or elapsed_minutes <= 0) and opened_at is not None:
         now = datetime.now(UTC)

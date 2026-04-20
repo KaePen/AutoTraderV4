@@ -1393,7 +1393,7 @@ class LiveTradingEngine:
         """
         symbol = self._active_symbol
         # 全TFのデータを一括収集してから設定
-        # MT5サーバー時間(UTC+2/3)とUTCのずれにより、
+        # MT5サーバー時間(ブローカーTZ)とUTCのずれにより、
         # M1は200本だとSMA(50)のウォームアップ範囲(先頭49本)に
         # 現在行が入るため、M1/M5は500本取得する
         # （個別set_market_dataは辞書を上書きするため）
