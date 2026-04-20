@@ -149,6 +149,8 @@ class ManagedPosition:
     trailing_activated: bool = False
     # エッジ劣化監視: エントリー時の自方向スコアを保存
     entry_own_score: float = 0.0
+    # MFE最終更新時刻（利益停滞検出用）
+    mfe_last_update_time: datetime | None = None
     state_machine: PositionStateMachine = field(
         default_factory=lambda: PositionStateMachine(
             PositionState.OPEN,
@@ -160,11 +162,16 @@ class ManagedPosition:
         """1R値（SL距離）を取得"""
         return abs(self.entry_price - self.original_sl)
 
-    def update_price(self, current_price: float) -> None:
+    def update_price(
+        self,
+        current_price: float,
+        current_time: datetime | None = None,
+    ) -> None:
         """価格更新時に最高/最安価格を更新
 
         Args:
             current_price: 現在価格
+            current_time: 現在時刻（MFE更新時刻の追跡用）
         """
         if self.direction == SignalType.BUY:
             self.highest_price = max(self.highest_price, current_price)
@@ -185,7 +192,11 @@ class ManagedPosition:
                 if self.r_value > 0 else 0.0
             )
 
+        prev_highest_r = self.highest_r
         self.highest_r = max(self.highest_r, self.current_r)
+        # MFEが更新された場合、最終更新時刻を記録
+        if self.highest_r > prev_highest_r and current_time is not None:
+            self.mfe_last_update_time = current_time
 
 
 @dataclass(frozen=True)
@@ -371,6 +382,20 @@ class PositionManagerConfig:
     edge_decay_stagnation_threshold: float = 0.35
     # stagnation時間をこの倍率に短縮（0.65=65%に短縮）
     edge_decay_stagnation_multiplier: float = 0.65
+    # --- Profit Plateau Exit（利益停滞検出による動的エグジット）---
+    # MFE（最高含み益）の更新が停止した事実を検出し、利益が残るうちに決済する。
+    # MFE分析結果: 中央値23分でMFEピーク到達、1時間以降は利益フラット。
+    profit_plateau_enabled: bool = False
+    # 発動に必要な最低MFE（一度はこれだけ有利に動いた証拠）
+    profit_plateau_min_mfe_r: float = 0.15
+    # MFE更新が停止してからの待機時間（分）
+    profit_plateau_stall_minutes: float = 15.0
+    # 現在まだ含み益であること（この値以上）
+    profit_plateau_min_current_r: float = 0.0
+    # ピークからの後退率がこの値以上なら待機時間を短縮
+    profit_plateau_retreat_threshold: float = 0.40
+    # 後退検出時の待機時間短縮倍率
+    profit_plateau_retreat_multiplier: float = 0.5
 
 
 class PositionManager:
@@ -490,6 +515,11 @@ class PositionManager:
             "bars_held": pos.bars_held,
             "trailing_activated": pos.trailing_activated,
             "entry_own_score": pos.entry_own_score,
+            "mfe_last_update_time": (
+                pos.mfe_last_update_time.isoformat()
+                if pos.mfe_last_update_time is not None
+                else None
+            ),
             "partial_closed_1r": (
                 position_id in self._partial_closed_1r
             ),
@@ -553,6 +583,11 @@ class PositionManager:
         pos.entry_own_score = state.get(
             "entry_own_score", pos.entry_own_score
         )
+        _mfe_t = state.get("mfe_last_update_time")
+        if _mfe_t is not None:
+            pos.mfe_last_update_time = datetime.fromisoformat(
+                _mfe_t,
+            )
 
         # フラグの復元（対称的: True→add, False→discard）
         _flag_map = {
@@ -608,7 +643,7 @@ class PositionManager:
             return ManagementAction.hold("ポジション未登録")
 
         # 価格更新
-        position.update_price(current_price)
+        position.update_price(current_price, current_time)
         position.bars_held += 1
 
         # エッジ劣化率を計算（以降のチェックで共有）
@@ -684,6 +719,17 @@ class PositionManager:
             action = self._check_pre_event_exit(
                 position, current_price,
                 fundamental_assessment,
+            )
+            if action is not None:
+                self._try_state_transition(
+                    position, action,
+                )
+                return action
+
+        # 3.9 利益停滞exit（Profit Plateau）
+        if self.config.profit_plateau_enabled:
+            action = self._check_profit_plateau(
+                position, current_time, current_price,
             )
             if action is not None:
                 self._try_state_transition(
@@ -889,6 +935,77 @@ class PositionManager:
                     ExitReason.TAKE_PROFIT,
                     trigger_price=position.original_tp,
                 )
+        return None
+
+    def _check_profit_plateau(
+        self,
+        position: ManagedPosition,
+        current_time: datetime,
+        current_price: float,
+    ) -> ManagementAction | None:
+        """利益停滞検出による動的エグジット
+
+        MFE（最高含み益）の更新が一定時間停止した事実を検出し、
+        利益が残っているうちに決済する。
+
+        判定データ（全て事実ベース）:
+        1. highest_r >= min_mfe_r → 一度は有意な利益に到達した
+        2. mfe_last_update_time からの経過 → 利益更新が止まっている
+        3. current_r >= min_current_r → まだ含み益がある
+        4. (highest_r - current_r) / highest_r → ピークからの後退率
+
+        MFE分析に基づく根拠:
+        - MFE到達の中央値は23分、86%が1時間以内
+        - 30分以降の利益カーブはフラット
+        - 利益が伸びなくなった後は返す傾向が強い
+        """
+        cfg = self.config
+
+        # MFEが最低閾値に達していなければスキップ
+        if position.highest_r < cfg.profit_plateau_min_mfe_r:
+            return None
+
+        # 現在含み益が最低ラインを下回っていればスキップ
+        if position.current_r < cfg.profit_plateau_min_current_r:
+            return None
+
+        # MFE最終更新時刻が未設定（初回バー等）
+        mfe_time = position.mfe_last_update_time
+        if mfe_time is None:
+            return None
+
+        # MFE更新停止からの経過時間
+        stall_minutes = (
+            (current_time - mfe_time).total_seconds() / 60
+        )
+
+        # ピークからの後退率を計算
+        effective_stall = cfg.profit_plateau_stall_minutes
+        if position.highest_r > 0:
+            retreat_ratio = (
+                (position.highest_r - position.current_r)
+                / position.highest_r
+            )
+            # 後退率が閾値以上なら待機時間を短縮
+            if retreat_ratio >= cfg.profit_plateau_retreat_threshold:
+                effective_stall *= (
+                    cfg.profit_plateau_retreat_multiplier
+                )
+        else:
+            retreat_ratio = 0.0
+
+        if stall_minutes >= effective_stall:
+            return ManagementAction.full_close(
+                reason=(
+                    f"利益停滞: MFE={position.highest_r:.2f}R"
+                    f"→現在{position.current_r:.2f}R"
+                    f" (停滞{stall_minutes:.0f}分,"
+                    f" 後退{retreat_ratio:.0%})"
+                ),
+                exit_reason=ExitReason.PROFIT_PLATEAU,
+                trigger_price=current_price,
+            )
+
         return None
 
     def _check_stagnation_exit(
