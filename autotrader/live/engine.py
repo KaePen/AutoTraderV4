@@ -173,6 +173,11 @@ class LiveTradingEngine:
         self._background_tasks: set[asyncio.Task[None]] = set()
 
         # ファンダメンタル関連（FundamentalConfig.enabled=Trueのみ初期化）
+        from autotrader.adapters.fundamental.sentiment_store import (
+            SentimentStore,
+        )
+
+        self._sentiment_store = SentimentStore()
         self._fundamental_memory = None
         self._fundamental_collector = None
         self._morning_update_done_date: datetime | None = None
