@@ -762,12 +762,13 @@ class PositionPanel extends Component {
     for (const p of positions) {
       const t = Number(p.ticket);
       activeTickets.add(t);
-      // opened_atからmsタイムスタンプを保存（最も信頼できるソース）
+      // opened_atからmsタイムスタンプを常に更新
+      // REST APIはDB由来の正確なopened_atを返すため、常に最新値を採用する
       const existing = this._posTimeCache[t];
       let openedAtMs = existing ? existing.openedAtMs : null;
-      if (!openedAtMs && p.opened_at) {
-        openedAtMs = new Date(p.opened_at).getTime();
-        if (isNaN(openedAtMs) || openedAtMs <= 0) openedAtMs = null;
+      if (p.opened_at) {
+        const parsed = new Date(p.opened_at).getTime();
+        if (!isNaN(parsed) && parsed > 0) openedAtMs = parsed;
       }
       const maxHoldMin = p.max_hold_minutes != null
         ? p.max_hold_minutes
@@ -787,23 +788,24 @@ class PositionPanel extends Component {
   }
 
   _fmtElapsedTime(p) {
-    // 1. バックエンドのelapsed_minutesがあればそれを使う
-    if (p.elapsed_minutes != null && p.elapsed_minutes > 0) {
-      return fmtHoldTime(null, p.elapsed_minutes);
-    }
-    // 2. opened_atから直接計算
+    // 1. opened_atキャッシュからクライアント側でリアルタイム計算（最も正確）
+    //    REST APIがDB由来のopened_atを返すため、リロード後も正しい経過時間を表示
     const cache = this._posTimeCache[Number(p.ticket)];
     if (cache && cache.openedAtMs) {
       const min = Math.max(0, Math.floor((Date.now() - cache.openedAtMs) / 60000));
-      if (min > 0) return fmtHoldTime(null, min);
+      return fmtHoldTime(null, min);
     }
-    // 3. opened_at文字列から直接計算（キャッシュ未構築時）
+    // 2. opened_at文字列から直接計算（キャッシュ未構築時のフォールバック）
     if (p.opened_at) {
       const ms = new Date(p.opened_at).getTime();
       if (!isNaN(ms) && ms > 0) {
         const min = Math.max(0, Math.floor((Date.now() - ms) / 60000));
-        if (min > 0) return fmtHoldTime(null, min);
+        return fmtHoldTime(null, min);
       }
+    }
+    // 3. バックエンドのelapsed_minutes（最終フォールバック）
+    if (p.elapsed_minutes != null && p.elapsed_minutes > 0) {
+      return fmtHoldTime(null, p.elapsed_minutes);
     }
     return '0m';
   }
