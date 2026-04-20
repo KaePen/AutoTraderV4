@@ -161,6 +161,7 @@ class ExitReason(str, Enum):
     EDGE_DECAY = "EDGE_DECAY"
     PRE_EVENT_CLOSE = "PRE_EVENT"
     WEEKEND_CLOSE = "WEEKEND"
+    PROFIT_PLATEAU = "PROFIT_PLATEAU"
 
 
 class TrendDirection(str, Enum):
