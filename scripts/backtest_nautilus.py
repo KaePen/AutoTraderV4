@@ -275,8 +275,10 @@ def cmd_run_month(args: argparse.Namespace) -> None:
         bot_kwargs["consensus_threshold"] = args.consensus_threshold
     if max_timeframe is not None:
         bot_kwargs["max_timeframe"] = max_timeframe
+    _pm_overrides: dict[str, Any] = {}
     if args.bot_overrides:
         _ovr = json.loads(args.bot_overrides)
+        _pm_overrides = _ovr.pop("pm", {})
         bot_kwargs.update(_ovr)
     bot_config = UnifiedBotConfig(**bot_kwargs)
     bot = UnifiedTradeBot(bot_config)
@@ -341,11 +343,13 @@ def cmd_run_month(args: argparse.Namespace) -> None:
         dl: float = 0.1
 
     # PositionManager 初期化
-    pm_config = PositionManagerConfig(
-        spread_pips=preset.spread_pips,
-        slippage_pips=preset.slippage_pips,
-        pip_unit=pip_unit,
-    )
+    _pm_kwargs: dict[str, Any] = {
+        "spread_pips": preset.spread_pips,
+        "slippage_pips": preset.slippage_pips,
+        "pip_unit": pip_unit,
+    }
+    _pm_kwargs.update(_pm_overrides)
+    pm_config = PositionManagerConfig(**_pm_kwargs)
     pm = PositionManager(pm_config)
 
     class S(Strategy):
@@ -1253,7 +1257,11 @@ def cmd_run_multi_month(args: argparse.Namespace) -> None:
         bot_kwargs.update(sym_ovr.get("risk_mgmt", {}))
         bot_kwargs["max_timeframe"] = max_timeframe
         if args.bot_overrides:
-            bot_kwargs.update(json.loads(args.bot_overrides))
+            _ovr_mm = json.loads(args.bot_overrides)
+            _pm_ovr_mm = _ovr_mm.pop("pm", {})
+            bot_kwargs.update(_ovr_mm)
+        else:
+            _pm_ovr_mm = {}
         effective_max_tf = bot_kwargs.get("max_timeframe", max_timeframe)
         bot_config = UnifiedBotConfig(**bot_kwargs)
 
@@ -1266,11 +1274,13 @@ def cmd_run_multi_month(args: argparse.Namespace) -> None:
         bot = UnifiedTradeBot(bot_config)
         bot.set_market_data(market_data)
 
-        pm_config = PositionManagerConfig(
-            spread_pips=preset.spread_pips,
-            slippage_pips=preset.slippage_pips,
-            pip_unit=pip_unit,
-        )
+        _pm_kw_mm: dict[str, Any] = {
+            "spread_pips": preset.spread_pips,
+            "slippage_pips": preset.slippage_pips,
+            "pip_unit": pip_unit,
+        }
+        _pm_kw_mm.update(_pm_ovr_mm)
+        pm_config = PositionManagerConfig(**_pm_kw_mm)
         pm = PositionManager(pm_config)
 
         # Instrument
