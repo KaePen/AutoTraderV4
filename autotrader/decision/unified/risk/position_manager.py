@@ -372,8 +372,9 @@ class PositionManagerConfig:
     edge_decay_exit_max_loss_r: float = -0.3
     # モードB: 利益侵食 + エッジ劣化 複合exit（利益を守る）
     edge_decay_profit_exit_enabled: bool = True
-    # MFEピークからの利益侵食率がこの閾値以上で発動（0.60=60%侵食）
-    edge_decay_profit_erosion_threshold: float = 0.60
+    # MFEピークからの利益侵食率がこの閾値以上で発動（0.35=35%侵食）
+    # BT検証(2023-2025 6JPY): 0.60→0.35で WR+2.3pp, PnL+2.6%改善
+    edge_decay_profit_erosion_threshold: float = 0.35
     # モードB発動に必要な最低エッジ劣化率（緩い閾値）
     edge_decay_profit_decay_min: float = 0.25
     # Stagnation連携: エッジ劣化時にstagnation時間閾値を短縮
