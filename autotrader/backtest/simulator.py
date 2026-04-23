@@ -287,6 +287,11 @@ class TradeSimulator:
         self._exit_metrics: dict[str, dict[str, float]] = {}
         # 連敗カウンター
         self._consecutive_losses: int = 0
+        # 同シンボル同方向の直近クローズ追跡
+        # key: (symbol, direction_str), value: list of close records
+        self._closed_by_dir: dict[
+            str, list[dict]
+        ] = {}
         # 処理中candle用スプレッド
         self._current_candle_spread: float = self._spread_price
         self._current_row_data: dict | None = None
@@ -1227,6 +1232,28 @@ class TradeSimulator:
             )
             if self.state.balance > 0:
                 _risk_pct = _risk / self.state.balance * 100
+        # 同方向再エントリー情報を計算
+        _dir_key = signal.signal_type.value
+        _dir_history = self._closed_by_dir.get(_dir_key, [])
+        _prev_exit_reason = ""
+        _prev_pnl_pips = 0.0
+        _min_since_prev = -1.0
+        _same_dir_consec_losses = 0
+        _is_reentry = False
+        if _dir_history:
+            _last = _dir_history[-1]
+            _prev_exit_reason = _last["exit_reason"]
+            _prev_pnl_pips = _last["pnl_pips"]
+            _is_reentry = True
+            if _last["closed_at"] and candle.time:
+                _td = candle.time - _last["closed_at"]
+                _min_since_prev = _td.total_seconds() / 60.0
+            # 同方向連敗数
+            for _rec in reversed(_dir_history):
+                if _rec["pnl"] < 0:
+                    _same_dir_consec_losses += 1
+                else:
+                    break
         self._entry_metrics[position.position_id] = {
             "spread": entry_spread,
             "equity_before": self.state.balance,
@@ -1237,6 +1264,15 @@ class TradeSimulator:
                 self._consecutive_losses
             ),
             "risk_per_trade_pct": _risk_pct,
+            "prev_same_dir_exit_reason": _prev_exit_reason,
+            "prev_same_dir_pnl_pips": _prev_pnl_pips,
+            "minutes_since_prev_same_dir_close": (
+                _min_since_prev
+            ),
+            "same_dir_consecutive_losses": float(
+                _same_dir_consec_losses
+            ),
+            "is_reentry": 1.0 if _is_reentry else 0.0,
         }
 
         # PositionManager登録
@@ -1391,6 +1427,24 @@ class TradeSimulator:
             self._consecutive_losses = 0
         else:
             self._consecutive_losses += 1
+
+        # 同方向クローズ履歴追跡
+        _dir_key = position.signal_type.value
+        if _dir_key not in self._closed_by_dir:
+            self._closed_by_dir[_dir_key] = []
+        self._closed_by_dir[_dir_key].append({
+            "exit_reason": exit_reason.value,
+            "pnl_pips": round(
+                (exit_price - position.entry_price)
+                / self._pip_unit
+                if position.signal_type.value == "BUY"
+                else (position.entry_price - exit_price)
+                / self._pip_unit,
+                1,
+            ),
+            "closed_at": exit_time,
+            "pnl": profit_loss,
+        })
 
         # ポジションイベントログ: FULL_CLOSE
         if self._pos_event_logger:

@@ -177,6 +177,12 @@ class TradeEvent(BacktestEvent):
     exit_reason_detail: str = ""
     stag_minutes_used: str = ""
     stag_mfe_r_used: str = ""
+    # F) 同方向再エントリー分析用フィールド
+    prev_same_dir_exit_reason: str = ""
+    prev_same_dir_pnl_pips: float = 0.0
+    minutes_since_prev_same_dir_close: float = -1.0
+    same_dir_consecutive_losses: int = 0
+    is_reentry: bool = False
 
     def __post_init__(self):
         if self.exit_price is not None:
@@ -1084,6 +1090,11 @@ class BacktestEventEmitter:
         trigger_price: float = 0.0,
         fill_price: float = 0.0,
         exit_reason_detail: str = "",
+        prev_same_dir_exit_reason: str = "",
+        prev_same_dir_pnl_pips: float = 0.0,
+        minutes_since_prev_same_dir_close: float = -1.0,
+        same_dir_consecutive_losses: int = 0,
+        is_reentry: bool = False,
     ) -> None:
         """ポジション決済イベント"""
         event = TradeEvent(
@@ -1132,6 +1143,15 @@ class BacktestEventEmitter:
             trigger_price=trigger_price,
             fill_price=fill_price,
             exit_reason_detail=exit_reason_detail,
+            prev_same_dir_exit_reason=prev_same_dir_exit_reason,
+            prev_same_dir_pnl_pips=prev_same_dir_pnl_pips,
+            minutes_since_prev_same_dir_close=(
+                minutes_since_prev_same_dir_close
+            ),
+            same_dir_consecutive_losses=(
+                same_dir_consecutive_losses
+            ),
+            is_reentry=is_reentry,
         )
         # シグナルデータをevent.dataに格納（リスナーで参照）
         if signal_data:

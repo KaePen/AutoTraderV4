@@ -1514,6 +1514,53 @@ class LiveTradingEngine:
 
         # 共通エントリーゲート判定（BT/ライブ統一ロジック）
         cfg = self._bot.config
+
+        # JPY SLサーキットブレーカー判定
+        # 直近60分以内に同方向JPYペアのSLが発生していたら発動
+        _jpy_sl_cb = False
+        _stag_block = False
+        _now_str = datetime.now(UTC).isoformat()
+        _dir_val = signal.signal_type.value
+        if self._active_symbol.endswith("JPY"):
+            _cb_window_min = 60
+            for t in reversed(self._closed_trades):
+                _sym = t.get("symbol", "")
+                if not _sym.endswith("JPY"):
+                    continue
+                if t.get("direction") != _dir_val:
+                    continue
+                _closed_str = t.get("closed_at", "")
+                if not _closed_str:
+                    continue
+                try:
+                    from datetime import datetime as _dt
+                    _closed_dt = _dt.fromisoformat(
+                        _closed_str
+                    )
+                    _elapsed = (
+                        datetime.now(UTC) - _closed_dt
+                    ).total_seconds() / 60
+                except (ValueError, TypeError):
+                    continue
+                if _elapsed > _cb_window_min:
+                    break
+                if t.get("exit_reason") in (
+                    "SL_HIT", "STOP_LOSS",
+                ):
+                    _jpy_sl_cb = True
+                    break
+        # STAGNATION後同方向ブロック判定
+        for t in reversed(self._closed_trades):
+            if t.get("symbol") != self._active_symbol:
+                continue
+            if t.get("direction") != _dir_val:
+                continue
+            if t.get("exit_reason") in (
+                "STAGNATION", "STAG",
+            ):
+                _stag_block = True
+            break  # 直近1件のみチェック
+
         _gate_ctx = EntryGateContext(
             signal_direction=signal.signal_type,
             consensus_score=signal.consensus_score,
@@ -1569,6 +1616,8 @@ class LiveTradingEngine:
             ),
             margin_usage_pct=0.0,
             margin_limit_pct=0.0,
+            jpy_sl_circuit_breaker_active=_jpy_sl_cb,
+            prev_same_dir_exit_was_stag=_stag_block,
         )
         _gate_result = self._entry_gate.evaluate(_gate_ctx)
         if not _gate_result.allowed:
@@ -2193,6 +2242,10 @@ class LiveTradingEngine:
                 {
                     "trade_id": trade_id,
                     "ticket": ticket,
+                    "symbol": self._active_symbol,
+                    "direction": (
+                        pos.direction.value if pos else ""
+                    ),
                     "exit_price": current_price,
                     "exit_reason": action_reason,
                     "pnl_pips": round(pnl_pips, 1),
