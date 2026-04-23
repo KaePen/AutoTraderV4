@@ -37,6 +37,8 @@ class EntryGateContext:
         dd_emergency_active: DD緊急停止中か
         margin_usage_pct: マージン使用率%（0-100）
         margin_limit_pct: マージン上限%（0=チェック無効）
+        jpy_sl_circuit_breaker_active: JPY SLサーキットブレーカー発動中か
+        prev_same_dir_exit_was_stag: 直前の同方向トレードがSTAGNATION exitか
     """
 
     signal_direction: SignalType
@@ -62,6 +64,11 @@ class EntryGateContext:
 
     margin_usage_pct: float
     margin_limit_pct: float
+
+    # JPY SLサーキットブレーカー: 直近N分以内に同方向JPYペアのSLが発生
+    jpy_sl_circuit_breaker_active: bool = False
+    # STAGNATION後再エントリーブロック
+    prev_same_dir_exit_was_stag: bool = False
 
 
 @dataclass(frozen=True)
@@ -154,6 +161,21 @@ class EntryGateChecker:
                 f"JPY {ctx.signal_direction.value}上限 "
                 f"{ctx.jpy_same_direction_count}"
                 f"/{ctx.max_same_direction_jpy}",
+            )
+
+        # 5b. JPY SLサーキットブレーカー
+        if ctx.is_jpy_pair and ctx.jpy_sl_circuit_breaker_active:
+            return _deny(
+                "jpy_sl_circuit_breaker",
+                f"JPY {ctx.signal_direction.value} "
+                f"SLサーキットブレーカー発動中",
+            )
+
+        # 5c. STAGNATION後同方向ブロック
+        if ctx.prev_same_dir_exit_was_stag:
+            return _deny(
+                "post_stagnation_block",
+                "直前同方向STAGNATION後のエントリー抑制",
             )
 
         # 6. スプレッドゲート

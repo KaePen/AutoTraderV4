@@ -220,6 +220,12 @@ class MultiPairConfig:
     global_max_exposure_lot: float = 10.0
     # JPY同方向制限（0=無制限）
     max_same_direction_jpy: int = 0
+    # JPY SLサーキットブレーカー（0=無効、分単位）
+    jpy_sl_circuit_breaker_minutes: int = 0
+    # CB発動に必要なSL件数（デフォルト2=2件以上で発動）
+    jpy_sl_circuit_breaker_threshold: int = 2
+    # STAGNATION後同方向ブロック（0=無効、分単位の時間制限）
+    stag_reentry_block_minutes: int = 0
 
 
 @dataclass
@@ -258,12 +264,34 @@ class PortfolioState:
     # JPYペアの方向別オープンポジション数
     jpy_buy_count: int = 0
     jpy_sell_count: int = 0
+    # SLサーキットブレーカー用: クロスペアSL履歴
+    _recent_closes: list[dict] = field(
+        default_factory=list, repr=False,
+    )
+    blocked_circuit_breaker: int = 0
+    blocked_stag_reentry: int = 0
+
+    def record_close(
+        self,
+        symbol: str,
+        direction: str,
+        exit_reason: str,
+        closed_at: datetime,
+    ) -> None:
+        """クローズ履歴を記録（CB判定用）"""
+        self._recent_closes.append({
+            "symbol": symbol,
+            "direction": direction,
+            "exit_reason": exit_reason,
+            "closed_at": closed_at,
+        })
 
     def can_open_position(
         self,
         symbol: str,
         config: MultiPairConfig,
         signal_direction: str = "",
+        current_time: datetime | None = None,
     ) -> bool:
         """新規ポジションを開けるかチェック
 
@@ -271,6 +299,7 @@ class PortfolioState:
             symbol: 通貨ペア名
             config: テスト設定
             signal_direction: シグナル方向 ("BUY"/"SELL")
+            current_time: 現在時刻（CB判定用）
 
         Returns:
             bool: 開ける場合True
@@ -300,6 +329,49 @@ class PortfolioState:
             if signal_direction == "SELL" and self.jpy_sell_count >= limit:
                 self.blocked_direction += 1
                 return False
+        # JPY SLサーキットブレーカー（N件以上のSLで発動）
+        if (
+            config.jpy_sl_circuit_breaker_minutes > 0
+            and symbol.endswith("JPY")
+            and current_time is not None
+        ):
+            _cb_window = config.jpy_sl_circuit_breaker_minutes
+            _sl_count = 0
+            for rec in reversed(self._recent_closes):
+                if not rec["symbol"].endswith("JPY"):
+                    continue
+                if rec["direction"] != signal_direction:
+                    continue
+                _elapsed = (
+                    current_time - rec["closed_at"]
+                ).total_seconds() / 60
+                if _elapsed > _cb_window:
+                    break
+                if rec["exit_reason"] in (
+                    "SL_HIT", "STOP_LOSS",
+                ):
+                    _sl_count += 1
+            if _sl_count >= config.jpy_sl_circuit_breaker_threshold:
+                self.blocked_circuit_breaker += 1
+                return False
+        # STAGNATION後同方向ブロック（時間制限付き）
+        if (
+            config.stag_reentry_block_minutes > 0
+            and current_time is not None
+        ):
+            for rec in reversed(self._recent_closes):
+                if rec["symbol"] != symbol:
+                    continue
+                if rec["direction"] != signal_direction:
+                    continue
+                if rec["exit_reason"] == "STAGNATION":
+                    _elapsed = (
+                        current_time - rec["closed_at"]
+                    ).total_seconds() / 60
+                    if _elapsed <= config.stag_reentry_block_minutes:
+                        self.blocked_stag_reentry += 1
+                        return False
+                break  # 直近1件のみ
         return True
 
     def update_positions(
@@ -855,6 +927,7 @@ def run_multi_pair_year(
             sym,
             multi_config,
             signal.signal_type.value,
+            current_time=bar_time,
         ):
             signal = None  # エントリーブロック
 
@@ -947,6 +1020,17 @@ def run_multi_pair_year(
                 bar_time,
                 pnl=pnl,
                 trade_record=_trade_record,
+            )
+            # SLサーキットブレーカー用: クローズ履歴記録
+            portfolio.record_close(
+                symbol=sym,
+                direction=new_trade.signal_type.value,
+                exit_reason=(
+                    new_trade.exit_reason.value
+                    if new_trade.exit_reason
+                    else ""
+                ),
+                closed_at=bar_time,
             )
             # ScoreBreakdownをtrade_idに紐付け
             if new_trade.trade_id and sym in _pending_breakdowns:
@@ -1258,6 +1342,8 @@ def _run_year_worker(args: tuple) -> dict[str, Any] | None:
         "blocked_per_pair": portfolio.blocked_per_pair,
         "blocked_exposure": portfolio.blocked_exposure,
         "blocked_direction": portfolio.blocked_direction,
+        "blocked_circuit_breaker": portfolio.blocked_circuit_breaker,
+        "blocked_stag_reentry": portfolio.blocked_stag_reentry,
         "pair_summaries": pair_summaries,
     }
 
@@ -1387,6 +1473,12 @@ def aggregate_year_results(
     blocked_direction = sum(
         yr.get("blocked_direction", 0) for yr in year_results
     )
+    blocked_cb = sum(
+        yr.get("blocked_circuit_breaker", 0) for yr in year_results
+    )
+    blocked_stag = sum(
+        yr.get("blocked_stag_reentry", 0) for yr in year_results
+    )
 
     # yearly_results構築
     yearly_results = [
@@ -1425,6 +1517,8 @@ def aggregate_year_results(
         "blocked_per_pair": blocked_per_pair,
         "blocked_exposure": blocked_exposure,
         "blocked_direction": blocked_direction,
+        "blocked_circuit_breaker": blocked_cb,
+        "blocked_stag_reentry": blocked_stag,
         "final_equity": final_equity,
     }
 
@@ -1566,6 +1660,8 @@ def run_test_case(
     total_blocked_per_pair = 0
     total_blocked_exposure = 0
     total_blocked_direction = 0
+    total_blocked_cb = 0
+    total_blocked_stag = 0
 
     for year in range(start_year, end_year + 1):
         _t_year = time.time()
@@ -1668,6 +1764,8 @@ def run_test_case(
         total_blocked_per_pair += portfolio.blocked_per_pair
         total_blocked_exposure += portfolio.blocked_exposure
         total_blocked_direction += portfolio.blocked_direction
+        total_blocked_cb += portfolio.blocked_circuit_breaker
+        total_blocked_stag += portfolio.blocked_stag_reentry
 
         yearly_results_seq.append(
             {
@@ -1711,6 +1809,8 @@ def run_test_case(
         blocked_per_pair=total_blocked_per_pair,
         blocked_exposure=total_blocked_exposure,
         blocked_direction=total_blocked_direction,
+        blocked_circuit_breaker=total_blocked_cb,
+        blocked_stag_reentry=total_blocked_stag,
     )
     agg_portfolio.monthly_pnl = all_monthly_pnl
 
@@ -1856,15 +1956,17 @@ def aggregate_results(
         "blocked_per_pair": portfolio.blocked_per_pair,
         "blocked_exposure": portfolio.blocked_exposure,
         "blocked_direction": portfolio.blocked_direction,
+        "blocked_circuit_breaker": portfolio.blocked_circuit_breaker,
+        "blocked_stag_reentry": portfolio.blocked_stag_reentry,
         "final_equity": portfolio.equity,
     }
 
 
 def _print_result_summary(result: dict[str, Any]) -> None:
-    """テスト結果サマリー出力"""
+    """テス���結果サマリー出力"""
     print(f"\n  --- {result['test_name']} サマリー ---")
     print(f"  総利益:     {result['total_profit']:>+12,.0f}")
-    print(f"  年間収益率: {result['annual_return_pct']:>8.1f}%")
+    print(f"  年��収益率: {result['annual_return_pct']:>8.1f}%")
     print(f"  最大DD:     {result['max_dd_pct']:>8.2f}%")
     print(f"  Sharpe:     {result['sharpe']:>8.2f}")
     print(f"  WR:         {result['wr']:>8.1f}%")
@@ -1875,7 +1977,9 @@ def _print_result_summary(result: dict[str, Any]) -> None:
         f"  制限発動: global={result['blocked_global']}, "
         f"per_pair={result['blocked_per_pair']}, "
         f"exposure={result['blocked_exposure']}, "
-        f"direction={result.get('blocked_direction', 0)}"
+        f"direction={result.get('blocked_direction', 0)}, "
+        f"CB={result.get('blocked_circuit_breaker', 0)}, "
+        f"STAG={result.get('blocked_stag_reentry', 0)}"
     )
 
     print("\n  ペア別:")
@@ -1903,6 +2007,18 @@ TEST_MATRIX: dict[str, MultiPairConfig] = {
         global_max_positions=6,
         per_pair_max_positions=1,
         global_max_exposure_lot=10.0,
+    ),
+    # サーキットブレーカーA/Bテスト
+    # サーキットブレーカーv2: SL2件以上 + STAG120分制限
+    "CB60v2": MultiPairConfig(
+        name="CB60v2",
+        global_max_positions=6,
+        per_pair_max_positions=1,
+        global_max_exposure_lot=10.0,
+        max_same_direction_jpy=3,
+        jpy_sl_circuit_breaker_minutes=60,
+        jpy_sl_circuit_breaker_threshold=2,
+        stag_reentry_block_minutes=120,
     ),
     "M0": MultiPairConfig(
         name="M0",

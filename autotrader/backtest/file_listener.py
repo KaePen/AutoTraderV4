@@ -86,6 +86,12 @@ CSV_COLUMNS = [
     "stag_mfe_r_used",
     # 理由
     "rationale",
+    # F) 同方向再エントリー分析用
+    "prev_same_dir_exit_reason",
+    "prev_same_dir_pnl_pips",
+    "minutes_since_prev_same_dir_close",
+    "same_dir_consecutive_losses",
+    "is_reentry",
 ]
 
 # ブロックシグナルCSVカラム定義
@@ -693,6 +699,23 @@ class FileEventListener(EventListener):
             _m_mfe.group(1) if _m_mfe else ""
         )
 
+        # F) 同方向再エントリー分析用
+        row["prev_same_dir_exit_reason"] = (
+            event.prev_same_dir_exit_reason or ""
+        )
+        row["prev_same_dir_pnl_pips"] = (
+            f"{event.prev_same_dir_pnl_pips:.1f}"
+        )
+        row["minutes_since_prev_same_dir_close"] = (
+            f"{event.minutes_since_prev_same_dir_close:.0f}"
+        )
+        row["same_dir_consecutive_losses"] = (
+            str(event.same_dir_consecutive_losses)
+        )
+        row["is_reentry"] = (
+            "1" if event.is_reentry else "0"
+        )
+
         self._trade_rows.append(row)
 
     def _handle_metrics(self, event: BacktestEvent) -> None:
@@ -1081,6 +1104,23 @@ class TradeRowCollector(EventListener):
         )
         row["stag_mfe_r_used"] = (
             _m_mfe.group(1) if _m_mfe else ""
+        )
+
+        # F) 同方向再エントリー分析用
+        row["prev_same_dir_exit_reason"] = (
+            event.prev_same_dir_exit_reason or ""
+        )
+        row["prev_same_dir_pnl_pips"] = (
+            f"{event.prev_same_dir_pnl_pips:.1f}"
+        )
+        row["minutes_since_prev_same_dir_close"] = (
+            f"{event.minutes_since_prev_same_dir_close:.0f}"
+        )
+        row["same_dir_consecutive_losses"] = (
+            str(event.same_dir_consecutive_losses)
+        )
+        row["is_reentry"] = (
+            "1" if event.is_reentry else "0"
         )
 
         self._trade_rows.append(row)

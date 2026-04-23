@@ -602,6 +602,44 @@ def run_unified_year(
                         else 0
                     ),
                     "lot": pos.volume,
+                    # 同方向再エントリー分析用
+                    "prev_same_dir_exit_reason": (
+                        _em.get(
+                            "prev_same_dir_exit_reason",
+                            "",
+                        )
+                        if _em
+                        else ""
+                    ),
+                    "prev_same_dir_pnl_pips": (
+                        _em.get(
+                            "prev_same_dir_pnl_pips",
+                            0.0,
+                        )
+                        if _em
+                        else 0.0
+                    ),
+                    "minutes_since_prev_same_dir_close": (
+                        _em.get(
+                            "minutes_since_prev_same_dir_close",
+                            -1.0,
+                        )
+                        if _em
+                        else -1.0
+                    ),
+                    "same_dir_consecutive_losses": int(
+                        _em.get(
+                            "same_dir_consecutive_losses",
+                            0,
+                        )
+                        if _em
+                        else 0
+                    ),
+                    "is_reentry": (
+                        _em.get("is_reentry", 0.0)
+                        if _em
+                        else 0.0
+                    ),
                     # Phase5: 新メタデータ
                     "entry_threshold": (consolidated.entry_threshold),
                     "htf_alignment": (consolidated.htf_alignment),
@@ -821,6 +859,36 @@ def run_unified_year(
                     0.0,
                 ),
                 exit_reason_detail=_exit_detail,
+                prev_same_dir_exit_reason=str(
+                    _sig_data.get(
+                        "prev_same_dir_exit_reason",
+                        "",
+                    )
+                ),
+                prev_same_dir_pnl_pips=float(
+                    _sig_data.get(
+                        "prev_same_dir_pnl_pips",
+                        0.0,
+                    )
+                ),
+                minutes_since_prev_same_dir_close=float(
+                    _sig_data.get(
+                        "minutes_since_prev_same_dir_close",
+                        -1.0,
+                    )
+                ),
+                same_dir_consecutive_losses=int(
+                    _sig_data.get(
+                        "same_dir_consecutive_losses",
+                        0,
+                    )
+                ),
+                is_reentry=bool(
+                    _sig_data.get(
+                        "is_reentry",
+                        0.0,
+                    )
+                ),
             )
 
             # メトリクス発行
