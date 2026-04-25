@@ -54,7 +54,7 @@ class PrecomputeConfig:
     """
 
     sma_periods: tuple[int, ...] = (10, 20, 50, 100, 200)
-    ema_periods: tuple[int, ...] = (10, 20, 50, 100, 200)
+    ema_periods: tuple[int, ...] = (10, 12, 20, 26, 50, 100, 200)
     rsi_period: int = 14
     macd_fast: int = 12
     macd_slow: int = 26
@@ -198,12 +198,17 @@ class PrecomputeEngine:
         result[f"adx_{self.config.adx_period}"] = adx_df[
             f"ADX_{self.config.adx_period}"
         ]
+        # Evaluator互換エイリアス: "adx" = "adx_14"
+        result["adx"] = result[f"adx_{self.config.adx_period}"]
         result[f"plus_di_{self.config.adx_period}"] = adx_df[
             f"DMP_{self.config.adx_period}"
         ]
         result[f"minus_di_{self.config.adx_period}"] = adx_df[
             f"DMN_{self.config.adx_period}"
         ]
+        # Evaluator互換エイリアス
+        result["plus_di"] = result[f"plus_di_{self.config.adx_period}"]
+        result["minus_di"] = result[f"minus_di_{self.config.adx_period}"]
 
         # モメンタム系
         momentum = MomentumIndicators(
@@ -218,6 +223,10 @@ class PrecomputeEngine:
         result["macd"] = macd_df["MACD"]
         result["macd_signal"] = macd_df["MACD_signal"]
         result["macd_histogram"] = macd_df["MACD_histogram"]
+        # MACDヒストグラムスロープ（Evaluator必須）
+        result["macd_hist_slope"] = (
+            result["macd_histogram"] - result["macd_histogram"].shift(1)
+        )
 
         stoch_df = momentum.calculate_stochastics(high, low, close)
         result["stoch_k"] = stoch_df["stoch_k"]
@@ -237,6 +246,18 @@ class PrecomputeEngine:
         result["bb_lower"] = bb_df["bb_lower"]
         result["bb_width"] = bb_df["bb_width"]
         result["bb_percent_b"] = bb_df["bb_percent_b"]
+
+        # ダイバージェンス（Evaluator必須: is_bullish_div, is_bearish_div）
+        from autotrader.calculator.features.divergence_features import (
+            DivergenceDetector,
+        )
+
+        div_detector = DivergenceDetector()
+        div_df = div_detector.calculate_divergence_signal(
+            close, result[f"rsi_{self.config.rsi_period}"]
+        )
+        result["is_bullish_div"] = div_df["is_bullish_div"]
+        result["is_bearish_div"] = div_df["is_bearish_div"]
 
         # 価格構造
         structure = PriceStructureIndicators()

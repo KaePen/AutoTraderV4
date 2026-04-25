@@ -787,6 +787,28 @@ class UnifiedTradeBot:
             )
         )
 
+        # リアクティブモード シグナル生成器（REACTIVE/HYBRID/ASSISTED で使用）
+        self._reactive_gen = None
+        # ASSISTED用: Armed状態管理
+        self._armed_direction: SignalType | None = None
+        self._armed_signal: ConsolidatedSignal | None = None
+        self._armed_bar_count: int = 0
+        if self.config.signal_mode in ("REACTIVE", "HYBRID", "ASSISTED"):
+            from .reactive_signal import (
+                ReactiveConfig,
+                ReactiveSignalGenerator,
+            )
+
+            self._reactive_gen = ReactiveSignalGenerator(
+                config=ReactiveConfig(
+                    donchian_period=self.config.reactive_donchian_period,
+                    adx_min=self.config.reactive_adx_min,
+                    sl_atr_mult=self.config.reactive_sl_atr_mult,
+                    tp_atr_mult=self.config.reactive_tp_atr_mult,
+                ),
+                pip_unit=self.config.pip_unit,
+            )
+
     def update_macro_regime(self, vix: float) -> None:
         """VIX値を更新してマクロレジームを判定
 
@@ -886,6 +908,20 @@ class UnifiedTradeBot:
         Returns:
             ConsolidatedSignal: 統合シグナル
         """
+        if self.config.signal_mode == "REACTIVE":
+            return self._generate_signal_reactive(
+                current_time, candle,
+            )
+        if self.config.signal_mode == "HYBRID":
+            return self._generate_signal_hybrid(
+                current_time, candle,
+                fundamental_ctx, fundamental_memory,
+            )
+        if self.config.signal_mode == "ASSISTED":
+            return self._generate_signal_assisted(
+                current_time, candle,
+                fundamental_ctx, fundamental_memory,
+            )
         return self._generate_signal_new(
             current_time,
             candle,
@@ -927,6 +963,413 @@ class UnifiedTradeBot:
         return self._fund_assessor.assess(
             fundamental_ctx,
             fundamental_memory,
+        )
+
+    def _generate_signal_reactive(
+        self,
+        current_time: pd.Timestamp,
+        candle: Candle | None = None,
+    ) -> ConsolidatedSignal:
+        """リアクティブモードでのシグナル生成
+
+        ドンチャンチャネル・ブレイクアウト + モメンタム確認。
+        方向を予測せず、動いた方向に乗る。
+
+        Args:
+            current_time: 現在時刻
+            candle: 現在のローソク足
+
+        Returns:
+            ConsolidatedSignal: 統合シグナル（HOLD含む）
+        """
+        from .scoring.consolidator import ConsolidatedSignal
+
+        reactive_tf = self.config.reactive_primary_tf
+
+        _hold = ConsolidatedSignal(
+            direction=SignalType.HOLD,
+            confidence=0.0,
+            primary_tf=reactive_tf,
+            aligned_tfs=[],
+            sl_pips=0.0,
+            tp_pips=0.0,
+            rationale="",
+            mode="REACTIVE",
+        )
+
+        if self._reactive_gen is None:
+            return _hold
+
+        # リスク管理チェック（クールダウン、日次損失等）
+        can_trade, reason = self.risk_manager.can_trade(
+            current_time,
+        )
+        if not can_trade:
+            return _hold
+
+        # reactive_primary_tfのデータ行を取得
+        primary_tf = reactive_tf
+        row = self._get_current_row(primary_tf, current_time)
+        if row is None:
+            return _hold
+
+        # リアクティブ評価
+        result = self._reactive_gen.evaluate(row, current_time)
+
+        if result.direction == SignalType.HOLD:
+            return _hold
+
+        # ポジションサイジング（シミュレータ側デフォルトに委任）
+        _lot = None
+
+        return ConsolidatedSignal(
+            direction=result.direction,
+            confidence=result.strength,
+            primary_tf=primary_tf,
+            aligned_tfs=[primary_tf],
+            sl_pips=result.sl_pips,
+            tp_pips=result.tp_pips,
+            rationale=result.rationale,
+            mode="REACTIVE",
+            regime=None,
+            consensus_score=result.adx,
+            lot=_lot,
+            strategy_id="REACTIVE",
+            buy_score=(
+                result.strength * 20
+                if result.direction == SignalType.BUY
+                else 0.0
+            ),
+            sell_score=(
+                result.strength * 20
+                if result.direction == SignalType.SELL
+                else 0.0
+            ),
+        )
+
+    def _generate_signal_assisted(
+        self,
+        current_time: pd.Timestamp,
+        candle: Candle | None = None,
+        fundamental_ctx: FundamentalContext | None = None,
+        fundamental_memory: FundamentalMemorySnapshot | None = None,
+    ) -> ConsolidatedSignal:
+        """ASSISTEDモード: UNIVERSALの方向判断 + REACTIVEのタイミング
+
+        2段階エントリー:
+        1. UNIVERSALがシグナル発火 → Armed状態（方向を記憶、まだエントリーしない）
+        2. Armed中にREACTIVEが同方向ブレイクアウト検出 → エントリー実行
+        3. タイムアウト → 見送り or フォールバック
+
+        UNIVERSALの「何を」+ REACTIVEの「いつ」でDD削減を狙う。
+
+        Args:
+            current_time: 現在時刻
+            candle: 現在のローソク足
+            fundamental_ctx: ファンダメンタルコンテキスト
+            fundamental_memory: ファンダメンタルメモリ
+
+        Returns:
+            ConsolidatedSignal: 統合シグナル
+        """
+        from .scoring.consolidator import ConsolidatedSignal as CS
+
+        _hold = CS(
+            direction=SignalType.HOLD,
+            confidence=0.0,
+            primary_tf=self.config.reactive_primary_tf,
+            aligned_tfs=[],
+            sl_pips=0.0,
+            tp_pips=0.0,
+            rationale="",
+            mode="ASSISTED",
+        )
+
+        # --- 1. UNIVERSALシグナルをチェック ---
+        uni_signal = self._generate_signal_new(
+            current_time, candle,
+            fundamental_ctx, fundamental_memory,
+        )
+
+        # --- 2. Armed状態の管理 ---
+        if uni_signal.direction != SignalType.HOLD:
+            # 新しいUNIVERSALシグナル → Armed状態にセット（または更新）
+            self._armed_direction = uni_signal.direction
+            self._armed_signal = uni_signal
+            self._armed_bar_count = 0
+            logger.debug(
+                "ASSISTED: Armed %s (score=%.1f)",
+                uni_signal.direction.value,
+                uni_signal.consensus_score or 0,
+            )
+
+        if self._armed_direction is None:
+            # Armed状態でない → 何もしない
+            return _hold
+
+        # Armed中のカウンター進行
+        self._armed_bar_count += 1
+        timeout = self.config.assisted_arm_timeout_bars
+
+        # --- 3. タイムアウトチェック ---
+        if self._armed_bar_count > timeout:
+            armed_dir = self._armed_direction
+            armed_sig = self._armed_signal
+
+            # Armed解除
+            self._armed_direction = None
+            self._armed_signal = None
+            self._armed_bar_count = 0
+
+            if self.config.assisted_fallback_entry and armed_sig:
+                # フォールバック: タイムアウトでもエントリー
+                logger.debug(
+                    "ASSISTED: Timeout fallback entry %s",
+                    armed_dir.value if armed_dir else "?",
+                )
+                return CS(
+                    direction=armed_sig.direction,
+                    confidence=armed_sig.confidence * 0.7,
+                    primary_tf=armed_sig.primary_tf,
+                    aligned_tfs=armed_sig.aligned_tfs,
+                    sl_pips=armed_sig.sl_pips,
+                    tp_pips=armed_sig.tp_pips,
+                    rationale=(
+                        f"ASSISTED FALLBACK: {armed_sig.rationale}"
+                    ),
+                    mode="ASSISTED_FALLBACK",
+                    regime=armed_sig.regime,
+                    consensus_score=armed_sig.consensus_score,
+                    lot=armed_sig.lot,
+                    strategy_id="ASSISTED_FALLBACK",
+                    buy_score=armed_sig.buy_score,
+                    sell_score=armed_sig.sell_score,
+                )
+            logger.debug("ASSISTED: Armed timeout, no entry")
+            return _hold
+
+        # --- 4. モメンタム確認でタイミング判断 ---
+        # REACTIVEのブレイクアウトは方向が矛盾しやすいため、
+        # H1データのモメンタム指標で同方向の勢いを確認する
+        reactive_tf = self.config.reactive_primary_tf
+        row = self._get_current_row(reactive_tf, current_time)
+        if row is None:
+            return _hold
+
+        macd_hist = float(row.get("macd_histogram", 0) or 0)
+        ema_fast = float(row.get("ema_12", 0) or 0)
+        ema_slow = float(row.get("ema_26", 0) or 0)
+        close = float(row.get("close", 0) or 0)
+        high = float(row.get("high", 0) or 0)
+        low = float(row.get("low", 0) or 0)
+        atr = float(row.get("atr_14", 0) or 0)
+
+        if close <= 0 or atr <= 0:
+            return _hold
+
+        # モメンタム確認: MACD方向 + EMA配列 + バーモメンタム
+        armed_dir = self._armed_direction
+        momentum_ok = False
+        bar_range = high - low
+
+        if armed_dir == SignalType.BUY:
+            macd_ok = macd_hist > 0
+            ema_ok = ema_fast > ema_slow if ema_fast > 0 else False
+            bar_ok = (close - low) > bar_range * 0.5  # 陽線寄り
+            momentum_ok = macd_ok and (ema_ok or bar_ok)
+        elif armed_dir == SignalType.SELL:
+            macd_ok = macd_hist < 0
+            ema_ok = ema_fast < ema_slow if ema_fast > 0 else False
+            bar_ok = (high - close) > bar_range * 0.5  # 陰線寄り
+            momentum_ok = macd_ok and (ema_ok or bar_ok)
+
+        if not momentum_ok:
+            return _hold
+
+        # --- 5. モメンタム確認 → エントリー！ ---
+        armed_sig = self._armed_signal
+        assert armed_sig is not None
+
+        wait_bars = self._armed_bar_count
+
+        # Armed解除
+        self._armed_direction = None
+        self._armed_signal = None
+        self._armed_bar_count = 0
+
+        # SL/TPをH1のATRで微調整
+        pip_unit = self.config.pip_unit
+        atr_pips = atr / pip_unit if pip_unit > 0 else 0
+        sl_pips = armed_sig.sl_pips
+        tp_pips = armed_sig.tp_pips
+        if atr_pips > 0:
+            sl_pips = max(
+                sl_pips,
+                atr_pips * self.config.reactive_sl_atr_mult,
+            )
+            tp_pips = max(
+                tp_pips,
+                atr_pips * self.config.reactive_tp_atr_mult,
+            )
+
+        logger.debug(
+            "ASSISTED: Entry %s confirmed by momentum (wait=%d bars)",
+            armed_sig.direction.value,
+            wait_bars,
+        )
+
+        return CS(
+            direction=armed_sig.direction,
+            confidence=min(1.0, armed_sig.confidence * 1.1),
+            primary_tf=armed_sig.primary_tf,
+            aligned_tfs=armed_sig.aligned_tfs,
+            sl_pips=sl_pips,
+            tp_pips=tp_pips,
+            rationale=(
+                f"ASSISTED: UNI({armed_sig.rationale}) "
+                f"+ momentum confirms after {wait_bars} bars"
+            ),
+            mode="ASSISTED",
+            regime=armed_sig.regime,
+            consensus_score=armed_sig.consensus_score,
+            lot=armed_sig.lot,
+            strategy_id="ASSISTED",
+            buy_score=armed_sig.buy_score,
+            sell_score=armed_sig.sell_score,
+        )
+
+    def _generate_signal_hybrid(
+        self,
+        current_time: pd.Timestamp,
+        candle: Candle | None = None,
+        fundamental_ctx: FundamentalContext | None = None,
+        fundamental_memory: FundamentalMemorySnapshot | None = None,
+    ) -> ConsolidatedSignal:
+        """ハイブリッドモード: UNIVERSAL + REACTIVE 同時評価
+
+        両モードのシグナルを同時に評価し、最も確信度の高いものを採用。
+        - UNIVERSAL発火 → フルロット（高確信、レアシグナル）
+        - REACTIVE発火 → ロット縮小（頻出シグナル）
+        - 両方同時同方向 → ロット増強（最大確信）
+
+        Args:
+            current_time: 現在時刻
+            candle: 現在のローソク足
+            fundamental_ctx: ファンダメンタルコンテキスト
+            fundamental_memory: ファンダメンタルメモリ
+
+        Returns:
+            ConsolidatedSignal: 統合シグナル
+        """
+        # 1. UNIVERSALシグナル取得
+        uni_signal = self._generate_signal_new(
+            current_time, candle,
+            fundamental_ctx, fundamental_memory,
+        )
+
+        # 2. REACTIVEシグナル取得
+        reactive_signal = self._generate_signal_reactive(
+            current_time, candle,
+        )
+
+        uni_active = uni_signal.direction != SignalType.HOLD
+        reactive_active = reactive_signal.direction != SignalType.HOLD
+
+        # 3. マージロジック
+        if uni_active and reactive_active:
+            if uni_signal.direction == reactive_signal.direction:
+                # 両方同方向 → UNIVERSAL採用 + 確信度ブースト
+                return ConsolidatedSignal(
+                    direction=uni_signal.direction,
+                    confidence=min(1.0, uni_signal.confidence * 1.2),
+                    primary_tf=uni_signal.primary_tf,
+                    aligned_tfs=uni_signal.aligned_tfs,
+                    sl_pips=uni_signal.sl_pips,
+                    tp_pips=uni_signal.tp_pips,
+                    rationale=(
+                        f"HYBRID DUAL: {uni_signal.rationale} "
+                        f"+ REACTIVE confirms"
+                    ),
+                    mode="HYBRID_DUAL",
+                    regime=uni_signal.regime,
+                    consensus_score=uni_signal.consensus_score,
+                    lot=uni_signal.lot,
+                    strategy_id="HYBRID_DUAL",
+                    buy_score=uni_signal.buy_score,
+                    sell_score=uni_signal.sell_score,
+                )
+            else:
+                # 方向矛盾 → 見送り（安全策）
+                from .scoring.consolidator import ConsolidatedSignal as CS
+
+                return CS(
+                    direction=SignalType.HOLD,
+                    confidence=0.0,
+                    primary_tf=uni_signal.primary_tf,
+                    aligned_tfs=[],
+                    sl_pips=0.0,
+                    tp_pips=0.0,
+                    rationale="HYBRID CONFLICT: UNI vs REACTIVE disagree",
+                    mode="HYBRID",
+                )
+
+        if uni_active:
+            # UNIVERSALのみ → そのまま採用
+            return uni_signal
+
+        if reactive_active:
+            # REACTIVEのみ → ADXフィルター + ロット縮小して採用
+            adx_threshold = self.config.hybrid_reactive_adx_min
+            if reactive_signal.consensus_score < adx_threshold:
+                from .scoring.consolidator import ConsolidatedSignal as CS
+
+                return CS(
+                    direction=SignalType.HOLD,
+                    confidence=0.0,
+                    primary_tf=self.config.reactive_primary_tf,
+                    aligned_tfs=[],
+                    sl_pips=0.0,
+                    tp_pips=0.0,
+                    rationale=(
+                        f"HYBRID: REACTIVE ADX {reactive_signal.consensus_score:.1f}"
+                        f" < {adx_threshold:.1f}"
+                    ),
+                    mode="HYBRID",
+                )
+
+            conf_scale = self.config.hybrid_reactive_confidence_scale
+            reactive_lot = None
+            if reactive_signal.lot is not None:
+                reactive_lot = reactive_signal.lot * conf_scale
+            return ConsolidatedSignal(
+                direction=reactive_signal.direction,
+                confidence=reactive_signal.confidence * conf_scale,
+                primary_tf=reactive_signal.primary_tf,
+                aligned_tfs=reactive_signal.aligned_tfs,
+                sl_pips=reactive_signal.sl_pips,
+                tp_pips=reactive_signal.tp_pips,
+                rationale=f"HYBRID REACTIVE-ONLY: {reactive_signal.rationale}",
+                mode="HYBRID_REACTIVE",
+                regime=reactive_signal.regime,
+                consensus_score=reactive_signal.consensus_score,
+                lot=reactive_lot,
+                strategy_id="HYBRID_REACTIVE",
+                buy_score=reactive_signal.buy_score,
+                sell_score=reactive_signal.sell_score,
+            )
+
+        # 両方HOLD
+        from .scoring.consolidator import ConsolidatedSignal as CS
+
+        return CS(
+            direction=SignalType.HOLD,
+            confidence=0.0,
+            primary_tf=self.config.default_primary_tf,
+            aligned_tfs=[],
+            sl_pips=0.0,
+            tp_pips=0.0,
+            rationale="",
+            mode="HYBRID",
         )
 
     def _generate_signal_new(

@@ -642,6 +642,30 @@ class UnifiedBotConfig:
     macro_regime_elevated_penalty: float = 0.1
     # HIGH_FEAR時ペナルティ
     macro_regime_high_fear_penalty: float = 0.3
+    # --- リアクティブモード ---
+    # シグナルモード: "UNIVERSAL"=既存MTFコンセンサス, "REACTIVE"=ブレイクアウト
+    signal_mode: str = "UNIVERSAL"
+    # リアクティブモードの基準時間足（H1推奨、BT検証済み）
+    reactive_primary_tf: str = "H1"
+    # ドンチャンチャネル期間（足数）
+    reactive_donchian_period: int = 20
+    # ADX最小値（トレンド確認）
+    reactive_adx_min: float = 22.0
+    # SL幅のATR倍率
+    reactive_sl_atr_mult: float = 1.5
+    # TP幅のATR倍率
+    reactive_tp_atr_mult: float = 2.5
+    # HYBRID時: REACTIVE-ONLYシグナルの確信度スケール (0.0-1.0)
+    hybrid_reactive_confidence_scale: float = 0.5
+    # HYBRID時: REACTIVE-ONLYシグナルのADX最小値（baseより高く設定でフィルタ強化）
+    hybrid_reactive_adx_min: float = 25.0
+    # --- ASSISTED モード（UNIVERSALの方向 + REACTIVEのタイミング）---
+    # Armed状態の最大保持足数（この間にREACTIVE確認が来なければ期限切れ）
+    assisted_arm_timeout_bars: int = 12
+    # タイムアウト時にフォールバックエントリーするか
+    assisted_fallback_entry: bool = False
+    # Armed中のコンセンサス閾値低減（UNI閾値をこの分だけ下げてArm発動しやすく）
+    assisted_consensus_discount: float = 2.0
     # --- エッジ検定 ---
     # エッジ検定有効化
     edge_validator_enabled: bool = True
