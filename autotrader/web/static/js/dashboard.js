@@ -770,6 +770,11 @@ class PositionPanel extends Component {
         const parsed = new Date(p.opened_at).getTime();
         if (!isNaN(parsed) && parsed > 0) openedAtMs = parsed;
       }
+      // opened_atパース失敗時: elapsed_minutesから逆算して近似値を設定
+      // これにより60秒タイマー(_tickPositionTimers)でも"0m"にならない
+      if (!openedAtMs && p.elapsed_minutes != null && p.elapsed_minutes > 0) {
+        openedAtMs = Date.now() - p.elapsed_minutes * 60000;
+      }
       const maxHoldMin = p.max_hold_minutes != null
         ? p.max_hold_minutes
         : (existing ? existing.maxHoldMin : null);
@@ -833,15 +838,23 @@ class PositionPanel extends Component {
   }
 
   _tickPositionTimers() {
+    // キャッシュが空の場合はスキップ（_render時に正しい値が設定される）
+    if (Object.keys(this._posTimeCache).length === 0) return;
     const elapsedEls = document.querySelectorAll('[data-elapsed-ticket]');
     for (const el of elapsedEls) {
       const ticket = Number(el.dataset.elapsedTicket);
       const min = this._calcElapsedMin(ticket);
+      // キャッシュにopenedAtMsが無い場合はDOM更新をスキップ
+      // （_render時の_fmtElapsedTimeが正しい値を表示しているため上書きしない）
+      const cache = this._posTimeCache[ticket];
+      if (!cache || !cache.openedAtMs) continue;
       el.textContent = fmtHoldTime(null, min);
     }
     const remainEls = document.querySelectorAll('[data-remaining-ticket]');
     for (const el of remainEls) {
       const ticket = Number(el.dataset.remainingTicket);
+      const cache = this._posTimeCache[ticket];
+      if (!cache || !cache.openedAtMs) continue;
       el.innerHTML = this._calcRemainingHtml(ticket);
     }
   }

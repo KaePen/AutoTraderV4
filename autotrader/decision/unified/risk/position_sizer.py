@@ -517,31 +517,20 @@ class PositionSizer:
     def _calculate_confidence_adjust(
         self, confidence: float
     ) -> float:
-        """確度に基づく調整係数（区分線形）
+        """確度に基づく調整係数
 
-        confidence = score/threshold（上限なし）で算出された値を
-        区分線形関数でロット係数に変換する。
-
-        しきい値未満（confidence < 1.0）:
-            lot_mult = 0.3 + confidence * 0.7
-            → confidence=0.0: 0.3x, confidence=1.0: 1.0x
-
-        しきい値以上（confidence >= 1.0）:
-            lot_mult = 1.0 + min(confidence - 1.0, 1.0) * 0.5
-            → confidence=1.0: 1.0x, confidence=2.0: 1.5x（上限）
+        consensus_scoreの予測力がほぼゼロ（r=-0.001）であることが
+        検証済みのため、confidence連動のロット増減は行わない。
+        エントリー可否の閾値フィルタは別途機能しており、
+        ロットサイジングはフラットにする。
 
         Args:
-            confidence: シグナル確度（0〜2以上、上限なし）
+            confidence: シグナル確度（未使用、互換性のため残存）
 
         Returns:
-            float: 調整係数（0.3〜1.5）
+            float: 常に1.0
         """
-        if confidence >= 1.0:
-            # しきい値以上：最大+50%増し（confidence=2.0で上限）
-            return 1.0 + min(confidence - 1.0, 1.0) * 0.5
-        else:
-            # しきい値未満：0.3x〜1.0xで線形補間
-            return 0.3 + confidence * 0.7  # 0.5〜1.2の範囲
+        return 1.0
 
     def _calculate_dd_adjust(self, current_dd_pct: float) -> float:
         """ドローダウンに基づく調整係数（2025年強化版）

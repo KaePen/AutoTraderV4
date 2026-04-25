@@ -152,12 +152,12 @@ class TestPositionSizer:
         assert result.risk_budget > 0
         assert result.reasoning
 
-    def test_high_confidence_increases_lot(self) -> None:
-        """高確度でロット増加"""
-        base_context = SizingContext(
+    def test_confidence_does_not_affect_lot(self) -> None:
+        """確度はロットサイズに影響しない（スコア予測力ゼロのため無効化済み）"""
+        low_conf_context = SizingContext(
             equity=1_000_000,
             sl_pips=20.0,
-            confidence=0.5,
+            confidence=0.3,
             regime=MarketRegime.TREND,
             consecutive_losses=0,
             current_dd_pct=0.0,
@@ -166,41 +166,16 @@ class TestPositionSizer:
         high_conf_context = SizingContext(
             equity=1_000_000,
             sl_pips=20.0,
-            confidence=0.8,  # 高確度
+            confidence=0.8,
             regime=MarketRegime.TREND,
             consecutive_losses=0,
             current_dd_pct=0.0,
         )
 
-        base_result = self.sizer.calculate(base_context)
+        low_result = self.sizer.calculate(low_conf_context)
         high_result = self.sizer.calculate(high_conf_context)
 
-        assert high_result.lot > base_result.lot
-
-    def test_low_confidence_decreases_lot(self) -> None:
-        """低確度でロット減少"""
-        base_context = SizingContext(
-            equity=1_000_000,
-            sl_pips=20.0,
-            confidence=0.6,
-            regime=MarketRegime.TREND,
-            consecutive_losses=0,
-            current_dd_pct=0.0,
-        )
-
-        low_conf_context = SizingContext(
-            equity=1_000_000,
-            sl_pips=20.0,
-            confidence=0.3,  # 低確度
-            regime=MarketRegime.TREND,
-            consecutive_losses=0,
-            current_dd_pct=0.0,
-        )
-
-        base_result = self.sizer.calculate(base_context)
-        low_result = self.sizer.calculate(low_conf_context)
-
-        assert low_result.lot < base_result.lot
+        assert low_result.lot == high_result.lot
 
     def test_regime_adjustment(self) -> None:
         """レジーム別調整"""
@@ -386,7 +361,7 @@ class TestSlippageBuffer:
         context = SizingContext(
             equity=1_000_000,
             sl_pips=20.0,
-            confidence=0.7,  # 0.3 + 0.7*0.7 = 0.79x (区分線形)
+            confidence=0.7,
             regime=MarketRegime.TREND,
             consecutive_losses=0,
             current_dd_pct=0.0,
@@ -394,11 +369,10 @@ class TestSlippageBuffer:
 
         result = sizer.calculate(context)
 
-        # 手計算: conf_adjust = 0.3 + 0.7*0.7 = 0.79
-        # 1M * 0.025 * 0.79 / ((20+2) * 1000) ≈ 0.897 → 0.90
-        conf_adjust = 0.3 + 0.7 * 0.7
+        # 手計算: conf_adjust = 1.0（確度調整無効化済み）
+        # 1M * 0.025 * 1.0 / ((20+2) * 1000) ≈ 1.136 → 1.14
         expected_lot = (
-            1_000_000 * 0.025 * conf_adjust
+            1_000_000 * 0.025 * 1.0
         ) / (22.0 * 1000.0)
         # max_risk_pct_absoluteによる上限
         max_lot_risk = (
