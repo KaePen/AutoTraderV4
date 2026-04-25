@@ -122,20 +122,9 @@ def replay_bot(
     """BotをリプレイしてBTシグナルを記録"""
     bot = UnifiedTradeBot(config=config)
 
-    # market_data をbotに設定
-    bot._market_data = {}
-    bot._time_arrays = {}
-    bot._current_indices = {}
-
-    import numpy as np
-
-    for tf, df in market_data.items():
-        bot._market_data[tf] = df
-        if hasattr(df.index, "values"):
-            bot._time_arrays[tf] = df.index.values.astype(
-                "datetime64[ns]"
-            )
-        bot._current_indices[tf] = 0
+    # set_market_data() を使って正しく初期化
+    # （evaluatorへのHTFデータ設定を含む）
+    bot.set_market_data(market_data)
 
     # M15バーを基準にイテレート（ライブと同じ頻度）
     iterate_tf = "M15" if "M15" in market_data else "H1"
