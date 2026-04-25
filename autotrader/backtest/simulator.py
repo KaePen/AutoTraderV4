@@ -12,6 +12,7 @@ from typing import Any
 from uuid import uuid4
 
 import numpy as np
+import pandas as pd
 
 from autotrader.backtest.position_event_logger import (
     PositionEventLogger,
@@ -124,6 +125,8 @@ class SimulatorConfig:
     signal_skip_rate: float = 0.0
     # マージン使用率上限%(0=チェック無効)
     margin_limit_pct: float = 80.0
+    # M1ベースティックシミュレーション設定
+    tick_sim_config: Any = None  # TickSimConfig | None
 
     def __post_init__(self) -> None:
         """ストレステストパラメータのバリデーション"""
@@ -351,6 +354,47 @@ class TradeSimulator:
                     "new_york", 1.2,
                 )
             # 23 UTC: off_hours（デフォルト）
+
+        # M1ベースティックシミュレーター
+        self._tick_simulator: Any = None
+        self._m1_df: Any = None  # pd.DataFrame | None
+        if (
+            self.config.tick_sim_config is not None
+            and self.config.tick_sim_config.enabled
+        ):
+            from autotrader.backtest.tick_simulator import (
+                BacktestTickSimulator,
+            )
+
+            self._tick_simulator = BacktestTickSimulator(
+                config=self.config.tick_sim_config,
+                symbol="",  # set_m1_data で設定
+            )
+
+    def set_m1_data(
+        self,
+        m1_df: "pd.DataFrame",
+        symbol: str,
+    ) -> None:
+        """M1データを設定（ティックシミュレーション用）
+
+        Args:
+            m1_df: M1 DataFrame（DatetimeIndex）
+            symbol: 通貨ペア名
+        """
+        self._m1_df = m1_df
+        if (
+            self.config.tick_sim_config is not None
+            and self.config.tick_sim_config.enabled
+        ):
+            from autotrader.backtest.tick_simulator import (
+                BacktestTickSimulator,
+            )
+
+            self._tick_simulator = BacktestTickSimulator(
+                config=self.config.tick_sim_config,
+                symbol=symbol,
+            )
 
     def set_position_event_logger(
         self, logger: PositionEventLogger,
@@ -664,8 +708,30 @@ class TradeSimulator:
                         ),
                     },
                 )
+            # M1ティックシミュレーション: 最適価格を探索
+            _tick_override_price: float | None = None
+            if (
+                self._tick_simulator is not None
+                and self._m1_df is not None
+                and signal.signal_type != SignalType.HOLD
+            ):
+                _sim_result = (
+                    self._tick_simulator.find_optimal_entry(
+                        signal_type=signal.signal_type,
+                        signal_time=pd.Timestamp(candle.time),
+                        m1_df=self._m1_df,
+                    )
+                )
+                if _sim_result is not None:
+                    _tick_override_price = (
+                        _sim_result.entry_price
+                    )
+
             position = self._open_position(
-                signal, candle, at_open=True,
+                signal,
+                candle,
+                at_open=True,
+                override_price=_tick_override_price,
             )
             if position:
                 state.open_positions.append(position)
@@ -1133,6 +1199,7 @@ class TradeSimulator:
         candle: Candle,
         strategy_id: str | None = None,
         at_open: bool = False,
+        override_price: float | None = None,
     ) -> Position | None:
         """ポジションをオープン
 
@@ -1141,12 +1208,15 @@ class TradeSimulator:
             candle: 現在の足データ
             strategy_id: 戦略ID（戦略別追跡用）
             at_open: Trueなら足openで約定（次足約定用）
+            override_price: エントリー価格上書き（M1ティックシミュレーション用）
 
         Returns:
             Position | None: 作成されたポジション
         """
         entry_price = self._get_entry_price(
-            signal.signal_type, candle, at_open=at_open,
+            signal.signal_type, candle,
+            override_price=override_price,
+            at_open=at_open,
         )
         # 動的サイジングONかつシグナルにlot指定あり→使用
         volume = (

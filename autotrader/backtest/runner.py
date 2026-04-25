@@ -112,6 +112,8 @@ class BacktestConfig:
         default_factory=lambda: DEFAULT_TRADING_PARAMS.commission_per_lot
     )
     use_session_spread: bool = False
+    # M1ベースティックシミュレーション設定
+    tick_sim_config: Any = None  # TickSimConfig | None
 
     @classmethod
     def from_preset(
@@ -1062,10 +1064,40 @@ class BacktestRunner:
                     "[Fundamental] データ読込失敗: %s",
                     e,
                 )
+        else:
+            # 明示パス未指定: 自動発見フォールバック
+            try:
+                from autotrader.backtest.fundamental_utils import (
+                    create_fundamental_provider,
+                )
+
+                fundamental_provider = (
+                    create_fundamental_provider(
+                        data_dir=str(self.config.data_dir),
+                        symbol=self.config.symbol,
+                        start_year=start_year,
+                        end_year=end_year,
+                        guard_minutes=fundamental_guard_minutes,
+                    )
+                )
+                if fundamental_provider is not None:
+                    if bot_config.fundamental_assessor_enabled:
+                        fundamental_provider.enable_memory()
+                    _log.info(
+                        "[Fundamental] 自動発見でプロバイダ初期化完了"
+                    )
+            except Exception as e:
+                _log.debug(
+                    "[Fundamental] 自動発見失敗: %s", e
+                )
 
         # M1/M5 自動ロード判定
         _short_tfs = {"M1", "M5"}
-        _needs_short_tf = use_m1 or bool(
+        _tick_sim_on = (
+            self.config.tick_sim_config is not None
+            and self.config.tick_sim_config.enabled
+        )
+        _needs_short_tf = use_m1 or _tick_sim_on or bool(
             set(bot_config.timeframes) & _short_tfs
         )
 
@@ -1137,6 +1169,7 @@ class BacktestRunner:
                 bot_config.use_actual_spread_data
             ),
             sl_tp_in_pips=True,
+            tick_sim_config=self.config.tick_sim_config,
         )
 
         yearly_results: list[dict[str, Any]] = []
@@ -1475,6 +1508,33 @@ class BacktestRunner:
                     "[Fundamental] データ読込失敗（無効化）: %s",
                     e,
                 )
+        else:
+            # 明示パス未指定: 自動発見フォールバック
+            try:
+                from autotrader.backtest.fundamental_utils import (
+                    create_fundamental_provider,
+                )
+
+                _bot_cfg = config or UnifiedBotConfig()
+                fundamental_provider = (
+                    create_fundamental_provider(
+                        data_dir=str(self.config.data_dir),
+                        symbol=self.config.symbol,
+                        start_year=start_year,
+                        end_year=end_year,
+                        guard_minutes=fundamental_guard_minutes,
+                    )
+                )
+                if fundamental_provider is not None:
+                    if _bot_cfg.fundamental_assessor_enabled:
+                        fundamental_provider.enable_memory()
+                    _log.info(
+                        "[Fundamental] 自動発見でプロバイダ初期化完了"
+                    )
+            except Exception as e:
+                _log.debug(
+                    "[Fundamental] 自動発見失敗: %s", e
+                )
 
         # ボット設定（各年の bot インスタンスはこの設定から生成）
         bot_config = config or UnifiedBotConfig()
@@ -1483,9 +1543,14 @@ class BacktestRunner:
         # enable_scalping/use_m1は後方互換性のため維持するが、
         # UNIVERSALモードでは明示指定不要。
         _short_tfs = {"M1", "M5"}
+        _tick_sim_on = (
+            self.config.tick_sim_config is not None
+            and self.config.tick_sim_config.enabled
+        )
         _needs_short_tf = (
             use_m1
             or enable_scalping
+            or _tick_sim_on
             or bool(set(bot_config.timeframes) & _short_tfs)
         )
 
@@ -1551,6 +1616,7 @@ class BacktestRunner:
             use_session_spread=self.config.use_session_spread,
             use_actual_spread_data=bot_config.use_actual_spread_data,
             sl_tp_in_pips=True,
+            tick_sim_config=self.config.tick_sim_config,
         )
 
         if len(years) > 1 and not sequential:

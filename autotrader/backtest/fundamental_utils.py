@@ -24,6 +24,7 @@ def create_fundamental_provider(
     発見順序（年ごとに独立判定）:
     1. data/{SYMBOL}/events/cache/events_YYYY.parquet
     2. data/{SYMBOL}/events/csv/events_YYYY.csv
+    3. data/fundamental/events/events_YYYY.csv（共通フォールバック）
 
     Args:
         data_dir: データルートディレクトリ
@@ -54,13 +55,21 @@ def create_fundamental_provider(
         if pq.exists():
             event_parquets.append(str(pq))
             continue
-        # 優先2: CSV
+        # 優先2: CSV（シンボル固有）
         csv = (
             data_base / symbol / "events" / "csv"
             / f"events_{yr}.csv"
         )
         if csv.exists():
             event_csvs.append(str(csv))
+            continue
+        # 優先3: CSV（共通フォールバック）
+        csv_common = (
+            data_base / "fundamental" / "events"
+            / f"events_{yr}.csv"
+        )
+        if csv_common.exists():
+            event_csvs.append(str(csv_common))
 
     if not event_csvs and not event_parquets:
         logger.debug(

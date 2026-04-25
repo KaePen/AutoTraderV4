@@ -138,6 +138,16 @@ def run_unified_year(
 
     simulator = TradeSimulator(config=sim_config)
 
+    # M1ティックシミュレーション: M1データを注入
+    if (
+        sim_config.tick_sim_config is not None
+        and sim_config.tick_sim_config.enabled
+        and "M1" in market_data
+    ):
+        simulator.set_m1_data(
+            market_data["M1"], runner.config.symbol,
+        )
+
     # ポジションイベントロガー設定
     _pos_evt_logger = PositionEventLogger()
     simulator.set_position_event_logger(_pos_evt_logger)
@@ -155,6 +165,7 @@ def run_unified_year(
     # メトリクス追跡
     winning_trades = 0
     losing_trades = 0
+    _events_skipped = 0  # 経済指標によるスキップ回数
     # モード/レジーム追跡（ポジション別）
     _pos_mode_regime: dict[str, tuple[str, str]] = {}
 
@@ -305,6 +316,7 @@ def run_unified_year(
             )
             # PRE_EVENT: 高インパクト指標30分前は常にスキップ
             if _fctx.has_high_impact_within_30min:
+                _events_skipped += 1
                 continue
             # Phase 2b無効時: caution_levelベースの追加ブロック
             # Phase 2b有効時: アセッサーの方向フィルターに委任
@@ -313,6 +325,7 @@ def run_unified_year(
                 and _fctx.event_caution_level
                 >= (bot_config.fundamental_caution_block_level)
             ):
+                _events_skipped += 1
                 continue  # 超重要指標日はスキップ
 
         # 統合ボットでシグナル生成
@@ -968,6 +981,12 @@ def run_unified_year(
     # ログ品質チェック
     validate_trade_log(trades, year)
 
+    if _events_skipped > 0:
+        _log.info(
+            "[Year %d] 経済指標スキップ: %d回",
+            year, _events_skipped,
+        )
+
     return {
         "year": year,
         "trades": len(trades),
@@ -979,6 +998,7 @@ def run_unified_year(
         "sharpe": metrics.sharpe_ratio or 0,
         "breakdown": breakdown,
         "monthly_results": _monthly_results,
+        "events_skipped": _events_skipped,
     }
 
 
