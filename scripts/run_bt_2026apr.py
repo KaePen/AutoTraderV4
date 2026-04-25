@@ -17,8 +17,15 @@ from autotrader.decision.unified.risk.position_manager import (
 )
 
 # ライブと同一設定（trading_defaults.yaml準拠）
-bot_config = UnifiedBotConfig(consensus_threshold=14.0)
-bt_config = BacktestConfig(symbol="USDJPY", timeframe="H1")
+bot_config = UnifiedBotConfig(
+    consensus_threshold=14.0,
+    max_positions=1,
+    bonus_max_positions=0,
+)
+bt_config = BacktestConfig(
+    symbol="USDJPY", timeframe="H1",
+    max_positions=1, bonus_max_positions=0,
+)
 
 # ライブのPM設定（trading_defaults.yaml pm_config）
 pm_config = PositionManagerConfig(
@@ -76,7 +83,7 @@ result = runner.run_unified_monthly(
     start_year=2026,
     end_year=2026,
     config=bot_config,
-    use_m1=False,
+    use_m1=True,
     pm_config=pm_config,
     max_month_workers=1,
     sequential=True,
