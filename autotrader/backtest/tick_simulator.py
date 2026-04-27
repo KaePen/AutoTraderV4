@@ -24,7 +24,10 @@ class TickSimConfig:
     TickEntryConfig（ライブ用）と同等のパラメータを持つ。
 
     Attributes:
-        enabled: M1ベースティックシミュレーション有効化
+        enabled: M1データ読み込み有効化（M1 exitに必要）
+        entry_optimization: M1エントリー最適化（擬似ティックスコアリング）
+            False推奨: M1擬似ティックの粒度不足で逆効果になる。
+            Trueにすると順張りモメンタムで高値掴み/安値売りが発生。
         window_minutes: エントリー探索ウィンドウ（分）
         composite_threshold: 総合スコア閾値
         spread_weight: スプレッド条件の重み
@@ -36,6 +39,7 @@ class TickSimConfig:
     """
 
     enabled: bool = False
+    entry_optimization: bool = False
     window_minutes: int = 15
     composite_threshold: float = 0.6
     spread_weight: float = 0.4

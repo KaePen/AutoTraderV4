@@ -713,11 +713,15 @@ class TradeSimulator:
                     },
                 )
             # M1ティックシミュレーション: 最適価格を探索
+            # entry_optimization=False(デフォルト)ではスキップし、
+            # bar open価格で約定（M1擬似ティックの粒度不足で逆効果のため）
             _tick_override_price: float | None = None
             if (
                 self._tick_simulator is not None
                 and self._m1_df is not None
                 and signal.signal_type != SignalType.HOLD
+                and self.config.tick_sim_config is not None
+                and self.config.tick_sim_config.entry_optimization
             ):
                 _sim_result = (
                     self._tick_simulator.find_optimal_entry(
@@ -770,6 +774,8 @@ class TradeSimulator:
     ) -> tuple[float, ExitReason, float] | None:
         """決済条件をチェック（ギャップ約定対応）
 
+        M1データがある場合はM1バーで精密判定を優先。
+
         Args:
             position: ポジション
             candle: 現在の足データ
@@ -777,6 +783,11 @@ class TradeSimulator:
         Returns:
             tuple | None: (fill_price, reason, trigger_price)
         """
+        # M1ベース精密判定を優先
+        m1_result = self._check_sl_tp_with_m1(position, candle)
+        if m1_result is not None:
+            return m1_result
+
         sl = position.stop_loss
         tp = position.take_profit
         slip = self._slippage_price
@@ -844,8 +855,9 @@ class TradeSimulator:
     ) -> tuple[float, ExitReason, float] | None:
         """PM経路用: high/lowでSL/TPブリーチを検出
 
-        _check_exit_conditions と同じロジックだが、
-        PM経路から呼び出される専用メソッド。
+        M1データがある場合はM1バーで時系列走査して
+        SL/TPヒット順序を精密判定する。
+        M1データがなければ従来のhigh/lowヒューリスティックにフォールバック。
 
         Args:
             position: ポジション
@@ -854,10 +866,15 @@ class TradeSimulator:
         Returns:
             tuple | None: (fill_price, reason, trigger_price)
         """
+        # M1ベース精密判定を優先
+        m1_result = self._check_sl_tp_with_m1(position, candle)
+        if m1_result is not None:
+            return m1_result
+
+        # フォールバック: bar high/lowベース
         sl = position.stop_loss
         tp = position.take_profit
         slip = self._slippage_price
-        # SL約定時スプレッド不利分
         _sl_spread = (
             self._current_candle_spread / 2
             * self.config.sl_exit_spread_factor
@@ -911,6 +928,120 @@ class TradeSimulator:
                 return (
                     tp + slip, ExitReason.TAKE_PROFIT, tp,
                 )
+
+        return None
+
+    def _check_sl_tp_with_m1(
+        self,
+        position: Position,
+        candle: Candle,
+    ) -> tuple[float, ExitReason, float] | None:
+        """M1バーでSL/TPヒット順序を精密判定
+
+        親足（M15/H1等）の期間内のM1バーを時系列走査し、
+        最初にSL/TPに到達したバーで決済する。
+        bar high/lowヒューリスティックと異なり、
+        同一足内のSL/TP同時ヒット問題を1分精度で解消する。
+
+        Returns:
+            tuple | None: (fill_price, reason, trigger_price)
+            M1データなし or ヒットなしの場合 None
+        """
+        if self._m1_df is None or self._m1_df.empty:
+            return None
+
+        sl = position.stop_loss
+        tp = position.take_profit
+        if sl is None and tp is None:
+            return None
+
+        is_buy = position.signal_type == SignalType.BUY
+        slip = self._slippage_price
+        _sl_spread = (
+            self._current_candle_spread / 2
+            * self.config.sl_exit_spread_factor
+            if self.config.sl_exit_spread_enabled
+            else 0.0
+        )
+
+        bar_start = pd.Timestamp(candle.time)
+        tf_minutes = candle.timeframe.minutes()
+        bar_end = bar_start + pd.Timedelta(minutes=tf_minutes)
+
+        m1_bars = self._m1_df.loc[
+            (self._m1_df.index >= bar_start)
+            & (self._m1_df.index < bar_end)
+        ]
+        if m1_bars.empty:
+            return None
+
+        for i in range(len(m1_bars)):
+            row = m1_bars.iloc[i]
+            m1_high = float(row["high"])
+            m1_low = float(row["low"])
+            m1_open = float(row["open"])
+
+            if is_buy:
+                sl_hit = sl is not None and m1_low <= sl
+                tp_hit = tp is not None and m1_high >= tp
+
+                if sl_hit and tp_hit:
+                    # 同一M1足内の同時ヒット: open方向で判定
+                    if m1_open <= sl:
+                        return (
+                            m1_open - slip - _sl_spread,
+                            ExitReason.STOP_LOSS,
+                            sl,
+                        )
+                    return (
+                        sl - slip - _sl_spread,
+                        ExitReason.STOP_LOSS,
+                        sl,
+                    )
+                if sl_hit:
+                    fill = (
+                        m1_open - slip - _sl_spread
+                        if m1_open < sl
+                        else sl - slip - _sl_spread
+                    )
+                    return (fill, ExitReason.STOP_LOSS, sl)
+                if tp_hit:
+                    fill = (
+                        m1_open - slip
+                        if m1_open > tp
+                        else tp - slip
+                    )
+                    return (fill, ExitReason.TAKE_PROFIT, tp)
+            else:
+                sl_hit = sl is not None and m1_high >= sl
+                tp_hit = tp is not None and m1_low <= tp
+
+                if sl_hit and tp_hit:
+                    if m1_open >= sl:
+                        return (
+                            m1_open + slip + _sl_spread,
+                            ExitReason.STOP_LOSS,
+                            sl,
+                        )
+                    return (
+                        sl + slip + _sl_spread,
+                        ExitReason.STOP_LOSS,
+                        sl,
+                    )
+                if sl_hit:
+                    fill = (
+                        m1_open + slip + _sl_spread
+                        if m1_open > sl
+                        else sl + slip + _sl_spread
+                    )
+                    return (fill, ExitReason.STOP_LOSS, sl)
+                if tp_hit:
+                    fill = (
+                        m1_open + slip
+                        if m1_open < tp
+                        else tp + slip
+                    )
+                    return (fill, ExitReason.TAKE_PROFIT, tp)
 
         return None
 
