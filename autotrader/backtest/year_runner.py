@@ -48,12 +48,16 @@ def run_unified_year(
     adaptive_config: "TunerConfig | None" = None,
     whatif_tracker: Any = None,
     vix_data: "dict | None" = None,
+    prev_bot: "UnifiedTradeBot | None" = None,
 ) -> dict[str, Any] | None:
     """統合ボットで1年分のバックテスト実行（self-contained）
 
     年ごとに新しい UnifiedTradeBot インスタンスを生成するため、
     年をまたいだ状態の累積が発生しない。
     並列実行に対応している。
+
+    prev_bot が渡された場合は前年の bot 状態を引き継ぎ、
+    エッジ検定・adaptive tuner の状態が累積する（リアルと同等）。
 
     Args:
         bot_config: ボット設定（各年で fresh な bot を生成）
@@ -70,21 +74,26 @@ def run_unified_year(
             並列実行時にUIへリアルタイム進捗を通知する。
         whatif_tracker: WhatIfTracker（ブロックシグナル仮想追跡）
         vix_data: VIX日次データ（date→float）
+        prev_bot: 前年のbotインスタンス（状態引き継ぎ用、Noneで新規）
 
     Returns:
-        年別結果（monthly_results フィールドを含む）
+        年別結果（monthly_results フィールドを含む、"bot" キーに
+        年末時点の bot インスタンスを格納）
     """
     from autotrader.decision.unified import (  # noqa: F401
         UnifiedBotConfig,
         UnifiedTradeBot,
     )
 
-    # 年ごとに fresh な bot を生成（状態の累積を防止）
-    bot = UnifiedTradeBot(
-        bot_config,
-        adaptive_config=adaptive_config,
-    )
-    bot.state = bot.state.with_initial_equity(sim_config.initial_balance)
+    # prev_bot が渡された場合は状態引き継ぎ（sequential実行時）
+    if prev_bot is not None:
+        bot = prev_bot
+    else:
+        bot = UnifiedTradeBot(
+            bot_config,
+            adaptive_config=adaptive_config,
+        )
+        bot.state = bot.state.with_initial_equity(sim_config.initial_balance)
     bot.set_market_data(market_data)
 
     # 共通エントリーゲート（BT/ライブ統一ロジック）
@@ -1000,6 +1009,7 @@ def run_unified_year(
         "breakdown": breakdown,
         "monthly_results": _monthly_results,
         "events_skipped": _events_skipped,
+        "bot": bot,
     }
 
 

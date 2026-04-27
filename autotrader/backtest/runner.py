@@ -1845,6 +1845,9 @@ class BacktestRunner:
                 break
         else:
             # シーケンシャル実行（単年 または --sequential 指定時）
+            # bot状態を年間で引き継ぎ（エッジ検定・adaptive tunerの累積）
+            _prev_bot = None
+            _last_year = years[-1]
             for year in years:
                 # キャンセルチェック
                 if self._check_cancel_requested():
@@ -1852,6 +1855,10 @@ class BacktestRunner:
                     return self._aggregate_results_from_yearly(yearly_results)
 
                 self._emitter.emit_year_start(year)
+                # period_start/period_end は最終年のみ適用
+                # ウォームアップ年は全データ処理してbot状態を蓄積
+                _ps = period_start if year == _last_year else None
+                _pe = period_end if year == _last_year else None
                 year_result = self._run_unified_year(
                     bot_config,
                     sim_config,
@@ -1859,13 +1866,19 @@ class BacktestRunner:
                     market_data,
                     use_m1=use_m1,
                     fundamental_provider=fundamental_provider,
-                    period_start=period_start,
-                    period_end=period_end,
+                    period_start=_ps,
+                    period_end=_pe,
+                    prev_bot=_prev_bot,
                 )
                 if year_result is None and self._check_cancel_requested():
                     return self._aggregate_results_from_yearly(yearly_results)
                 if year_result is not None:
-                    yearly_results.append(year_result)
+                    _prev_bot = year_result.pop("bot", None)
+                    # ウォームアップ年の結果は集計に含めない
+                    if year == _last_year or (
+                        period_start is None and period_end is None
+                    ):
+                        yearly_results.append(year_result)
                     self._emitter.emit_year_end(year_result)
 
         # 並列実行後: 年別サマリをまとめて発行
@@ -2255,6 +2268,7 @@ class BacktestRunner:
         emitter: "BacktestEventEmitter | None" = None,
         row_progress_callback: ("Callable[[int, int], None] | None") = None,
         adaptive_config: "TunerConfig | None" = None,
+        prev_bot: Any = None,
     ) -> dict[str, Any] | None:
         """統合ボットで1年分のバックテスト実行（self-contained）
 
@@ -2273,6 +2287,7 @@ class BacktestRunner:
             emitter=emitter,
             row_progress_callback=row_progress_callback,
             adaptive_config=adaptive_config,
+            prev_bot=prev_bot,
         )
 
     def _validate_trade_log(
