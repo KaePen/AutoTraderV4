@@ -382,6 +382,10 @@ class TradeSimulator:
             m1_df: M1 DataFrame（DatetimeIndex）
             symbol: 通貨ペア名
         """
+        if not isinstance(m1_df.index, pd.DatetimeIndex):
+            if "time" in m1_df.columns:
+                m1_df = m1_df.set_index("time")
+                m1_df.index = pd.to_datetime(m1_df.index)
         self._m1_df = m1_df
         if (
             self.config.tick_sim_config is not None
