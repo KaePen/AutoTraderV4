@@ -990,6 +990,7 @@ def run_unified_year(
     return {
         "year": year,
         "trades": len(trades),
+        "closed_trades": trades,
         "win_rate": metrics.win_rate * 100,
         "non_loss_rate": metrics.non_loss_rate * 100,
         "profit_factor": metrics.profit_factor,
