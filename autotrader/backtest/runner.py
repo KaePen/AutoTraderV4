@@ -212,9 +212,15 @@ class BacktestRunner:
         # 例: data/USDJPY/ (data_dir="data", symbol="USDJPY")
         _base = Path(data_dir)
         self.data_dir = _base / self.config.symbol
-        # チャートCSVが chart/ 配下の場合はそちらを優先
+        # チャートCSV検索パス: raw/ohlcv → chart/ → data_dir
+        _raw_dir = self.data_dir / "raw" / "ohlcv"
         _chart_dir = self.data_dir / "chart"
-        self.chart_dir = _chart_dir if _chart_dir.exists() else self.data_dir
+        if _raw_dir.exists():
+            self.chart_dir = _raw_dir
+        elif _chart_dir.exists():
+            self.chart_dir = _chart_dir
+        else:
+            self.chart_dir = self.data_dir
         # TFデータを統合dict管理
         self._tf_data: dict[str, pd.DataFrame] = {}
         # M1構造的SLスイングウィンドウ（run_unified でbot_configから上書き可能）

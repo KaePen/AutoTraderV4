@@ -66,6 +66,10 @@ TIMEFRAMES = {
     "D1":  (mt5.TIMEFRAME_D1,  1440),
 }
 
+# リトライ設定
+MAX_RETRIES = 5
+RETRY_WAIT_SEC = 3
+
 # デフォルトウォームアップ足数
 DEFAULT_WARMUP_BARS = 500
 
@@ -90,73 +94,6 @@ def _warmup_start(
     return utc_start - timedelta(days=calendar_days)
 
 
-def _next_month_ohlcv(dt: datetime) -> datetime:
-    """翌月1日 00:00 UTC を返す（OHLCV用）"""
-    if dt.month == 12:
-        return dt.replace(year=dt.year + 1, month=1, day=1)
-    return dt.replace(month=dt.month + 1, day=1)
-
-
-def _fetch_rates_with_retry(
-    symbol: str,
-    tf_mt5: int,
-    tf_name: str,
-    fetch_start: datetime,
-    fetch_end: datetime,
-) -> "list | None":
-    """MT5からOHLCVを取得（リトライ付き）"""
-    for attempt in range(1, MAX_RETRIES + 1):
-        rates = mt5.copy_rates_range(
-            symbol, tf_mt5, fetch_start, fetch_end,
-        )
-        if rates is not None and len(rates) > 0:
-            return rates
-        if attempt < MAX_RETRIES:
-            print(
-                f"    {tf_name}: データ待機中... "
-                f"({attempt}/{MAX_RETRIES})"
-            )
-            time.sleep(RETRY_WAIT_SEC)
-    return None
-
-
-def _fetch_ohlcv_chunked(
-    symbol: str,
-    tf_name: str,
-    tf_mt5: int,
-    fetch_start: datetime,
-    utc_end: datetime,
-) -> "list | None":
-    """M1/M5を月単位でチャンク取得し結合する"""
-    import numpy as np
-
-    current = fetch_start.replace(
-        day=1, hour=0, minute=0, second=0, microsecond=0,
-    )
-    chunks = []
-    while current < utc_end:
-        chunk_start = max(current, fetch_start)
-        chunk_end = min(_next_month_ohlcv(current), utc_end)
-
-        rates = _fetch_rates_with_retry(
-            symbol, tf_mt5, tf_name, chunk_start, chunk_end,
-        )
-        if rates is not None and len(rates) > 0:
-            chunks.append(rates)
-            print(
-                f"    {tf_name} {current:%Y-%m}: "
-                f"{len(rates):,}本"
-            )
-        else:
-            print(f"    {tf_name} {current:%Y-%m}: データなし")
-
-        current = _next_month_ohlcv(current)
-
-    if not chunks:
-        return None
-    return np.concatenate(chunks)
-
-
 def fetch_ohlcv(
     symbol: str,
     tf_name: str,
@@ -169,31 +106,30 @@ def fetch_ohlcv(
 ) -> int:
     """1シンボル x 1時間足のOHLCVデータを取得してCSV保存
 
-    M1/M5は月単位でチャンク取得する（MT5の一括取得上限回避）。
-
     Returns:
         取得した足の数
     """
     fetch_start = _warmup_start(utc_start, warmup_bars, bar_minutes)
 
-    if bar_minutes <= 5:
-        all_rates = _fetch_ohlcv_chunked(
-            symbol, tf_name, tf_mt5, fetch_start, utc_end,
-        )
-    else:
-        all_rates = _fetch_rates_with_retry(
-            symbol, tf_mt5, tf_name, fetch_start, utc_end,
-        )
+    # MT5はサーバーからデータをダウンロードする時間が必要な場合がある
+    rates = None
+    for attempt in range(1, MAX_RETRIES + 1):
+        rates = mt5.copy_rates_range(symbol, tf_mt5, fetch_start, utc_end)
+        if rates is not None and len(rates) > 0:
+            break
+        if attempt < MAX_RETRIES:
+            print(f"    {tf_name}: データ待機中... ({attempt}/{MAX_RETRIES})")
+            time.sleep(RETRY_WAIT_SEC)
 
-    if all_rates is None or len(all_rates) == 0:
+    if rates is None or len(rates) == 0:
         print(f"    {tf_name}: データなし（{MAX_RETRIES}回リトライ後）")
         return 0
 
     csv_dir = output_dir / symbol / "chart" / "csv"
     csv_dir.mkdir(parents=True, exist_ok=True)
 
-    first_time = datetime.utcfromtimestamp(all_rates[0]["time"])
-    last_time = datetime.utcfromtimestamp(all_rates[-1]["time"])
+    first_time = datetime.fromtimestamp(rates[0]["time"], tz=UTC)
+    last_time = datetime.fromtimestamp(rates[-1]["time"], tz=UTC)
     start_str = first_time.strftime("%Y%m%d%H%M")
     end_str = last_time.strftime("%Y%m%d%H%M")
 
@@ -206,8 +142,8 @@ def fetch_ohlcv(
             "<DATE>\t<TIME>\t<OPEN>\t<HIGH>\t<LOW>"
             "\t<CLOSE>\t<TICKVOL>\t<VOL>\t<SPREAD>\n"
         )
-        for r in all_rates:
-            dt = datetime.utcfromtimestamp(r["time"])
+        for r in rates:
+            dt = datetime.fromtimestamp(r["time"], tz=UTC)
             line = (
                 f"{dt:%Y.%m.%d}\t{dt:%H:%M:%S}\t"
                 f"{r['open']}\t{r['high']}\t{r['low']}\t{r['close']}\t"
@@ -215,13 +151,20 @@ def fetch_ohlcv(
             )
             f.write(line)
 
-    print(f"    {tf_name}: {len(all_rates):,}本 → {filepath.name}")
-    return len(all_rates)
+    print(f"    {tf_name}: {len(rates):,}本 → {filepath.name}")
+    return len(rates)
 
 
 # ============================================================
 # ティックデータ取得
 # ============================================================
+
+def _next_month(dt: datetime) -> datetime:
+    """翌月1日 00:00 UTC を返す"""
+    if dt.month == 12:
+        return dt.replace(year=dt.year + 1, month=1, day=1)
+    return dt.replace(month=dt.month + 1, day=1)
+
 
 def fetch_ticks(
     symbol: str,
@@ -232,15 +175,15 @@ def fetch_ticks(
 ) -> int:
     """ティックデータを月単位で取得してParquet保存
 
-    MT5の copy_ticks_range は大量データ取得に制限があるため、
-    chunk_days 日単位で分割取得する。
+    カレンダー月境界で分割し、データがない月が連続したら
+    残りの年をスキップして高速化する。
 
     Args:
         symbol: 通貨ペア
         utc_start: 開始日時（UTC）
         utc_end: 終了日時（UTC）
         output_dir: 出力ルートディレクトリ
-        chunk_days: 1回の取得日数
+        chunk_days: 未使用（後方互換のため残す）
 
     Returns:
         取得した総ティック数
@@ -249,23 +192,48 @@ def fetch_ticks(
     tick_dir.mkdir(parents=True, exist_ok=True)
 
     total_ticks = 0
-    current = utc_start
+    # 月初に揃える
+    current = utc_start.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
     file_count = 0
+    consecutive_empty = 0
+    max_consecutive_empty = 3  # 3ヶ月連続空なら年末までスキップ
 
     while current < utc_end:
-        chunk_end = min(current + timedelta(days=chunk_days), utc_end)
+        chunk_end = min(_next_month(current), utc_end)
 
-        ticks = mt5.copy_ticks_range(
-            symbol, current, chunk_end, mt5.COPY_TICKS_ALL,
-        )
+        ticks = None
+        for attempt in range(1, MAX_RETRIES + 1):
+            ticks = mt5.copy_ticks_range(
+                symbol, current, chunk_end, mt5.COPY_TICKS_ALL,
+            )
+            if ticks is not None and len(ticks) > 0:
+                break
+            if attempt < MAX_RETRIES:
+                print(
+                    f"    ticks {current:%Y-%m}: "
+                    f"データ待機中... ({attempt}/{MAX_RETRIES})"
+                )
+                time.sleep(RETRY_WAIT_SEC)
 
         if ticks is None or len(ticks) == 0:
-            print(
-                f"    ticks {current.date()} → {chunk_end.date()}: "
-                "データなし"
-            )
-            current = chunk_end
+            consecutive_empty += 1
+            if consecutive_empty >= max_consecutive_empty:
+                # 年末までスキップ
+                next_year = current.replace(
+                    year=current.year + 1, month=1, day=1,
+                )
+                print(
+                    f"    ticks {current:%Y-%m}: データなし "
+                    f"({consecutive_empty}ヶ月連続) → {next_year.year}年へスキップ"
+                )
+                current = next_year
+                consecutive_empty = 0
+            else:
+                print(f"    ticks {current:%Y-%m}: データなし")
+                current = chunk_end
             continue
+
+        consecutive_empty = 0
 
         df = pd.DataFrame(ticks)
         df["timestamp"] = pd.to_datetime(
@@ -274,23 +242,17 @@ def fetch_ticks(
         df = df[["timestamp", "bid", "ask", "volume", "flags"]]
         df = df.set_index("timestamp")
 
-        # 月別ファイル保存
-        filename = (
-            f"ticks_{current.strftime('%Y%m%d')}_"
-            f"{chunk_end.strftime('%Y%m%d')}.parquet"
-        )
+        # 月別ファイル保存（YYYY_MM形式）
+        filename = f"ticks_{current:%Y_%m}.parquet"
         out_path = tick_dir / filename
         df.to_parquet(out_path, engine="pyarrow", compression="snappy")
 
         n = len(df)
         total_ticks += n
         file_count += 1
-        print(
-            f"    ticks {current.date()} → {chunk_end.date()}: "
-            f"{n:,} ticks → {out_path.name}"
-        )
+        print(f"    ticks {current:%Y-%m}: {n:,} ticks → {out_path.name}")
 
-        current = chunk_end
+        current = _next_month(current)
 
     if file_count > 0:
         print(f"    ティック合計: {total_ticks:,} ({file_count}ファイル)")
@@ -435,6 +397,14 @@ def main() -> None:
             print(f"\n{'─' * 50}")
             print(f"■ {symbol}")
             print(f"{'─' * 50}")
+
+            # シンボルをMarket Watchに追加してデータ取得を有効化
+            if not mt5.symbol_select(symbol, True):
+                print(f"  WARNING: {symbol} の選択に失敗: {mt5.last_error()}")
+                continue
+            # データダウンロード開始を待つ
+            time.sleep(1)
+
             sym_start = time.time()
             sym_stats = {"ohlcv": {}, "ticks": 0}
 

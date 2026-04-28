@@ -81,12 +81,14 @@ def _load_ohlcv_csv(
     """OHLCV単一CSVを読み込み"""
     from autotrader.backtest.data_loader import DataLoader
 
-    csv_dir = data_dir / symbol / "chart" / "csv"
+    csv_dir = data_dir / symbol / "raw" / "ohlcv"
+    if not csv_dir.exists():
+        csv_dir = data_dir / symbol / "chart" / "csv"
     if not csv_dir.exists():
         csv_dir = data_dir / symbol / "chart"
-        if not csv_dir.exists():
-            logger.warning("[Pipeline] CSVディレクトリなし: %s", csv_dir)
-            return None
+    if not csv_dir.exists():
+        logger.warning("[Pipeline] CSVディレクトリなし: %s", csv_dir)
+        return None
 
     tf_csv = "Daily" if tf_name == "D1" else tf_name
     pattern = f"{symbol}_{tf_csv}_*.csv"
