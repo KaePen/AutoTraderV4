@@ -118,7 +118,7 @@ pm_config:
   edge_decay_exit_enabled: true
   edge_decay_exit_threshold: 0.40     # 40%劣化で発動（Mode A基準値）
   edge_decay_exit_min_bars: 5         # 非推奨: min_minutesが0の場合のフォールバック
-  edge_decay_exit_min_minutes: 300    # 最低保有5時間（BT H1×5bars相当）
+  edge_decay_exit_min_minutes: 15     # BT検証(2026/1-4): 15分が最適(PF4.45,WR82.3%)
   edge_decay_exit_max_loss_r: -0.3
   # Mode B: 利益侵食 + エッジ劣化複合exit
   edge_decay_profit_exit_enabled: true
