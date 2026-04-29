@@ -145,6 +145,9 @@ class LiveTradingEngine:
         # M1-gated エントリー: 直近で generate_signal を呼んだ M1 バー時刻
         # (entry_on_m1_close_only=True 時にエントリー判定を M1 確定時のみに制限)
         self._last_signaled_m1_index: pd.Timestamp | None = None
+        # 直近フル indicator 再計算の M1 最終時刻
+        # (PrecomputeEngine を毎秒走らせると重いため、M1 確定時のみフル再計算)
+        self._last_full_recalc_m1_idx: pd.Timestamp | None = None
         self._enable_auto_trade = config.enable_auto_trade
         # ランタイムで切替可能なアクティブシンボル
         self._active_symbol = config.symbol
@@ -1418,10 +1421,65 @@ class LiveTradingEngine:
     async def _update_market_data(self) -> None:
         """最新ローソク足データを取得してTradeBotに設定
 
-        時間足確定を待たずリアルタイム評価するため、全TFの最後の
-        バーのclose/high/lowを現在のtick価格で上書きしてから
-        インジケータを再計算する。
+        2モードで動作 (BT-Live 性能最適化):
+        - **軽量モード (毎秒)**: 既存 market_data の最新バーの close/high/low を
+          現在 tick の mid で in-place 更新するのみ。インジケータ再計算なし。
+        - **完全モード (M1 確定時)**: MT5 から全 TF を再取得し、PrecomputeEngine
+          で全指標を再計算して set_market_data で bot に反映。
+
+        PrecomputeEngine は重い (8 TF で ~900ms) ため毎秒走らせると 1秒サイクルに
+        間に合わない。M1 確定時のみフル計算することで毎秒処理を ~10ms 以下に抑える。
         """
+        # M1 確定 (= 新しい M1 バーの登場) を検知
+        if self._needs_full_market_recalc():
+            await self._update_market_data_full()
+        else:
+            self._update_market_data_light()
+
+    def _needs_full_market_recalc(self) -> bool:
+        """フル再計算が必要か判定
+
+        - 初回 (bot.market_data が空) → True
+        - 直近 fetch の M1 最新時刻が前回と異なる (新規 M1 確定) → True
+        - それ以外 → False (軽量更新で十分)
+        """
+        m1 = self._bot.market_data.get("M1")
+        if m1 is None or len(m1) == 0:
+            return True
+        latest = m1.index[-1]
+        prev = getattr(self, "_last_full_recalc_m1_idx", None)
+        if prev is None or latest != prev:
+            return True
+        return False
+
+    def _update_market_data_light(self) -> None:
+        """軽量更新: 各 TF の最終バーを最新 tick mid で上書き (indicator 再計算なし)"""
+        tick = self._last_tick_data
+        if not tick:
+            return
+        try:
+            bid = float(tick.get("bid", 0.0))
+            ask = float(tick.get("ask", 0.0))
+        except (TypeError, ValueError):
+            return
+        mid = (bid + ask) / 2.0
+        if mid <= 0:
+            return
+        for tf_str, df in self._bot.market_data.items():
+            if df is None or df.empty:
+                continue
+            idx = df.index[-1]
+            try:
+                df.at[idx, "close"] = mid
+                if mid > float(df.at[idx, "high"]):
+                    df.at[idx, "high"] = mid
+                if mid < float(df.at[idx, "low"]):
+                    df.at[idx, "low"] = mid
+            except Exception:
+                continue
+
+    async def _update_market_data_full(self) -> None:
+        """完全更新 (M1 確定時のみ): MT5 取得 + tick overwrite + indicator 再計算"""
         symbol = self._active_symbol
         # 全TFのデータを一括収集してから設定
         # MT5サーバー時間(ブローカーTZ)とUTCのずれにより、
@@ -1493,6 +1551,10 @@ class LiveTradingEngine:
 
             all_data = self._calc_indicators(all_data)
             self._bot.set_market_data(all_data)
+            # M1 確定検知用: フル再計算した M1 の最終時刻を記録
+            m1 = all_data.get("M1")
+            if m1 is not None and not m1.empty:
+                self._last_full_recalc_m1_idx = m1.index[-1]
 
     def _calc_indicators(
         self,
