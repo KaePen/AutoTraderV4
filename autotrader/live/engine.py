@@ -1416,6 +1416,9 @@ class LiveTradingEngine:
         if all_data:
             all_data = self._calc_indicators(all_data)
             self._bot.set_market_data(all_data)
+            m1 = all_data.get("M1")
+            if m1 is not None and not m1.empty:
+                self._last_full_recalc_m1_idx = m1.index[-1]
             logger.info("全TFデータ設定完了: %d時間足", len(all_data))
 
     async def _update_market_data(self) -> None:
