@@ -142,6 +142,9 @@ class LiveTradingEngine:
         self._last_analysis: ConsolidatedSignal | None = None
         self._last_tick_time: datetime | None = None
         self._signal_history: list[Signal] = []
+        # M1-gated エントリー: 直近で generate_signal を呼んだ M1 バー時刻
+        # (entry_on_m1_close_only=True 時にエントリー判定を M1 確定時のみに制限)
+        self._last_signaled_m1_index: pd.Timestamp | None = None
         self._enable_auto_trade = config.enable_auto_trade
         # ランタイムで切替可能なアクティブシンボル
         self._active_symbol = config.symbol
@@ -801,11 +804,34 @@ class LiveTradingEngine:
             pass  # 取得失敗時はプリセット値にフォールバック
 
         # 4. シグナル生成
+        # M1-gated エントリー: BT-ライブ乖離対策。
+        # entry_on_m1_close_only=True なら新規 M1 確定時のみ generate_signal。
+        # それ以外の tick では既存シグナル(self._last_signal) を保持する。
         current_time = pd.Timestamp.now(tz="UTC")
-        signal = self._bot.generate_signal(
-            current_time,
-            fundamental_ctx=fundamental_ctx,
-        )
+        m1_gated_skip = False
+        if self._config.entry_on_m1_close_only:
+            _m1 = self._bot.market_data.get("M1")
+            if _m1 is not None and len(_m1) >= 1:
+                _live_idx = _m1.index[-1]
+                if (
+                    self._last_signaled_m1_index is not None
+                    and _live_idx == self._last_signaled_m1_index
+                ):
+                    # 同じ M1 ライブバー → スキップ
+                    m1_gated_skip = True
+                else:
+                    self._last_signaled_m1_index = _live_idx
+
+        if m1_gated_skip:
+            # M1 確定までエントリー判定をスキップ。
+            # 後続のエントリーパスは「シグナルなし」として進む。
+            # ポジション管理 (exit/SL/TP) は既に上で実行済み。
+            signal = None
+        else:
+            signal = self._bot.generate_signal(
+                current_time,
+                fundamental_ctx=fundamental_ctx,
+            )
 
         # 分析結果を保存
         # クールダウン等で分析スキップ時（scores空）は前回の
@@ -1472,8 +1498,43 @@ class LiveTradingEngine:
         self,
         data: dict[str, pd.DataFrame],
     ) -> dict[str, pd.DataFrame]:
-        """生OHLCVデータにテクニカル指標を計算して付加"""
-        return calc_indicators_multi_tf(data)
+        """生OHLCVデータにテクニカル指標を計算して付加
+
+        BT (PrecomputeEngine) と同じ計算経路を使い、 ma_alignment / bos_signal
+        / choch_signal / volatility_regime / liquidity_grab_* 等の構造系・
+        SMC 系指標も含めた完全な指標セットを bot に渡す。これにより BT と
+        ライブで bot が見るデータ列を揃え、判定ロジックの動作差を排除する。
+
+        互換性: 失敗時は旧経路 (calc_indicators_multi_tf) にフォールバック。
+        """
+        from autotrader.calculator.precompute import PrecomputeEngine
+        from autotrader.core.enums import Timeframe as _TF
+
+        try:
+            engine = PrecomputeEngine()
+            out: dict[str, pd.DataFrame] = {}
+            for tf_str, df in data.items():
+                try:
+                    tf = _TF(tf_str)
+                    out[tf_str] = engine.precompute(
+                        df, self._active_symbol, tf, use_cache=False,
+                    )
+                except Exception as e:
+                    logger.warning(
+                        "[%s] %s: PrecomputeEngine 失敗 (%s) → "
+                        "calc_indicators_multi_tf 使用",
+                        self._active_symbol, tf_str, e,
+                    )
+                    out[tf_str] = (
+                        calc_indicators_multi_tf({tf_str: df}).get(tf_str, df)
+                    )
+            return out
+        except Exception as e:
+            logger.error(
+                "[%s] _calc_indicators 全体失敗 (%s) → 旧経路フォールバック",
+                self._active_symbol, e,
+            )
+            return calc_indicators_multi_tf(data)
 
     def _should_use_tick_optimizer(self) -> bool:
         """ティック最適化を使用すべきか判定

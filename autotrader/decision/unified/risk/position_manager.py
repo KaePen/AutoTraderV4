@@ -366,8 +366,12 @@ class PositionManagerConfig:
     edge_decay_exit_enabled: bool = True
     # エントリースコアからの劣化率がこの閾値以上で発動（0.40=40%劣化）
     edge_decay_exit_threshold: float = 0.50
-    # 最低保有バー数（エントリー直後のノイズ排除）
+    # 最低保有バー数（非推奨: edge_decay_exit_min_minutesを使用）
     edge_decay_exit_min_bars: int = 5
+    # 最低保有時間（分）。0より大きい場合はbars_heldより優先される。
+    # BTではevaluate()がH1足ごと、ライブでは毎秒呼ばれるため
+    # bars_heldでは判定タイミングが大幅に異なる。時間ベースで統一する。
+    edge_decay_exit_min_minutes: int = 0
     # 許容最大損失R値（これより大きな損失は通常SLに任せる）
     edge_decay_exit_max_loss_r: float = -0.3
     # モードB: 利益侵食 + エッジ劣化 複合exit（利益を守る）
@@ -785,6 +789,7 @@ class PositionManager:
         action = self._check_edge_decay_exit(
             position, current_price,
             _own_score, _decay_ratio,
+            current_time=current_time,
         )
         if action is not None:
             self._try_state_transition(position, action)
@@ -1379,6 +1384,7 @@ class PositionManager:
         current_price: float,
         own_score: float,
         decay_ratio: float,
+        current_time: datetime | None = None,
     ) -> ManagementAction | None:
         """エッジ劣化exit
 
@@ -1395,6 +1401,7 @@ class PositionManager:
             current_price: 現在価格
             own_score: 現在の自方向コンセンサススコア
             decay_ratio: エントリー時からのスコア劣化率（0.0〜1.0）
+            current_time: 現在時刻（時間ベース判定用）
 
         Returns:
             ManagementAction | None: 決済アクション
@@ -1405,9 +1412,16 @@ class PositionManager:
         if position.entry_own_score <= 0:
             return None
 
-        # 最低保有バー数未満はスキップ（エントリー直後のノイズ排除）
-        if position.bars_held < cfg.edge_decay_exit_min_bars:
-            return None
+        # 最低保有時間チェック（時間ベース優先、フォールバックはbars_held）
+        if cfg.edge_decay_exit_min_minutes > 0 and current_time is not None:
+            elapsed_minutes = (
+                current_time - position.entry_time
+            ).total_seconds() / 60.0
+            if elapsed_minutes < cfg.edge_decay_exit_min_minutes:
+                return None
+        else:
+            if position.bars_held < cfg.edge_decay_exit_min_bars:
+                return None
 
         # モードB: 利益侵食 + エッジ劣化（利益を守る・優先）
         if cfg.edge_decay_profit_exit_enabled:

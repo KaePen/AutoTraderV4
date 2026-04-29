@@ -194,7 +194,7 @@ class DataFeedService:
             )
 
         if all_data:
-            all_data = self._calc_indicators(all_data)
+            all_data = self._calc_indicators(all_data, symbol)
             self._bot.set_market_data(all_data)
             logger.info("全TFデータ設定完了: %d時間足", len(all_data))
 
@@ -249,12 +249,44 @@ class DataFeedService:
                     all_data[tf_str] = df
 
         if all_data:
-            all_data = self._calc_indicators(all_data)
+            all_data = self._calc_indicators(all_data, symbol)
             self._bot.set_market_data(all_data)
 
     def _calc_indicators(
         self,
         data: dict[str, pd.DataFrame],
+        symbol: str = "USDJPY",
     ) -> dict[str, pd.DataFrame]:
-        """生OHLCVデータにテクニカル指標を計算して付加"""
-        return calc_indicators_multi_tf(data)
+        """生OHLCVデータにテクニカル指標を計算して付加
+
+        BT (PrecomputeEngine) と同じ計算経路を使い、ma_alignment 等の
+        構造系・SMC 系指標も含めた完全な指標セットを bot に渡す。
+        失敗時は旧 calc_indicators_multi_tf にフォールバック。
+        """
+        from autotrader.calculator.precompute import PrecomputeEngine
+        from autotrader.core.enums import Timeframe as _TF
+
+        try:
+            engine = PrecomputeEngine()
+            out: dict[str, pd.DataFrame] = {}
+            for tf_str, df in data.items():
+                try:
+                    tf = _TF(tf_str)
+                    out[tf_str] = engine.precompute(
+                        df, symbol, tf, use_cache=False,
+                    )
+                except Exception as e:
+                    logger.warning(
+                        "[%s] %s: PrecomputeEngine 失敗 (%s) → 旧経路",
+                        symbol, tf_str, e,
+                    )
+                    out[tf_str] = (
+                        calc_indicators_multi_tf({tf_str: df}).get(tf_str, df)
+                    )
+            return out
+        except Exception as e:
+            logger.error(
+                "[%s] _calc_indicators 全体失敗 (%s) → 旧経路",
+                symbol, e,
+            )
+            return calc_indicators_multi_tf(data)

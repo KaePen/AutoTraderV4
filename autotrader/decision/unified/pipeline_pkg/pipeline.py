@@ -512,6 +512,30 @@ class ConsensusStep:
             )
             return ctx
 
+        # HTFトレンド逆行ハードブロック
+        # signal方向と htf_alignment が強く対立した場合にエントリー無効化
+        if (
+            bot.config.htf_counter_block_enabled
+            and consensus.direction != SignalType.HOLD
+        ):
+            _thr = bot.config.htf_counter_block_threshold
+            _is_counter = (
+                (consensus.direction == SignalType.BUY
+                 and htf_alignment <= -_thr)
+                or (consensus.direction == SignalType.SELL
+                    and htf_alignment >= _thr)
+            )
+            if _is_counter:
+                ctx.should_abort = True
+                ctx.abort_signal = bot._hold_with_analysis(
+                    f"HTF逆行ブロック: dir={consensus.direction.value}"
+                    f", htf_align={htf_alignment:+.2f}"
+                    f" (閾値±{_thr})",
+                    plan, tf_signals, consensus,
+                    regime_result, htf_alignment,
+                )
+                return ctx
+
         ctx.consensus = consensus
         ctx.fund_boosted = _fund_boosted
 

@@ -7,7 +7,7 @@
 
 # === シグナル生成・コンセンサス ===
 signal:
-  consensus_threshold: 14.0
+  consensus_threshold: 16.0           # DD圧縮: MP-T16基準 (DD 1.45%, WR 79.98%, PF 3.31)
   consensus_primary_weight: 2.0
   consensus_entry_weight: 1.5
   consensus_confirm_weight: 3.0
@@ -19,9 +19,12 @@ signal:
   htf_score_filter_enabled: true
   htf_score_filter_min_alignment: 0.1
   htf_score_filter_threshold_add: 1.0
+  # HTFトレンド逆行ハードブロック (デフォルトoff、A/B検証用)
+  htf_counter_block_enabled: false
+  htf_counter_block_threshold: 0.3
   macd_slope_filter_threshold: -2.0
   trend_strength_max: 0.6             # ストレステストP3: 0.6が最適 (PF +8%, DD -17%)
-  regime_trend_threshold_add: 1.5
+  regime_trend_threshold_add: 2.0     # MP-Tシリーズ採用、symbol_overridesと統一
   # MACDスロープスコアリング係数
   macd_slope_bonus: 2.5
   macd_slope_penalty: 2.0
@@ -117,7 +120,8 @@ pm_config:
   # エッジ劣化監視（Mode A: 純粋劣化exit）
   edge_decay_exit_enabled: true
   edge_decay_exit_threshold: 0.40     # 40%劣化で発動（Mode A基準値）
-  edge_decay_exit_min_bars: 5
+  edge_decay_exit_min_bars: 5         # 非推奨: min_minutesが0の場合のフォールバック
+  edge_decay_exit_min_minutes: 15     # BT検証(2026/1-4): 15分が最適(PF4.45,WR82.3%)
   edge_decay_exit_max_loss_r: -0.3
   # Mode B: 利益侵食 + エッジ劣化複合exit
   edge_decay_profit_exit_enabled: true

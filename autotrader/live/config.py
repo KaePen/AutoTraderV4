@@ -81,6 +81,12 @@ class LiveTradingConfig:
     symbol: str = "USDJPY"
     check_interval_sec: float = 1.0
     candle_lookback: int = 500
+    # エントリー判定を M1 確定時のみ行う (BT-ライブ乖離対策)
+    # True: bot.generate_signal() を M1 が新規確定したタイミングでのみ実行
+    #       (BT と評価頻度を一致させる、推奨)
+    # False: 従来動作 (毎秒 generate_signal) — 1秒スパイク逆張りBUY等を発生
+    # ポジション管理 (SL/TP/EDGE_DECAY 等) は引き続き毎秒実行される
+    entry_on_m1_close_only: bool = True
     bot_config: UnifiedBotConfig = field(
         default_factory=UnifiedBotConfig
     )

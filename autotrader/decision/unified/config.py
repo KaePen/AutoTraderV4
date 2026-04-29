@@ -495,6 +495,12 @@ class UnifiedBotConfig:
     htf_score_filter_min_alignment: float = 0.1
     # HTF不一致時の追加閾値
     htf_score_filter_threshold_add: float = 1.0
+    # HTFトレンド逆行ハードブロック: signal方向とhtf_alignmentが
+    # 強く対立したらエントリー無効化。デフォルトoff。
+    # 例: htf_alignment=-0.4でBUYシグナル → ブロック
+    htf_counter_block_enabled: bool = False
+    # |htf_alignment| がこの値以上の逆行でブロック
+    htf_counter_block_threshold: float = 0.3
     # --- Phase 2a: ファンダメンタル統合設定 ---
     # ハードガード: 注意度がこの値以上でエントリーブロック
     fundamental_caution_block_level: int = 2

@@ -133,6 +133,98 @@ def cmd_status(args: argparse.Namespace) -> None:
     pipeline_main()
 
 
+def cmd_run_single(args: argparse.Namespace) -> None:
+    """単独ペアBT（run_unified ベース、TickSim 有効）"""
+    from datetime import datetime
+    from autotrader.backtest.single_pair_runner import (
+        SinglePairConfig, run_single_pair,
+    )
+
+    pstart = (
+        datetime.fromisoformat(args.period_start)
+        if args.period_start else None
+    )
+    pend = (
+        datetime.fromisoformat(args.period_end)
+        if args.period_end else None
+    )
+
+    cfg = SinglePairConfig(
+        symbol=args.symbol,
+        start_year=args.start,
+        end_year=args.end,
+        use_tick_sim=not args.no_tick_sim,
+        sequential=not args.no_sequential,
+        period_start=pstart,
+        period_end=pend,
+    )
+    summary = run_single_pair(cfg)
+    print(json.dumps(summary, indent=2, ensure_ascii=False, default=str))
+
+
+def cmd_run_portfolio(args: argparse.Namespace) -> None:
+    """マルチペア統合BT（時系列インターリーブ + 共有ポートフォリオ）"""
+    from datetime import datetime
+    from autotrader.backtest.multi_pair_runner import (
+        MultiPairConfig, run_multi_pair_period,
+    )
+
+    symbols = _parse_symbols(args)
+    pstart = (
+        datetime.fromisoformat(args.period_start)
+        if args.period_start else None
+    )
+    pend = (
+        datetime.fromisoformat(args.period_end)
+        if args.period_end else None
+    )
+    cfg = MultiPairConfig(
+        symbols=symbols,
+        start_year=args.start,
+        end_year=args.end,
+        initial_equity=args.initial_equity,
+        global_max_positions=args.global_max_positions,
+        per_pair_max_positions=args.per_pair_max_positions,
+        global_max_exposure_lot=args.global_max_exposure_lot,
+        max_same_direction_jpy=args.max_same_direction_jpy,
+        sequential_years=not args.no_sequential,
+        data_load_workers=args.data_load_workers,
+        period_start=pstart,
+        period_end=pend,
+        use_tick_exit=args.use_tick_exit,
+        tick_check_tf_minutes=args.tick_check_tf_minutes,
+        output_trades_csv=args.trades_csv,
+    )
+
+    bot_overrides: dict = {}
+    if args.htf_counter_block:
+        bot_overrides["htf_counter_block_enabled"] = True
+    if args.htf_counter_threshold is not None:
+        bot_overrides["htf_counter_block_threshold"] = args.htf_counter_threshold
+    if args.bot_override_json:
+        try:
+            extra = json.loads(args.bot_override_json)
+            if not isinstance(extra, dict):
+                raise ValueError("--bot-override-json must be a JSON object")
+            bot_overrides.update(extra)
+        except Exception as e:
+            print(f"ERROR --bot-override-json: {e}")
+            sys.exit(1)
+
+    result = run_multi_pair_period(cfg, bot_overrides=bot_overrides or None)
+    summary = result.summary()
+    print(json.dumps(summary, indent=2, ensure_ascii=False, default=str))
+
+    if args.out:
+        out_path = Path(args.out)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        out_path.write_text(
+            json.dumps(summary, indent=2, ensure_ascii=False, default=str),
+            encoding="utf-8",
+        )
+        print(f"\n結果保存: {out_path}")
+
+
 def _parse_symbols(args: argparse.Namespace) -> list[str]:
     if hasattr(args, "symbols") and args.symbols:
         return [s.strip() for s in args.symbols.split(",")]
@@ -185,6 +277,72 @@ def main() -> None:
     p_run.add_argument("--config", help="設定JSONファイルパス")
     p_run.add_argument("--data-dir", help="データディレクトリ")
 
+    # --- run-single ---（TickSim付き単独ペアBT）
+    p_single = sub.add_parser(
+        "run-single",
+        help="単独ペアBT（run_unified + TickSim）",
+    )
+    p_single.add_argument("--symbol", required=True, help="通貨ペア")
+    p_single.add_argument("--start", type=int, required=True, help="開始年")
+    p_single.add_argument("--end", type=int, required=True, help="終了年")
+    p_single.add_argument(
+        "--no-tick-sim", action="store_true",
+        help="TickSimを無効化（M1 OHLC のみで判定）",
+    )
+    p_single.add_argument(
+        "--no-sequential", action="store_true",
+        help="年間 bot 状態引き継ぎを無効化",
+    )
+    p_single.add_argument(
+        "--period-start", default=None,
+        help="期間開始 ISO日時 (例: 2025-06-01)",
+    )
+    p_single.add_argument(
+        "--period-end", default=None,
+        help="期間終了 ISO日時 (exclusive、例: 2025-07-01)",
+    )
+
+    # --- run-portfolio ---（マルチペア統合BT）
+    p_port = sub.add_parser(
+        "run-portfolio",
+        help="マルチペアBT（時系列インターリーブ + 共有資金プール）",
+    )
+    p_port.add_argument("--symbols", required=True, help="通貨ペア（カンマ区切り）")
+    p_port.add_argument("--start", type=int, required=True, help="開始年")
+    p_port.add_argument("--end", type=int, required=True, help="終了年")
+    p_port.add_argument("--initial-equity", type=float, default=1_000_000.0,
+                        help="初期資金 JPY（デフォルト 1,000,000）")
+    p_port.add_argument("--global-max-positions", type=int, default=4,
+                        help="全ペア合計最大同時ポジション数")
+    p_port.add_argument("--per-pair-max-positions", type=int, default=1,
+                        help="ペア当たり最大同時ポジション数")
+    p_port.add_argument("--global-max-exposure-lot", type=float, default=10.0,
+                        help="全ペア合計最大ロット")
+    p_port.add_argument("--max-same-direction-jpy", type=int, default=3,
+                        help="JPYペア同方向制限（0=無制限）")
+    p_port.add_argument("--no-sequential", action="store_true",
+                        help="年間 bot 状態引き継ぎを無効化")
+    p_port.add_argument("--data-load-workers", type=int, default=6,
+                        help="データロード並列ワーカー数")
+    p_port.add_argument("--out", help="サマリ JSON 出力パス")
+    p_port.add_argument("--period-start", default=None,
+                        help="期間開始 ISO日時 (start==end の年内フィルタ用)")
+    p_port.add_argument("--period-end", default=None,
+                        help="期間終了 ISO日時 (exclusive)")
+    p_port.add_argument("--htf-counter-block", action="store_true",
+                        help="HTF逆行ハードブロックを有効化")
+    p_port.add_argument("--htf-counter-threshold", type=float, default=None,
+                        help="HTF逆行ブロック閾値 (例: 0.3)")
+    p_port.add_argument("--bot-override-json", default=None,
+                        help='UnifiedBotConfig 任意フィールドを JSON で上書き '
+                             '(例: \'{"base_risk_pct":0.005,"trend_strength_max":0.5}\')')
+    p_port.add_argument("--use-tick-exit", action="store_true",
+                        help="ティックレベル SL/TP 精密判定を有効化")
+    p_port.add_argument("--tick-check-tf-minutes", type=int, default=1,
+                        help="ティック判定で使う基準TFのバー長(分)")
+    p_port.add_argument("--trades-csv", default=None,
+                        help="trade-by-trade CSV 出力パス")
+
     # --- prepare-ohlcv ---
     p_ohlcv = sub.add_parser("prepare-ohlcv", help="OHLCV → インジケータ → 月別キャッシュ")
     p_ohlcv.add_argument("--symbol", help="通貨ペア（単体）")
@@ -212,6 +370,8 @@ def main() -> None:
 
     commands = {
         "run": cmd_run,
+        "run-single": cmd_run_single,
+        "run-portfolio": cmd_run_portfolio,
         "prepare-ohlcv": cmd_prepare_ohlcv,
         "prepare-ticks": cmd_prepare_ticks,
         "status": cmd_status,
