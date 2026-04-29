@@ -221,21 +221,8 @@ async def lifespan(app: FastAPI):
         try:
             await mgr.connect()
 
-            # 全通貨ペアのエンジンを起動時に追加
-            all_symbols = [
-                "EURUSD",
-                "GBPUSD",
-                "AUDUSD",
-                "NZDUSD",
-                "USDCHF",
-                "USDCAD",
-                "USDJPY",
-                "EURJPY",
-                "GBPJPY",
-                "AUDJPY",
-                "CADJPY",
-                "CHFJPY",
-            ]
+            # 採用ペアのみ起動時に追加（不採用ペアは計算リソース節約のため除外）
+            all_symbols = sorted(_ACTIVE_TRADE_PAIRS)
             default_symbol = os.environ.get("AUTOTRADER_SYMBOL", "USDJPY")
             for sym in all_symbols:
                 try:
