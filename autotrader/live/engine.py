@@ -148,6 +148,9 @@ class LiveTradingEngine:
         # 直近フル indicator 再計算の M1 最終時刻
         # (PrecomputeEngine を毎秒走らせると重いため、M1 確定時のみフル再計算)
         self._last_full_recalc_m1_idx: pd.Timestamp | None = None
+        # 指標キャッシュ固着検出: TF別の最終警告時刻 (スパム抑制用)
+        # 高市砲時のRSI -999固着バグ (M2-H1 同時固着) 検知のため使用
+        self._stale_warned_at: dict[str, datetime] = {}
         self._enable_auto_trade = config.enable_auto_trade
         # ランタイムで切替可能なアクティブシンボル
         self._active_symbol = config.symbol
@@ -1593,6 +1596,7 @@ class LiveTradingEngine:
                     out[tf_str] = (
                         calc_indicators_multi_tf({tf_str: df}).get(tf_str, df)
                     )
+            self._check_indicator_cache_stale(out)
             return out
         except Exception as e:
             logger.error(
@@ -1600,6 +1604,53 @@ class LiveTradingEngine:
                 self._active_symbol, e,
             )
             return calc_indicators_multi_tf(data)
+
+    def _check_indicator_cache_stale(
+        self,
+        data: dict[str, pd.DataFrame],
+    ) -> None:
+        """指標キャッシュ固着検出 (高市砲時 RSI -999 固着バグ対策)
+
+        M2/M5/M15/M30/H1 の RSI が複数TFで連続同値の場合、キャッシュ固着の
+        疑いがあるため警告ログを出す (M1/H4 は対象外)。再現観測のための
+        ロギング強化が目的で、自動再計算/通知は将来追加予定。
+
+        スパム抑制: 同一TFは5分以内の重複警告をスキップ。
+        """
+        target_tfs = ("M2", "M5", "M15", "M30", "H1")
+        check_count = 5
+        stale_tfs: list[str] = []
+        for tf in target_tfs:
+            df = data.get(tf)
+            if df is None or len(df) < check_count:
+                continue
+            if "rsi_14" not in df.columns:
+                continue
+            tail = df["rsi_14"].iloc[-check_count:]
+            if tail.isna().any():
+                continue
+            if tail.nunique(dropna=True) == 1:
+                stale_tfs.append(tf)
+
+        if len(stale_tfs) >= 3:
+            now = datetime.now(UTC)
+            recent_warned = [
+                tf for tf in stale_tfs
+                if (
+                    self._stale_warned_at.get(tf) is not None
+                    and (now - self._stale_warned_at[tf]).total_seconds() < 300
+                )
+            ]
+            new_tfs = [tf for tf in stale_tfs if tf not in recent_warned]
+            if new_tfs:
+                logger.warning(
+                    "[%s] 指標キャッシュ固着疑い: %d/%d TFで RSI 連続同値 (%s)。"
+                    " 高市砲型バグの可能性あり、再起動を検討",
+                    self._active_symbol, len(stale_tfs), len(target_tfs),
+                    ",".join(stale_tfs),
+                )
+                for tf in new_tfs:
+                    self._stale_warned_at[tf] = now
 
     def _should_use_tick_optimizer(self) -> bool:
         """ティック最適化を使用すべきか判定
