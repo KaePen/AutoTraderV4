@@ -366,11 +366,13 @@ class PositionManagerConfig:
     edge_decay_exit_enabled: bool = True
     # エントリースコアからの劣化率がこの閾値以上で発動（0.40=40%劣化）
     edge_decay_exit_threshold: float = 0.50
-    # 最低保有バー数（非推奨: edge_decay_exit_min_minutesを使用）
+    # 最低保有バー数（非推奨: edge_decay_exit_min_minutesのフォールバック）
+    # BTではevaluate()がM1足ごと、ライブでは毎秒呼ばれるため
+    # bars_heldでは判定タイミングが大幅に異なる。実運用は分単位で統一する。
+    # 設定漏れ時のみ参照される。trading_defaults.yamlでmin_minutesを設定すること。
     edge_decay_exit_min_bars: int = 5
     # 最低保有時間（分）。0より大きい場合はbars_heldより優先される。
-    # BTではevaluate()がH1足ごと、ライブでは毎秒呼ばれるため
-    # bars_heldでは判定タイミングが大幅に異なる。時間ベースで統一する。
+    # 推奨値: 15分（BT検証2026/1-4で最適）。trading_defaults.yamlで設定。
     edge_decay_exit_min_minutes: int = 0
     # 許容最大損失R値（これより大きな損失は通常SLに任せる）
     edge_decay_exit_max_loss_r: float = -0.3
@@ -1413,6 +1415,8 @@ class PositionManager:
             return None
 
         # 最低保有時間チェック（時間ベース優先、フォールバックはbars_held）
+        # 呼出頻度差（BT=M1毎/Live=1秒毎）の影響を排除するため分単位を推奨。
+        # bars_heldフォールバックは互換のため残すが、実運用では使われない想定。
         if cfg.edge_decay_exit_min_minutes > 0 and current_time is not None:
             elapsed_minutes = (
                 current_time - position.entry_time
@@ -1420,6 +1424,11 @@ class PositionManager:
             if elapsed_minutes < cfg.edge_decay_exit_min_minutes:
                 return None
         else:
+            if cfg.edge_decay_exit_min_minutes > 0 and current_time is None:
+                logger.warning(
+                    "edge_decay_exit: current_time が None のため "
+                    "bars_heldフォールバックを使用。BT/Liveで判定タイミング差発生の可能性"
+                )
             if position.bars_held < cfg.edge_decay_exit_min_bars:
                 return None
 
