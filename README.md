@@ -232,8 +232,10 @@ AutoTraderV4/
 ├── start_at4.bat               # ワンクリック起動バッチ
 ├── pyproject.toml               # プロジェクト定義・依存関係
 ├── config/
-│   ├── symbol_presets.yaml      # 通貨ペア別パラメータ（SSOT）
-│   ├── live_trading.yaml        # ライブトレード設定
+│   ├── trading_defaults.yaml    # 全トレードロジックのSSOT（グローバルデフォルト）
+│   ├── symbol_overrides.yaml    # 通貨ペア別上書き（symbols.{SYMBOL} のみ参照）
+│   ├── modes.yaml               # demo/live モード差分
+│   ├── symbol_presets.yaml      # SymbolPreset レガシーソース（後方互換）
 │   └── accounts.yaml            # MT5アカウント情報
 │
 ├── autotrader/                  # === メインパッケージ ===

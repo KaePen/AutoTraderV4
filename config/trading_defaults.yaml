@@ -7,7 +7,7 @@
 
 # === シグナル生成・コンセンサス ===
 signal:
-  consensus_threshold: 16.0           # DD圧縮: MP-T16基準 (DD 1.45%, WR 79.98%, PF 3.31)
+  consensus_threshold: 16.0           # 全ペア共通の実効値 (SSOT)。検証履歴は memory/CT_history を参照。
   consensus_primary_weight: 2.0
   consensus_entry_weight: 1.5
   consensus_confirm_weight: 3.0
