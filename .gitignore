@@ -50,12 +50,9 @@ tmp/
 *.tmp
 *_done.txt
 
-# バックテスト結果
-results/
-backtest_*.json
-
 # アーカイブ
 archives/
+output/
 
 # キャッシュ・データ
 cache/

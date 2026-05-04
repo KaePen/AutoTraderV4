@@ -197,7 +197,7 @@ class TestPresetConfig:
         assert isinstance(bot, UnifiedBotConfig)
         assert isinstance(pm, PositionManagerConfig)
         # trading_defaults.yaml の signal.consensus_threshold
-        assert bot.consensus_threshold == 18.0
+        assert bot.consensus_threshold == 16.0
         # trading_defaults.yaml の signal.bca_min_edge
         assert bot.bca_min_edge == 0.60
         # symbol_overrides.yaml の USDJPY.max_positions
@@ -210,8 +210,8 @@ class TestPresetConfig:
 
         # EURJPY固有: bca_min_edge=0.70
         assert bot.bca_min_edge == 0.70
-        # 共通デフォルト: consensus_threshold=18.0
-        assert bot.consensus_threshold == 18.0
+        # 共通デフォルト: consensus_threshold=16.0
+        assert bot.consensus_threshold == 16.0
         # EURJPYプリセットのmax_positions
         assert bot.max_positions == 1
 
@@ -221,7 +221,7 @@ class TestPresetConfig:
         bot, _ = loader.load_preset_config("XYZJPY")
 
         # グローバルデフォルト値
-        assert bot.consensus_threshold == 18.0
+        assert bot.consensus_threshold == 16.0
         assert bot.bca_min_edge == 0.60
 
     def test_PM設定が読み込まれる(self) -> None:

@@ -1,39 +1,14 @@
 # 通貨ペア別プリセット設定
 # ============================================================
 # trading_defaults.yaml のグローバル値を通貨ペア別に上書きする。
-# symbols[X] セクションのみ変更が必要な値を記載する。
+# ConfigLoader._load_preset_from_new_config は overrides.symbols.{SYMBOL}
+# のみ参照する。トップレベル signal/defaults はマージ対象外（過去のデッド
+# 設定）であり、本ファイルでは記載しない。
+#
+# SymbolPreset の通貨ペア共通値は config/symbol_presets.yaml の
+# defaults セクション、または autotrader/config/trading_params.py の
+# Python デフォルトから取得される。
 # ============================================================
-
-# --- グローバルシグナル設定 ---
-signal:
-  consensus_threshold: 14.0           # D1/CT14: WR67.1%(IS), 64.7%(OOS), trades 2.7x vs CT18
-
-# --- 通貨ペア共通フォールバック（SymbolPreset フィールド）---
-defaults:
-  pip_unit: 0.01          # JPYペア: 1pip = 0.01
-  # quote_ccy_rate: クォート通貨→口座通貨(JPY)変換レート
-  # JPYペアは1.0固定。非JPYペアは概算値
-  quote_ccy_rate: 1.0
-  pip_value: 100.0
-  spread_pips: 1.5
-  slippage_pips: 0.5
-  default_sl_pips: 20.0
-  default_tp_pips: 40.0
-  min_lot: 0.01
-  max_lot: 10.0
-  commission_per_lot: 0.0
-  max_positions: 1
-  bonus_max_positions: 0
-  bonus_score_threshold: 7.0
-  base_risk_pct: 0.004          # DD圧縮: 0.4%採用 (MP-T18系の保守設定、handover risk_philosophy)
-  max_lot_per_trade: 1.5
-  max_total_exposure_lot: 3.0
-  equity_floor_pct: 0.30
-  use_position_manager: true
-  trailing_start_r: 0.5
-  trailing_atr_multiplier: 2.0
-  breakeven_at_1r: true
-  sg_spread_threshold_pips: 4.5  # p95ベース切り上げ
 
 # ------------------------------------------------------------------
 # USD ペア（quote currency = USD: pip_value ≈ $10/lot）
