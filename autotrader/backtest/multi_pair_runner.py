@@ -152,6 +152,28 @@ class PortfolioState:
             if dd > self.max_dd_pct:
                 self.max_dd_pct = dd
 
+    def update_dd_unrealized(
+        self, equity_with_unrealized: float,
+    ) -> None:
+        """含み損込みのequityで peak/DD を mark-to-market 更新
+
+        portfolio.equity は close 時のみ更新されるため close-base の
+        DDは楽観バイアスを持つ。本メソッドは毎足呼び、含み損を反映した
+        実効的な最大DDを追跡する。
+
+        Args:
+            equity_with_unrealized: portfolio.equity + 全ペア含み損
+        """
+        if equity_with_unrealized > self.peak_equity:
+            self.peak_equity = equity_with_unrealized
+        if self.peak_equity > 0:
+            dd = (
+                (self.peak_equity - equity_with_unrealized)
+                / self.peak_equity * 100
+            )
+            if dd > self.max_dd_pct:
+                self.max_dd_pct = dd
+
 
 @dataclass
 class PairContext:
@@ -523,6 +545,18 @@ def _run_year(
         pnl_delta = ctx.simulator.state.balance - balance_before
         portfolio.equity += pnl_delta
         portfolio.update_peak()
+
+        # 含み損込みの mark-to-market DD更新
+        # 各 simulator.state.equity = simulator.state.balance + 自身の含み損
+        # multi_pair では simulator.state.balance は portfolio.equity に同期(L390-391)
+        # → 各 (equity - balance) の合計が全ペア含み損
+        unrealized_total = sum(
+            (c.simulator.state.equity - c.simulator.state.balance)
+            for c in contexts.values()
+        )
+        portfolio.update_dd_unrealized(
+            portfolio.equity + unrealized_total,
+        )
 
         curr_n = len(ctx.simulator.state.open_positions)
         balance_changed = ctx.simulator.state.balance != balance_before
