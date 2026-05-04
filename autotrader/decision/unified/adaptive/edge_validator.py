@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 import math
 from collections import deque
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from enum import Enum
 
 from autotrader.decision.unified.adaptive.trade_record import (
@@ -214,25 +214,16 @@ class EdgeValidator:
         """累積状態を JSON serializable dict に変換 (state dump用)
 
         BT/Live間の累積状態 (window/short_window/pf_below_1_count) を
-        ファイル経由で受け渡すために使用。
+        ファイル経由で受け渡すために使用。EdgeStatus は asdict で
+        自動シリアライズし、Enum の alert_level のみ string に変換する。
         """
+        status_dict = asdict(self._last_status)
+        status_dict["alert_level"] = self._last_status.alert_level.value
         return {
             "window": [r.to_dict() for r in self._window],
             "short_window": [r.to_dict() for r in self._short_window],
             "pf_below_1_count": self._pf_below_1_count,
-            "last_status": {
-                "alert_level": self._last_status.alert_level.value,
-                "rolling_winrate": self._last_status.rolling_winrate,
-                "rolling_pf": self._last_status.rolling_pf,
-                "rolling_sharpe": self._last_status.rolling_sharpe,
-                "wr_drop": self._last_status.wr_drop,
-                "pf_below_1_count": self._last_status.pf_below_1_count,
-                "reasons": list(self._last_status.reasons),
-                "sample_count": self._last_status.sample_count,
-                "short_winrate": self._last_status.short_winrate,
-                "short_pf": self._last_status.short_pf,
-                "short_sample_count": self._last_status.short_sample_count,
-            },
+            "last_status": status_dict,
         }
 
     def load_state(self, data: dict) -> None:
@@ -252,33 +243,13 @@ class EdgeValidator:
             self._short_window.append(TradeRecord.from_dict(r_data))
         self._pf_below_1_count = int(data.get("pf_below_1_count", 0))
 
-        status_data = data.get("last_status", {})
+        status_data = data.get("last_status")
         if status_data:
-            self._last_status = EdgeStatus(
-                alert_level=EdgeAlertLevel(
-                    status_data.get("alert_level", "ok"),
-                ),
-                rolling_winrate=float(
-                    status_data.get("rolling_winrate", 0.0),
-                ),
-                rolling_pf=float(status_data.get("rolling_pf", 0.0)),
-                rolling_sharpe=float(
-                    status_data.get("rolling_sharpe", 0.0),
-                ),
-                wr_drop=float(status_data.get("wr_drop", 0.0)),
-                pf_below_1_count=int(
-                    status_data.get("pf_below_1_count", 0),
-                ),
-                reasons=list(status_data.get("reasons", [])),
-                sample_count=int(status_data.get("sample_count", 0)),
-                short_winrate=float(
-                    status_data.get("short_winrate", 0.0),
-                ),
-                short_pf=float(status_data.get("short_pf", 0.0)),
-                short_sample_count=int(
-                    status_data.get("short_sample_count", 0),
-                ),
+            kwargs = {**status_data}
+            kwargs["alert_level"] = EdgeAlertLevel(
+                status_data.get("alert_level", "ok"),
             )
+            self._last_status = EdgeStatus(**kwargs)
 
     def _evaluate(self) -> EdgeStatus:
         """エッジ検定を実行（デュアルウィンドウ）

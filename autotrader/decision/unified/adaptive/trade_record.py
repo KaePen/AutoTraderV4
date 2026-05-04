@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 
 from autotrader.config.trading_params import get_pip_unit
@@ -99,32 +99,18 @@ class TradeRecord:
         return self.exit_reason == "STAGNATION"
 
     def to_dict(self) -> dict:
-        """JSON serializable dict に変換 (state dump用)"""
-        return {
-            "pnl": self.pnl,
-            "pnl_pips": self.pnl_pips,
-            "exit_reason": self.exit_reason,
-            "regime": self.regime,
-            "consensus_score": self.consensus_score,
-            "mfe_pips": self.mfe_pips,
-            "mae_pips": self.mae_pips,
-            "sl_pips": self.sl_pips,
-            "holding_minutes": self.holding_minutes,
-            "closed_at": self.closed_at.isoformat(),
-        }
+        """JSON serializable dict に変換 (state dump用)
+
+        フィールド追加時に自動追従するため asdict を使用。
+        datetime 型のみ post-step で ISO 文字列化。
+        """
+        data = asdict(self)
+        data["closed_at"] = self.closed_at.isoformat()
+        return data
 
     @classmethod
     def from_dict(cls, data: dict) -> TradeRecord:
         """dict から TradeRecord を復元 (state inject用)"""
-        return cls(
-            pnl=float(data["pnl"]),
-            pnl_pips=float(data["pnl_pips"]),
-            exit_reason=str(data["exit_reason"]),
-            regime=str(data["regime"]),
-            consensus_score=float(data["consensus_score"]),
-            mfe_pips=float(data["mfe_pips"]),
-            mae_pips=float(data["mae_pips"]),
-            sl_pips=float(data["sl_pips"]),
-            holding_minutes=float(data["holding_minutes"]),
-            closed_at=datetime.fromisoformat(data["closed_at"]),
-        )
+        kwargs = {**data}
+        kwargs["closed_at"] = datetime.fromisoformat(data["closed_at"])
+        return cls(**kwargs)

@@ -144,32 +144,24 @@ class PortfolioState:
                 return False
         return True
 
-    def update_peak(self) -> None:
-        if self.equity > self.peak_equity:
-            self.peak_equity = self.equity
-        if self.peak_equity > 0:
-            dd = (self.peak_equity - self.equity) / self.peak_equity * 100
-            if dd > self.max_dd_pct:
-                self.max_dd_pct = dd
-
-    def update_dd_unrealized(
-        self, equity_with_unrealized: float,
-    ) -> None:
-        """含み損込みのequityで peak/DD を mark-to-market 更新
-
-        portfolio.equity は close 時のみ更新されるため close-base の
-        DDは楽観バイアスを持つ。本メソッドは毎足呼び、含み損を反映した
-        実効的な最大DDを追跡する。
+    def update_peak(self, equity: float | None = None) -> None:
+        """peak/DD を更新 (mark-to-market 対応)
 
         Args:
-            equity_with_unrealized: portfolio.equity + 全ペア含み損
+            equity: 評価対象の equity。None なら self.equity (close-base)。
+                含み損込みの mark-to-market 評価では値を指定する。
+
+        portfolio.equity は close 時のみ更新されるため close-base の
+        DDは楽観バイアスを持つ。マルチペアBTでは毎足、含み損込みの
+        equity を渡して実効的な最大DDを追跡する。
         """
-        if equity_with_unrealized > self.peak_equity:
-            self.peak_equity = equity_with_unrealized
+        eff_equity = self.equity if equity is None else equity
+        if eff_equity > self.peak_equity:
+            self.peak_equity = eff_equity
+            return  # peak 超過時はDD計算不要 (no-op 早期リターン)
         if self.peak_equity > 0:
             dd = (
-                (self.peak_equity - equity_with_unrealized)
-                / self.peak_equity * 100
+                (self.peak_equity - eff_equity) / self.peak_equity * 100
             )
             if dd > self.max_dd_pct:
                 self.max_dd_pct = dd
@@ -367,6 +359,10 @@ def _run_year(
         sym: (0.0, 0.0, 0.0, 0, 0) for sym in contexts
     }
     pair_last_dir: dict[str, str] = {}
+    # 含み損込みDD算出用: 各ペアの unrealized PnL をキャッシュし、
+    # メインループ内で running total を increment 更新 (O(1))
+    ctx_unrealized: dict[str, float] = {sym: 0.0 for sym in contexts}
+    unrealized_running: float = 0.0
 
     t0 = time.time()
     log_interval = max(total_bars // 20, 10000)
@@ -544,19 +540,18 @@ def _run_year(
 
         pnl_delta = ctx.simulator.state.balance - balance_before
         portfolio.equity += pnl_delta
-        portfolio.update_peak()
 
-        # 含み損込みの mark-to-market DD更新
+        # 含み損込みの mark-to-market DD更新 (O(1) キャッシュ更新)
         # 各 simulator.state.equity = simulator.state.balance + 自身の含み損
         # multi_pair では simulator.state.balance は portfolio.equity に同期(L390-391)
-        # → 各 (equity - balance) の合計が全ペア含み損
-        unrealized_total = sum(
-            (c.simulator.state.equity - c.simulator.state.balance)
-            for c in contexts.values()
+        # process_candle で更新されるのは sym のみなので、その差分のみ反映
+        prev_unr = ctx_unrealized[sym]
+        curr_unr = (
+            ctx.simulator.state.equity - ctx.simulator.state.balance
         )
-        portfolio.update_dd_unrealized(
-            portfolio.equity + unrealized_total,
-        )
+        unrealized_running += (curr_unr - prev_unr)
+        ctx_unrealized[sym] = curr_unr
+        portfolio.update_peak(portfolio.equity + unrealized_running)
 
         curr_n = len(ctx.simulator.state.open_positions)
         balance_changed = ctx.simulator.state.balance != balance_before

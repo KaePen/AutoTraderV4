@@ -10,6 +10,7 @@ from __future__ import annotations
 import asyncio
 import dataclasses
 import logging
+import math
 import time as _time
 import uuid
 from datetime import UTC, datetime, timedelta
@@ -148,10 +149,10 @@ class LiveTradingEngine:
         # 直近フル indicator 再計算の M1 最終時刻
         # (PrecomputeEngine を毎秒走らせると重いため、M1 確定時のみフル再計算)
         self._last_full_recalc_m1_idx: pd.Timestamp | None = None
-        # 指標キャッシュ固着検出: TF別の最終警告時刻 (スパム抑制用)
+        # 指標キャッシュ固着検出: TF別の最終警告時刻(monotonic秒、5分間隔)
         # 高市砲時のRSI -999固着バグ (M2-H1 同時固着) 検知のため使用
-        self._stale_warned_at: dict[str, datetime] = {}
-        # tick NaN/異常値ガード: 直近警告時刻 (スパム抑制用、30秒間隔)
+        self._stale_warned_at: dict[str, float] = {}
+        # tick NaN/異常値ガード: 直近警告時刻 (monotonic秒、30秒間隔)
         # MT5切断/流動性低下時の防御
         self._tick_nan_warned_at: float = 0.0
         self._enable_auto_trade = config.enable_auto_trade
@@ -687,7 +688,7 @@ class LiveTradingEngine:
         # NaN/異常値ガード: MT5切断/流動性低下時の防御
         # 検出時は前tickを温存し、broadcastスキップ
         if (
-            bid != bid or ask != ask  # NaN判定 (float仕様)
+            math.isnan(bid) or math.isnan(ask)
             or bid <= 0.0 or ask <= 0.0
         ):
             now_sec = _time.monotonic()
@@ -1651,15 +1652,11 @@ class LiveTradingEngine:
                 stale_tfs.append(tf)
 
         if len(stale_tfs) >= 3:
-            now = datetime.now(UTC)
-            recent_warned = [
+            now = _time.monotonic()
+            new_tfs = [
                 tf for tf in stale_tfs
-                if (
-                    self._stale_warned_at.get(tf) is not None
-                    and (now - self._stale_warned_at[tf]).total_seconds() < 300
-                )
+                if now - self._stale_warned_at.get(tf, 0.0) >= 300.0
             ]
-            new_tfs = [tf for tf in stale_tfs if tf not in recent_warned]
             if new_tfs:
                 logger.warning(
                     "[%s] 指標キャッシュ固着疑い: %d/%d TFで RSI 連続同値 (%s)。"
