@@ -151,6 +151,9 @@ class LiveTradingEngine:
         # 指標キャッシュ固着検出: TF別の最終警告時刻 (スパム抑制用)
         # 高市砲時のRSI -999固着バグ (M2-H1 同時固着) 検知のため使用
         self._stale_warned_at: dict[str, datetime] = {}
+        # tick NaN/異常値ガード: 直近警告時刻 (スパム抑制用、30秒間隔)
+        # MT5切断/流動性低下時の防御
+        self._tick_nan_warned_at: float = 0.0
         self._enable_auto_trade = config.enable_auto_trade
         # ランタイムで切替可能なアクティブシンボル
         self._active_symbol = config.symbol
@@ -678,10 +681,25 @@ class LiveTradingEngine:
         if tick_ms <= self._last_mt5_tick_ms:
             return  # 新しいtickなし
 
-        self._last_mt5_tick_ms = tick_ms
         bid = float(tick.get("bid", 0.0))
         ask = float(tick.get("ask", 0.0))
 
+        # NaN/異常値ガード: MT5切断/流動性低下時の防御
+        # 検出時は前tickを温存し、broadcastスキップ
+        if (
+            bid != bid or ask != ask  # NaN判定 (float仕様)
+            or bid <= 0.0 or ask <= 0.0
+        ):
+            now_sec = _time.monotonic()
+            if now_sec - self._tick_nan_warned_at >= 30.0:
+                logger.warning(
+                    "[%s] tick NaN/異常値検出 (bid=%s, ask=%s) → 前tickを保持",
+                    self._active_symbol, bid, ask,
+                )
+                self._tick_nan_warned_at = now_sec
+            return
+
+        self._last_mt5_tick_ms = tick_ms
         # 1秒サイクルのフル処理で使うためキャッシュ
         self._last_tick_data = tick
 
