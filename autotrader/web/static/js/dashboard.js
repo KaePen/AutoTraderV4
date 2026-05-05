@@ -1039,6 +1039,26 @@ class TradeHistory extends Component {
 
 // ── AnalysisPanel ──
 
+// ホールド理由(rationale文字列)を短いラベルに圧縮
+// pipeline.py 側で生成される rationale パターンに対応
+function _shortenHoldReason(rationale) {
+  if (!rationale) return '';
+  const r = String(rationale);
+  // pipeline.py 側の主要パターンを判定（順序重要: より具体的なものを先に）
+  if (r.includes('HTF逆行ブロック')) return 'HTF強逆行';
+  if (r.includes('HTFトレンド不一致')) return 'HTF逆行';
+  if (r.includes('SoftGuardブロック')) return 'ペナルティ過大';
+  if (r.includes('ペナルティ上限')) return 'ペナルティ上限';
+  if (r.includes('資金管理')) return '資金管理';
+  if (r.includes('スコア不足')) return 'スコア不足';
+  if (r.includes('primary_tfデータなし')) return 'データ不足';
+  // BUY/SELL方向で正常エントリーした場合の rationale (例: "..., mode=trend, lot=0.10")
+  // もしくはエントリー成立時は rationale は HOLD ではないので呼ばれない想定
+  // それ以外は先頭24文字を表示
+  const trimmed = r.split(/[,、]/)[0].trim();
+  return trimmed.length > 24 ? trimmed.slice(0, 24) + '…' : trimmed;
+}
+
 class AnalysisPanel extends Component {
   constructor(dataFlow) {
     super('analysis-panel', dataFlow);
@@ -1085,6 +1105,8 @@ class AnalysisPanel extends Component {
       if (penaltyEl) { penaltyEl.textContent = '--'; penaltyEl.className = 'font-bold tabular-nums text-gray-500'; }
       const tfEl = document.getElementById('ap-tf-scores');
       if (tfEl) tfEl.innerHTML = '<p class="text-gray-500 text-xs text-center py-4">' + msg + '</p>';
+      const holdEl0 = document.getElementById('ap-hold-reason');
+      if (holdEl0) holdEl0.classList.add('hidden');
       return;
     }
 
@@ -1098,6 +1120,22 @@ class AnalysisPanel extends Component {
       };
       dirBadge.textContent = a.direction || '--';
       dirBadge.className = 'inline-flex items-center px-2 py-0.5 rounded text-xs font-bold ' + (dirStyles[a.direction] || dirStyles.HOLD);
+    }
+
+    // ホールド理由チップ（HOLD時のみ表示）
+    const holdEl = document.getElementById('ap-hold-reason');
+    if (holdEl) {
+      if (a.direction === 'HOLD' && a.rationale) {
+        const short = _shortenHoldReason(a.rationale);
+        holdEl.textContent = short ? '⚠ ' + short : '';
+        holdEl.title = a.rationale;
+        if (short) holdEl.classList.remove('hidden');
+        else holdEl.classList.add('hidden');
+      } else {
+        holdEl.textContent = '';
+        holdEl.title = '';
+        holdEl.classList.add('hidden');
+      }
     }
 
     // スコアバー
