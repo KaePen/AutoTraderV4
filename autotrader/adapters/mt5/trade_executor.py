@@ -120,7 +120,7 @@ class MT5TradeExecutor:
             ExecutionResult: 実行結果
         """
         filling = await self._get_filling_mode(signal.symbol)
-        async with self._conn.session() as transport:
+        async with self._conn.order_session() as transport:
             tick = await transport.symbol_info_tick(signal.symbol)
             if not tick:
                 return ExecutionResult(
@@ -274,7 +274,7 @@ class MT5TradeExecutor:
         close_type = ORDER_TYPE_SELL if is_buy else ORDER_TYPE_BUY
         filling = await self._get_filling_mode(position.symbol)
 
-        async with self._conn.session() as transport:
+        async with self._conn.order_session() as transport:
             tick = await transport.symbol_info_tick(position.symbol)
             if not tick:
                 return ExecutionResult(
@@ -387,7 +387,7 @@ class MT5TradeExecutor:
         else:
             request["tp"] = position.take_profit or 0.0
 
-        async with self._conn.session() as transport:
+        async with self._conn.order_session() as transport:
             result = await transport.order_send(request)
 
         retcode = result.get("retcode", -1)

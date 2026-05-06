@@ -13,6 +13,7 @@ import logging
 import math
 import time as _time
 import uuid
+from concurrent.futures import ThreadPoolExecutor
 from datetime import UTC, datetime, timedelta
 
 import pandas as pd
@@ -93,6 +94,7 @@ class LiveTradingEngine:
         shared_data_provider: MT5DataProvider | None = None,
         shared_fundamental_collector=None,
         shared_rss_collector=None,
+        shared_calc_executor: ThreadPoolExecutor | None = None,
     ) -> None:
         """初期化
 
@@ -104,12 +106,20 @@ class LiveTradingEngine:
                 コレクター（EngineManager経由）
             shared_rss_collector: 共有RSSコレクター
                 （EngineManager経由）
+            shared_calc_executor: 全エンジン共有の指標計算用
+                ThreadPoolExecutor (max_workers=2 想定)。None の場合
+                run_in_executor のデフォルトプールにフォールバック。
         """
         self._config = config
         self._conn = shared_conn or MT5ConnectionManager(config.mt5_config)
         self._data_provider = shared_data_provider or MT5DataProvider(
             self._conn
         )
+        # 指標計算用 ThreadPoolExecutor (None ならデフォルトプール)。
+        # M1 確定時の _update_market_data_full と起動時の
+        # _load_historical_data で PrecomputeEngine を thread pool に
+        # 逃がし、複数エンジンの計算を並列化する目的。
+        self._calc_executor = shared_calc_executor
         # 共有接続の場合、接続/切断はEngineManagerが管理
         self._owns_connection = shared_conn is None
         self._executor = MT5TradeExecutor(
@@ -1461,7 +1471,7 @@ class LiveTradingEngine:
             )
 
         if all_data:
-            all_data = self._calc_indicators(all_data)
+            all_data = await self._calc_indicators_async(all_data)
             self._bot.set_market_data(all_data)
             m1 = all_data.get("M1")
             if m1 is not None and not m1.empty:
@@ -1601,24 +1611,50 @@ class LiveTradingEngine:
                     # 取得成功時はカウンターリセット
                     self._tf_fetch_fail_count.pop(tf_str, None)
 
-            all_data = self._calc_indicators(all_data)
+            all_data = await self._calc_indicators_async(all_data)
             self._bot.set_market_data(all_data)
             # M1 確定検知用: フル再計算した M1 の最終時刻を記録
             m1 = all_data.get("M1")
             if m1 is not None and not m1.empty:
                 self._last_full_recalc_m1_idx = m1.index[-1]
 
+    async def _calc_indicators_async(
+        self,
+        data: dict[str, pd.DataFrame],
+    ) -> dict[str, pd.DataFrame]:
+        """指標計算を ThreadPoolExecutor に逃がす並列版
+
+        PrecomputeEngine は CPU bound だが NumPy/pandas/polars が
+        GIL を解放するため、共有 ThreadPoolExecutor (max_workers=2) で
+        複数エンジンの計算を真に並列実行できる。
+        shared_calc_executor が None の場合は asyncio デフォルトプール
+        (=MT5 API と同じ) を使うが、その場合並列効果は限定的。
+
+        Args:
+            data: 生OHLCVデータ (TF -> DataFrame)
+
+        Returns:
+            指標付き DataFrame の辞書
+        """
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
+            self._calc_executor,
+            self._calc_indicators,
+            data,
+        )
+
     def _calc_indicators(
         self,
         data: dict[str, pd.DataFrame],
     ) -> dict[str, pd.DataFrame]:
-        """生OHLCVデータにテクニカル指標を計算して付加
+        """生OHLCVデータにテクニカル指標を計算して付加 (同期版)
 
         BT (PrecomputeEngine) と同じ計算経路を使い、 ma_alignment / bos_signal
         / choch_signal / volatility_regime / liquidity_grab_* 等の構造系・
         SMC 系指標も含めた完全な指標セットを bot に渡す。これにより BT と
         ライブで bot が見るデータ列を揃え、判定ロジックの動作差を排除する。
 
+        通常は _calc_indicators_async() 経由で thread pool に逃がして呼ぶ。
         互換性: 失敗時は旧経路 (calc_indicators_multi_tf) にフォールバック。
         """
         from autotrader.calculator.precompute import PrecomputeEngine

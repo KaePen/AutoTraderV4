@@ -532,6 +532,15 @@ class MT5ConnectionManager:
         self._transport = self._create_transport()
         self._connected = False
         self._last_health_check = 0.0
+        # MT5公式Pythonライブラリは単一プロセス前提のため、
+        # 並列呼び出しを設計上直列化する。
+        # _fetch_lock: 読み取り(チャート/ポジション/履歴/口座情報)用。
+        #   複数エンジンのデータ取得をパイプライン直列化する目的。
+        # _order_lock: 書き込み(注文/SL/TP変更)用。
+        #   注文系の順序保証目的。fetch とは独立しているため
+        #   注文中に他ペアの読み取りはブロックされない。
+        self._fetch_lock: asyncio.Lock = asyncio.Lock()
+        self._order_lock: asyncio.Lock = asyncio.Lock()
 
     def _create_transport(self) -> MT5Transport:
         """トランスポートを生成
@@ -657,17 +666,58 @@ class MT5ConnectionManager:
         await self.connect()
 
     @asynccontextmanager
-    async def session(
+    async def fetch_session(
         self,
     ) -> AsyncGenerator[MT5Transport, None]:
-        """接続セッションコンテキストマネージャ
+        """読み取り用セッション (チャート/ポジション/履歴/口座情報)
+
+        複数エンジン横断で fetch_lock により直列化される。
+        MT5 公式 Python ライブラリは単一プロセス前提のため、
+        並列呼び出しを設計上直列化することで未定義動作を回避する。
 
         Yields:
             MT5Transport: 接続済みトランスポート
         """
-        await self.ensure_connected()
-        try:
-            yield self._transport
-        except Exception:
-            self._connected = False
-            raise
+        async with self._fetch_lock:
+            await self.ensure_connected()
+            try:
+                yield self._transport
+            except Exception:
+                self._connected = False
+                raise
+
+    @asynccontextmanager
+    async def order_session(
+        self,
+    ) -> AsyncGenerator[MT5Transport, None]:
+        """書き込み用セッション (注文/SL/TP変更/ポジション決済)
+
+        order_lock により注文系API の順序保証を行う。
+        fetch_lock とは独立しているため、注文処理中も
+        他ペアのチャート/ポジション読み取りはブロックされない。
+
+        Yields:
+            MT5Transport: 接続済みトランスポート
+        """
+        async with self._order_lock:
+            await self.ensure_connected()
+            try:
+                yield self._transport
+            except Exception:
+                self._connected = False
+                raise
+
+    @asynccontextmanager
+    async def session(
+        self,
+    ) -> AsyncGenerator[MT5Transport, None]:
+        """接続セッションコンテキストマネージャ (後方互換)
+
+        新規コードは fetch_session() / order_session() を用途別に使い分けること。
+        本メソッドは fetch_session() のエイリアスとして残置する。
+
+        Yields:
+            MT5Transport: 接続済みトランスポート
+        """
+        async with self.fetch_session() as transport:
+            yield transport

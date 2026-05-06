@@ -7,7 +7,9 @@ MT5接続とデータプロバイダを全エンジンで共有する。
 
 from __future__ import annotations
 
+import asyncio
 import logging
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timezone
 from typing import Any
 
@@ -71,6 +73,16 @@ class EngineManager:
         # 共有コレクター（最初のエンジン起動時に初期化）
         self._shared_fundamental_collector = None
         self._shared_rss_collector = None
+
+        # 全エンジン共有の指標計算用 ThreadPoolExecutor。
+        # PrecomputeEngine は CPU bound だが NumPy/pandas/polars が
+        # GIL を解放するため、thread pool でも真の並列実行が可能。
+        # max_workers=2 は 2スレッドCPU 端末を想定。CPU 増強時は
+        # EngineConfig 等で外出し可能 (将来課題)。
+        self._calc_executor: ThreadPoolExecutor = ThreadPoolExecutor(
+            max_workers=2,
+            thread_name_prefix="precompute",
+        )
 
         # ポートフォリオDD監視
         self._peak_equity: float = 0.0
@@ -161,6 +173,7 @@ class EngineManager:
                 self._shared_fundamental_collector
             ),
             shared_rss_collector=None,
+            shared_calc_executor=self._calc_executor,
         )
         # グローバル制限コールバックを注入
         engine.set_global_limit_callbacks(
@@ -219,18 +232,35 @@ class EngineManager:
             logger.info("MT5接続確立（EngineManager）")
 
     async def disconnect(self) -> None:
-        """全エンジン停止 + MT5切断"""
+        """全エンジン停止 + MT5切断 + 共有リソース解放"""
         await self.stop_all()
         if self._conn.connected:
             await self._conn.disconnect()
+        # 共有 ThreadPoolExecutor を破棄
+        self._calc_executor.shutdown(wait=True)
         logger.info("MT5切断（EngineManager）")
 
     async def start_all(self) -> None:
-        """全エンジンを起動"""
-        for symbol, engine in self._engines.items():
-            if not engine.running:
+        """全エンジンを起動
+
+        並列度2 (=CPU 2スレッド想定) で同時起動する。
+        MT5 API 呼び出しは MT5ConnectionManager の fetch_lock により
+        設計上直列化されるため、複数エンジンの copy_rates 等が
+        同時に走っても MT5 側で順次処理される。
+        指標計算は共有 ThreadPoolExecutor に逃がされて並列実行される。
+        """
+        sem = asyncio.Semaphore(2)
+
+        async def _start_one(symbol: str, engine: LiveTradingEngine) -> None:
+            if engine.running:
+                return
+            async with sem:
                 await engine.start()
                 logger.info("エンジン起動: %s", symbol)
+
+        await asyncio.gather(*[
+            _start_one(s, e) for s, e in self._engines.items()
+        ])
 
     async def stop_all(self) -> None:
         """全エンジンを停止（接続は維持）"""
