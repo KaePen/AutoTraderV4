@@ -1432,6 +1432,8 @@ class LiveTradingEngine:
         symbol = self._active_symbol
         lookback = self._required_lookback()
         timeframes = self._bot.timeframes
+        t_total_start = _time.monotonic()
+        t_fetch_start = t_total_start
 
         logger.info(
             "過去データ読込: %s %d本 x %d時間足",
@@ -1471,12 +1473,24 @@ class LiveTradingEngine:
             )
 
         if all_data:
-            all_data = await self._calc_indicators_async(all_data)
+            t_fetch = _time.monotonic() - t_fetch_start
+            (
+                all_data,
+                calc_thread,
+                t_calc,
+            ) = await self._calc_indicators_async(all_data)
             self._bot.set_market_data(all_data)
             m1 = all_data.get("M1")
             if m1 is not None and not m1.empty:
                 self._last_full_recalc_m1_idx = m1.index[-1]
-            logger.info("全TFデータ設定完了: %d時間足", len(all_data))
+            t_total = _time.monotonic() - t_total_start
+            logger.info(
+                "[%s] 起動データ計算: thread=%s "
+                "fetch=%.0fms calc=%.0fms total=%.0fms (%d時間足)",
+                symbol, calc_thread,
+                t_fetch * 1000.0, t_calc * 1000.0, t_total * 1000.0,
+                len(all_data),
+            )
 
     async def _update_market_data(self) -> None:
         """最新ローソク足データを取得してTradeBotに設定
@@ -1547,6 +1561,8 @@ class LiveTradingEngine:
         """
         symbol = self._active_symbol
         lookback = self._required_lookback()
+        t_total_start = _time.monotonic()
+        t_fetch_start = t_total_start
         # 全TFのデータを一括収集してから設定
         # （個別set_market_dataは辞書を上書きするため）
         all_data: dict[str, pd.DataFrame] = {}
@@ -1561,6 +1577,7 @@ class LiveTradingEngine:
             )
             if not df.empty:
                 all_data[tf_str] = df
+        t_fetch = _time.monotonic() - t_fetch_start
 
         # リアルタイム評価: キャッシュ済みtick価格で最後のバーを更新
         # _tick_price_update()が0.1秒毎にキャッシュするため追加API不要。
@@ -1611,17 +1628,34 @@ class LiveTradingEngine:
                     # 取得成功時はカウンターリセット
                     self._tf_fetch_fail_count.pop(tf_str, None)
 
-            all_data = await self._calc_indicators_async(all_data)
+            (
+                all_data,
+                calc_thread,
+                t_calc,
+            ) = await self._calc_indicators_async(all_data)
             self._bot.set_market_data(all_data)
             # M1 確定検知用: フル再計算した M1 の最終時刻を記録
             m1 = all_data.get("M1")
             if m1 is not None and not m1.empty:
                 self._last_full_recalc_m1_idx = m1.index[-1]
 
+            # 並列化挙動の検証用ログ:
+            # - fetch: fetch_lock 直列化中の MT5 取得時間
+            # - calc:  ThreadPoolExecutor 上の純計算時間
+            # - thread: どの thread pool worker で計算されたか
+            # - total: M1確定検知から set_market_data までの総時間
+            t_total = _time.monotonic() - t_total_start
+            logger.info(
+                "[%s] M1確定処理: thread=%s "
+                "fetch=%.0fms calc=%.0fms total=%.0fms",
+                symbol, calc_thread,
+                t_fetch * 1000.0, t_calc * 1000.0, t_total * 1000.0,
+            )
+
     async def _calc_indicators_async(
         self,
         data: dict[str, pd.DataFrame],
-    ) -> dict[str, pd.DataFrame]:
+    ) -> tuple[dict[str, pd.DataFrame], str, float]:
         """指標計算を ThreadPoolExecutor に逃がす並列版
 
         PrecomputeEngine は CPU bound だが NumPy/pandas/polars が
@@ -1634,14 +1668,28 @@ class LiveTradingEngine:
             data: 生OHLCVデータ (TF -> DataFrame)
 
         Returns:
-            指標付き DataFrame の辞書
+            (指標付きデータ, 実行スレッド名, 計算経過秒) の3要素タプル。
+            スレッド名は "precompute_X" 形式 (max_workers=2 なら 0-1)。
+            None executor の場合は "ThreadPoolExecutor-X" 等の汎用名。
         """
+        import threading
+
         loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(
-            self._calc_executor,
-            self._calc_indicators,
-            data,
+        t_start = _time.monotonic()
+        thread_holder: list[str] = []
+
+        def _wrapped(
+            d: dict[str, pd.DataFrame],
+        ) -> dict[str, pd.DataFrame]:
+            thread_holder.append(threading.current_thread().name)
+            return self._calc_indicators(d)
+
+        result = await loop.run_in_executor(
+            self._calc_executor, _wrapped, data,
         )
+        elapsed = _time.monotonic() - t_start
+        thread_name = thread_holder[0] if thread_holder else "main"
+        return result, thread_name, elapsed
 
     def _calc_indicators(
         self,
