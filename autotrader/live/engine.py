@@ -1393,6 +1393,26 @@ class LiveTradingEngine:
             consensus_score=cs.consensus_score,
         )
 
+    def _required_lookback(self) -> int:
+        """指標再現性に必要なバー数を算出
+
+        EMA(200)など再帰系指標は5×期間で初期値影響が e^-5 ≈ 0.67%
+        まで減衰し、値が決定的になる。PrecomputeConfig.min_warmup_bars()
+        と candle_lookback 設定値の大きい方を採用する。
+
+        起動時とM1確定時の再取得で同じ本数を使うことで、
+        再起動タイミングや M1 境界跨ぎによる指標値の揺れを排除する。
+
+        Returns:
+            int: 各TFで取得すべきバー数
+        """
+        from autotrader.calculator.precompute import PrecomputeConfig
+
+        return max(
+            self._config.candle_lookback,
+            PrecomputeConfig().min_warmup_bars(),
+        )
+
     async def _load_historical_data(self) -> None:
         """起動時に過去データをTradeBotに供給
 
@@ -1400,7 +1420,7 @@ class LiveTradingEngine:
         （個別set_market_dataは辞書を上書きするため）
         """
         symbol = self._active_symbol
-        lookback = self._config.candle_lookback
+        lookback = self._required_lookback()
         timeframes = self._bot.timeframes
 
         logger.info(
@@ -1418,14 +1438,19 @@ class LiveTradingEngine:
                 logger.warning("未知の時間足: %s", tf_str)
                 continue
 
-            # M1/M5はMT5サーバー時間オフセットにより多めに取得
-            tf_lookback = max(lookback, 500) if tf_str in ("M1", "M5") else lookback
             df = await self._data_provider.get_candles_from_pos(
-                symbol, tf, tf_lookback
+                symbol, tf, lookback
             )
             if df.empty:
                 logger.warning("データなし: %s %s", symbol, tf_str)
                 continue
+
+            if len(df) < lookback:
+                logger.warning(
+                    "%s %s: 履歴不足 %d/%d本 "
+                    "(EMA200等が未収束、指標値が再起動毎に変動する可能性)",
+                    symbol, tf_str, len(df), lookback,
+                )
 
             all_data[tf_str] = df
             logger.info(
@@ -1504,12 +1529,15 @@ class LiveTradingEngine:
                 continue
 
     async def _update_market_data_full(self) -> None:
-        """完全更新 (M1 確定時のみ): MT5 取得 + tick overwrite + indicator 再計算"""
+        """完全更新 (M1 確定時のみ): MT5 取得 + tick overwrite + indicator 再計算
+
+        起動時 (_load_historical_data) と同一の本数を取得することで、
+        EMA(200) 等の再帰系指標が同じウォームアップから収束し、
+        M1境界跨ぎや再起動タイミングによる指標値の揺れを排除する。
+        """
         symbol = self._active_symbol
+        lookback = self._required_lookback()
         # 全TFのデータを一括収集してから設定
-        # MT5サーバー時間(ブローカーTZ)とUTCのずれにより、
-        # M1は200本だとSMA(50)のウォームアップ範囲(先頭49本)に
-        # 現在行が入るため、M1/M5は500本取得する
         # （個別set_market_dataは辞書を上書きするため）
         all_data: dict[str, pd.DataFrame] = {}
         for tf_str in self._bot.timeframes:
@@ -1518,7 +1546,6 @@ class LiveTradingEngine:
             except ValueError:
                 continue
 
-            lookback = 500 if tf_str in ("M1", "M5") else 200
             df = await self._data_provider.get_candles_from_pos(
                 symbol, tf, lookback
             )

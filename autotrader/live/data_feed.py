@@ -147,6 +147,18 @@ class DataFeedService:
             "ema_slow": _v("ema_26"),
         }
 
+    @staticmethod
+    def _required_lookback(lookback: int) -> int:
+        """指標再現性に必要なバー数
+
+        EMA(200)等再帰系指標は5×期間で初期値影響が e^-5 ≈ 0.67%
+        まで減衰し決定的になる。PrecomputeConfig.min_warmup_bars()
+        と引数の大きい方を採用する。
+        """
+        from autotrader.calculator.precompute import PrecomputeConfig
+
+        return max(lookback, PrecomputeConfig().min_warmup_bars())
+
     async def load_historical_data(
         self,
         symbol: str,
@@ -159,14 +171,16 @@ class DataFeedService:
 
         Args:
             symbol: 通貨ペアシンボル
-            lookback: 取得本数
+            lookback: 取得本数 (PrecomputeConfig のウォームアップ要件と
+                大きい方が採用される)
         """
         timeframes = self._bot.timeframes
+        actual_lookback = self._required_lookback(lookback)
 
         logger.info(
             "過去データ読込: %s %d本 x %d時間足",
             symbol,
-            lookback,
+            actual_lookback,
             len(timeframes),
         )
 
@@ -179,11 +193,18 @@ class DataFeedService:
                 continue
 
             df = await self._data_provider.get_candles_from_pos(
-                symbol, tf, lookback
+                symbol, tf, actual_lookback
             )
             if df.empty:
                 logger.warning("データなし: %s %s", symbol, tf_str)
                 continue
+
+            if len(df) < actual_lookback:
+                logger.warning(
+                    "%s %s: 履歴不足 %d/%d本 "
+                    "(EMA200等が未収束、指標値が変動する可能性)",
+                    symbol, tf_str, len(df), actual_lookback,
+                )
 
             all_data[tf_str] = df
             logger.info(
@@ -209,12 +230,15 @@ class DataFeedService:
         バーのclose/high/lowを現在のtick価格で上書きしてから
         インジケータを再計算する。
 
+        起動時の load_historical_data と同一の本数を取得し、
+        EMA(200) 等のウォームアップを揃えることで再現性を確保する。
+
         Args:
             symbol: 通貨ペアシンボル
             last_tick_data: 直近tick価格キャッシュ
         """
+        actual_lookback = self._required_lookback(0)
         # 全TFのデータを一括収集してから設定
-        # sma_50計算に50本必要なためバッファを含め200本取得
         # （個別set_market_dataは辞書を上書きするため）
         all_data: dict[str, pd.DataFrame] = {}
         for tf_str in self._bot.timeframes:
@@ -224,7 +248,7 @@ class DataFeedService:
                 continue
 
             df = await self._data_provider.get_candles_from_pos(
-                symbol, tf, 200
+                symbol, tf, actual_lookback
             )
             if not df.empty:
                 all_data[tf_str] = df

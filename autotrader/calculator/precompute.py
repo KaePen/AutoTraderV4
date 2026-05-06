@@ -78,6 +78,30 @@ class PrecomputeConfig:
         )
         return hashlib.md5(config_str.encode()).hexdigest()[:8]
 
+    def min_warmup_bars(self) -> int:
+        """指標ウォームアップに必要な最小バー数を算出
+
+        EMA・MACD・Wilder smoothing(RSI/ADX) は再帰式のため、初期値の影響が
+        指数減衰する。経験則として 5×期間 で初期値影響が e^-5 ≈ 0.67% まで
+        減衰し、最終バーの値はほぼ決定的となる。SMA は確定窓なので期間ぶんで
+        十分。これらの最大値を返す。
+
+        現行設定 (EMA最大=200) では 200×5 = 1000本が必要。
+        ライブの起動時履歴本数およびM1確定時の再取得本数は本値を満たす必要がある。
+
+        Returns:
+            int: 全指標が再現性を持つために必要な最小バー数
+        """
+        ema_max = max(self.ema_periods, default=0)
+        sma_max = max(self.sma_periods, default=0)
+        return max(
+            ema_max * 5,            # EMA(200) → 1000
+            sma_max,                # SMA(200) → 200 (確定窓)
+            self.macd_slow * 5,     # MACD slow(26) → 130
+            self.rsi_period * 5,    # RSI(14) → 70
+            self.adx_period * 5,    # ADX(14) → 70
+        )
+
 
 class PrecomputeEngine:
     """事前計算エンジン
