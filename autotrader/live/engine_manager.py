@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Executor, ProcessPoolExecutor, ThreadPoolExecutor
 from datetime import datetime, timezone
 from typing import Any
 
@@ -74,15 +74,47 @@ class EngineManager:
         self._shared_fundamental_collector = None
         self._shared_rss_collector = None
 
-        # 全エンジン共有の指標計算用 ThreadPoolExecutor。
-        # PrecomputeEngine は CPU bound だが NumPy/pandas/polars が
-        # GIL を解放するため、thread pool でも真の並列実行が可能。
-        # max_workers=2 は 2スレッドCPU 端末を想定。CPU 増強時は
-        # EngineConfig 等で外出し可能 (将来課題)。
-        self._calc_executor: ThreadPoolExecutor = ThreadPoolExecutor(
-            max_workers=2,
-            thread_name_prefix="precompute",
+        # 全エンジン共有の指標計算用 Executor。
+        # PrecomputeEngine 内部の SwingAnalyzer/StructureAnalyzer/
+        # DivergenceDetector は Python レベルのバー単位ループが多く GIL を
+        # 解放しないため、ThreadPool では真の並列が得られない (実測: 8ペア
+        # で 22秒、シリアル比 5%しか速くない)。
+        # ProcessPoolExecutor を採用することで GIL 制約を完全に回避し、
+        # CPU コア数に応じた真の並列実行を実現する。
+        # 環境変数 AUTOTRADER_CALC_POOL=thread でフォールバック可能。
+        # max_workers は環境変数 AUTOTRADER_CALC_WORKERS で指定可、
+        # デフォルトは CPU コア数に応じた min(4, ceil(cpu/2)) の保守値。
+        import os
+
+        pool_kind = os.environ.get(
+            "AUTOTRADER_CALC_POOL", "process"
+        ).lower()
+        cpu_count = os.cpu_count() or 2
+        default_workers = max(2, min(4, (cpu_count + 1) // 2))
+        max_workers = int(
+            os.environ.get(
+                "AUTOTRADER_CALC_WORKERS", str(default_workers)
+            )
         )
+
+        self._calc_executor: Executor
+        if pool_kind == "thread":
+            logger.info(
+                "calc_executor: ThreadPool (workers=%d, GIL制約あり)",
+                max_workers,
+            )
+            self._calc_executor = ThreadPoolExecutor(
+                max_workers=max_workers,
+                thread_name_prefix="precompute",
+            )
+        else:
+            logger.info(
+                "calc_executor: ProcessPool (workers=%d, GIL制約なし)",
+                max_workers,
+            )
+            self._calc_executor = ProcessPoolExecutor(
+                max_workers=max_workers,
+            )
 
         # ポートフォリオDD監視
         self._peak_equity: float = 0.0

@@ -13,7 +13,7 @@ import logging
 import math
 import time as _time
 import uuid
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import Executor
 from datetime import UTC, datetime, timedelta
 
 import pandas as pd
@@ -67,6 +67,69 @@ from autotrader.live.tick_entry_optimizer import TickEntryOptimizer
 logger = logging.getLogger(__name__)
 
 
+def _calc_indicators_in_pool(
+    symbol: str,
+    data: dict[str, pd.DataFrame],
+) -> tuple[dict[str, pd.DataFrame], str]:
+    """指標計算の module-level エントリ (Process/Thread Pool 両対応)
+
+    ProcessPoolExecutor で実行する場合、関数が pickle 可能である必要があるため
+    LiveTradingEngine インスタンスメソッドではなく module-level 関数として定義。
+    LiveTradingEngine._calc_indicators と同等の処理だが、self への依存はなく
+    キャッシュ固着検出 (_check_indicator_cache_stale) は呼ばない (main process で
+    呼ぶこと)。
+
+    Args:
+        symbol: アクティブシンボル (PrecomputeEngine のキャッシュキーに使用)
+        data: 生 OHLCV データ (TF -> DataFrame)
+
+    Returns:
+        (指標付きデータ, 実行 worker 名) のタプル。
+        worker 名は ProcessPool では "SpawnProcess-N" 等の子プロセス名、
+        ThreadPool では "precompute_X" 等の thread 名。
+        失敗 TF は旧経路 calc_indicators_multi_tf にフォールバックする。
+    """
+    import multiprocessing
+    import threading
+    from autotrader.calculator.precompute import PrecomputeEngine
+    from autotrader.core.enums import Timeframe as _TF
+
+    # 実行コンテキスト名: 子プロセス名 or thread 名
+    proc_name = multiprocessing.current_process().name
+    if proc_name == "MainProcess":
+        # ThreadPool 経由 (同一プロセス内 thread)
+        worker = threading.current_thread().name
+    else:
+        # ProcessPool 経由 (子プロセス、name は "SpawnProcess-N" 等)
+        worker = proc_name
+
+    try:
+        engine = PrecomputeEngine()
+        out: dict[str, pd.DataFrame] = {}
+        for tf_str, df in data.items():
+            try:
+                tf = _TF(tf_str)
+                out[tf_str] = engine.precompute(
+                    df, symbol, tf, use_cache=False,
+                )
+            except Exception as e:
+                logger.warning(
+                    "[%s] %s: PrecomputeEngine 失敗 (%s) → "
+                    "calc_indicators_multi_tf 使用",
+                    symbol, tf_str, e,
+                )
+                out[tf_str] = (
+                    calc_indicators_multi_tf({tf_str: df}).get(tf_str, df)
+                )
+        return out, worker
+    except Exception as e:
+        logger.error(
+            "[%s] _calc_indicators_in_pool 全体失敗 (%s) → 旧経路フォールバック",
+            symbol, e,
+        )
+        return calc_indicators_multi_tf(data), worker
+
+
 class LiveTradingEngine:
     """ライブトレーディングエンジン
 
@@ -94,7 +157,7 @@ class LiveTradingEngine:
         shared_data_provider: MT5DataProvider | None = None,
         shared_fundamental_collector=None,
         shared_rss_collector=None,
-        shared_calc_executor: ThreadPoolExecutor | None = None,
+        shared_calc_executor: Executor | None = None,
     ) -> None:
         """初期化
 
@@ -106,19 +169,21 @@ class LiveTradingEngine:
                 コレクター（EngineManager経由）
             shared_rss_collector: 共有RSSコレクター
                 （EngineManager経由）
-            shared_calc_executor: 全エンジン共有の指標計算用
-                ThreadPoolExecutor (max_workers=2 想定)。None の場合
-                run_in_executor のデフォルトプールにフォールバック。
+            shared_calc_executor: 全エンジン共有の指標計算用 Executor
+                (通常 ProcessPoolExecutor)。None の場合
+                run_in_executor のデフォルト ThreadPool にフォールバック
+                するが、GIL 制約で並列効果は限定的。
         """
         self._config = config
         self._conn = shared_conn or MT5ConnectionManager(config.mt5_config)
         self._data_provider = shared_data_provider or MT5DataProvider(
             self._conn
         )
-        # 指標計算用 ThreadPoolExecutor (None ならデフォルトプール)。
+        # 指標計算用 Executor (None ならデフォルト ThreadPool)。
         # M1 確定時の _update_market_data_full と起動時の
-        # _load_historical_data で PrecomputeEngine を thread pool に
-        # 逃がし、複数エンジンの計算を並列化する目的。
+        # _load_historical_data で PrecomputeEngine を pool に逃がし、
+        # 複数エンジンの計算を並列化する目的。
+        # ProcessPool 採用時は引数 (symbol, data) と戻り値が pickle される。
         self._calc_executor = shared_calc_executor
         # 共有接続の場合、接続/切断はEngineManagerが管理
         self._owns_connection = shared_conn is None
@@ -1656,40 +1721,42 @@ class LiveTradingEngine:
         self,
         data: dict[str, pd.DataFrame],
     ) -> tuple[dict[str, pd.DataFrame], str, float]:
-        """指標計算を ThreadPoolExecutor に逃がす並列版
+        """指標計算を Process/Thread Pool に逃がす並列版
 
-        PrecomputeEngine は CPU bound だが NumPy/pandas/polars が
-        GIL を解放するため、共有 ThreadPoolExecutor (max_workers=2) で
-        複数エンジンの計算を真に並列実行できる。
-        shared_calc_executor が None の場合は asyncio デフォルトプール
-        (=MT5 API と同じ) を使うが、その場合並列効果は限定的。
+        EngineManager._calc_executor は ProcessPoolExecutor で構成されるため、
+        GIL 制約を完全に回避し CPU コア数に応じた真の並列実行が可能。
+        ProcessPool の場合、引数(symbol, data)と戻り値(dict, worker名)が
+        子プロセスとの間で pickle される。1ペア×8TF×1000本 ≒ 5MB 程度の
+        DataFrame 転送が発生する。
+
+        shared_calc_executor が None の場合は asyncio デフォルト ThreadPool
+        にフォールバックするが、GIL 制約で並列効果は限定的。
 
         Args:
             data: 生OHLCVデータ (TF -> DataFrame)
 
         Returns:
-            (指標付きデータ, 実行スレッド名, 計算経過秒) の3要素タプル。
-            スレッド名は "precompute_X" 形式 (max_workers=2 なら 0-1)。
-            None executor の場合は "ThreadPoolExecutor-X" 等の汎用名。
+            (指標付きデータ, 実行 worker 名, 計算経過秒) の3要素タプル。
+            worker 名は ProcessPool では "SpawnProcess-N" 等、
+            ThreadPool では "precompute_X" 等。
         """
-        import threading
-
         loop = asyncio.get_running_loop()
         t_start = _time.monotonic()
-        thread_holder: list[str] = []
 
-        def _wrapped(
-            d: dict[str, pd.DataFrame],
-        ) -> dict[str, pd.DataFrame]:
-            thread_holder.append(threading.current_thread().name)
-            return self._calc_indicators(d)
-
-        result = await loop.run_in_executor(
-            self._calc_executor, _wrapped, data,
+        # module-level の _calc_indicators_in_pool は pickle 可能なため
+        # ProcessPool / ThreadPool 両方で使える
+        result, worker = await loop.run_in_executor(
+            self._calc_executor,
+            _calc_indicators_in_pool,
+            self._active_symbol,
+            data,
         )
+        # キャッシュ固着検出は main process でログ出力する必要があるため
+        # pool 復帰後に main で実行
+        self._check_indicator_cache_stale(result)
+
         elapsed = _time.monotonic() - t_start
-        thread_name = thread_holder[0] if thread_holder else "main"
-        return result, thread_name, elapsed
+        return result, worker, elapsed
 
     def _calc_indicators(
         self,
