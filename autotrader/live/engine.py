@@ -221,9 +221,13 @@ class LiveTradingEngine:
         # M1-gated エントリー: 直近で generate_signal を呼んだ M1 バー時刻
         # (entry_on_m1_close_only=True 時にエントリー判定を M1 確定時のみに制限)
         self._last_signaled_m1_index: pd.Timestamp | None = None
-        # 直近フル indicator 再計算の M1 最終時刻
-        # (PrecomputeEngine を毎秒走らせると重いため、M1 確定時のみフル再計算)
+        # 直近フル indicator 再計算の M1 最終時刻 (デバッグ・キャッシュ整合性用に保持)
         self._last_full_recalc_m1_idx: pd.Timestamp | None = None
+        # 直近フル再計算が走った壁時計の分 (UTC, floor)。
+        # _needs_full_market_recalc は本値と現在分を比較して
+        # 1分につき最大1回のフル再計算をトリガする。MT5 バー時刻の
+        # ブローカー差異 (未確定バーを返さない等) に依存しない設計。
+        self._last_full_recalc_wall_minute: pd.Timestamp | None = None
         # 指標キャッシュ固着検出: TF別の最終警告時刻(monotonic秒、5分間隔)
         # 高市砲時のRSI -999固着バグ (M2-H1 同時固着) 検知のため使用
         self._stale_warned_at: dict[str, float] = {}
@@ -1548,6 +1552,11 @@ class LiveTradingEngine:
             m1 = all_data.get("M1")
             if m1 is not None and not m1.empty:
                 self._last_full_recalc_m1_idx = m1.index[-1]
+            # 起動時点の分を記録 → 同じ分の間は M1確定処理 を再起動直後に
+            # 二重発火させない (次の分境界でのみフル再計算)
+            self._last_full_recalc_wall_minute = (
+                pd.Timestamp.now(tz="UTC").floor("1min")
+            )
             t_total = _time.monotonic() - t_total_start
             logger.info(
                 "[%s] 起動データ計算: thread=%s "
@@ -1579,30 +1588,30 @@ class LiveTradingEngine:
         """フル再計算が必要か判定
 
         判定基準:
-        - 初回 (bot.market_data が空) → True
-        - 前回フル再計算した M1 の分よりも壁時計の現在分が進んでいる
-          (= 新しい M1 が MT5 で確定した可能性) → True
+        - 初回 (bot.market_data が空、または前回 wall minute が未記録) → True
+        - 前回フル再計算した壁時計の分よりも現在分が進んでいる → True
         - それ以外 → False (軽量更新で十分)
 
-        旧実装は in-memory データの m1.index[-1] を比較していたが、
-        light mode は index を進めないため永久に False を返す
-        構造的バグがあった。壁時計の分境界判定に変更。
+        実装ノート:
+        - 旧 v1 実装: in-memory data の m1.index[-1] を比較。light mode が
+          index を進めないため永久に False (構造的バグ)
+        - 旧 v2 実装: MT5 から取得した M1 bar のタイムスタンプ floor で比較。
+          MT5 が未確定バーを返さないブローカーで prev が常に1分前のまま
+          固定 → wall now が常にそれを上回り毎秒 True を返してしまう
+          (本コミットで修正)
+        - 現実装: 壁時計の分境界のみで判定。MT5 のバー時刻挙動には
+          依存しない。1分につき最大1回のフル再計算となる。
         """
         m1 = self._bot.market_data.get("M1")
         if m1 is None or len(m1) == 0:
             return True
 
-        prev = getattr(self, "_last_full_recalc_m1_idx", None)
-        if prev is None:
+        last_wall = getattr(self, "_last_full_recalc_wall_minute", None)
+        if last_wall is None:
             return True
 
-        prev_ts = pd.Timestamp(prev)
-        if prev_ts.tz is None:
-            prev_ts = prev_ts.tz_localize("UTC")
-        now = pd.Timestamp.now(tz="UTC")
-
-        # 前回フル再計算 M1 の分よりも現在分が進んでいれば再計算
-        return now.floor("1min") > prev_ts.floor("1min")
+        now_minute = pd.Timestamp.now(tz="UTC").floor("1min")
+        return now_minute > last_wall
 
     def _update_market_data_light(self) -> None:
         """軽量更新: 各 TF の最終バーを最新 tick mid で上書き (indicator 再計算なし)"""
@@ -1716,6 +1725,10 @@ class LiveTradingEngine:
             m1 = all_data.get("M1")
             if m1 is not None and not m1.empty:
                 self._last_full_recalc_m1_idx = m1.index[-1]
+            # 壁時計分を記録 → 同じ分の間は再フル再計算しない
+            self._last_full_recalc_wall_minute = (
+                pd.Timestamp.now(tz="UTC").floor("1min")
+            )
 
             # 並列化挙動の検証用ログ:
             # - fetch: fetch_lock 直列化中の MT5 取得時間
