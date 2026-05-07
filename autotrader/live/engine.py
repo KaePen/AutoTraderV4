@@ -1578,18 +1578,31 @@ class LiveTradingEngine:
     def _needs_full_market_recalc(self) -> bool:
         """フル再計算が必要か判定
 
+        判定基準:
         - 初回 (bot.market_data が空) → True
-        - 直近 fetch の M1 最新時刻が前回と異なる (新規 M1 確定) → True
+        - 前回フル再計算した M1 の分よりも壁時計の現在分が進んでいる
+          (= 新しい M1 が MT5 で確定した可能性) → True
         - それ以外 → False (軽量更新で十分)
+
+        旧実装は in-memory データの m1.index[-1] を比較していたが、
+        light mode は index を進めないため永久に False を返す
+        構造的バグがあった。壁時計の分境界判定に変更。
         """
         m1 = self._bot.market_data.get("M1")
         if m1 is None or len(m1) == 0:
             return True
-        latest = m1.index[-1]
+
         prev = getattr(self, "_last_full_recalc_m1_idx", None)
-        if prev is None or latest != prev:
+        if prev is None:
             return True
-        return False
+
+        prev_ts = pd.Timestamp(prev)
+        if prev_ts.tz is None:
+            prev_ts = prev_ts.tz_localize("UTC")
+        now = pd.Timestamp.now(tz="UTC")
+
+        # 前回フル再計算 M1 の分よりも現在分が進んでいれば再計算
+        return now.floor("1min") > prev_ts.floor("1min")
 
     def _update_market_data_light(self) -> None:
         """軽量更新: 各 TF の最終バーを最新 tick mid で上書き (indicator 再計算なし)"""
