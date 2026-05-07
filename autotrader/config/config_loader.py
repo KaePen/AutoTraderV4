@@ -23,6 +23,110 @@ _DEFAULT_CONFIG_DIR = (
 )
 
 
+# ===================================================================
+# 採用ペア config バリデーション
+# ===================================================================
+
+# 本番運用で取引対象とする 8 ペア (max_positions > 0)。
+# 本リストに含まれるペアは symbol_overrides.yaml で REQUIRED_PAIR_FIELDS が
+# 全て明示されている必要がある。Python dataclass デフォルトに暗黙落ちして
+# 想定外のリスク値で取引する事故を防ぐ目的。
+# ペアを増減する際は本リストと symbol_overrides.yaml を同時に更新する。
+ADOPTED_PAIRS: tuple[str, ...] = (
+    "USDJPY",
+    "EURJPY",
+    "GBPJPY",
+    "AUDJPY",
+    "CADJPY",
+    "CHFJPY",
+    "EURUSD",
+    "GBPUSD",
+)
+
+# 各採用ペアで必須となる SymbolPreset/UnifiedBotConfig フィールド。
+# 欠落時は ConfigValidationError を起動時に発生させ、危険な dataclass
+# デフォルトでの取引開始を阻止する。
+REQUIRED_PAIR_FIELDS: tuple[str, ...] = (
+    "pip_value",
+    "spread_pips",
+    "slippage_pips",
+    "default_sl_pips",
+    "default_tp_pips",
+    "max_positions",
+    "base_risk_pct",
+    "max_lot_per_trade",
+    "max_total_exposure_lot",
+)
+
+
+class ConfigValidationError(RuntimeError):
+    """採用ペア config の必須キー不足等を表すエラー"""
+
+
+def validate_adopted_pairs_config(
+    config_dir: Path | None = None,
+    adopted_pairs: tuple[str, ...] = ADOPTED_PAIRS,
+    required_fields: tuple[str, ...] = REQUIRED_PAIR_FIELDS,
+) -> None:
+    """採用ペアの必須キー充足を起動時に検証
+
+    config/symbol_overrides.yaml の symbols.{SYMBOL} エントリで、
+    各 adopted_pair が required_fields を全て持つことを確認する。
+    base_risk_pct のような重要パラメータの欠落により Python dataclass
+    デフォルトに落ちる事故を防ぐ。
+
+    Args:
+        config_dir: config ディレクトリ (None なら標準パス)
+        adopted_pairs: 採用ペアシンボル
+        required_fields: 各ペアの必須フィールド
+
+    Raises:
+        ConfigValidationError: 必須フィールド不足、ペア未定義、または
+            symbol_overrides.yaml 自体が存在しない
+    """
+    cfg_dir = config_dir or _DEFAULT_CONFIG_DIR
+    overrides_path = cfg_dir / "symbol_overrides.yaml"
+
+    if not overrides_path.exists():
+        raise ConfigValidationError(
+            f"symbol_overrides.yaml が存在しない: {overrides_path}"
+        )
+
+    with open(overrides_path, encoding="utf-8") as f:
+        data = yaml.safe_load(f) or {}
+
+    symbols = data.get("symbols") or {}
+    errors: list[str] = []
+
+    for pair in adopted_pairs:
+        pair_cfg = symbols.get(pair)
+        if pair_cfg is None:
+            errors.append(
+                f"採用ペア {pair} が symbol_overrides.yaml に未定義"
+            )
+            continue
+
+        missing = [k for k in required_fields if k not in pair_cfg]
+        if missing:
+            errors.append(
+                f"採用ペア {pair} の必須キー不足: "
+                f"{', '.join(missing)}"
+            )
+
+    if errors:
+        bullet = "\n  - ".join(errors)
+        raise ConfigValidationError(
+            "採用ペア config 検証失敗:\n  - " + bullet
+        )
+
+    logger.info(
+        "採用ペア config 検証 OK: %d ペア × %d 必須キー (%s)",
+        len(adopted_pairs),
+        len(required_fields),
+        ", ".join(adopted_pairs),
+    )
+
+
 def _filter_fields(
     data: dict,
     cls: type,
@@ -565,57 +669,10 @@ class ConfigLoader:
         )
         return EdgeValidatorConfig(**kwargs)
 
-    def load_position_sizer_config(
-        self,
-        symbol: str = "",
-    ) -> Any:
-        """PositionSizerConfig を trading_defaults.yaml から読み込む
-
-        セクション未存在時はPythonデフォルト値を使用。
-
-        Args:
-            symbol: 通貨ペアシンボル（pip_value自動計算用）
-
-        Returns:
-            PositionSizerConfig: ポジションサイザー設定
-        """
-        from autotrader.decision.unified.risk.position_sizer import (
-            PositionSizerConfig,
-        )
-
-        section = {}
-        if self._use_new_config():
-            defaults = self._load_trading_defaults()
-            section = defaults.get("position_sizer", {}) or {}
-
-            # symbol_overrides.yaml からシンボル別の資金管理設定を上書き
-            if symbol:
-                overrides = self._load_symbol_overrides()
-                sym_data = dict(
-                    (overrides.get("symbols") or {}).get(symbol)
-                    or {}
-                )
-                # シンボルプリセットの資金管理フィールドで上書き
-                ps_fields = {
-                    f.name
-                    for f in dataclasses.fields(PositionSizerConfig)
-                }
-                for k in list(sym_data.keys()):
-                    if k in ps_fields:
-                        section[k] = sym_data[k]
-
-        if not section:
-            cfg = PositionSizerConfig(symbol=symbol) if symbol else PositionSizerConfig()
-            return cfg
-
-        if symbol:
-            section["symbol"] = symbol
-
-        kwargs = _convert_tuple_fields(
-            _filter_fields(section, PositionSizerConfig),
-            PositionSizerConfig,
-        )
-        return PositionSizerConfig(**kwargs)
+    # 旧 load_position_sizer_config は削除済み (2026-05-07)。
+    # caller ゼロ (LiveTradingEngine._build_sizer_config が UnifiedBotConfig
+    # から直接構築) のデッドコードであり、trading_defaults.yaml の
+    # position_sizer セクションも合わせて削除した。
 
     # ------------------------------------------------------------------
     # パブリック: ライブ・デモ設定読み込み

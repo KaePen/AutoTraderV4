@@ -56,59 +56,9 @@ symbols:
       trailing_start_r: 1.5
       trailing_atr_multiplier: 2.0
 
-  AUDUSD:
-    pip_unit: 0.0001
-    quote_ccy_rate: 150.0
-    pip_value: 10.0
-    spread_pips: 1.5
-    slippage_pips: 0.3
-    default_sl_pips: 15.0
-    default_tp_pips: 30.0
-    max_positions: 0              # 不採用ペア
-    bonus_score_threshold: 7.0
-    base_risk_pct: 0.01
-    max_lot_per_trade: 1.5
-    max_total_exposure_lot: 3.0
-
-  NZDUSD:
-    pip_unit: 0.0001
-    quote_ccy_rate: 150.0
-    pip_value: 10.0
-    spread_pips: 2.0
-    slippage_pips: 0.5
-    default_sl_pips: 15.0
-    default_tp_pips: 30.0
-    max_positions: 0              # 不採用ペア
-    bonus_score_threshold: 7.0
-    base_risk_pct: 0.01
-    max_lot_per_trade: 1.5
-    max_total_exposure_lot: 2.0
-
-  USDCHF:
-    pip_unit: 0.0001
-    quote_ccy_rate: 170.0
-    pip_value: 9.0
-    spread_pips: 1.5
-    slippage_pips: 0.3
-    default_sl_pips: 15.0
-    default_tp_pips: 30.0
-    max_positions: 0              # 不採用ペア
-    bonus_score_threshold: 7.0
-    base_risk_pct: 0.02
-    max_lot_per_trade: 2.0
-
-  USDCAD:
-    pip_unit: 0.0001
-    quote_ccy_rate: 110.0
-    pip_value: 7.5
-    spread_pips: 2.0
-    slippage_pips: 0.5
-    default_sl_pips: 15.0
-    default_tp_pips: 30.0
-    max_positions: 0              # 不採用ペア
-    bonus_score_threshold: 7.0
-    base_risk_pct: 0.02
-    max_lot_per_trade: 2.0
+# 旧 AUDUSD/NZDUSD/USDCHF/USDCAD エントリは削除済み (2026-05-07)。
+# 未採用ペアの危険なフォールバック値 (base_risk_pct 0.01-0.02) を排除する目的。
+# 採用ペアに追加する際は明示的に再追加すること。
 
 # ------------------------------------------------------------------
 # JPY ペア（quote currency = JPY: pip_value=100）

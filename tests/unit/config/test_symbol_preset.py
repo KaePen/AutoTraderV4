@@ -510,10 +510,9 @@ class TestQuoteCcyRateField:
         preset = get_preset("GBPUSD")
         assert preset.quote_ccy_rate == 150.0
 
-    def test_usdchf_quote_ccy_rate(self):
-        """USDCHF quote_ccy_rate=170.0（CHF→JPY）"""
-        preset = get_preset("USDCHF")
-        assert preset.quote_ccy_rate == 170.0
+    # USDCHF は採用ペア外として symbol_overrides.yaml /
+    # symbol_presets.yaml から削除済み (2026-05-07)。
+    # 復活させる場合は両 yaml にエントリを再追加してテストを戻すこと。
 
     def test_default_quote_ccy_rate(self):
         """SymbolPreset デフォルト quote_ccy_rate=1.0"""

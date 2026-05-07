@@ -10,9 +10,12 @@
 #
 # live_trading.yaml は廃止予定。全設定はこのファイルで管理する。
 
-# --- シグナル生成設定（全通貨ペア共通デフォルト）---
+# --- シグナル生成設定（旧構成フォールバック専用）---
+# trading_defaults.yaml が SSOT。本セクションは
+# _load_preset_from_legacy_presets (trading_defaults 不在時) のみで使用。
+# 値は trading_defaults.yaml と必ず同期させること。
 signal:
-  consensus_threshold: 14.0           # D1/CT14: WR67.1%(IS), 64.7%(OOS), trades 2.7x vs CT18
+  consensus_threshold: 16.0           # SSOT: trading_defaults.yaml と一致 (2026-05-07 update from 14.0)
   consensus_primary_weight: 2.0
   consensus_entry_weight: 1.5
   consensus_confirm_weight: 3.0
@@ -25,8 +28,8 @@ signal:
   htf_score_filter_min_alignment: 0.1
   htf_score_filter_threshold_add: 1.0
   macd_slope_filter_threshold: -2.0
-  trend_strength_max: 0.6             # ストレステストP3結果: 0.6が最適 (PF +8%, DD -17%)
-  regime_trend_threshold_add: 1.5    # フォールバック（per-pair signalで上書き）
+  trend_strength_max: 0.6
+  regime_trend_threshold_add: 2.0     # SSOT: trading_defaults.yaml と一致 (2026-05-07 update from 1.5)
 
 # --- リスク管理設定（全通貨ペア共通デフォルト）---
 risk_mgmt:
@@ -160,63 +163,9 @@ symbols:
       trailing_start_r: 1.5
       trailing_atr_multiplier: 2.0
 
-  AUDUSD:
-    pip_unit: 0.0001
-    quote_ccy_rate: 150.0
-    pip_value: 10.0        # AUD/USD 1pip=$10/lot
-    spread_pips: 1.5
-    slippage_pips: 0.3
-    default_sl_pips: 15.0
-    default_tp_pips: 30.0
-    # AUDUSD最適化結果 (2026-03-09, 2023-2025検証, pip_value修正後)
-    # +9.7M, WR 72.8%, MaxDD 7.98%, Trades 3,214
-    max_positions: 0              # 不採用ペア: トレード無効化
-    bonus_score_threshold: 7.0
-    base_risk_pct: 0.01
-    max_lot_per_trade: 1.5
-    max_total_exposure_lot: 3.0
-
-  NZDUSD:
-    pip_unit: 0.0001
-    quote_ccy_rate: 150.0
-    pip_value: 10.0        # NZD/USD 1pip=$10/lot
-    spread_pips: 2.0       # NZDは流動性やや低め
-    slippage_pips: 0.5
-    default_sl_pips: 15.0
-    default_tp_pips: 30.0
-    # NZDUSD最適化結果 (2026-03-09, 2023-2025検証, pip_value修正後)
-    # +3.5M, WR 70.3%, MaxDD 7.29%, Trades 2,204
-    max_positions: 0              # 不採用ペア: トレード無効化
-    bonus_score_threshold: 7.0
-    base_risk_pct: 0.01
-    max_lot_per_trade: 1.5
-    max_total_exposure_lot: 2.0
-
-  USDCHF:
-    pip_unit: 0.0001
-    quote_ccy_rate: 170.0  # CHF→JPY概算レート
-    pip_value: 9.0         # 1pip=10CHF/lot、CHF≈1.1USD → ~$9.1
-    spread_pips: 1.5
-    slippage_pips: 0.3
-    default_sl_pips: 15.0
-    default_tp_pips: 30.0
-    max_positions: 0              # 不採用ペア: トレード無効化
-    bonus_score_threshold: 7.0
-    base_risk_pct: 0.02
-    max_lot_per_trade: 2.0
-
-  USDCAD:
-    pip_unit: 0.0001
-    quote_ccy_rate: 110.0  # CAD→JPY概算レート
-    pip_value: 7.5         # 1pip=10CAD/lot、CAD≈0.75USD → ~$7.3
-    spread_pips: 2.0
-    slippage_pips: 0.5
-    default_sl_pips: 15.0
-    default_tp_pips: 30.0
-    max_positions: 0              # 不採用ペア: トレード無効化
-    bonus_score_threshold: 7.0
-    base_risk_pct: 0.02
-    max_lot_per_trade: 2.0
+# 旧 AUDUSD/NZDUSD/USDCHF/USDCAD エントリは削除済み (2026-05-07)。
+# 未採用ペアの危険なフォールバック値 (base_risk_pct 0.01-0.02) を排除する目的。
+# 採用ペアに追加する際は明示的に再追加すること。
 
 # ------------------------------------------------------------------
 # JPY ペア（quote currency = JPY: pip_value=100）

@@ -144,18 +144,9 @@ edge_validator:
   stop_pf_threshold: 1.3
   critical_pf_threshold: 1.0
 
-# === ポジションサイザー（PositionSizerConfig）===
-position_sizer:
-  base_risk_pct: 0.025
-  max_lot_per_trade: 2.5
-  max_total_exposure_lot: 4.0
-  equity_floor_pct: 0.30
-  equity_caution_pct: 0.50
-  confidence_high_threshold: 0.7
-  confidence_low_threshold: 0.5
-  dd_reduction_threshold: 0.015
-  dd_max_reduction: 0.5
-  dd_early_threshold: 0.008
-  consecutive_loss_start: 2
-  consecutive_loss_max: 5
-  consecutive_loss_min_adjust: 0.2
+# 旧 position_sizer セクションは削除済み (2026-05-07)。
+# load_position_sizer_config の caller がゼロ、LiveTradingEngine は
+# UnifiedBotConfig 経由で base_risk_pct を取得するため、本セクション
+# 経路は完全デッドコードだった。base_risk_pct=0.025 (=2.5%) という
+# 実態と乖離した危険値が残っていた事故防止のため削除。
+# ペア別リスクは symbol_overrides.yaml の base_risk_pct で指定。

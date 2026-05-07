@@ -146,7 +146,11 @@ class PositionSizerConfig:
     """
 
     symbol: str = ""              # 通貨ペアシンボル（pip_value自動計算用）
-    base_risk_pct: float = 0.025  # 2.5%リスク（2025年DD対策）
+    # base_risk_pct: ライブ経路では LiveTradingEngine._build_sizer_config が
+    # UnifiedBotConfig.base_risk_pct (= symbol_overrides.yaml で指定値) を
+    # 渡すため、本デフォルトは未指定での暴走防止のための保守値とする。
+    # (2026-05-07 update: 旧 0.025 = 2.5% を 0.004 = 0.4% に引下げ)
+    base_risk_pct: float = 0.004
     pip_value: float = 0.0       # 0=シンボルから自動計算
     min_lot: float = 0.01
     max_lot: float = 10.0

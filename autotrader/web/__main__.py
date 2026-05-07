@@ -66,6 +66,23 @@ if __name__ == "__main__":
     if args.show_mt5:
         os.environ["MT5_SHOW_WINDOW"] = "1"
 
+    # ── 採用ペア config バリデーション ──
+    # symbol_overrides.yaml の必須キー充足を起動時に確認し、危険な
+    # dataclass デフォルト (base_risk_pct=0.4% 等) に暗黙落ちした
+    # 状態でのライブ起動を阻止する。
+    from autotrader.config.config_loader import (
+        ConfigValidationError,
+        validate_adopted_pairs_config,
+    )
+
+    try:
+        validate_adopted_pairs_config()
+    except ConfigValidationError as exc:
+        logger.error(
+            "起動中止 — 採用ペア config 検証失敗:\n%s", exc,
+        )
+        raise SystemExit(2) from exc
+
     # コマンドファイル監視スレッド起動（supervisor連携）
     from autotrader.ipc import command_watcher
 
