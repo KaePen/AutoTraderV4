@@ -17,6 +17,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from enum import Enum
 
+import numpy as np
 import pandas as pd
 
 from autotrader.calculator.market_structure.swing_analyzer import (
@@ -120,7 +121,11 @@ class StructureAnalyzer:
         self,
         df: pd.DataFrame,
     ) -> pd.DataFrame:
-        """BOS/CHoCHシグナルを検出
+        """BOS/CHoCHシグナルを検出 (numpy 配列バックエンド版)
+
+        旧実装は pd.DataFrame.iloc[i, col_loc] = value を毎バー呼ぶ pandas
+        indexing が支配的 (1呼び出しで数十μs)。numpy 配列で蓄積し最後に
+        DataFrame 化することで ~10倍高速化。stateful なロジックは保ったまま。
 
         Args:
             df: OHLC DataFrame
@@ -128,109 +133,90 @@ class StructureAnalyzer:
         Returns:
             pd.DataFrame: BOS/CHoCHシグナル列を追加したDataFrame
         """
-        result = pd.DataFrame(index=df.index)
-        result["bos_signal"] = 0  # 1: bullish BOS, -1: bearish BOS
-        result["choch_signal"] = 0  # 1: bullish CHoCH, -1: bearish CHoCH
-        result["structure_direction"] = 0  # 1: bullish, -1: bearish
-        result["trend_state"] = TrendState.CONSOLIDATION.value
+        n = len(df)
+        bos_arr = np.zeros(n, dtype=np.int8)
+        choch_arr = np.zeros(n, dtype=np.int8)
+        direction_arr = np.zeros(n, dtype=np.int8)
+        # trend_state は文字列、object 配列で保持
+        trend_arr = np.full(n, TrendState.CONSOLIDATION.value, dtype=object)
 
-        swing_high_flags = self.swing_analyzer.detect_swing_highs(df)
-        swing_low_flags = self.swing_analyzer.detect_swing_lows(df)
+        swing_high_flags = self.swing_analyzer.detect_swing_highs(df).values
+        swing_low_flags = self.swing_analyzer.detect_swing_lows(df).values
 
         high_prices = df["high"].values
         low_prices = df["low"].values
 
-        # スイングポイントを収集
         swing_high_levels: list[tuple[int, float]] = []
         swing_low_levels: list[tuple[int, float]] = []
 
-        for bar_idx in range(len(df)):
-            if swing_high_flags.iloc[bar_idx]:
+        bullish_value = TrendState.BULLISH
+        bearish_value = TrendState.BEARISH
+
+        for bar_idx in range(n):
+            if swing_high_flags[bar_idx]:
                 swing_high_levels.append(
                     (bar_idx, float(high_prices[bar_idx]))
                 )
-            if swing_low_flags.iloc[bar_idx]:
+            if swing_low_flags[bar_idx]:
                 swing_low_levels.append(
                     (bar_idx, float(low_prices[bar_idx]))
                 )
 
-            # 十分なスイングポイントがなければスキップ
             if len(swing_high_levels) < 2 or len(swing_low_levels) < 2:
                 continue
 
-            # 直近のスイングポイントを取得
             recent_highs = swing_high_levels[-3:]
             recent_lows = swing_low_levels[-3:]
 
-            # 現在のトレンド状態を判定
             prev_trend = self._get_trend_from_recent(
                 recent_highs[:-1] if len(recent_highs) > 1 else recent_highs,
                 recent_lows[:-1] if len(recent_lows) > 1 else recent_lows,
             )
-            curr_trend = self._get_trend_from_recent(recent_highs, recent_lows)
-
-            result.iloc[bar_idx, result.columns.get_loc("trend_state")] = (
-                curr_trend.value
+            curr_trend = self._get_trend_from_recent(
+                recent_highs, recent_lows,
             )
 
-            if curr_trend == TrendState.BULLISH:
-                result.iloc[
-                    bar_idx, result.columns.get_loc("structure_direction")
-                ] = 1
-            elif curr_trend == TrendState.BEARISH:
-                result.iloc[
-                    bar_idx, result.columns.get_loc("structure_direction")
-                ] = -1
+            trend_arr[bar_idx] = curr_trend.value
 
-            # BOS/CHoCH検出
-            current_high = df["high"].iloc[bar_idx]
-            current_low = df["low"].iloc[bar_idx]
+            if curr_trend is bullish_value:
+                direction_arr[bar_idx] = 1
+            elif curr_trend is bearish_value:
+                direction_arr[bar_idx] = -1
 
-            # 直近の確定したスイングレベル
+            current_high = high_prices[bar_idx]
+            current_low = low_prices[bar_idx]
+
             last_swing_high = swing_high_levels[-1][1]
             last_swing_low = swing_low_levels[-1][1]
+            prev_swing_high = swing_high_levels[-2][1]
+            prev_swing_low = swing_low_levels[-2][1]
 
-            # 2つ前のスイングレベル（比較用）
-            prev_swing_high = (
-                swing_high_levels[-2][1]
-                if len(swing_high_levels) >= 2
-                else last_swing_high
-            )
-            prev_swing_low = (
-                swing_low_levels[-2][1]
-                if len(swing_low_levels) >= 2
-                else last_swing_low
-            )
-
-            # BOS検出
-            if curr_trend == TrendState.BULLISH:
-                # 上昇トレンド中に前回高値を超える → 強気BOS
+            # BOS 検出
+            if curr_trend is bullish_value:
                 if current_high > prev_swing_high:
-                    result.iloc[
-                        bar_idx, result.columns.get_loc("bos_signal")
-                    ] = 1
-            elif curr_trend == TrendState.BEARISH:
-                # 下降トレンド中に前回安値を下回る → 弱気BOS
+                    bos_arr[bar_idx] = 1
+            elif curr_trend is bearish_value:
                 if current_low < prev_swing_low:
-                    result.iloc[
-                        bar_idx, result.columns.get_loc("bos_signal")
-                    ] = -1
+                    bos_arr[bar_idx] = -1
 
-            # CHoCH検出
-            if prev_trend == TrendState.BULLISH:
-                # 上昇から下降への転換（安値を割る）
+            # CHoCH 検出
+            if prev_trend is bullish_value:
                 if current_low < last_swing_low:
-                    result.iloc[
-                        bar_idx, result.columns.get_loc("choch_signal")
-                    ] = -1
-            elif prev_trend == TrendState.BEARISH:
-                # 下降から上昇への転換（高値を超える）
+                    choch_arr[bar_idx] = -1
+            elif prev_trend is bearish_value:
                 if current_high > last_swing_high:
-                    result.iloc[
-                        bar_idx, result.columns.get_loc("choch_signal")
-                    ] = 1
+                    choch_arr[bar_idx] = 1
 
-        return result
+        # 最後にまとめて DataFrame 化 (pandas indexing コスト排除)
+        return pd.DataFrame(
+            {
+                "bos_signal": bos_arr,
+                "choch_signal": choch_arr,
+                "structure_direction": direction_arr,
+                "trend_state": trend_arr,
+            },
+            index=df.index,
+        )
 
     def _get_trend_from_recent(
         self,
