@@ -823,22 +823,24 @@ class PositionPanel extends Component {
     for (const p of positions) {
       const t = Number(p.ticket);
       activeTickets.add(t);
-      // opened_atからmsタイムスタンプを常に更新
-      // REST APIはDB由来の正確なopened_atを返すため、常に最新値を採用する
+      // opened_at は不変値。初回キャッシュ確定後は絶対に上書きしない。
+      // (毎秒の state.tick で elapsed_minutes は整数化されているため、
+      //  Date.now() - elapsed*60000 のフォールバックで毎秒再計算すると
+      //  60秒タイマー発火時に _calcElapsedMin が 0 を返す現象が起きる)
       const existing = this._posTimeCache[t];
       let openedAtMs = existing ? existing.openedAtMs : null;
-      if (p.opened_at) {
+      if (!openedAtMs && p.opened_at) {
         const parsed = new Date(p.opened_at).getTime();
         if (!isNaN(parsed) && parsed > 0) openedAtMs = parsed;
       }
-      // opened_atパース失敗時: elapsed_minutesから逆算して近似値を設定
-      // これにより60秒タイマー(_tickPositionTimers)でも"0m"にならない
+      // opened_at が無い場合だけ elapsed_minutes から逆算（初回フォールバック）
       if (!openedAtMs && p.elapsed_minutes != null && p.elapsed_minutes > 0) {
         openedAtMs = Date.now() - p.elapsed_minutes * 60000;
       }
-      const maxHoldMin = p.max_hold_minutes != null
-        ? p.max_hold_minutes
-        : (existing ? existing.maxHoldMin : null);
+      // maxHoldMin も既存値を優先（毎秒変わらない設計値）
+      const maxHoldMin = (existing && existing.maxHoldMin != null)
+        ? existing.maxHoldMin
+        : (p.max_hold_minutes != null ? p.max_hold_minutes : null);
       this._posTimeCache[t] = { openedAtMs, maxHoldMin };
     }
     for (const ticket of Object.keys(this._posTimeCache)) {
