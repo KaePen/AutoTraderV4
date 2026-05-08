@@ -587,13 +587,7 @@ class PositionPanel extends Component {
           `absolute w-2.5 h-2.5 ${nowBg} rounded-full border border-gray-900/70`;
       }
     }
-    // 経過時間 / 残り時間
-    const elapsedEl =
-      card.querySelector(`[data-elapsed-ticket="${p.ticket}"]`);
-    if (elapsedEl) elapsedEl.textContent = this._fmtElapsedTime(p);
-    const remainingEl =
-      card.querySelector(`[data-remaining-ticket="${p.ticket}"]`);
-    if (remainingEl) remainingEl.innerHTML = this._fmtRemainingTimeInner(p);
+    // 経過時間 / 残り時間は毎秒更新しない (_tickPositionTimers が 60秒間隔で更新)
   }
 
   _positionCard(p, idx) {
