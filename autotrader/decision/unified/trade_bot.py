@@ -1766,7 +1766,7 @@ class UnifiedTradeBot:
             )
             if not _edge_result.passed:
                 return self._hold_with_analysis(
-                    "スコア不足",
+                    "BCA方向性不足",
                     plan,
                     tf_signals,
                     consensus,
@@ -1791,7 +1791,7 @@ class UnifiedTradeBot:
             )
             if _mr_result.should_filter:
                 return self._hold_with_analysis(
-                    "スコア不足",
+                    "M1マイクロ反転",
                     plan,
                     tf_signals,
                     consensus,
@@ -1811,7 +1811,7 @@ class UnifiedTradeBot:
             )
             if not _gate_result.passed:
                 return self._hold_with_analysis(
-                    "スコア不足",
+                    "M1実行ゲート",
                     plan,
                     tf_signals,
                     consensus,

@@ -1049,6 +1049,16 @@ function _shortenHoldReason(rationale) {
   if (r.includes('HTFトレンド不一致')) return 'HTF逆行';
   if (r.includes('SoftGuardブロック')) return 'ペナルティ過大';
   if (r.includes('ペナルティ上限')) return 'ペナルティ上限';
+  if (r.includes('BCA方向性不足')) return 'BCAエッジ';
+  if (r.includes('M1マイクロ反転')) return 'M1反転リスク';
+  if (r.includes('M1実行ゲート')) return 'M1ゲート';
+  if (r.includes('ファンダフィルター')) return 'ファンダ';
+  if (r.includes('レジームブロック')) return 'レジーム';
+  if (r.includes('パラメータブロック')) return 'パラメータ';
+  if (r.includes('時間帯ブロック')) return '時間帯';
+  if (r.includes('VIXブロック')) return 'VIX';
+  if (r.includes('エッジ劣化')) return 'エッジ劣化';
+  if (r.includes('資金不足')) return '資金不足';
   if (r.includes('資金管理')) return '資金管理';
   if (r.includes('スコア不足')) return 'スコア不足';
   if (r.includes('primary_tfデータなし')) return 'データ不足';
@@ -1987,19 +1997,17 @@ const DashboardApp = {
         });
       }
     }
-    // ポジション（シンボル単位マージ）
+    // ポジション（全置換）
+    // engine 側 state.tick の positions は MT5 から取得した
+    // 全シンボルの開放ポジション一覧。シンボル単位マージにすると
+    // ticket が重複し含み損益が古い値で固着するため、丸ごと置換する。
     if (data.positions !== undefined) {
-      const tickSymbol = data.symbol
-        || (data.positions.length > 0 && data.positions[0].symbol)
-        || '';
-      if (!tickSymbol) return;
       for (const p of data.positions) {
         p.trade_id = this._tradeIdCache[p.ticket] || '';
       }
-      const prevPositions = df.get('positions') || [];
-      const otherPositions = prevPositions.filter(p => p.symbol !== tickSymbol);
-      const merged = [...otherPositions, ...data.positions]
+      const merged = [...data.positions]
         .sort((a, b) => a.ticket - b.ticket);
+      const prevPositions = df.get('positions') || [];
       const prevTickets = new Set(prevPositions.map(p => p.ticket));
       const mergedTickets = new Set(merged.map(p => p.ticket));
       df.publish('positions', merged);
