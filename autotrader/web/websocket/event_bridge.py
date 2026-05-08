@@ -45,10 +45,43 @@ async def _on_signal_generated(
 async def _on_tick_completed(
     data: dict[str, Any],
 ) -> None:
-    """tick完了 -> dashboard"""
+    """[旧] tick完了 -> dashboard
+
+    新設計では state.tick / analysis.refreshed に分割されたが、
+    互換のため受信ハンドラは残す。engine 側が publish しなくなった
+    時点で自然消滅する。
+    """
     bridge_event_counts["tick.completed"] += 1
     await manager.broadcast(
         EventType.TICK_UPDATE, data, "dashboard"
+    )
+
+
+async def _on_state_tick(
+    data: dict[str, Any],
+) -> None:
+    """毎 tick 状態更新 -> dashboard
+
+    account / positions / alerts のみ (analysis なし)。
+    フロント側 _applyStateTick でハンドリング。
+    """
+    bridge_event_counts["state.tick"] += 1
+    await manager.broadcast(
+        EventType.STATE_TICK, data, "dashboard"
+    )
+
+
+async def _on_analysis_refreshed(
+    data: dict[str, Any],
+) -> None:
+    """M1 確定時の analysis 更新 -> dashboard
+
+    analysis / radar / indicators (毎秒ではなく M1 確定時のみ)。
+    フロント側 _applyAnalysisUpdate でハンドリング。
+    """
+    bridge_event_counts["analysis.refreshed"] += 1
+    await manager.broadcast(
+        EventType.ANALYSIS_UPDATE, data, "dashboard"
     )
 
 
@@ -132,6 +165,12 @@ def setup_event_bridge() -> None:
     )
     get_event_bus().subscribe(
         "tick.completed", _on_tick_completed
+    )
+    get_event_bus().subscribe(
+        "state.tick", _on_state_tick
+    )
+    get_event_bus().subscribe(
+        "analysis.refreshed", _on_analysis_refreshed
     )
     get_event_bus().subscribe(
         "position.opened", _on_position_opened

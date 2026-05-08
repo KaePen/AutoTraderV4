@@ -1942,9 +1942,20 @@ const DashboardApp = {
         ChartManager.updateLastBar(bid, time_ms);
       }
     });
+    // 旧 tick_update (互換用、サーバ移行中は無視可)
     this.dashWs.on('tick_update', (msg) => {
       this.wsActive = true;
       this._applyTickUpdate(msg.data);
+    });
+    // 毎秒の状態 (account/positions/alerts)
+    this.dashWs.on('state_tick', (msg) => {
+      this.wsActive = true;
+      this._applyStateTick(msg.data);
+    });
+    // M1 確定時の analysis 更新
+    this.dashWs.on('analysis_update', (msg) => {
+      this.wsActive = true;
+      this._applyAnalysisUpdate(msg.data);
     });
     this.dashWs.on('position_update', () => {
       this.wsActive = true;
@@ -1962,20 +1973,11 @@ const DashboardApp = {
     this.dashWs.connect();
   },
 
-  // ── tick_update 一括適用 ──
+  // ── 毎秒の状態 (account / positions / alerts) ──
 
-  _applyTickUpdate(data) {
+  _applyStateTick(data) {
     const df = this.dataFlow;
-    const symbol = df.get('symbol');
-
-    // 分析パネル
-    if (data.analysis) {
-      if (!data.analysis.symbol || data.analysis.symbol === symbol) {
-        df.publish('analysis', data.analysis);
-      }
-    }
-
-    // メトリクス（口座情報のみ → dashboardチャネル）
+    // メトリクス（口座情報）
     if (data.account) {
       const d = df.get('dashboard');
       if (d) {
@@ -1985,26 +1987,94 @@ const DashboardApp = {
         });
       }
     }
-
-    // ポジション（シンボル単位マージ: 各エンジンは自シンボル分のみ送信）
+    // ポジション（シンボル単位マージ）
     if (data.positions !== undefined) {
-      // 送信元シンボルの特定: analysis.symbol → positions内のsymbol → 不明時はスキップ
-      const tickSymbol = (data.analysis && data.analysis.symbol)
+      const tickSymbol = data.symbol
         || (data.positions.length > 0 && data.positions[0].symbol)
         || '';
-      if (!tickSymbol) return; // シンボル不明時はマージ不可、REST再取得に任せる
+      if (!tickSymbol) return;
       for (const p of data.positions) {
         p.trade_id = this._tradeIdCache[p.ticket] || '';
       }
       const prevPositions = df.get('positions') || [];
-      // 送信元シンボルのポジションだけ差し替え、他シンボルは保持
       const otherPositions = prevPositions.filter(p => p.symbol !== tickSymbol);
       const merged = [...otherPositions, ...data.positions]
         .sort((a, b) => a.ticket - b.ticket);
       const prevTickets = new Set(prevPositions.map(p => p.ticket));
       const mergedTickets = new Set(merged.map(p => p.ticket));
       df.publish('positions', merged);
-      // ポジション増減時はREST再取得でtrade_idをDB同期
+      const added = merged.some(p => !prevTickets.has(p.ticket));
+      const removed = [...prevTickets].some(t => !mergedTickets.has(t));
+      if (added || removed) {
+        this.fetchPositionsAndTrades();
+      }
+    }
+    // active_alerts は analysis に乗っていたが、state.tick へ移動。
+    // 既存の analysis オブジェクトに alerts のみ差し込む。
+    if (data.active_alerts !== undefined) {
+      const sym = df.get('symbol');
+      if (!data.symbol || data.symbol === sym) {
+        const cur = df.get('analysis') || {};
+        df.publish('analysis', { ...cur, active_alerts: data.active_alerts });
+      }
+    }
+  },
+
+  // ── 新: M1 確定時の analysis 更新 ──
+
+  _applyAnalysisUpdate(data) {
+    const df = this.dataFlow;
+    const symbol = df.get('symbol');
+    if (data.analysis) {
+      if (!data.analysis.symbol || data.analysis.symbol === symbol) {
+        // active_alerts は state_tick で頻繁に更新されるため、
+        // analysis_update の値が古くなる可能性がある。直前の値を保持。
+        const cur = df.get('analysis') || {};
+        const merged = {
+          ...data.analysis,
+          active_alerts:
+            data.analysis.active_alerts || cur.active_alerts || [],
+        };
+        df.publish('analysis', merged);
+      }
+    }
+    // radar / indicators の処理が必要な箇所は将来追加
+  },
+
+  // ── [互換] 旧 tick_update (サーバ移行中の保険) ──
+
+  _applyTickUpdate(data) {
+    const df = this.dataFlow;
+    const symbol = df.get('symbol');
+    if (data.analysis) {
+      if (!data.analysis.symbol || data.analysis.symbol === symbol) {
+        df.publish('analysis', data.analysis);
+      }
+    }
+    if (data.account) {
+      const d = df.get('dashboard');
+      if (d) {
+        df.publish('dashboard', {
+          ...d,
+          account: { ...d.account, ...data.account },
+        });
+      }
+    }
+    if (data.positions !== undefined) {
+      const tickSymbol = (data.analysis && data.analysis.symbol)
+        || (data.positions.length > 0 && data.positions[0].symbol)
+        || '';
+      if (!tickSymbol) return;
+      for (const p of data.positions) {
+        p.trade_id = this._tradeIdCache[p.ticket] || '';
+      }
+      const prevPositions = df.get('positions') || [];
+      const otherPositions = prevPositions.filter(p => p.symbol !== tickSymbol);
+      const merged = [...otherPositions, ...data.positions]
+        .sort((a, b) => a.ticket - b.ticket);
+      const prevTickets = new Set(prevPositions.map(p => p.ticket));
+      const mergedTickets = new Set(merged.map(p => p.ticket));
+      df.publish('positions', merged);
       const added = merged.some(p => !prevTickets.has(p.ticket));
       const removed = [...prevTickets].some(t => !mergedTickets.has(t));
       if (added || removed) {

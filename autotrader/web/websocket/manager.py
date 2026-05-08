@@ -21,7 +21,9 @@ class EventType(str, Enum):
     POSITION_UPDATE = "position_update"
     INDICATOR_UPDATE = "indicator_update"
     ACCOUNT_UPDATE = "account_update"
-    TICK_UPDATE = "tick_update"
+    TICK_UPDATE = "tick_update"  # 旧 (state_tick へ移行中)
+    STATE_TICK = "state_tick"
+    ANALYSIS_UPDATE = "analysis_update"
     PRICE_UPDATE = "price_update"
     NEWS_UPDATE = "news_update"
     CALENDAR_UPDATE = "calendar_update"

@@ -940,8 +940,10 @@ class LiveTradingEngine:
         # 分析結果を保存
         # クールダウン等で分析スキップ時（scores空）は前回の
         # 表示データを保持し、UIの空表示を防止
+        analysis_updated_this_tick = False
         if signal and signal.scores:
             self._last_analysis = signal
+            analysis_updated_this_tick = True
         self._last_tick_time = datetime.now(UTC)
 
         if signal and signal.direction != SignalType.HOLD:
@@ -993,9 +995,13 @@ class LiveTradingEngine:
                         await self._execute_entry(pending)
                 self._tick_optimizer.reset()
 
-        # 5. tick完了: 全UIデータをWebSocketで一括配信
+        # 5. tick完了: WebSocketで配信
+        # - 毎 tick: state.tick (account/positions/alerts)
+        # - analysis_updated_this_tick=True 時のみ: analysis.refreshed
         task = asyncio.create_task(
-            self._broadcast_tick_update(),
+            self._broadcast_tick_update(
+                analysis_changed=analysis_updated_this_tick,
+            ),
         )
         self._background_tasks.add(task)
         task.add_done_callback(self._on_background_task_done)
@@ -1042,20 +1048,76 @@ class LiveTradingEngine:
                 },
             )
 
-    async def _broadcast_tick_update(self) -> None:
-        """tick完了後に全UIデータをダッシュボードへ一括配信
+    async def _broadcast_tick_update(
+        self,
+        *,
+        analysis_changed: bool = False,
+    ) -> None:
+        """tick完了後の WebSocket 配信
 
-        analysis / account / positions / radar を1ペイロードで送信。
-        フロントエンドはこのイベントを受信してUIを全更新する。
+        - 毎 tick: state.tick (account / positions / alerts)
+        - analysis_changed=True 時のみ: analysis.refreshed
+          (analysis / radar / indicators / mode)
+
+        旧 tick.completed トピックは廃止 (analysis を毎秒送る無駄を排除)。
         """
-        payload = self._build_tick_payload()
-        await get_event_bus().publish("tick.completed", payload)
+        state_payload = self._build_state_payload()
+        await get_event_bus().publish("state.tick", state_payload)
+
+        if analysis_changed:
+            analysis_payload = self._build_analysis_payload()
+            await get_event_bus().publish(
+                "analysis.refreshed", analysis_payload,
+            )
+
+    def _build_state_payload(self) -> dict:
+        """毎秒配信用 state.tick ペイロード (account / positions / alerts)
+
+        analysis / radar / indicators は含めない。
+        analysis は M1 確定時のみ analysis.refreshed で配信。
+        """
+        cs = self._last_analysis
+        acc = self._account_info
+        return {
+            "symbol": self._config.symbol,
+            "engine_running": self._running,
+            "mt5_connected": self.connected,
+            "auto_trade_enabled": self._enable_auto_trade,
+            "demo_mode": self.demo_mode_enabled,
+            "account": {
+                "balance": acc.balance if acc else 0.0,
+                "equity": acc.equity if acc else 0.0,
+                "margin": acc.margin if acc else 0.0,
+                "free_margin": acc.free_margin if acc else 0.0,
+                "profit": acc.profit if acc else 0.0,
+            },
+            "positions": self._cached_positions,
+            "active_alerts": self._build_active_alerts(cs),
+            "last_tick_time": (
+                self._last_tick_time.isoformat()
+                if self._last_tick_time else None
+            ),
+        }
+
+    def _build_analysis_payload(self) -> dict:
+        """M1 確定時のみ配信する analysis.refreshed ペイロード
+
+        analysis / radar / indicators を含む。
+        毎秒ではなく _last_analysis 更新時のみ送信。
+        """
+        full = self._build_tick_payload()
+        return {
+            "symbol": self._config.symbol,
+            "analysis": full["analysis"],
+            "radar": full["radar"],
+            "indicators": full["indicators"],
+        }
 
     def _build_tick_payload(self) -> dict:
-        """tick_updateペイロードを構築
+        """tick_updateペイロードを構築 (分割後の内部ヘルパー)
 
         Returns:
-            dict: analysis / account / positions / radar / mode
+            dict: analysis / account / positions / radar / indicators
         """
         # --- analysis ---
         cs = self._last_analysis
@@ -1533,6 +1595,11 @@ class LiveTradingEngine:
                     symbol, tf_str, len(df), lookback,
                 )
 
+            # DatetimeIndex 化 (BT 側の data_pipeline / fast_backtest と整合)
+            # ライブだけ漏れていると m1.index[-1] が RangeIndex 末尾 (=999) を返し
+            # _last_signaled_m1_index 比較が永久に同値となり m1_gated_skip 連発する。
+            if "time" in df.columns:
+                df = df.set_index("time")
             all_data[tf_str] = df
             logger.info(
                 "データ読込完了: %s %s %d本",
@@ -1663,6 +1730,9 @@ class LiveTradingEngine:
                 symbol, tf, lookback
             )
             if not df.empty:
+                # DatetimeIndex 化 (BT 側との整合 / m1_gated_skip 判定の正常化)
+                if "time" in df.columns:
+                    df = df.set_index("time")
                 all_data[tf_str] = df
         t_fetch = _time.monotonic() - t_fetch_start
 
