@@ -480,8 +480,10 @@ class PositionPanel extends Component {
     if (!listEl) return;
 
     const positions = [...(this._dataFlow.get('positions') || [])];
-    // 損失大→利益大の順にソート
-    positions.sort((a, b) => (a.unrealized_pnl || 0) - (b.unrealized_pnl || 0));
+    // ticket 昇順 (= MT5 オープン順) で安定化。
+    // 損益順だと毎秒の価格変動でカード並びが入れ替わり、
+    // sameStructure=false → 全innerHTML置換 → 点滅する。
+    positions.sort((a, b) => a.ticket - b.ticket);
     this._updatePosTimeCache(positions);
 
     if (countEl) countEl.textContent = positions.length > 0 ? positions.length + ' open' : 'no open';
@@ -506,20 +508,11 @@ class PositionPanel extends Component {
       existingTickets.every((t, i) => t === newTickets[i]);
 
     if (sameStructure) {
+      // 同構造: 動的要素のみ in-place 更新（innerHTML 置換しない=点滅なし）
       positions.forEach((p, i) => {
         const card = existingCards[i];
         if (!card) return;
-        const inner = this._positionCardInner(p, i);
-        card.setAttribute(
-          'onclick',
-          `DashboardApp.togglePositionDetail('pos-detail-${i}', 'pos-arrow-${i}', ${p.ticket})`
-        );
-        const posInner = card.querySelector('[data-pos-inner]');
-        if (posInner) {
-          posInner.innerHTML = inner;
-        } else {
-          card.innerHTML = inner;
-        }
+        this._updatePositionCardFields(card, p);
       });
     } else {
       listEl.innerHTML =
@@ -527,6 +520,80 @@ class PositionPanel extends Component {
         positions.map((p, i) => this._positionCard(p, i)).join('') +
         '</div>';
     }
+  }
+
+  /** 既存カードの動的要素 (価格/損益/プログレス/時間) のみ更新 */
+  _updatePositionCardFields(card, p) {
+    const c = this._getCurrency();
+    const isProfit = p.unrealized_pnl >= 0;
+    const pnlColor = isProfit ? 'text-green-400' : 'text-red-400';
+    const pnlBg = isProfit ? 'bg-green-500/10' : 'bg-red-500/10';
+    const pnlSign = isProfit ? '+' : '';
+    const digits = _getSymbolDigits(p.symbol);
+
+    // 現在価格 (ヘッダ行)
+    const pxNow = card.querySelector('[data-dyn="px-now"]');
+    if (pxNow) {
+      pxNow.textContent = p.current_price.toFixed(digits);
+      pxNow.className = `font-mono tabular-nums ${pnlColor}`;
+    }
+    // 現在価格 (詳細グリッド or SL/TPなし時 inline)
+    const gridPx = card.querySelector('[data-dyn="grid-px-now"]');
+    if (gridPx) {
+      gridPx.textContent = p.current_price.toFixed(digits);
+      gridPx.className = (p.stop_loss != null && p.take_profit != null)
+        ? `text-[10px] tabular-nums font-semibold ${pnlColor}`
+        : `font-semibold ${pnlColor}`;
+    }
+    // 含み損益バッジ背景
+    const pnlBgEl = card.querySelector('[data-dyn="pnl-bg"]');
+    if (pnlBgEl) {
+      pnlBgEl.className =
+        `flex items-baseline gap-1 ${pnlBg} px-2 py-0.5 rounded-md`;
+    }
+    // 含み損益 金額
+    const pnlAmt = card.querySelector('[data-dyn="pnl-amt"]');
+    if (pnlAmt) {
+      pnlAmt.textContent = `${pnlSign}${fmtCurrency(p.unrealized_pnl, c)}`;
+      pnlAmt.className = `text-sm font-bold tabular-nums ${pnlColor}`;
+    }
+    // 含み損益 pips
+    const pnlPips = card.querySelector('[data-dyn="pnl-pips"]');
+    if (pnlPips) {
+      pnlPips.textContent = `${pnlSign}${p.unrealized_pnl_pips.toFixed(1)}p`;
+      pnlPips.className = `text-[10px] tabular-nums ${pnlColor} opacity-70`;
+    }
+    // プログレスバー (現在位置インジケータ)
+    if (p.stop_loss != null && p.take_profit != null) {
+      const halfRange = Math.max(
+        Math.abs(p.entry_price - p.stop_loss),
+        Math.abs(p.entry_price - p.take_profit),
+        Math.abs(p.entry_price - p.current_price),
+        0.0001
+      );
+      const nowPct = Math.max(0, Math.min(100,
+        50 + (p.current_price - p.entry_price) / halfRange * 50));
+      const nowBg = pnlColor.replace('text-', 'bg-');
+      const progBar = card.querySelector('[data-dyn="prog-now-bar"]');
+      if (progBar) {
+        progBar.style.left = `${nowPct}%`;
+        progBar.className =
+          `absolute -top-0.5 -bottom-0.5 w-1 ${nowBg} rounded-sm`;
+      }
+      const progDot = card.querySelector('[data-dyn="prog-now-dot"]');
+      if (progDot) {
+        progDot.style.left = `${nowPct}%`;
+        progDot.className =
+          `absolute w-2.5 h-2.5 ${nowBg} rounded-full border border-gray-900/70`;
+      }
+    }
+    // 経過時間 / 残り時間
+    const elapsedEl =
+      card.querySelector(`[data-elapsed-ticket="${p.ticket}"]`);
+    if (elapsedEl) elapsedEl.textContent = this._fmtElapsedTime(p);
+    const remainingEl =
+      card.querySelector(`[data-remaining-ticket="${p.ticket}"]`);
+    if (remainingEl) remainingEl.innerHTML = this._fmtRemainingTimeInner(p);
   }
 
   _positionCard(p, idx) {
@@ -578,7 +645,7 @@ class PositionPanel extends Component {
           <div class="grid grid-cols-4 text-center gap-1 mb-2">
             <div><div class="text-[9px] text-gray-600 mb-0.5">SL</div><div class="text-[10px] tabular-nums text-red-400">${sl.toFixed(digits)}</div></div>
             <div><div class="text-[9px] text-gray-600 mb-0.5">約定</div><div class="text-[10px] tabular-nums text-gray-400">${entry.toFixed(digits)}</div></div>
-            <div><div class="text-[9px] text-gray-600 mb-0.5">現在</div><div class="text-[10px] tabular-nums font-semibold ${pnlColor}">${now.toFixed(digits)}</div></div>
+            <div><div class="text-[9px] text-gray-600 mb-0.5">現在</div><div class="text-[10px] tabular-nums font-semibold ${pnlColor}" data-dyn="grid-px-now">${now.toFixed(digits)}</div></div>
             <div><div class="text-[9px] text-gray-600 mb-0.5">TP</div><div class="text-[10px] tabular-nums text-green-400">${tp.toFixed(digits)}</div></div>
           </div>`;
 
@@ -595,8 +662,8 @@ class PositionPanel extends Component {
               </div>
               <div class="absolute inset-y-0 w-0.5 bg-red-500" style="left:${slLeft}"></div>
               <div class="absolute inset-y-0 w-0.5 bg-green-500" style="left:${tpLeft}"></div>
-              <div class="absolute -top-0.5 -bottom-0.5 w-1 ${nowBg} rounded-sm" style="left:${nowPct}%;transform:translateX(-50%)"></div>
-              <div class="absolute w-2.5 h-2.5 ${nowBg} rounded-full border border-gray-900/70" style="left:${nowPct}%;top:50%;transform:translate(-50%,-50%)"></div>
+              <div class="absolute -top-0.5 -bottom-0.5 w-1 ${nowBg} rounded-sm" style="left:${nowPct}%;transform:translateX(-50%)" data-dyn="prog-now-bar"></div>
+              <div class="absolute w-2.5 h-2.5 ${nowBg} rounded-full border border-gray-900/70" style="left:${nowPct}%;top:50%;transform:translate(-50%,-50%)" data-dyn="prog-now-dot"></div>
             </div>
           </div>`;
       }
@@ -606,7 +673,7 @@ class PositionPanel extends Component {
           <span class="text-gray-500">約定</span>
           <span class="text-gray-400">${p.entry_price.toFixed(digits)}</span>
           <span class="text-gray-600">&rarr;</span>
-          <span class="font-semibold ${pnlColor}">${p.current_price.toFixed(digits)}</span>
+          <span class="font-semibold ${pnlColor}" data-dyn="grid-px-now">${p.current_price.toFixed(digits)}</span>
         </div>`;
     }
 
@@ -625,7 +692,7 @@ class PositionPanel extends Component {
           </div>
           <!-- 中グループ: 価格 + ロット + 経過時間 (スマホでは折り返し) -->
           <div class="flex items-center gap-1 sm:gap-1.5 text-xs text-gray-400 flex-shrink-0">
-            <span class="font-mono tabular-nums ${pnlColor}">${p.current_price.toFixed(digits)}</span>
+            <span class="font-mono tabular-nums ${pnlColor}" data-dyn="px-now">${p.current_price.toFixed(digits)}</span>
             <span class="text-gray-600">&middot;</span>
             <span>${p.volume.toFixed(2)}lot</span>
             <span class="text-gray-600">&middot;</span>
@@ -634,9 +701,9 @@ class PositionPanel extends Component {
           </div>
           <!-- 右グループ: 損益 + 矢印 (常に右寄せ) -->
           <div class="flex items-center gap-1.5 ml-auto flex-shrink-0">
-            <div class="flex items-baseline gap-1 ${pnlBg} px-2 py-0.5 rounded-md">
-              <span class="text-sm font-bold tabular-nums ${pnlColor}">${pnlSign}${fmtCurrency(p.unrealized_pnl, c)}</span>
-              <span class="text-[10px] tabular-nums ${pnlColor} opacity-70">${pnlSign}${p.unrealized_pnl_pips.toFixed(1)}p</span>
+            <div class="flex items-baseline gap-1 ${pnlBg} px-2 py-0.5 rounded-md" data-dyn="pnl-bg">
+              <span class="text-sm font-bold tabular-nums ${pnlColor}" data-dyn="pnl-amt">${pnlSign}${fmtCurrency(p.unrealized_pnl, c)}</span>
+              <span class="text-[10px] tabular-nums ${pnlColor} opacity-70" data-dyn="pnl-pips">${pnlSign}${p.unrealized_pnl_pips.toFixed(1)}p</span>
             </div>
             <span id="${arrowId}" class="text-base text-gray-400">${arrowChar}</span>
           </div>
@@ -1997,24 +2064,32 @@ const DashboardApp = {
         });
       }
     }
-    // ポジション（全置換）
-    // engine 側 state.tick の positions は MT5 から取得した
-    // 全シンボルの開放ポジション一覧。シンボル単位マージにすると
-    // ticket が重複し含み損益が古い値で固着するため、丸ごと置換する。
+    // ポジション（シンボル単位マージ）
+    // engine.py:_manage_positions は self._active_symbol を引数に
+    // get_open_positions_async() を呼ぶため、_cached_positions は
+    // 自シンボル分のみ。ペア別エンジンから順に state.tick が来るので、
+    // 自シンボル以外は prev 値を保持して上書き合戦を防ぐ (497eb1b)。
     if (data.positions !== undefined) {
-      for (const p of data.positions) {
-        p.trade_id = this._tradeIdCache[p.ticket] || '';
-      }
-      const merged = [...data.positions]
-        .sort((a, b) => a.ticket - b.ticket);
-      const prevPositions = df.get('positions') || [];
-      const prevTickets = new Set(prevPositions.map(p => p.ticket));
-      const mergedTickets = new Set(merged.map(p => p.ticket));
-      df.publish('positions', merged);
-      const added = merged.some(p => !prevTickets.has(p.ticket));
-      const removed = [...prevTickets].some(t => !mergedTickets.has(t));
-      if (added || removed) {
-        this.fetchPositionsAndTrades();
+      const tickSymbol = data.symbol
+        || (data.positions.length > 0 && data.positions[0].symbol)
+        || '';
+      if (tickSymbol) {
+        for (const p of data.positions) {
+          p.trade_id = this._tradeIdCache[p.ticket] || '';
+        }
+        const prevPositions = df.get('positions') || [];
+        const otherPositions =
+          prevPositions.filter(p => p.symbol !== tickSymbol);
+        const merged = [...otherPositions, ...data.positions]
+          .sort((a, b) => a.ticket - b.ticket);
+        const prevTickets = new Set(prevPositions.map(p => p.ticket));
+        const mergedTickets = new Set(merged.map(p => p.ticket));
+        df.publish('positions', merged);
+        const added = merged.some(p => !prevTickets.has(p.ticket));
+        const removed = [...prevTickets].some(t => !mergedTickets.has(t));
+        if (added || removed) {
+          this.fetchPositionsAndTrades();
+        }
       }
     }
     // active_alerts は analysis に乗っていたが、state.tick へ移動。
