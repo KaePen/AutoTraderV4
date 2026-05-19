@@ -313,3 +313,108 @@ async def alert_presets() -> dict[str, Any]:
             "?preset=clear で全消去"
         ),
     }
+
+
+@router.get("/debug/engine-state")
+async def engine_state(
+    request: Request,
+    symbol: str = "USDJPY",
+) -> dict[str, Any]:
+    """エンジン内部状態の診断ダンプ
+
+    BT-Live 乖離追跡用。シグナル生成・エントリーゲートの
+    最新スナップショットを返す。
+    """
+    mgr = getattr(request.app.state, "engine_manager", None)
+    if mgr is None:
+        return {"error": "EngineManager未初期化"}
+    eng = mgr.get_engine(symbol) if mgr else None
+    if eng is None:
+        return {"error": f"エンジンなし: {symbol}"}
+
+    last_analysis = eng._last_analysis
+    sig: dict[str, Any] = {}
+    if last_analysis is not None:
+        sig = {
+            "direction": (
+                last_analysis.direction.value
+                if hasattr(last_analysis.direction, "value")
+                else str(last_analysis.direction)
+            ),
+            "consensus_score": getattr(
+                last_analysis, "consensus_score", None,
+            ),
+            "buy_score": getattr(last_analysis, "buy_score", None),
+            "sell_score": getattr(last_analysis, "sell_score", None),
+            "confidence": getattr(last_analysis, "confidence", None),
+            "rationale": getattr(last_analysis, "rationale", None),
+            "regime": getattr(last_analysis, "regime", None),
+            "mode": getattr(last_analysis, "mode", None),
+            "strategy_id": getattr(last_analysis, "strategy_id", None),
+            "scores": dict(
+                getattr(last_analysis, "scores", {}) or {},
+            ),
+            "penalty_total": getattr(
+                last_analysis, "penalty_total", None,
+            ),
+            "penalty_breakdown": dict(
+                getattr(last_analysis, "penalty_breakdown", {}) or {},
+            ),
+        }
+
+    last_signaled = getattr(eng, "_last_signaled_m1_index", None)
+    last_full_recalc = getattr(eng, "_last_full_recalc_m1_idx", None)
+    last_wall = getattr(eng, "_last_full_recalc_wall_minute", None)
+
+    closed = list(eng._closed_trades)[-15:]
+    recent_closed = []
+    for t in closed:
+        recent_closed.append({
+            "symbol": t.get("symbol"),
+            "direction": t.get("direction"),
+            "exit_reason": t.get("exit_reason"),
+            "closed_at": t.get("closed_at"),
+            "profit_loss_pips": t.get("profit_loss_pips"),
+        })
+
+    tick_optimizer_state = None
+    try:
+        tick_optimizer_state = {
+            "is_active": eng._tick_optimizer.is_active,
+            "state": str(
+                getattr(eng._tick_optimizer, "_state", None),
+            ),
+            "pending_signal_symbol": (
+                eng._tick_optimizer.pending_signal.symbol
+                if eng._tick_optimizer.pending_signal is not None
+                else None
+            ),
+            "buffer_count": (
+                eng._tick_optimizer._buffer.count
+                if hasattr(eng._tick_optimizer, "_buffer")
+                else None
+            ),
+        }
+    except Exception as e:
+        tick_optimizer_state = {"error": str(e)}
+
+    return {
+        "symbol": symbol,
+        "running": eng.running,
+        "enable_auto_trade": eng._enable_auto_trade,
+        "entry_blocked": getattr(eng, "_entry_blocked", None),
+        "last_entry_skip_reason": eng._last_entry_skip_reason,
+        "last_signaled_m1_index": (
+            str(last_signaled) if last_signaled is not None else None
+        ),
+        "last_full_recalc_m1_idx": (
+            str(last_full_recalc)
+            if last_full_recalc is not None else None
+        ),
+        "last_full_recalc_wall_minute": (
+            str(last_wall) if last_wall is not None else None
+        ),
+        "tick_optimizer": tick_optimizer_state,
+        "recent_closed_trades": recent_closed,
+        "last_analysis": sig,
+    }
