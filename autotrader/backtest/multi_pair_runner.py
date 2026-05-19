@@ -29,7 +29,7 @@ import logging
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import asdict, dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -48,6 +48,10 @@ from autotrader.config.trading_params import (
     get_pip_unit,
     get_preset,
     get_quote_ccy_rate,
+)
+from autotrader.constraint.entry_gate import (
+    EntryGateChecker,
+    EntryGateContext,
 )
 from autotrader.core.entities import Signal
 from autotrader.core.enums import ExitReason, SignalType, Timeframe
@@ -90,6 +94,11 @@ class MultiPairConfig:
     tick_check_tf_minutes: int = 1
     # トレード CSV 出力パス（None=出力しない）
     output_trades_csv: str | None = None
+    # Live engine 互換のエントリーゲート (EntryGateChecker) を通す。
+    # year_runner / live engine と同じ判定ロジック (JPY SL CB,
+    # STAGNATION block, spread gate 等) を multi_pair でも適用する。
+    # デフォルト False で従来動作 (portfolio.can_open_position のみ)。
+    use_entry_gate: bool = False
 
 
 # ============================================================
@@ -114,6 +123,8 @@ class PortfolioState:
     blocked_per_pair: int = 0
     blocked_exposure: int = 0
     blocked_direction: int = 0
+    # EntryGateChecker (Live互換) の deny コード別件数
+    entry_gate_denies: dict[str, int] = field(default_factory=dict)
     monthly_pnl: dict[tuple[int, int], float] = field(default_factory=dict)
 
     def can_open_position(
@@ -355,6 +366,11 @@ def _run_year(
     current_month: tuple[int, int] | None = None
     month_start_equity = portfolio.equity
 
+    # EntryGateChecker (Live engine 互換、use_entry_gate=True 時のみ)
+    entry_gate_checker: EntryGateChecker | None = (
+        EntryGateChecker() if config.use_entry_gate else None
+    )
+
     cached_exp: dict[str, tuple[float, float, float, int, int]] = {
         sym: (0.0, 0.0, 0.0, 0, 0) for sym in contexts
     }
@@ -466,6 +482,82 @@ def _run_year(
             sym, config, signal.signal_type.value,
         ):
             signal = None
+
+        # EntryGateChecker (Live engine 互換)
+        # use_entry_gate=True 時のみ JPY SL CB / STAGNATION block 等を判定
+        if (
+            signal is not None
+            and entry_gate_checker is not None
+        ):
+            _sigtype = signal.signal_type
+            _dir_val = _sigtype.value
+            _bar_ts = pd.Timestamp(bar_time)
+
+            # JPY SL CB: 60分以内同方向 JPY SL_HIT
+            _jpy_sl_cb = False
+            if sym.endswith("JPY"):
+                _cutoff = _bar_ts - timedelta(minutes=60)
+                for _s2, _c2 in contexts.items():
+                    if not _s2.endswith("JPY"):
+                        continue
+                    for _t in reversed(_c2.simulator.state.closed_trades):
+                        if _t.signal_type.value != _dir_val:
+                            continue
+                        _ct = pd.Timestamp(_t.closed_at)
+                        if _ct < _cutoff:
+                            break
+                        if _t.exit_reason == ExitReason.STOP_LOSS:
+                            _jpy_sl_cb = True
+                            break
+                    if _jpy_sl_cb:
+                        break
+
+            # STAGNATION block: 同シンボル同方向の直近1件が STAG
+            _stag_block = False
+            for _t in reversed(ctx.simulator.state.closed_trades):
+                if _t.signal_type.value != _dir_val:
+                    continue
+                if _t.exit_reason == ExitReason.STAGNATION:
+                    _stag_block = True
+                break
+
+            _preset = get_preset(sym)
+            _sym_count = portfolio.per_pair_positions.get(sym, 0)
+            _jpy_same = (
+                portfolio.jpy_buy_count
+                if _dir_val == "BUY"
+                else portfolio.jpy_sell_count
+            )
+
+            _gate_ctx = EntryGateContext(
+                signal_direction=_sigtype,
+                consensus_score=signal.consensus_score,
+                symbol_position_count=_sym_count,
+                global_position_count=portfolio.global_open_positions,
+                global_exposure_lot=portfolio.global_exposure_lot,
+                jpy_same_direction_count=_jpy_same,
+                max_positions=_preset.max_positions,
+                bonus_max_positions=_preset.bonus_max_positions,
+                bonus_score_threshold=_preset.bonus_score_threshold,
+                global_max_positions=config.global_max_positions,
+                global_max_exposure_lot=config.global_max_exposure_lot,
+                max_same_direction_jpy=config.max_same_direction_jpy,
+                is_jpy_pair=sym.endswith("JPY"),
+                current_spread_pips=_preset.spread_pips,
+                spread_threshold_pips=None,
+                dd_emergency_active=False,
+                margin_usage_pct=0.0,
+                margin_limit_pct=0.0,
+                jpy_sl_circuit_breaker_active=_jpy_sl_cb,
+                prev_same_dir_exit_was_stag=_stag_block,
+            )
+            _gres = entry_gate_checker.evaluate(_gate_ctx)
+            if not _gres.allowed:
+                _code = _gres.deny_code or "unknown"
+                portfolio.entry_gate_denies[_code] = (
+                    portfolio.entry_gate_denies.get(_code, 0) + 1
+                )
+                signal = None
 
         balance_before = ctx.simulator.state.balance
         prev_n = len(ctx.simulator.state.open_positions)
@@ -767,6 +859,7 @@ class MultiPairResult:
             "blocked_per_pair": self.portfolio.blocked_per_pair,
             "blocked_exposure": self.portfolio.blocked_exposure,
             "blocked_direction": self.portfolio.blocked_direction,
+            "entry_gate_denies": dict(self.portfolio.entry_gate_denies),
             "per_pair": per_pair,
             "monthly_pnl": {
                 f"{y}-{m:02d}": v

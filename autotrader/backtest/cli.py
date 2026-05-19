@@ -194,6 +194,7 @@ def cmd_run_portfolio(args: argparse.Namespace) -> None:
         use_tick_exit=args.use_tick_exit,
         tick_check_tf_minutes=args.tick_check_tf_minutes,
         output_trades_csv=args.trades_csv,
+        use_entry_gate=args.entry_gate,
     )
 
     bot_overrides: dict = {}
@@ -342,6 +343,11 @@ def main() -> None:
                         help="ティック判定で使う基準TFのバー長(分)")
     p_port.add_argument("--trades-csv", default=None,
                         help="trade-by-trade CSV 出力パス")
+    p_port.add_argument(
+        "--entry-gate", action="store_true",
+        help="Live engine 互換のエントリーゲート (EntryGateChecker) を通す "
+             "(JPY SL CB / STAGNATION block 等)",
+    )
 
     # --- prepare-ohlcv ---
     p_ohlcv = sub.add_parser("prepare-ohlcv", help="OHLCV → インジケータ → 月別キャッシュ")
