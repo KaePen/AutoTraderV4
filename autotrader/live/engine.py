@@ -932,6 +932,30 @@ class LiveTradingEngine:
             # ポジション管理 (exit/SL/TP) は既に上で実行済み。
             signal = None
         else:
+            # BT-Live ロジック共有原則 (CLAUDE.md/core.md): multi_pair_runner
+            # と同じく cross_pair_directions を bot に渡す。
+            # bot._cross_pair_directions が空のままだと
+            # trade_bot.py:1641-1665 の cross_pair_agreement_bonus が
+            # 効かず、Live だけ閾値判定が厳しくなる経路差が出る。
+            if self._engine_manager is not None:
+                _other_dirs: dict[str, str] = {}
+                for _s, _eng in self._engine_manager._engines.items():
+                    if _s == self._active_symbol:
+                        continue
+                    _last_ana = getattr(_eng, "_last_analysis", None)
+                    if _last_ana is None:
+                        continue
+                    _d = _last_ana.direction
+                    _d_val = (
+                        _d.value if hasattr(_d, "value") else str(_d)
+                    )
+                    if _d_val in ("BUY", "SELL"):
+                        _other_dirs[_s] = _d_val
+                try:
+                    self._bot.set_cross_pair_directions(_other_dirs)
+                except Exception:
+                    pass
+
             signal = self._bot.generate_signal(
                 current_time,
                 fundamental_ctx=fundamental_ctx,
@@ -1600,6 +1624,11 @@ class LiveTradingEngine:
             # _last_signaled_m1_index 比較が永久に同値となり m1_gated_skip 連発する。
             if "time" in df.columns:
                 df = df.set_index("time")
+            # BT-Live 整合: 進行中 (未確定) の最終バーを除外。
+            # MT5 copy_rates_from_pos は broker によって進行中バーを含む。
+            # 詳細は _update_market_data_full のコメント参照。
+            if len(df) > 1:
+                df = df.iloc[:-1]
             all_data[tf_str] = df
             logger.info(
                 "データ読込完了: %s %s %d本",
@@ -1681,30 +1710,24 @@ class LiveTradingEngine:
         return now_minute > last_wall
 
     def _update_market_data_light(self) -> None:
-        """軽量更新: 各 TF の最終バーを最新 tick mid で上書き (indicator 再計算なし)"""
-        tick = self._last_tick_data
-        if not tick:
-            return
-        try:
-            bid = float(tick.get("bid", 0.0))
-            ask = float(tick.get("ask", 0.0))
-        except (TypeError, ValueError):
-            return
-        mid = (bid + ask) / 2.0
-        if mid <= 0:
-            return
-        for tf_str, df in self._bot.market_data.items():
-            if df is None or df.empty:
-                continue
-            idx = df.index[-1]
-            try:
-                df.at[idx, "close"] = mid
-                if mid > float(df.at[idx, "high"]):
-                    df.at[idx, "high"] = mid
-                if mid < float(df.at[idx, "low"]):
-                    df.at[idx, "low"] = mid
-            except Exception:
-                continue
+        """軽量更新 (M1境界以外の tick): no-op。
+
+        BT-Live ロジック共有原則 (CLAUDE.md/core.md) に合わせ、
+        bot.market_data の最終バーを進行中 tick mid で書き換えない。
+        BT (multi_pair monthly_cache) は確定バーのみで indicator 計算
+        するため、ライブもそれに合わせる。
+
+        旧実装は最終バー close を毎秒 mid で上書きしていたが、
+        - generate_signal は M1 境界の m1_gated_skip=False 時のみ呼ばれる
+          (line ~916-927) ので、毎秒の close 上書きは signal 評価に影響しない
+        - 残る効果は WebUI 表示用だけで、それは別経路 (price.updated) が
+          担当している
+        ため副作用なしに無効化できる。
+
+        進行中 tick の price 表示が必要なら _publish_cached_price() 等の
+        別経路で行う (本関数とは独立)。
+        """
+        return
 
     async def _update_market_data_full(self) -> None:
         """完全更新 (M1 確定時のみ): MT5 取得 + tick overwrite + indicator 再計算
@@ -1733,29 +1756,21 @@ class LiveTradingEngine:
                 # DatetimeIndex 化 (BT 側との整合 / m1_gated_skip 判定の正常化)
                 if "time" in df.columns:
                     df = df.set_index("time")
+                # BT-Live ロジック共有 (CLAUDE.md/core.md) のため、進行中
+                # (= 未確定) の最終バーを除外する。MT5 の copy_rates_from_pos
+                # は broker によって進行中バーを含めて返すため (特に H4/D1
+                # 等の長い TF で顕著)、その時点の生 tick 値で indicator
+                # 計算すると BT (monthly_cache 確定バー) と乖離する。
+                # 確定済みの直前バーまでを使うことで両者を一致させる。
+                if len(df) > 1:
+                    df = df.iloc[:-1]
                 all_data[tf_str] = df
         t_fetch = _time.monotonic() - t_fetch_start
 
-        # リアルタイム評価: キャッシュ済みtick価格で最後のバーを更新
-        # _tick_price_update()が0.1秒毎にキャッシュするため追加API不要。
-        # インジケータ・アナリティクスは同じ1秒サイクルで同期して更新される。
-        tick = self._last_tick_data
-        if tick:
-            bid = float(tick.get("bid", 0.0))
-            ask = float(tick.get("ask", 0.0))
-            mid = (bid + ask) / 2.0
-            if mid > 0:
-                for tf_str, df in all_data.items():
-                    if df.empty:
-                        continue
-                    df = df.copy()
-                    idx = df.index[-1]
-                    df.at[idx, "close"] = mid
-                    if mid > float(df.at[idx, "high"]):
-                        df.at[idx, "high"] = mid
-                    if mid < float(df.at[idx, "low"]):
-                        df.at[idx, "low"] = mid
-                    all_data[tf_str] = df
+        # BT-Live ロジック共有原則 (CLAUDE.md/core.md) のため、進行中バーの
+        # tick mid 上書きは行わない。BT (multi_pair monthly_cache) は確定
+        # バーの確定 close で indicator 計算するため、ライブも MT5 から
+        # 取得した確定バーをそのまま PrecomputeEngine に渡す。
 
         if all_data:
             # MT5取得に失敗したTFは既存データで補完し、
