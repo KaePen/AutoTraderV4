@@ -22,7 +22,7 @@ from autotrader.decision.unified import (
     UnifiedTradeBot,
 )
 from autotrader.decision.unified.config import RiskConfig, UnifiedBotConfig
-from autotrader.decision.unified.mode_aware_consensus import (
+from autotrader.decision.unified.scoring.consensus import (
     ConsensusResult,
 )
 from autotrader.decision.unified.mode_selector import TradingPlan

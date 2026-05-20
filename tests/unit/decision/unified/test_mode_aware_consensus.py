@@ -4,7 +4,7 @@ from __future__ import annotations
 
 
 from autotrader.core.enums import SignalType
-from autotrader.decision.unified.mode_aware_consensus import (
+from autotrader.decision.unified.scoring.consensus import (
     ConsensusConfig,
     ModeAwareScoreConsensus,
 )

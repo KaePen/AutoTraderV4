@@ -115,7 +115,7 @@ class TestModeAwareScoreConsensus:
 
     def test_consolidate_buy_signal(self) -> None:
         """BUYシグナルの統合"""
-        from autotrader.decision.unified.mode_aware_consensus import (
+        from autotrader.decision.unified.scoring.consensus import (
             ModeAwareScoreConsensus,
         )
         from autotrader.decision.unified.scoring.timeframe_evaluator import (
@@ -170,7 +170,7 @@ class TestModeAwareScoreConsensus:
 
     def test_check_entry_conditions_on_entry_tf(self) -> None:
         """entry_tf確定時のエントリー条件チェック"""
-        from autotrader.decision.unified.mode_aware_consensus import (
+        from autotrader.decision.unified.scoring.consensus import (
             ModeAwareScoreConsensus,
         )
         from autotrader.decision.unified.scoring.timeframe_evaluator import (
@@ -218,7 +218,7 @@ class TestModeAwareScoreConsensus:
 
     def test_check_entry_conditions_on_non_entry_tf(self) -> None:
         """entry_tf以外ではHOLD"""
-        from autotrader.decision.unified.mode_aware_consensus import (
+        from autotrader.decision.unified.scoring.consensus import (
             ModeAwareScoreConsensus,
         )
         from autotrader.decision.unified.scoring.timeframe_evaluator import (

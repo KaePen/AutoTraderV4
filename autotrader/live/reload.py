@@ -32,7 +32,7 @@ class TradeLogicReloader:
         "autotrader.calculator",
         "autotrader.constraint",
         "autotrader.decision.unified.config",
-        "autotrader.decision.unified.position_manager",
+        "autotrader.decision.unified.risk",
         "autotrader.decision.unified.scoring",
         "autotrader.decision.unified.pipeline_pkg",
         "autotrader.decision.unified.trade_bot",
@@ -158,7 +158,7 @@ class TradeLogicReloader:
             PositionManager: reload 後のクラス定義で生成した新インスタンス
         """
         mod = importlib.import_module(
-            "autotrader.decision.unified.position_manager"
+            "autotrader.decision.unified.risk.position_manager"
         )
         _pu = get_pip_unit(symbol)
         cfg = mod.PositionManagerConfig(pip_unit=_pu)
@@ -174,6 +174,6 @@ class TradeLogicReloader:
             PositionSizer: reload 後のクラス定義で生成した新インスタンス
         """
         mod = importlib.import_module(
-            "autotrader.decision.unified.position_sizer"
+            "autotrader.decision.unified.risk.position_sizer"
         )
         return mod.PositionSizer(sizer_config)

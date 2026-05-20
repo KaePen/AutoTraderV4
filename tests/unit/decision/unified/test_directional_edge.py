@@ -12,7 +12,7 @@ from autotrader.decision.unified.pipeline_pkg.directional_edge import (
     DirectionalEdgeAssessor,
     DirectionalEdgeResult,
 )
-from autotrader.decision.unified.mode_aware_consensus import (
+from autotrader.decision.unified.scoring.consensus import (
     ConsensusResult,
 )
 from autotrader.decision.unified.scoring.timeframe_evaluator import (
