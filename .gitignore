@@ -1,88 +1,92 @@
-# Python
+# ============================
+# Python ビルド・キャッシュ
+# ============================
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
-.Python
+*.egg
+*.egg-info/
 build/
-develop-eggs/
 dist/
-downloads/
-eggs/
 .eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
 wheels/
 share/python-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
 MANIFEST
 
+# ============================
 # 仮想環境
+# ============================
+.venv/
 venv/
 env/
 ENV/
 
-# テスト・カバレッジ
+# ============================
+# テスト・型チェック・lint キャッシュ
+# ============================
 .pytest_cache/
-.coverage
-htmlcov/
-*.cover
-.hypothesis/
-data/
-userdoc/
-backtest_results/
-
-# mypy
+.ruff_cache/
 .mypy_cache/
-.dmyp.json
+.dmypy.json
+.hypothesis/
+.coverage
+*.cover
+htmlcov/
 
-# ログファイル
+# ============================
+# ログ・一時ファイル
+# ============================
 logs/
 *.log
-reports/
-
-# 一時ファイル
 tmp/
 *.tmp
 *_done.txt
 
-# アーカイブ
-archives/
+# ============================
+# 生成物・出力
+# ============================
+reports/
 output/
+archives/
+backtest_results/
 
-# キャッシュ・データ
+# ============================
+# データ・DB・キャッシュ
+# ============================
+data/
 cache/
 *.db
 *.sqlite
 *.sqlite3
 
-# 環境変数
+# ============================
+# 秘匿情報・環境設定
+# ============================
 .env
 .env.local
-
-# 認証設定（機密情報）
 config/auth.yaml
 
+# ============================
 # OS固有
+# ============================
 .DS_Store
 Thumbs.db
+*:Zone.Identifier
 
+# ============================
 # エディタ
+# ============================
 *.swp
 *.swo
 *~
 .vscode/
 .idea/
 
-# Claude Code
-.serena
-.omc
-.venv
-.taskmaster
-.ruff_cache
-.claude/worktrees/*backtest_results/
+# ============================
+# Claude Code / OMC / 周辺ツール
+# ============================
+.claude/worktrees/
+.omc/
+.serena/
+.taskmaster/
