@@ -249,7 +249,8 @@ AutoTraderV4/
 │   ├── web/                     # FastAPI Web UI
 │   └── config/                  # 設定管理
 │
-├── scripts/                     # ユーティリティスクリプト
+├── scripts/                     # MT5 データ取得・パイプラインスクリプト
+├── tools/                       # BT-Live 乖離検証ツール
 ├── tests/                       # テストコード
 └── .env                         # 環境変数（git管理外）
 ```
@@ -339,47 +340,26 @@ AutoTraderV4/
 
 ## 7. バックテスト
 
-### キューランナー（推奨）
-
-バックテストは**キューランナー**経由で実行します。別ターミナルで常駐起動:
-
-```bash
-uv run python scripts/backtest_queue_runner.py --cpu-threads 12
-```
-
-キューファイルにジョブを記述して投入:
-
-```json
-{
-  "jobs": [
-    {
-      "symbol": "USDJPY",
-      "years": "2020-2025",
-      "description": "USDJPY検証"
-    }
-  ]
-}
-```
-
-#### 対話コマンド
-
-| コマンド | 動作 |
-|---------|------|
-| `status` | 稼働状態・進捗を表示 |
-| `pause` / `resume` | 一時停止 / 再開 |
-| `stop` | 全タスク停止 |
-| `cpu N` | CPUスレッド数を変更 |
-| `quit` | ランナー終了 |
-
-### 直接実行（開発・デバッグ用）
+### CLI 直接実行
 
 ```bash
 # シングルペア
-uv run python scripts/run_backtest.py --symbol USDJPY --years 2023-2025
+python -m autotrader.backtest.cli run-single --symbol USDJPY --start 2023 --end 2025
 
-# マルチペア
-uv run python scripts/run_multi_pair_backtest.py --tests R1
+# マルチペア（ポートフォリオ）
+python -m autotrader.backtest.cli run-portfolio --symbols USDJPY,EURJPY,GBPJPY --start 2023 --end 2025
 ```
+
+主要オプション (`run-portfolio`):
+
+| オプション | 説明 |
+|---------|------|
+| `--symbols` | 通貨ペア（カンマ区切り） |
+| `--start` / `--end` | 開始年 / 終了年 |
+| `--initial-equity` | 初期資金（デフォルト 1,000,000） |
+| `--global-max-positions` | 同時保有ポジション上限 |
+| `--out` | サマリ JSON 出力パス |
+| `--entry-gate` | Live engine の EntryGateChecker を BT にも適用 |
 
 ---
 
