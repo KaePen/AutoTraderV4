@@ -117,6 +117,9 @@ def build_live_market_data(
             # ライブ engine と完全同じ変換 (utc=True, 6カラムのみ)
             df = mt5_rates_to_dataframe(rates_list)
             df = df.set_index("time")
+            # ライブ engine (修正後) と同じく進行中の最終バーを除外
+            if len(df) > 1:
+                df = df.iloc[:-1]
             raw[tf_str] = df
             logger.info(
                 "Live MT5 %s %s: %d bars [%s ~ %s]",
@@ -124,28 +127,19 @@ def build_live_market_data(
                 df.index[0], df.index[-1],
             )
 
+        # ライブ engine (修正後) は tick mid overwrite を行わないため、
+        # snapshot_diff もそれに合わせて確定バーのみで indicator 計算する。
+        # tick_info は spread 注入用に取得するのみ。
         tick_info: dict | None = None
-        if overwrite_with_tick:
-            bid = float(tick_now.bid)
-            ask = float(tick_now.ask)
-            if bid > 0 and ask > 0:
-                mid = (bid + ask) / 2.0
-                tick_info = {"bid": bid, "ask": ask, "mid": mid}
-                logger.info(
-                    "Live tick: bid=%.5f ask=%.5f mid=%.5f",
-                    bid, ask, mid,
-                )
-                for tf_str, df in list(raw.items()):
-                    if df.empty:
-                        continue
-                    d = df.copy()
-                    idx = d.index[-1]
-                    d.at[idx, "close"] = mid
-                    if mid > float(d.at[idx, "high"]):
-                        d.at[idx, "high"] = mid
-                    if mid < float(d.at[idx, "low"]):
-                        d.at[idx, "low"] = mid
-                    raw[tf_str] = d
+        bid = float(tick_now.bid)
+        ask = float(tick_now.ask)
+        if bid > 0 and ask > 0:
+            mid = (bid + ask) / 2.0
+            tick_info = {"bid": bid, "ask": ask, "mid": mid}
+            logger.info(
+                "Live tick (spread計算用): bid=%.5f ask=%.5f mid=%.5f",
+                bid, ask, mid,
+            )
     finally:
         mt5.shutdown()
 
