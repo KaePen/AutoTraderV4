@@ -354,11 +354,26 @@ async def engine_state(
             "scores": dict(
                 getattr(last_analysis, "scores", {}) or {},
             ),
+            # 実効エントリー閾値 (consensus_threshold + regime/htf_add) と
+            # それを構成するメトリクス。BT-Live 乖離調査で 「現在のscoreが
+            # 同じでも threshold が違う」ケースを検出するための重要指標。
+            "entry_threshold": getattr(
+                last_analysis, "entry_threshold", None,
+            ),
+            "htf_alignment": getattr(
+                last_analysis, "htf_alignment", None,
+            ),
+            "trend_strength": getattr(
+                last_analysis, "trend_strength", None,
+            ),
             "penalty_total": getattr(
                 last_analysis, "penalty_total", None,
             ),
             "penalty_breakdown": dict(
                 getattr(last_analysis, "penalty_breakdown", {}) or {},
+            ),
+            "tf_directions": dict(
+                getattr(last_analysis, "tf_directions", {}) or {},
             ),
         }
 
